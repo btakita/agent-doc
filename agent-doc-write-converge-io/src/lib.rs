@@ -5,20 +5,20 @@
 //! graphs out of the orchestration command crate.
 
 use agent_doc_document::write_normalization::{
-    AGENT_RESPONSE_COMPONENT, convergence_recovered_editor_wins_for_payload,
+    AGENT_RESPONSE_COMPONENT, blank_components_except,
+    convergence_recovered_editor_wins_for_payload,
     convergence_recovered_editor_wins_outside_response, strip_boundary_for_dedup,
 };
 use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
-    ack_content_contains_latest_response, classify_ack_mismatch_recovery,
-    decide_whole_buffer_delivery, dropped_prompt_lines_after_content_ours,
-    exchange_change_is_safe_historical_reduction, first_response_heading,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
-    new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
-    response_already_in_current, response_converged_in_visible_target,
-    response_target_disjoint_from_user_edit, should_refuse_disk_fallback,
-    snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    classify_ack_mismatch_recovery, decide_whole_buffer_delivery,
+    dropped_prompt_lines_after_content_ours, exchange_change_is_safe_historical_reduction,
+    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
+    live_prompt_drift_recovery_target, new_agent_response_headings,
+    normalize_visible_recovery_compare, operator_reconcile_step, response_already_in_current,
+    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
+    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
 };
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
@@ -36,7 +36,8 @@ use agent_doc_ipc_protocol::{
     is_socket_ack_timeout_error, is_socket_status_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
-    dropped_queue_prompt_lines_after_content_ours, preserve_content_ours_over_live_queue_deletions,
+    dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
+    preserve_content_ours_over_live_queue_deletions,
 };
 use agent_doc_turn::response_replay::{
     materialize_response_in_current_exchange, response_materialized_in_content,
@@ -135,6 +136,9 @@ pub fn try_semantic_merge_convergence(
     if !dropped_queue_prompt_lines_after_content_ours(base, candidate, &sm.merged_doc).is_empty() {
         return None;
     }
+    if !preserves_visible_non_component_edits(base, candidate, &sm.merged_doc) {
+        return None;
+    }
     for heading in new_agent_response_headings(base, candidate) {
         if !sm.merged_doc.contains(&heading) {
             return None;
@@ -142,6 +146,16 @@ pub fn try_semantic_merge_convergence(
     }
 
     Some(sm)
+}
+
+fn preserves_visible_non_component_edits(base: &str, candidate: &str, _merged: &str) -> bool {
+    let (Some(base_non_components), Some(candidate_non_components)) = (
+        blank_components_except(base, &[]),
+        blank_components_except(candidate, &[]),
+    ) else {
+        return false;
+    };
+    base_non_components == candidate_non_components
 }
 
 pub fn log_ipc_snapshot_adoption_allowed(
@@ -187,7 +201,7 @@ pub fn log_ipc_snapshot_adoption_allowed(
     );
 }
 
-struct StaleAckContentContext<'a> {
+struct StaleVisibleWriteContext<'a> {
     file: &'a Path,
     source: &'a str,
     patch_id: Option<&'a str>,
@@ -196,12 +210,12 @@ struct StaleAckContentContext<'a> {
     expected_response: &'a str,
 }
 
-fn visible_content_supersedes_ack_content(
-    context: &StaleAckContentContext<'_>,
-    ack_content: &str,
+fn visible_content_supersedes_visible_write_snapshot(
+    context: &StaleVisibleWriteContext<'_>,
+    snapshot_content: &str,
     visible_content: &str,
 ) -> bool {
-    if strip_boundary_for_dedup(ack_content) == strip_boundary_for_dedup(visible_content) {
+    if strip_boundary_for_dedup(snapshot_content) == strip_boundary_for_dedup(visible_content) {
         return false;
     }
     if context.expected_response.trim().is_empty() {
@@ -227,13 +241,13 @@ fn visible_content_supersedes_ack_content(
     agent_doc_ops_log_io::log_op(
         context.file,
         &format!(
-            "{source}_ack_content_stale_visible_adopted file={} patch_id={} visible_len={} visible_hash={} ack_len={} ack_hash={} response_present=true prompt_drift={}",
+            "{source}_visible_write_snapshot_stale_visible_adopted file={} patch_id={} visible_len={} visible_hash={} snapshot_len={} snapshot_hash={} response_present=true prompt_drift={}",
             context.file.display(),
             context.patch_id.unwrap_or("-"),
             visible_content.len(),
             agent_doc_hash::content_hash(visible_content),
-            ack_content.len(),
-            agent_doc_hash::content_hash(ack_content),
+            snapshot_content.len(),
+            agent_doc_hash::content_hash(snapshot_content),
             prompt_drift,
             source = context.source
         ),
@@ -241,7 +255,7 @@ fn visible_content_supersedes_ack_content(
     true
 }
 
-pub fn prefer_visible_content_over_stale_ack_content(
+pub fn prefer_visible_content_over_stale_visible_write_snapshot(
     file: &Path,
     source: &str,
     patch_id: Option<&str>,
@@ -250,7 +264,7 @@ pub fn prefer_visible_content_over_stale_ack_content(
     expected_response: &str,
     decision: &mut IpcRepairDecision,
 ) -> bool {
-    if decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+    if decision.snap_source != IpcSnapshotSource::LazilyVisibleWriteEvent {
         return false;
     }
     if decision.disk_repair_reason.is_some() {
@@ -259,7 +273,7 @@ pub fn prefer_visible_content_over_stale_ack_content(
     let Ok(visible_content) = std::fs::read_to_string(file) else {
         return false;
     };
-    let context = StaleAckContentContext {
+    let context = StaleVisibleWriteContext {
         file,
         source,
         patch_id,
@@ -267,7 +281,7 @@ pub fn prefer_visible_content_over_stale_ack_content(
         content_ours,
         expected_response,
     };
-    if !visible_content_supersedes_ack_content(
+    if !visible_content_supersedes_visible_write_snapshot(
         &context,
         &decision.snapshot_content,
         &visible_content,
@@ -439,11 +453,12 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             }
         } else {
             repair_decision = match current_source {
-                IpcSnapshotSource::AckContentSidecar
-                | IpcSnapshotSource::LazilyVisibleWriteEvent => {
-                    IpcRepairDecision::ack_content(current.to_string())
+                IpcSnapshotSource::LazilyVisibleWriteEvent => {
+                    IpcRepairDecision::lazily_visible_write(current.to_string())
                 }
-                IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                IpcSnapshotSource::LegacySidecarProjection
+                | IpcSnapshotSource::FileRead
+                | IpcSnapshotSource::ContentOurs => {
                     IpcRepairDecision::file_read(current.to_string())
                 }
             };
@@ -486,16 +501,16 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         }
     } else if let Some(current) = current.as_deref() {
         repair_decision = match current_source {
-            IpcSnapshotSource::AckContentSidecar | IpcSnapshotSource::LazilyVisibleWriteEvent => {
-                IpcRepairDecision::ack_content(current.to_string())
+            IpcSnapshotSource::LazilyVisibleWriteEvent => {
+                IpcRepairDecision::lazily_visible_write(current.to_string())
             }
-            IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
-                IpcRepairDecision::file_read(current.to_string())
-            }
+            IpcSnapshotSource::LegacySidecarProjection
+            | IpcSnapshotSource::FileRead
+            | IpcSnapshotSource::ContentOurs => IpcRepairDecision::file_read(current.to_string()),
         };
     }
 
-    prefer_visible_content_over_stale_ack_content(
+    prefer_visible_content_over_stale_visible_write_snapshot(
         file,
         "already_applied",
         Some(patch_id),
@@ -579,10 +594,9 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             )
         },
     )?;
-    if repair_decision.snap_source.is_ack_content_proven() {
-        let proof =
-            ack_content_disk_write_proof(file, editor_id, &repair_decision.snapshot_content);
-        let disk_synced = write_ack_content_through_to_disk(
+    if repair_decision.snap_source.is_visible_write_proven() {
+        let proof = visible_write_disk_proof(file, editor_id, &repair_decision.snapshot_content);
+        let disk_synced = write_visible_write_through_to_disk(
             effects,
             file,
             patch_id,
@@ -592,7 +606,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         if !disk_synced {
             return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
         }
-        mark_ack_content_live_buffer_synced_after_write(
+        mark_visible_write_live_buffer_synced_after_write(
             file,
             patch_id,
             editor_id,
@@ -767,6 +781,9 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
         return false;
     }
 
+    let candidate = decision.snapshot_content.clone();
+    let (queue_reconciled_ours, ignored_queue_deletions) =
+        preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
     let prior_source = decision.snap_source.label();
     log_flow_event(
         file,
@@ -808,9 +825,6 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
     );
     let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
 
-    let candidate = decision.snapshot_content.clone();
-    let (queue_reconciled_ours, ignored_queue_deletions) =
-        preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
     if !ignored_queue_deletions.is_empty() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -824,14 +838,116 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
         );
     }
 
-    if let Some(sm) = try_semantic_merge_convergence(base, &candidate, &queue_reconciled_ours) {
-        let merged_doc = sm.merged_doc.clone();
-        let outcome_count = sm.outcomes.len();
-        let ack_count = sm.requires_ack.len();
+    let response_headings = new_agent_response_headings(base, &queue_reconciled_ours);
+    let candidate_response_headings = new_agent_response_headings(base, &candidate);
+    let visible_write_response_present = decision.snap_source.is_visible_write_proven()
+        && ((!response_headings.is_empty()
+            && response_converged_in_visible_target(base, &queue_reconciled_ours, &candidate))
+            || (!candidate_response_headings.is_empty()
+                && response_converged_in_visible_target(base, &candidate, &candidate)));
+    if visible_write_response_present {
+        if matches!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::PrefixDivergence)
+        ) {
+            let visible_candidate_has_non_component_edits =
+                !preserves_visible_non_component_edits(base, &candidate, &candidate);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "live_prompt_drift_visible_write_prefix_repair_evaluated file={} source={} patch_id={} visible_candidate_has_non_component_edits={} candidate_len={} candidate_hash={}",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    visible_candidate_has_non_component_edits,
+                    candidate.len(),
+                    agent_doc_hash::content_hash(&candidate),
+                ),
+            );
+            if visible_candidate_has_non_component_edits {
+                decision.disk_repair_reason = None;
+                decision.editor_bad_state = None;
+                decision.normalize_prefix_lines.clear();
+                decision.redeliver_editor = false;
+            }
+            return true;
+        }
+        let dropped_visible_prompts =
+            dropped_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
+        let dropped_visible_queue =
+            dropped_queue_prompt_lines_after_content_ours(base, &candidate, &queue_reconciled_ours);
+        if dropped_visible_prompts.is_empty()
+            && !dropped_visible_queue.is_empty()
+            && preserves_visible_non_component_edits(base, &candidate, &candidate)
+            && let Some(union) = merge_visible_queue_additions_into_content_ours(
+                base,
+                &candidate,
+                &queue_reconciled_ours,
+                &dropped_visible_queue,
+            )
+            .or_else(|| {
+                agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
+                    .ok()
+                    .filter(|union| !union.contains("<<<<<<<"))
+                    .filter(|union| {
+                        dropped_queue_prompt_lines_after_content_ours(base, &candidate, union)
+                            .is_empty()
+                    })
+            })
+            && response_converged_in_visible_target(base, &queue_reconciled_ours, &union)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "live_prompt_drift_visible_write_component_reconciled file={} source={} patch_id={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={} union_len={} union_hash={} queue_prompts={} reason=visible_write_queue_component_reconcile",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    candidate.len(),
+                    agent_doc_hash::content_hash(&candidate),
+                    queue_reconciled_ours.len(),
+                    agent_doc_hash::content_hash(&queue_reconciled_ours),
+                    union.len(),
+                    agent_doc_hash::content_hash(&union),
+                    dropped_visible_queue.len(),
+                ),
+            );
+            decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&union, false);
+            return true;
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} reason=node_keyed_semantic_merge",
+                "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response=true visible_repair_required=false candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                candidate.len(),
+                agent_doc_hash::content_hash(&candidate),
+                queue_reconciled_ours.len(),
+                agent_doc_hash::content_hash(&queue_reconciled_ours),
+            ),
+        );
+        decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+            &queue_reconciled_ours,
+            false,
+        );
+        return true;
+    }
+
+    if !decision.snap_source.is_visible_write_proven()
+        && let Some(sm) = try_semantic_merge_convergence(base, &candidate, &queue_reconciled_ours)
+    {
+        let merged_doc = sm.merged_doc.clone();
+        let outcome_count = sm.outcomes.len();
+        let ack_count = sm.requires_ack.len();
+        let merged_response_present = !response_headings.is_empty()
+            && response_converged_in_visible_target(base, &queue_reconciled_ours, &merged_doc);
+        let visible_repair_required = !visible_write_response_present;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_prompt_drift_semantic_merged file={} source={} patch_id={} base_len={} base_hash={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={} merged_len={} merged_hash={} outcomes={} acks={} visible_write_response_present={} merged_response_present={} visible_repair_required={} reason=node_keyed_semantic_merge",
                 file.display(),
                 source,
                 patch_id.unwrap_or("-"),
@@ -845,6 +961,9 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
                 agent_doc_hash::content_hash(&merged_doc),
                 outcome_count,
                 ack_count,
+                visible_write_response_present,
+                merged_response_present,
+                visible_repair_required,
             ),
         );
         if ack_count > 0 {
@@ -872,8 +991,6 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
                 );
             }
         }
-        let visible_repair_required =
-            !response_converged_in_visible_target(base, &candidate, &merged_doc);
         decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
             &merged_doc,
             visible_repair_required,
@@ -881,19 +998,24 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
         return true;
     }
 
-    if response_target_disjoint_from_user_edit(
-        base,
-        &queue_reconciled_ours,
-        &candidate,
-        |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
-    ) && let Ok(union) =
-        agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
+    if !decision.snap_source.is_visible_write_proven()
+        && response_target_disjoint_from_user_edit(
+            base,
+            &queue_reconciled_ours,
+            &candidate,
+            |base, ours, theirs| agent_doc_merge_io::merge_contents(base, ours, theirs).ok(),
+        )
+        && let Ok(union) =
+            agent_doc_merge_io::merge_contents(base, &queue_reconciled_ours, &candidate)
         && !union.contains("<<<<<<<")
     {
+        let union_response_present = !response_headings.is_empty()
+            && response_converged_in_visible_target(base, &queue_reconciled_ours, &union);
+        let visible_repair_required = !visible_write_response_present && !union_response_present;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} reason=independent_concurrent_edit",
+                "live_prompt_drift_forward_merged file={} source={} patch_id={} candidate_len={} candidate_hash={} union_len={} union_hash={} visible_write_response_present={} union_response_present={} visible_repair_required={} reason=independent_concurrent_edit",
                 file.display(),
                 source,
                 patch_id.unwrap_or("-"),
@@ -901,10 +1023,11 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
                 agent_doc_hash::content_hash(&candidate),
                 union.len(),
                 agent_doc_hash::content_hash(&union),
+                visible_write_response_present,
+                union_response_present,
+                visible_repair_required,
             ),
         );
-        let visible_repair_required =
-            !response_converged_in_visible_target(base, &candidate, &union);
         decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
             &union,
             visible_repair_required,
@@ -954,21 +1077,30 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
             ),
         );
     }
-    let live_candidate_contains_response =
-        ack_content_contains_latest_response(&candidate, &queue_reconciled_ours);
+    let live_candidate_contains_response = (!response_headings.is_empty()
+        && response_converged_in_visible_target(base, &queue_reconciled_ours, &candidate))
+        || (!candidate_response_headings.is_empty()
+            && response_converged_in_visible_target(base, &candidate, &candidate));
+    let visible_repair_required =
+        !(decision.snap_source.is_visible_write_proven() && live_candidate_contains_response);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
+            "live_prompt_drift_agent_target_not_snapshot_authority file={} source={} patch_id={} live_candidate_contains_response={} visible_repair_required={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={}",
             file.display(),
             source,
             patch_id.unwrap_or("-"),
             live_candidate_contains_response,
+            visible_repair_required,
             candidate.len(),
             agent_doc_hash::content_hash(&candidate),
             queue_reconciled_ours.len(),
             agent_doc_hash::content_hash(&queue_reconciled_ours),
         ),
+    );
+    decision.replace_snapshot_with_content_ours_for_live_prompt_drift(
+        &queue_reconciled_ours,
+        visible_repair_required,
     );
     true
 }
@@ -1046,12 +1178,12 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
             agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
             agent_doc_flow::types::FlowOutcome::Blocked,
         )
-        .with_reason("prompt_duplication_in_ack_content"),
+        .with_reason("prompt_duplication_in_visible_write"),
     );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_ack_content duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
+            "ipc_snapshot_adoption_blocked file={} source={} patch_id={} snap_source={} reason=prompt_duplication_in_visible_write duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
             file.display(),
             source,
             patch_id.unwrap_or("-"),
@@ -1067,7 +1199,7 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
         file,
         source,
         patch_id,
-        "prompt_duplication_in_ack_content",
+        "prompt_duplication_in_visible_write",
         "content_ours_snapshot_and_visible_repair",
         &format!(
             "snap_source={} duplicate_prompt_count={} candidate_len={} candidate_hash={} content_ours_len={} content_ours_hash={}",
@@ -1163,7 +1295,7 @@ pub fn log_ipcfullprompt_corruption_if_any(
     );
 }
 
-pub fn materialize_missing_response_for_socket_ack_drift(
+pub fn materialize_missing_response_for_socket_visible_write_drift(
     file: &Path,
     patch_id: Option<&str>,
     content_ours: Option<&str>,
@@ -1171,7 +1303,7 @@ pub fn materialize_missing_response_for_socket_ack_drift(
     drift_fired: bool,
     decision: &mut IpcRepairDecision,
 ) -> bool {
-    if !drift_fired || decision.snap_source != IpcSnapshotSource::AckContentSidecar {
+    if !drift_fired || decision.snap_source != IpcSnapshotSource::LazilyVisibleWriteEvent {
         return false;
     }
     if matches!(
@@ -1224,7 +1356,7 @@ pub fn materialize_missing_response_for_socket_ack_drift(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_socket_ack_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
+            "ipc_socket_visible_write_drift_missing_response_materialized file={} patch_id={} repaired_len={} repaired_hash={} response_sha256={}",
             file.display(),
             patch_id.unwrap_or("-"),
             decision.snapshot_content.len(),
@@ -1279,7 +1411,7 @@ pub struct VisibleWriteContent {
     pub authority: VisibleWriteContentAuthority,
 }
 
-fn ack_content_from_lazily_event(
+fn visible_write_content_from_lazily_event(
     file: &Path,
     patch_id: &str,
 ) -> Result<
@@ -1323,7 +1455,7 @@ fn ack_content_from_lazily_event(
     Ok(None)
 }
 
-pub fn poll_ack_content_lazily_event(
+pub fn poll_visible_write_content_lazily_event(
     file: &Path,
     patch_id: &str,
     timeout: std::time::Duration,
@@ -1331,7 +1463,7 @@ pub fn poll_ack_content_lazily_event(
 ) -> Result<Option<String>> {
     let start = std::time::Instant::now();
     loop {
-        if let Some((content, proof)) = ack_content_from_lazily_event(file, patch_id)? {
+        if let Some((content, proof)) = visible_write_content_from_lazily_event(file, patch_id)? {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1353,7 +1485,7 @@ pub fn poll_ack_content_lazily_event(
     }
 }
 
-pub fn poll_ack_content_lazily_event_or_projection(
+pub fn poll_visible_write_text_lazily_event_or_projection(
     file: &Path,
     project_root: &Path,
     patch_id: &str,
@@ -1377,7 +1509,9 @@ pub fn poll_visible_write_content_lazily_event_or_projection(
     timeout: std::time::Duration,
     poll_interval: std::time::Duration,
 ) -> Result<Option<VisibleWriteContent>> {
-    if let Some(content) = poll_ack_content_lazily_event(file, patch_id, timeout, poll_interval)? {
+    if let Some(content) =
+        poll_visible_write_content_lazily_event(file, patch_id, timeout, poll_interval)?
+    {
         return Ok(Some(VisibleWriteContent {
             content,
             authority: VisibleWriteContentAuthority::LazilyEvent,
@@ -1423,13 +1557,13 @@ pub trait EditorConvergenceEffects {
 }
 
 #[cfg(test)]
-const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 75;
+const VISIBLE_WRITE_TYPING_SETTLE_MS: u64 = 75;
 #[cfg(not(test))]
-const ACK_CONTENT_TYPING_SETTLE_MS: u64 = 500;
+const VISIBLE_WRITE_TYPING_SETTLE_MS: u64 = 500;
 #[cfg(test)]
-const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 1_000;
+const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 1_000;
 #[cfg(not(test))]
-const ACK_CONTENT_TYPING_TIMEOUT_MS: u64 = 2_000;
+const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 2_000;
 
 fn live_buffer_file_keys(file: &Path) -> Vec<String> {
     let mut keys = Vec::new();
@@ -1444,52 +1578,52 @@ fn live_buffer_file_keys(file: &Path) -> Vec<String> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AckContentDiskWriteProof {
+pub struct VisibleWriteDiskProof {
     pub authority: WholeBufferAuthority,
     pub source_buffer_matches: bool,
 }
 
-impl AckContentDiskWriteProof {
+impl VisibleWriteDiskProof {
     fn unproven() -> Self {
         Self {
-            authority: WholeBufferAuthority::AckContentSidecar,
+            authority: WholeBufferAuthority::None,
             source_buffer_matches: false,
         }
     }
 }
 
-pub fn ack_content_disk_write_proof(
+pub fn visible_write_disk_proof(
     file: &Path,
     editor_id: Option<&str>,
     content: &str,
-) -> AckContentDiskWriteProof {
+) -> VisibleWriteDiskProof {
     let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
-        return AckContentDiskWriteProof::unproven();
+        return VisibleWriteDiskProof::unproven();
     };
     let content_len = content.len();
     let content_hash = agent_doc_hash::content_hash(content);
 
     if let Some(typing_key) = live_buffer_file_keys(file).into_iter().find(|file_key| {
-        agent_doc_debounce::is_typing_via_file(file_key, ACK_CONTENT_TYPING_SETTLE_MS)
+        agent_doc_debounce::is_typing_via_file(file_key, VISIBLE_WRITE_TYPING_SETTLE_MS)
     }) {
         let settled = agent_doc_debounce::await_idle_via_file(
             &typing_key,
-            ACK_CONTENT_TYPING_SETTLE_MS,
-            ACK_CONTENT_TYPING_TIMEOUT_MS,
+            VISIBLE_WRITE_TYPING_SETTLE_MS,
+            VISIBLE_WRITE_TYPING_TIMEOUT_MS,
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_disk_write_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
+                "visible_write_disk_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
                 file.display(),
                 settled,
-                ACK_CONTENT_TYPING_SETTLE_MS,
-                ACK_CONTENT_TYPING_TIMEOUT_MS,
+                VISIBLE_WRITE_TYPING_SETTLE_MS,
+                VISIBLE_WRITE_TYPING_TIMEOUT_MS,
                 typing_key
             ),
         );
         if !settled {
-            return AckContentDiskWriteProof::unproven();
+            return VisibleWriteDiskProof::unproven();
         }
     }
 
@@ -1505,7 +1639,7 @@ pub fn ack_content_disk_write_proof(
         .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
         .max_by_key(|snapshot| snapshot.timestamp_ms)
     else {
-        return AckContentDiskWriteProof::unproven();
+        return VisibleWriteDiskProof::unproven();
     };
 
     let source_buffer_matches =
@@ -1514,10 +1648,10 @@ pub fn ack_content_disk_write_proof(
         if snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
             WholeBufferAuthority::OperatorTextAuthority
         } else {
-            WholeBufferAuthority::AckContentSidecar
+            WholeBufferAuthority::None
         };
 
-    AckContentDiskWriteProof {
+    VisibleWriteDiskProof {
         authority,
         source_buffer_matches,
     }
@@ -1544,15 +1678,15 @@ fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<
 }
 
 /// Settle the editor (wait out active typing) so the next live-buffer read is
-/// quiescent. Bounded by the ack-content settle/timeout budget; a no-op when the
-/// editor is not typing.
+/// quiescent. Bounded by the visible-write settle/timeout budget; a no-op when
+/// the editor is not typing.
 fn settle_editor_typing(file: &Path) {
     for key in live_buffer_file_keys(file) {
-        if agent_doc_debounce::is_typing_via_file(&key, ACK_CONTENT_TYPING_SETTLE_MS) {
+        if agent_doc_debounce::is_typing_via_file(&key, VISIBLE_WRITE_TYPING_SETTLE_MS) {
             agent_doc_debounce::await_idle_via_file(
                 &key,
-                ACK_CONTENT_TYPING_SETTLE_MS,
-                ACK_CONTENT_TYPING_TIMEOUT_MS,
+                VISIBLE_WRITE_TYPING_SETTLE_MS,
+                VISIBLE_WRITE_TYPING_TIMEOUT_MS,
             );
         }
     }
@@ -1561,17 +1695,17 @@ fn settle_editor_typing(file: &Path) {
 /// Max rounds of the bounded reconcile-before-accept loop. Each round settles the
 /// editor and re-samples the operator buffer; the loop ends when the buffer is
 /// stable across two reads (a fixpoint) or this bound is hit.
-const ACK_RECONCILE_MAX_ROUNDS: usize = 4;
+const VISIBLE_WRITE_RECONCILE_MAX_ROUNDS: usize = 4;
 
 /// `#adoc-live-prompt-drift-operator-edit` (Phase 2): the bounded
 /// reconcile-before-accept loop. When the operator kept editing past the ack
-/// capture (so the ack snapshot is stale relative to the live buffer), settle the
-/// editor and re-sample its buffer until it reaches a fixpoint (unchanged across
-/// two reads) or the round bound is hit, then adopt that settled
-/// operator-authoritative buffer as the snapshot, provided it still presents this
-/// cycle's response. This owns only the IO/settling; the decision each round is
-/// owned by the realtime model.
-pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
+/// capture (so the visible-write snapshot is stale relative to the live buffer),
+/// settle the editor and re-sample its buffer until it reaches a fixpoint
+/// (unchanged across two reads) or the round bound is hit, then adopt that
+/// settled operator-authoritative buffer as the snapshot, provided it still
+/// presents this cycle's response. This owns only the IO/settling; the decision
+/// each round is owned by the realtime model.
+pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
     file: &Path,
     editor_id: Option<&str>,
     decision: &mut IpcRepairDecision,
@@ -1580,7 +1714,7 @@ pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
         return false;
     };
     let mut prev: Option<String> = None;
-    for round in 0..ACK_RECONCILE_MAX_ROUNDS {
+    for round in 0..VISIBLE_WRITE_RECONCILE_MAX_ROUNDS {
         settle_editor_typing(file);
         let Some(curr) = newest_operator_authoritative_buffer(file, editor_id) else {
             return false;
@@ -1596,7 +1730,7 @@ pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ack_content_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead rounds={} stale_len={} stale_hash={} newer_len={} newer_hash={}",
+                        "visible_write_snapshot_reconciled_forward file={} editor_id={} reason=operator_buffer_ahead rounds={} stale_len={} stale_hash={} newer_len={} newer_hash={}",
                         file.display(),
                         editor_id,
                         round + 1,
@@ -1616,7 +1750,7 @@ pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ack_content_snapshot_reconcile_fail_closed file={} editor_id={} reason=settled_buffer_dropped_response rounds={}",
+                        "visible_write_snapshot_reconcile_fail_closed file={} editor_id={} reason=settled_buffer_dropped_response rounds={}",
                         file.display(),
                         editor_id,
                         round + 1,
@@ -1629,16 +1763,16 @@ pub fn reconcile_ack_snapshot_to_newer_operator_buffer(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ack_content_snapshot_reconcile_timeout file={} editor_id={} reason=operator_still_editing rounds={}",
+            "visible_write_snapshot_reconcile_timeout file={} editor_id={} reason=operator_still_editing rounds={}",
             file.display(),
             editor_id,
-            ACK_RECONCILE_MAX_ROUNDS,
+            VISIBLE_WRITE_RECONCILE_MAX_ROUNDS,
         ),
     );
     false
 }
 
-pub fn mark_ack_content_live_buffer_synced(
+pub fn mark_visible_write_live_buffer_synced(
     file: &Path,
     patch_id: &str,
     editor_id: Option<&str>,
@@ -1648,7 +1782,7 @@ pub fn mark_ack_content_live_buffer_synced(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
+                "visible_write_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
                 file.display(),
                 patch_id
             ),
@@ -1671,7 +1805,7 @@ pub fn mark_ack_content_live_buffer_synced(
         Ok(()) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
+                "visible_write_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
                 file.display(),
                 patch_id,
                 editor_id,
@@ -1682,7 +1816,7 @@ pub fn mark_ack_content_live_buffer_synced(
         Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
+                "visible_write_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
                 file.display(),
                 patch_id,
                 editor_id,
@@ -1692,15 +1826,15 @@ pub fn mark_ack_content_live_buffer_synced(
     }
 }
 
-pub fn write_ack_content_through_to_disk(
+pub fn write_visible_write_through_to_disk(
     effects: &dyn EditorConvergenceEffects,
     file: &Path,
     patch_id: &str,
     content: &str,
-    proof: AckContentDiskWriteProof,
+    proof: VisibleWriteDiskProof,
 ) -> Result<bool> {
     let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
-        delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+        delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
         authority: proof.authority,
         source_buffer_matches: proof.source_buffer_matches,
         scope_rejection: None,
@@ -1710,7 +1844,7 @@ pub fn write_ack_content_through_to_disk(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_disk_write_through_blocked file={} patch_id={} authority={} source_buffer_matches={} action={} reason={} len={} hash={}",
+                "visible_write_disk_write_through_blocked file={} patch_id={} authority={} source_buffer_matches={} action={} reason={} len={} hash={}",
                 file.display(),
                 patch_id,
                 proof.authority.as_str(),
@@ -1731,7 +1865,7 @@ pub fn write_ack_content_through_to_disk(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "ack_content_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
+                "visible_write_disk_write_through_skipped file={} patch_id={} authority={} reason=already_current len={} hash={}",
                 file.display(),
                 patch_id,
                 proof.authority.as_str(),
@@ -1744,14 +1878,14 @@ pub fn write_ack_content_through_to_disk(
 
     effects.atomic_write(file, content).with_context(|| {
         format!(
-            "failed to write proven ack-content through to disk for {}",
+            "failed to write proven visible-write content through to disk for {}",
             file.display()
         )
     })?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ack_content_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} ack_len={} ack_hash={}",
+            "visible_write_disk_write_through file={} patch_id={} authority={} before_len={} before_hash={} visible_len={} visible_hash={}",
             file.display(),
             patch_id,
             proof.authority.as_str(),
@@ -1767,23 +1901,23 @@ pub fn write_ack_content_through_to_disk(
     Ok(true)
 }
 
-pub fn mark_ack_content_live_buffer_synced_after_write(
+pub fn mark_visible_write_live_buffer_synced_after_write(
     file: &Path,
     patch_id: &str,
     editor_id: Option<&str>,
     content: &str,
 ) {
-    let proof = ack_content_disk_write_proof(file, editor_id, content);
+    let proof = visible_write_disk_proof(file, editor_id, content);
     if proof.authority == WholeBufferAuthority::OperatorTextAuthority && proof.source_buffer_matches
     {
-        mark_ack_content_live_buffer_synced(file, patch_id, editor_id, content);
+        mark_visible_write_live_buffer_synced(file, patch_id, editor_id, content);
         return;
     }
 
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ack_content_live_buffer_sync_skipped file={} patch_id={} reason=post_write_source_unproven authority={} source_buffer_matches={}",
+            "visible_write_live_buffer_sync_skipped file={} patch_id={} reason=post_write_source_unproven authority={} source_buffer_matches={}",
             file.display(),
             patch_id,
             proof.authority.as_str(),
@@ -1805,10 +1939,21 @@ impl FileIpcDeliveryOptions {
     }
 }
 
+const FILE_IPC_TIMEOUT_MS_ENV: &str = "AGENT_DOC_FILE_IPC_TIMEOUT_MS";
+
+fn file_ipc_delivery_timeout() -> std::time::Duration {
+    std::env::var(FILE_IPC_TIMEOUT_MS_ENV)
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|millis| *millis > 0)
+        .map(std::time::Duration::from_millis)
+        .unwrap_or_else(|| std::time::Duration::from_secs(2))
+}
+
 /// Write a file-IPC patch and prove the plugin consumed it.
 ///
 /// This owns the durable delivery loop: atomic patch write, committed-cycle
-/// fence, negative-ack sidecar handling, and no-ack timeout proof logging. The
+/// fence, negative-delivery marker handling, and no-ack timeout proof logging. The
 /// caller remains responsible for post-consumption snapshot/response validation.
 pub fn write_file_ipc_and_poll_delivery(
     effects: &dyn EditorConvergenceEffects,
@@ -1828,7 +1973,7 @@ pub fn write_file_ipc_and_poll_delivery(
         patch_count
     );
 
-    let timeout = std::time::Duration::from_secs(2);
+    let timeout = file_ipc_delivery_timeout();
     let poll_interval = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
 
@@ -2409,18 +2554,18 @@ pub fn try_editor_converge_live_prompt_drift(
                 .get("patch_id")
                 .and_then(|value| value.as_str())
                 .unwrap_or("-");
-            let sidecar = poll_ack_content_lazily_event_or_projection(
+            let visible_write = poll_visible_write_text_lazily_event_or_projection(
                 file,
                 project_root,
                 patch_id,
                 std::time::Duration::from_millis(500),
                 std::time::Duration::from_millis(25),
             )?;
-            let Some(recovered) = sidecar else {
+            let Some(recovered) = visible_write else {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "[jbstalecache] editor_convergence_no_ack_content file={} patch_id={} action=block_external_disk_write",
+                        "[jbstalecache] editor_convergence_no_visible_write_receipt file={} patch_id={} action=block_external_disk_write",
                         file.display(),
                         patch_id
                     ),
@@ -2639,7 +2784,7 @@ fn refresh_editor_after_ack_mismatch(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{source}_ack_mismatch_editor_refresh file={} transport=blocked reason=untrusted_ack_content_contains_user_drift action=leave_editor_owned_ack_content stale_len={} stale_hash={}",
+                "{source}_visible_write_mismatch_editor_refresh file={} transport=blocked reason=untrusted_visible_write_contains_user_drift action=leave_editor_owned_visible_write stale_len={} stale_hash={}",
                 file.display(),
                 recovered.len(),
                 &stale_hash[..stale_hash.len().min(12)]
@@ -2650,7 +2795,7 @@ fn refresh_editor_after_ack_mismatch(
     let (refresh_content, action, success_outcome) = match recovery {
         AckMismatchRecovery::RevertUntrustedAckToCurrent => (
             current_content,
-            "revert_untrusted_ack_content",
+            "revert_untrusted_visible_write",
             AckMismatchRefreshOutcome::RevertedToCurrent,
         ),
         AckMismatchRecovery::ReplayMissingAgentResponseToTarget => (
@@ -2662,7 +2807,7 @@ fn refresh_editor_after_ack_mismatch(
     let target_hash = agent_doc_hash::content_hash(refresh_content);
     let failure_action = match recovery {
         AckMismatchRecovery::RevertUntrustedAckToCurrent => {
-            "left_untrusted_ack_content_editor_owned"
+            "left_untrusted_visible_write_editor_owned"
         }
         AckMismatchRecovery::ReplayMissingAgentResponseToTarget => {
             "left_missing_agent_response_editor_owned"
@@ -2852,7 +2997,7 @@ fn content_matches_recent_committed_blob(file: &Path, content: &str, limit: usiz
     false
 }
 
-pub fn ipc_repair_decision_from_sidecar(
+pub fn ipc_repair_decision_from_visible_write(
     file: &Path,
     patch_id: Option<&str>,
     baseline: Option<&str>,
@@ -2882,13 +3027,13 @@ pub fn ipc_repair_decision_from_sidecar(
             normalization_prefix_observation_counts(&bad_state, lines);
         let duplicate_prompt_count = duplicate_prompt_line_count(&bad_state);
         eprintln!(
-            "[write] sidecar normalization diverged — retrying from ACK sidecar ({} bytes)",
+            "[write] visible-write normalization diverged — retrying from lazily event ({} bytes)",
             repaired.len()
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "sidecar_normalization_fallback file={} patch_id={} snap_source=ack_content_sidecar reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
+                "visible_write_normalization_fallback file={} patch_id={} snap_source=lazily_visible_write_event reason=prefix_divergence bad_len={} bad_hash={} fallback_len={} fallback_hash={} required_prefix_count={} observed_prefix_count={} duplicate_prompt_count={}",
                 file.display(),
                 patch_id.unwrap_or("-"),
                 bad_state.len(),
@@ -2900,10 +3045,10 @@ pub fn ipc_repair_decision_from_sidecar(
                 duplicate_prompt_count
             ),
         );
-        return IpcRepairDecision::ack_content_prefix_repair(repaired, bad_state, lines);
+        return IpcRepairDecision::lazily_visible_write_prefix_repair(repaired, bad_state, lines);
     }
 
-    IpcRepairDecision::ack_content(snap_content)
+    IpcRepairDecision::lazily_visible_write(snap_content)
 }
 
 pub fn redelivery_missing_operator_text_authority(
@@ -3180,7 +3325,7 @@ pub fn try_ipc_normalization_repair_patch(
     );
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
 
-    let timeout = std::time::Duration::from_secs(2);
+    let timeout = file_ipc_delivery_timeout();
     let poll_interval = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
@@ -3558,26 +3703,20 @@ pub fn repair_ipc_decision_visible_state(
     }
 
     if matches!(reason, IpcDiskRepairReason::LivePromptDrift) {
-        let listener_active = file
+        let ipc_project_root = file
             .canonicalize()
             .ok()
-            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+            .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical));
+        let listener_active = ipc_project_root
             .as_deref()
             .map(agent_doc_ipc_io::is_listener_active)
             .unwrap_or(false);
-        if listener_active
-            && let Ok(file_content) = std::fs::read_to_string(file)
-            && let Ok(Some(_recovered)) = try_auto_recover_live_prompt_drift(
-                effects,
-                file,
-                &decision.snapshot_content,
-                &file_content,
-            )
-        {
+
+        let log_reconciled = |transport: &str| {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "ipc_visible_repair_incycle_editor_converged file={} patch_id={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} transport=editor_ipc",
+                    "ipc_visible_repair_incycle_editor_converged file={} patch_id={} repair_reason={} redeliver_editor={} bad_len={} bad_hash={} repaired_len={} repaired_hash={} transport={}",
                     file.display(),
                     patch_id.unwrap_or("-"),
                     reason.label(),
@@ -3586,9 +3725,70 @@ pub fn repair_ipc_decision_visible_state(
                     bad_hash,
                     decision.snapshot_content.len(),
                     agent_doc_hash::content_hash(&decision.snapshot_content),
+                    transport,
                 ),
             );
-            return Ok(());
+        };
+
+        if let Ok(file_content) = std::fs::read_to_string(file) {
+            if let Some(project_root) = ipc_project_root.as_deref()
+                && listener_active
+                && let Ok(Some(_recovered)) = try_editor_converge_live_prompt_drift(
+                    file,
+                    project_root,
+                    &decision.snapshot_content,
+                    &file_content,
+                )
+            {
+                log_reconciled("editor_ipc");
+                return Ok(());
+            }
+
+            let bad_state_matches = decision
+                .editor_bad_state
+                .as_ref()
+                .is_some_and(|state| state.content() == file_content);
+            if !listener_active && bad_state_matches {
+                effects
+                    .atomic_write(file, &decision.snapshot_content)
+                    .with_context(|| {
+                        format!(
+                            "live_prompt_drift visible repair write for {}",
+                            file.display()
+                        )
+                    })?;
+                save_document_snapshot_and_crdt(file, &decision.snapshot_content)?;
+                log_reconciled("disk_fallback");
+                log_flow_event(
+                    file,
+                    agent_doc_flow::types::FlowEvent::new(
+                        agent_doc_flow::types::FlowName::DocumentMutation,
+                        agent_doc_flow::types::FlowStage::IpcSnapshotAdoption,
+                        agent_doc_flow::types::FlowOutcome::Completed,
+                    )
+                    .with_reason("live_prompt_drift_visible_repair_reconciled"),
+                );
+                eprintln!(
+                    "[commit] reconciled live_prompt_drift visible repair for {} via guarded disk fallback ({} bytes)",
+                    file.display(),
+                    decision.snapshot_content.len()
+                );
+                return Ok(());
+            }
+
+            if let Ok(Some(_recovered)) = try_auto_recover_live_prompt_drift(
+                effects,
+                file,
+                &decision.snapshot_content,
+                &file_content,
+            ) {
+                log_reconciled(if listener_active {
+                    "editor_ipc"
+                } else {
+                    "disk_fallback"
+                });
+                return Ok(());
+            }
         }
     }
 
@@ -3819,18 +4019,18 @@ pub fn try_editor_converge(
 
     match agent_doc_ipc_io::send_message(&project_root, &payload) {
         Ok(Some(_ack)) => {
-            let sidecar = poll_ack_content_lazily_event_or_projection(
+            let visible_write = poll_visible_write_text_lazily_event_or_projection(
                 file,
                 &project_root,
                 &patch_id,
                 std::time::Duration::from_millis(500),
                 std::time::Duration::from_millis(25),
             )?;
-            let Some(recovered) = sidecar else {
+            let Some(recovered) = visible_write else {
                 return refuse_unproven_editor_delivery(
                     file,
                     source,
-                    "no_ack_content",
+                    "no_visible_write_receipt",
                     Some(&patch_id),
                 );
             };

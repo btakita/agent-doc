@@ -396,9 +396,10 @@ pub fn send_reposition(
 /// `content_ours` as a next-cycle carry-forward snapshot (which also leaves the
 /// IntelliJ buffer dirty, re-drifting + raising a File Cache Conflict on every
 /// later cycle). Instead the plugin runs `FileDocumentManager.saveDocument()`,
-/// flushing the buffer to disk AND clearing the editor's dirty flag, then writes
-/// the saved buffer to the ack-content sidecar keyed by `patch_id` so the binary
-/// can read exactly what was persisted and adopt it as a clean on-disk snapshot.
+/// flushing the buffer to disk AND clearing the editor's dirty flag, then
+/// publishes the saved buffer through the lazily visible-write receipt bridge
+/// keyed by `patch_id` so the binary can read exactly what was persisted and
+/// adopt it as a clean on-disk snapshot.
 pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Result<bool> {
     let message = save_document_message(file, patch_id);
 
@@ -473,7 +474,8 @@ pub fn send_publish_live_buffer_file_signal(project_root: &Path, file: &str) -> 
 }
 
 /// Write a VS Code-style file IPC signal asking the editor to save the current
-/// visible buffer for `file` and publish ack-content for `patch_id`.
+/// visible buffer for `file` and publish a lazily visible-write receipt for
+/// `patch_id`.
 pub fn send_save_document_file_signal(
     project_root: &Path,
     file: &str,

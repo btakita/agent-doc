@@ -1721,7 +1721,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
-        let iso = IsolatedTmux::new("route-test-live-ack-content-edit");
+        let iso = IsolatedTmux::new("route-test-live-visible-write-edit");
         let session = "claude";
         let cwd = test_cwd();
         let pane = iso.auto_start(session, &cwd).unwrap();

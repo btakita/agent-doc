@@ -158,6 +158,71 @@ pub fn preserve_content_ours_over_live_queue_deletions(
     )
 }
 
+pub fn merge_visible_queue_additions_into_content_ours(
+    base: &str,
+    candidate: &str,
+    content_ours: &str,
+    dropped_queue: &[String],
+) -> Option<String> {
+    if dropped_queue.is_empty() {
+        return None;
+    }
+
+    let base_queue = queue_component_text(base);
+    let candidate_queue = queue_component_text(candidate);
+    let content_ours_queue = queue_component_text(content_ours);
+    let candidate_entries = document_queue::parse(&candidate_queue).ok()?;
+    let mut merged_entries = document_queue::parse(&content_ours_queue).ok()?;
+
+    let baseline_counts = queue_prompt_counts(&queue_prompt_texts(&base_queue));
+    let mut content_ours_counts =
+        queue_prompt_counts(&queue_prompt_texts_including_consumed(&content_ours_queue));
+    let mut candidate_seen = HashMap::new();
+    let mut appended = Vec::new();
+
+    for entry in candidate_entries {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if prompt.multiline {
+            continue;
+        }
+        let text = prompt.text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+
+        let seen = candidate_seen.entry(text.clone()).or_insert(0);
+        *seen += 1;
+        let baseline_count = queue_prompt_count(&baseline_counts, &text);
+        if *seen <= baseline_count {
+            continue;
+        }
+
+        let candidate_added_index = *seen - baseline_count;
+        let content_ours_added_count =
+            queue_prompt_count(&content_ours_counts, &text).saturating_sub(baseline_count);
+        if candidate_added_index > content_ours_added_count {
+            appended.push(QueueEntry::Prompt(document_queue::QueuePrompt {
+                text: text.clone(),
+                multiline: false,
+            }));
+            *content_ours_counts.entry(text).or_insert(0) += 1;
+        }
+    }
+
+    if appended.len() != dropped_queue.len() {
+        return None;
+    }
+    merged_entries.extend(appended);
+    let merged_queue = document_queue::render(&merged_entries);
+    let components = agent_doc_element::element::parse(content_ours).ok()?;
+    let queue_component = components
+        .iter()
+        .find(|component| component.name == "queue")?;
+    Some(queue_component.replace_content(content_ours, &merged_queue))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

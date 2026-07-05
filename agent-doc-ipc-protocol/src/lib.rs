@@ -173,7 +173,7 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IpcSnapshotSource {
-    AckContentSidecar,
+    LegacySidecarProjection,
     LazilyVisibleWriteEvent,
     ContentOurs,
     FileRead,
@@ -182,18 +182,15 @@ pub enum IpcSnapshotSource {
 impl IpcSnapshotSource {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::AckContentSidecar => "ack_content_sidecar",
+            Self::LegacySidecarProjection => "legacy_sidecar_projection",
             Self::LazilyVisibleWriteEvent => "lazily_visible_write_event",
             Self::ContentOurs => "content_ours",
             Self::FileRead => "file_read",
         }
     }
 
-    pub const fn is_ack_content_proven(self) -> bool {
-        matches!(
-            self,
-            Self::AckContentSidecar | Self::LazilyVisibleWriteEvent
-        )
+    pub const fn is_visible_write_proven(self) -> bool {
+        matches!(self, Self::LazilyVisibleWriteEvent)
     }
 }
 
@@ -263,10 +260,10 @@ pub struct IpcRepairDecision {
 }
 
 impl IpcRepairDecision {
-    pub fn ack_content(snapshot_content: String) -> Self {
+    pub fn lazily_visible_write(snapshot_content: String) -> Self {
         Self {
             snapshot_content,
-            snap_source: IpcSnapshotSource::AckContentSidecar,
+            snap_source: IpcSnapshotSource::LazilyVisibleWriteEvent,
             disk_repair_reason: None,
             editor_bad_state: None,
             normalize_prefix_lines: Vec::new(),
@@ -301,7 +298,7 @@ impl IpcRepairDecision {
         }
     }
 
-    pub fn ack_content_prefix_repair(
+    pub fn lazily_visible_write_prefix_repair(
         snapshot_content: String,
         bad_state: String,
         normalize_prefix_lines: &[String],
@@ -310,7 +307,7 @@ impl IpcRepairDecision {
             snapshot_content,
             bad_state,
             normalize_prefix_lines,
-            IpcSnapshotSource::AckContentSidecar,
+            IpcSnapshotSource::LazilyVisibleWriteEvent,
         )
     }
 
@@ -355,8 +352,8 @@ impl IpcRepairDecision {
         self
     }
 
-    pub fn ack_content_proven(&self) -> bool {
-        self.snap_source.is_ack_content_proven()
+    pub fn visible_write_proven(&self) -> bool {
+        self.snap_source.is_visible_write_proven()
     }
 
     pub fn replace_snapshot_with_content_ours_for_live_prompt_drift(
@@ -1358,11 +1355,12 @@ mod tests {
     #[test]
     fn ipc_repair_vocabulary_labels_and_messages_are_stable() {
         assert_eq!(
-            IpcSnapshotSource::AckContentSidecar.label(),
-            "ack_content_sidecar"
+            IpcSnapshotSource::LegacySidecarProjection.label(),
+            "legacy_sidecar_projection"
         );
-        assert!(IpcSnapshotSource::AckContentSidecar.is_ack_content_proven());
-        assert!(!IpcSnapshotSource::FileRead.is_ack_content_proven());
+        assert!(IpcSnapshotSource::LazilyVisibleWriteEvent.is_visible_write_proven());
+        assert!(!IpcSnapshotSource::LegacySidecarProjection.is_visible_write_proven());
+        assert!(!IpcSnapshotSource::FileRead.is_visible_write_proven());
 
         assert_eq!(
             IpcDiskRepairReason::PrefixDivergence.label(),
@@ -1418,7 +1416,7 @@ mod tests {
 
     #[test]
     fn ipc_repair_decision_dedupe_merges_prefix_repair_state() {
-        let decision = IpcRepairDecision::ack_content_prefix_repair(
+        let decision = IpcRepairDecision::lazily_visible_write_prefix_repair(
             "prefix repaired\n".to_string(),
             "bad prefix\n".to_string(),
             &["normalize me".to_string()],
@@ -1433,7 +1431,10 @@ mod tests {
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)
         );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert!(decision.redeliver_editor);
         assert_eq!(
             decision

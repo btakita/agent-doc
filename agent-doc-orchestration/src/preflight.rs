@@ -768,8 +768,9 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     };
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
 
-    // Flush the live editor buffer to disk (editor = source of truth). Fail-open: an
-    // error or absent ack means we cannot trust disk == buffer, so fall through.
+    // Flush the live editor buffer to disk (editor = source of truth). Fail-open:
+    // an error or absent lazily visible-write receipt means we cannot trust
+    // disk == buffer, so fall through.
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
     let barrier = agent_doc_debounce::await_editor_sync_barrier(&path_str, 75, 150);
@@ -801,11 +802,12 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
             Ok(true) => {}
             Ok(false) | Err(_) => return Ok(false),
         }
-        if poll_save_document_ack_content(&project_root, &patch_id)?.is_none() {
+        if poll_save_document_visible_write_receipt(&project_root, &canonical, &patch_id)?.is_none()
+        {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "ipc_truncation_recover_rejected file={} save_document_file_signal=unacked patch_id={}",
+                    "ipc_truncation_recover_rejected file={} save_document_file_signal=unproven_visible_write patch_id={}",
                     file.display(),
                     patch_id
                 ),
@@ -857,26 +859,18 @@ fn recover_ipc_truncated_worktree_from_editor_buffer(
     Ok(true)
 }
 
-fn poll_save_document_ack_content(project_root: &Path, patch_id: &str) -> Result<Option<String>> {
-    let sidecar = project_root
-        .join(".agent-doc")
-        .join("ack-content")
-        .join(format!("{patch_id}.md"));
-    let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(6);
-    let poll_interval = std::time::Duration::from_millis(100);
-    loop {
-        if sidecar.exists() {
-            let content = std::fs::read_to_string(&sidecar)
-                .with_context(|| format!("failed to read ack-content sidecar {sidecar:?}"))?;
-            let _ = std::fs::remove_file(&sidecar);
-            return Ok(Some(content));
-        }
-        if start.elapsed() >= timeout {
-            return Ok(None);
-        }
-        std::thread::sleep(poll_interval);
-    }
+fn poll_save_document_visible_write_receipt(
+    project_root: &Path,
+    file: &Path,
+    patch_id: &str,
+) -> Result<Option<String>> {
+    agent_doc_write_converge_io::poll_visible_write_text_lazily_event_or_projection(
+        file,
+        project_root,
+        patch_id,
+        std::time::Duration::from_secs(6),
+        std::time::Duration::from_millis(100),
+    )
 }
 
 fn recover_route_queue_snapshot_commit_boundary(
@@ -1692,7 +1686,7 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
         let canonical = doc.canonicalize().unwrap();
         let diagnostic = format!(
-            "ipc_proof_insufficient file={} source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required",
+            "ipc_proof_insufficient file={} source=socket_visible_write patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required",
             canonical.display()
         );
         write_ops_log(

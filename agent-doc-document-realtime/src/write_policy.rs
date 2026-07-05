@@ -619,13 +619,13 @@ pub fn new_agent_response_headings(base: &str, candidate: &str) -> Vec<String> {
         .collect()
 }
 
-/// Return true when `ack_content` already contains `target`'s latest exchange
+/// Return true when visible-write content already contains `target`'s latest exchange
 /// response block.
-pub fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> bool {
+fn visible_write_contains_latest_response(visible_write_content: &str, target: &str) -> bool {
     let Some(response) = latest_exchange_response_block(target) else {
         return true;
     };
-    response_materialized_in_content(&response, ack_content)
+    response_materialized_in_content(&response, visible_write_content)
 }
 
 /// Operator-edit-tolerant convergence predicate for the `live_prompt_drift`
@@ -639,7 +639,7 @@ pub fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> 
 /// the response and NO redelivery/repair is required — closeout must not wedge.
 ///
 /// This is the reconcile-aware counterpart to
-/// [`ack_content_contains_latest_response`], which requires the agent's *exact*
+/// [`visible_write_contains_latest_response`], which requires the agent's *exact*
 /// response bytes and therefore misreads any operator body-edit as
 /// "response missing", forcing a needless editor redelivery that cannot prove
 /// against a lagging disk (the observed live_prompt_drift wedge). When the cycle
@@ -648,7 +648,7 @@ pub fn ack_content_contains_latest_response(ack_content: &str, target: &str) -> 
 pub fn response_converged_in_visible_target(base: &str, candidate: &str, target: &str) -> bool {
     let headings = new_agent_response_headings(base, candidate);
     if headings.is_empty() {
-        return ack_content_contains_latest_response(candidate, target);
+        return visible_write_contains_latest_response(candidate, target);
     }
     let target_exchange = exchange_component_text(target);
     headings
@@ -696,10 +696,10 @@ pub fn operator_reconcile_step(
 
 /// True when `buffer` still presents the latest `### Re:` response block found in
 /// `reference` — matched by heading with a non-empty body — even if the operator
-/// edited the body. `reference` is the proven ack content (which carries the
-/// response); `buffer` is a *newer* operator live buffer that has moved ahead of
-/// it. Used to reconcile a stale ack-content disk write FORWARD to the operator's
-/// newer buffer instead of wedging on a `stale_source_buffer` mismatch
+/// edited the body. `reference` is the proven visible-write content (which carries
+/// the response); `buffer` is a *newer* operator live buffer that has moved ahead
+/// of it. Used to reconcile a stale lazily-visible disk write FORWARD to the
+/// operator's newer buffer instead of wedging on a `stale_source_buffer` mismatch
 /// (`#adoc-live-prompt-drift-operator-edit`). When `reference` carries no response
 /// block there is nothing to preserve, so it returns true.
 pub fn buffer_presents_reference_response(reference: &str, buffer: &str) -> bool {
@@ -708,7 +708,7 @@ pub fn buffer_presents_reference_response(reference: &str, buffer: &str) -> bool
     };
     match first_response_heading(&response) {
         Some(heading) => response_heading_has_body(&exchange_component_text(buffer), &heading),
-        None => ack_content_contains_latest_response(reference, buffer),
+        None => visible_write_contains_latest_response(reference, buffer),
     }
 }
 
@@ -1041,6 +1041,12 @@ pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
     {
         return true;
     }
+    if candidate_has_unowned_prompt_target_line(snapshot_candidate, content_ours) {
+        return true;
+    }
+    if content_ours_drops_operator_text(baseline, snapshot_candidate, content_ours) {
+        return true;
+    }
 
     let candidate_changes = prompt_bearing_user_changes_between(baseline, snapshot_candidate);
     if candidate_changes.is_empty() {
@@ -1050,6 +1056,32 @@ pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
     candidate_changes
         .iter()
         .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
+}
+
+fn candidate_has_unowned_prompt_target_line(candidate: &str, content_ours: &str) -> bool {
+    let owned = prompt_target_line_set(content_ours);
+    prompt_target_line_set(candidate)
+        .into_iter()
+        .any(|line| !owned.contains(&line))
+}
+
+fn prompt_target_line_set(doc: &str) -> HashSet<String> {
+    exchange_component_or_document_text(doc)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| line.starts_with('❯') || text_line_looks_like_prompt_target(line))
+        .map(normalized_prompt_line)
+        .collect()
+}
+
+fn exchange_component_or_document_text(doc: &str) -> String {
+    let exchange = exchange_component_text(doc);
+    if exchange.is_empty() {
+        doc.to_string()
+    } else {
+        exchange
+    }
 }
 
 fn added_nonblank_lines(baseline: &str, candidate: &str) -> Vec<String> {
@@ -1464,7 +1496,7 @@ pub fn full_content_scope_rejection_reason(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WholeBufferDelivery {
     FullContentEditorIpc,
-    AckContentDiskWriteThrough,
+    VisibleWriteDiskWriteThrough,
     EditorRepairRedelivery,
 }
 
@@ -1473,7 +1505,7 @@ impl WholeBufferDelivery {
         matches!(
             self,
             Self::FullContentEditorIpc
-                | Self::AckContentDiskWriteThrough
+                | Self::VisibleWriteDiskWriteThrough
                 | Self::EditorRepairRedelivery
         )
     }
@@ -1481,7 +1513,7 @@ impl WholeBufferDelivery {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FullContentEditorIpc => "full_content_editor_ipc",
-            Self::AckContentDiskWriteThrough => "ack_content_disk_write_through",
+            Self::VisibleWriteDiskWriteThrough => "visible_write_disk_write_through",
             Self::EditorRepairRedelivery => "editor_repair_redelivery",
         }
     }
@@ -1490,7 +1522,6 @@ impl WholeBufferDelivery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WholeBufferAuthority {
     OperatorTextAuthority,
-    AckContentSidecar,
     FileRead,
     ContentOurs,
     None,
@@ -1500,7 +1531,6 @@ impl WholeBufferAuthority {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OperatorTextAuthority => "operator_text_authority",
-            Self::AckContentSidecar => "ack_content_sidecar",
             Self::FileRead => "file_read",
             Self::ContentOurs => "content_ours",
             Self::None => "none",
@@ -1556,7 +1586,7 @@ const WHOLE_BUFFER_AUTHORITY_TABLE: &[WholeBufferAuthorityRule] = &[
         reason: "operator_text_authority_source_buffer",
     },
     WholeBufferAuthorityRule {
-        delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+        delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
         authority: WholeBufferAuthority::OperatorTextAuthority,
         action: WholeBufferDeliveryAction::Apply,
         reason: "operator_text_authority",
@@ -2891,7 +2921,7 @@ Same content.
     }
 
     #[test]
-    fn ack_content_contains_latest_response_uses_latest_exchange_block() {
+    fn visible_write_contains_latest_response_uses_latest_exchange_block() {
         let target = doc_with_exchange(
             concat!(
                 "❯ do #old\n",
@@ -2908,29 +2938,29 @@ Same content.
             doc_with_exchange("### Re: do #latest - gpt-5\n\nLatest response.\n", "");
         let ack_with_old = doc_with_exchange("### Re: do #old - gpt-5\n\nOld response.\n", "");
 
-        assert!(ack_content_contains_latest_response(
+        assert!(visible_write_contains_latest_response(
             &ack_with_latest,
             &target
         ));
-        assert!(!ack_content_contains_latest_response(
+        assert!(!visible_write_contains_latest_response(
             &ack_with_old,
             &target
         ));
     }
 
     #[test]
-    fn ack_content_contains_latest_response_allows_targets_without_response_heading() {
+    fn visible_write_contains_latest_response_allows_targets_without_response_heading() {
         let target = doc_with_exchange("❯ do #pending\nstill typing\n", "");
 
-        assert!(ack_content_contains_latest_response("", &target));
+        assert!(visible_write_contains_latest_response("", &target));
     }
 
     #[test]
-    fn ack_content_contains_latest_response_falls_back_to_whole_content_without_exchange() {
+    fn visible_write_contains_latest_response_falls_back_to_whole_content_without_exchange() {
         let target = "### Re: loose response - gpt-5\n\nLoose response body.\n";
 
-        assert!(ack_content_contains_latest_response(target, target));
-        assert!(!ack_content_contains_latest_response(
+        assert!(visible_write_contains_latest_response(target, target));
+        assert!(!visible_write_contains_latest_response(
             "### Re: other response - gpt-5\n\nOther body.\n",
             target,
         ));
@@ -2957,7 +2987,7 @@ Same content.
             "operator body-edit with heading + body present is converged"
         );
         // The strict byte check is what used to wedge here.
-        assert!(!ack_content_contains_latest_response(
+        assert!(!visible_write_contains_latest_response(
             &candidate,
             &operator_edited
         ));
@@ -3005,7 +3035,7 @@ Same content.
 
     #[test]
     fn buffer_presents_reference_response_true_for_newer_operator_edit() {
-        // Reference = proven ack content (carries the response). Buffer = a NEWER
+        // Reference = proven visible-write content (carries the response). Buffer = a NEWER
         // operator buffer whose response body was edited. It still presents the
         // response heading with a body, so the stale ack can reconcile forward.
         let reference = doc_with_exchange("❯ prompt\n### Re: topic — opus\n\nAck body.\n", "");
@@ -3494,17 +3524,17 @@ Working.
     }
 
     #[test]
-    fn whole_buffer_table_allows_ack_write_through_only_with_operator_authority() {
+    fn whole_buffer_table_allows_visible_write_through_only_with_operator_authority() {
         let allowed = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
-            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+            delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
             authority: WholeBufferAuthority::OperatorTextAuthority,
             source_buffer_matches: true,
             scope_rejection: None,
             enabled: true,
         });
         let blocked = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
-            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
-            authority: WholeBufferAuthority::AckContentSidecar,
+            delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
+            authority: WholeBufferAuthority::None,
             source_buffer_matches: true,
             scope_rejection: None,
             enabled: true,
@@ -3516,9 +3546,9 @@ Working.
     }
 
     #[test]
-    fn whole_buffer_table_rejects_ack_write_through_stale_source() {
+    fn whole_buffer_table_rejects_visible_write_through_stale_source() {
         let decision = decide_whole_buffer_delivery(WholeBufferAuthorityFacts {
-            delivery: WholeBufferDelivery::AckContentDiskWriteThrough,
+            delivery: WholeBufferDelivery::VisibleWriteDiskWriteThrough,
             authority: WholeBufferAuthority::OperatorTextAuthority,
             source_buffer_matches: false,
             scope_rejection: None,

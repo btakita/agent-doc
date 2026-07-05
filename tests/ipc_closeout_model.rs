@@ -34,7 +34,7 @@ enum IpcTransport {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SnapshotSource {
-    AckContent,
+    VisibleWrite,
     ContentOurs,
     FileRead,
     DirectDisk,
@@ -42,7 +42,7 @@ enum SnapshotSource {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CloseoutHazard {
-    BadAckContent,
+    MissingVisibleWriteReceipt,
     PromptDrift,
     PartialResponseMaterialization,
     StalePatchReplay,
@@ -61,16 +61,19 @@ fn model_transition(transport: IpcTransport, hazard: Option<CloseoutHazard>) -> 
         (_, Some(CloseoutHazard::StalePatchReplay)) => CloseoutTransition::RejectBeforeCommit,
         (
             IpcTransport::Socket | IpcTransport::File,
-            Some(CloseoutHazard::BadAckContent | CloseoutHazard::PartialResponseMaterialization),
+            Some(
+                CloseoutHazard::MissingVisibleWriteReceipt
+                | CloseoutHazard::PartialResponseMaterialization,
+            ),
         ) => CloseoutTransition::RejectBeforeCommit,
         (
             IpcTransport::Socket | IpcTransport::File,
             Some(CloseoutHazard::PromptDrift | CloseoutHazard::PostBlockSnapshotAbsorb),
         ) => CloseoutTransition::Commit(SnapshotSource::ContentOurs),
         (IpcTransport::Socket | IpcTransport::File, None) => {
-            CloseoutTransition::Commit(SnapshotSource::AckContent)
+            CloseoutTransition::Commit(SnapshotSource::VisibleWrite)
         }
-        (IpcTransport::DirectDisk, Some(CloseoutHazard::BadAckContent)) => {
+        (IpcTransport::DirectDisk, Some(CloseoutHazard::MissingVisibleWriteReceipt)) => {
             CloseoutTransition::Commit(SnapshotSource::DirectDisk)
         }
         (IpcTransport::DirectDisk, Some(CloseoutHazard::PartialResponseMaterialization)) => {
@@ -86,16 +89,17 @@ fn model_transition(transport: IpcTransport, hazard: Option<CloseoutHazard>) -> 
 
 fn unsafe_snapshot_source(hazard: CloseoutHazard, source: SnapshotSource) -> bool {
     match hazard {
-        CloseoutHazard::BadAckContent | CloseoutHazard::PartialResponseMaterialization => {
+        CloseoutHazard::MissingVisibleWriteReceipt
+        | CloseoutHazard::PartialResponseMaterialization => {
             matches!(
                 source,
-                SnapshotSource::AckContent | SnapshotSource::FileRead
+                SnapshotSource::VisibleWrite | SnapshotSource::FileRead
             )
         }
         CloseoutHazard::PromptDrift | CloseoutHazard::PostBlockSnapshotAbsorb => {
             matches!(
                 source,
-                SnapshotSource::AckContent | SnapshotSource::FileRead
+                SnapshotSource::VisibleWrite | SnapshotSource::FileRead
             )
         }
         CloseoutHazard::StalePatchReplay => true,
@@ -343,19 +347,22 @@ fn run_finalize_expect(root: &Path, doc: &Path, baseline: &Path, response: &str,
 #[test]
 fn ipc_closeout_transition_table_forbids_unsafe_commits() {
     assert!(
-        unsafe_snapshot_source(CloseoutHazard::BadAckContent, SnapshotSource::FileRead),
-        "file-read snapshots are unsafe when ACK content is known bad"
+        unsafe_snapshot_source(
+            CloseoutHazard::MissingVisibleWriteReceipt,
+            SnapshotSource::FileRead
+        ),
+        "file-read snapshots are unsafe when visible-write proof is missing"
     );
 
     let cases = [
         (
             IpcTransport::Socket,
-            Some(CloseoutHazard::BadAckContent),
+            Some(CloseoutHazard::MissingVisibleWriteReceipt),
             CloseoutTransition::RejectBeforeCommit,
         ),
         (
             IpcTransport::File,
-            Some(CloseoutHazard::BadAckContent),
+            Some(CloseoutHazard::MissingVisibleWriteReceipt),
             CloseoutTransition::RejectBeforeCommit,
         ),
         (
@@ -484,7 +491,7 @@ proptest! {
             _ => IpcTransport::DirectDisk,
         };
         let hazard = match hazard_index {
-            0 => CloseoutHazard::BadAckContent,
+            0 => CloseoutHazard::MissingVisibleWriteReceipt,
             1 => CloseoutHazard::PromptDrift,
             2 => CloseoutHazard::PartialResponseMaterialization,
             3 => CloseoutHazard::StalePatchReplay,
@@ -585,7 +592,6 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
-    let ack_dir = agent_doc_dir.join("ack-content");
     let response = response_text("partial response");
     let partial_marker = "partial-only-response-heading";
     let initial_head = head_blob(root);
@@ -613,7 +619,13 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
                     &format!("### Re: partial response - gpt-5\n{partial_marker}\n"),
                 );
                 fs::write(&doc_for_watcher, &partial).unwrap();
-                fs::write(ack_dir.join(format!("{id}.md")), &partial).unwrap();
+                agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                    &doc_for_watcher,
+                    &id,
+                    &partial,
+                    "file_ipc_partial_materialization_test",
+                )
+                .unwrap();
                 fs::remove_file(path).unwrap();
                 return true;
             }
@@ -664,7 +676,7 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
 }
 
 #[test]
-fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
+fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
     let agent_doc_dir = root.join(".agent-doc");
@@ -679,7 +691,6 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
     let seen_for_listener = seen_payload.clone();
     let doc_for_listener = doc.clone();
     let listener_root = root.to_path_buf();
-    let ack_dir = agent_doc_dir.join("ack-content");
     let server = std::thread::spawn(move || {
         agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
@@ -699,7 +710,13 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
                 Some(after)
             })?;
             record_operator_buffer(&doc_for_listener, &after_apply);
-            fs::write(ack_dir.join(format!("{id}.md")), &after_apply).ok()?;
+            agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                &doc_for_listener,
+                &id,
+                &after_apply,
+                "socket_prompt_drift_test",
+            )
+            .ok()?;
             *seen_for_listener.lock().ok()? = Some(payload);
             Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
         })
@@ -742,7 +759,7 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
     assert_eq!(
         head.matches(live_note).count(),
         1,
-        "ACK-proven post-block prompt drift should be committed exactly once:\n{head}"
+        "visible-write-proven post-block prompt drift should be committed exactly once:\n{head}"
     );
     let visible = fs::read_to_string(&doc).unwrap();
     assert_eq!(
@@ -755,13 +772,13 @@ fn socket_ipc_post_block_prompt_drift_commits_ack_authority_snapshot() {
     assert_eq!(
         snapshot.matches(live_note).count(),
         1,
-        "ACK-proven snapshot should preserve post-block prompt drift exactly once:\n{snapshot}"
+        "visible-write-proven snapshot should preserve post-block prompt drift exactly once:\n{snapshot}"
     );
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
         ops_log.contains("ipc_snapshot_adoption_blocked")
             && ops_log.contains("reason=live_prompt_drift_after_preflight"),
-        "socket ACK prompt drift should block snapshot adoption:\n{ops_log}"
+        "socket visible-write prompt drift should block snapshot adoption:\n{ops_log}"
     );
 }
 

@@ -1297,7 +1297,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("session.md");
         let content = concat!(
             "---\n",

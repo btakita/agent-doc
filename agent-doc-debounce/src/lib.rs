@@ -615,9 +615,9 @@ pub fn record_live_buffer_digest_content_for_editor_with_capabilities_v2(
 /// Record editor-visible content that is already synced/proven for commit.
 ///
 /// Unlike the normal document-change report, this marks `last_synced_epoch` at the
-/// newly-written epoch. Editor integrations use it after an IPC ack-content proof:
-/// the patch is visible in the editor buffer, so the commit barrier must not keep
-/// treating an older live-buffer epoch as unsynced.
+/// newly-written epoch. Editor integrations use it after a lazily visible-write
+/// receipt proves the patch is visible in the editor buffer, so the commit
+/// barrier must not keep treating an older live-buffer epoch as unsynced.
 pub fn record_live_buffer_synced_content_for_editor_with_capabilities(
     file: &str,
     content: &str,
@@ -1658,7 +1658,7 @@ mod tests {
     fn synced_live_buffer_report_clears_epoch_barrier_before_disk_catches_up() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
-        let doc = tmp.path().join("ack-content-synced.md");
+        let doc = tmp.path().join("visible-write-synced.md");
         std::fs::write(&doc, "before\n").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
 
@@ -1669,10 +1669,10 @@ mod tests {
         );
         assert!(editor_sync_statuses(&doc_str)[0].in_flight);
 
-        let ack_content = "before\n### Re: done\n";
+        let visible_content = "before\n### Re: done\n";
         record_live_buffer_synced_content_for_editor_with_capabilities(
             &doc_str,
-            ack_content,
+            visible_content,
             "jetbrains:test",
             "jetbrains",
             "test",

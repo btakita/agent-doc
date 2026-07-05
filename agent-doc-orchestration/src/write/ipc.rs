@@ -13,10 +13,11 @@ use agent_doc_element_exchange::verify_sidecar_normalization;
 use agent_doc_ipc_protocol::{IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource};
 #[cfg(test)]
 use agent_doc_write_converge_io::{
-    ack_content_disk_write_proof, guard_ipc_snapshot_adoption_against_live_prompt_drift,
-    ipc_repair_decision_from_sidecar, log_ipc_snapshot_adoption_allowed,
-    log_ipcfullprompt_corruption_if_any, materialize_missing_response_for_socket_ack_drift,
-    poll_ack_content_lazily_event, reconcile_ack_snapshot_to_newer_operator_buffer,
+    guard_ipc_snapshot_adoption_against_live_prompt_drift, ipc_repair_decision_from_visible_write,
+    log_ipc_snapshot_adoption_allowed, log_ipcfullprompt_corruption_if_any,
+    materialize_missing_response_for_socket_visible_write_drift,
+    poll_visible_write_content_lazily_event,
+    reconcile_visible_write_snapshot_to_newer_operator_buffer, visible_write_disk_proof,
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
@@ -24,6 +25,30 @@ use agent_doc_write_converge_io::{
     guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning, ipc_direct_disk_degraded,
     record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
 };
+
+#[cfg(test)]
+pub(crate) fn record_lazily_visible_write_candidate(file: &Path, patch_id: &str, content: &str) {
+    std::fs::write(file, content).unwrap();
+    let file_key = file.to_string_lossy();
+    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        "test-editor",
+        "test",
+        "test",
+        &[
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+        ],
+    );
+    agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+        file,
+        patch_id,
+        content,
+        "unit_test",
+    )
+    .unwrap();
+}
 
 #[cfg(test)]
 pub(crate) fn content_ours_with_pending_from_disk(file: &Path, content_ours: &str) -> String {
@@ -137,7 +162,7 @@ mod transport;
 pub(crate) use transport::try_ipc;
 
 #[cfg(test)]
-mod ack_content_snapshot_tests {
+mod visible_write_content_snapshot_tests {
     use super::*;
     use tempfile::TempDir;
 
@@ -186,6 +211,18 @@ mod ack_content_snapshot_tests {
 
     fn record_lazily_visible_write_candidate(file: &Path, patch_id: &str, content: &str) {
         std::fs::write(file, content).unwrap();
+        let file_key = file.to_string_lossy();
+        let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            file_key.as_ref(),
+            content,
+            "test-editor",
+            "test",
+            "test",
+            &[
+                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            ],
+        );
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file,
             patch_id,
@@ -205,7 +242,7 @@ mod ack_content_snapshot_tests {
         let doc = project_root.join("session.md");
         record_lazily_visible_write_candidate(&doc, patch_id, "applied content from plugin");
 
-        let result = poll_ack_content_lazily_event(
+        let result = poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
             std::time::Duration::from_millis(100),
@@ -223,7 +260,7 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn ack_content_disk_write_proof_waits_for_typing_indicator_before_trusting_live_buffer() {
+    fn visible_write_disk_proof_waits_for_typing_indicator_before_trusting_live_buffer() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
@@ -233,12 +270,12 @@ mod ack_content_snapshot_tests {
         std::fs::write(&doc, "before\n").unwrap();
         let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains:test";
-        let ack_content = "before\n### Re: done\n";
+        let visible_write_content = "before\n### Re: done\n";
         let newer_editor_content = "before\n### Re: done\noperator typed after ack\n";
 
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
-            ack_content,
+            visible_write_content,
             editor_id,
             "jetbrains",
             "test",
@@ -262,7 +299,7 @@ mod ack_content_snapshot_tests {
             .unwrap();
         });
 
-        let proof = ack_content_disk_write_proof(&doc, Some(editor_id), ack_content);
+        let proof = visible_write_disk_proof(&doc, Some(editor_id), visible_write_content);
         updater.join().unwrap();
 
         assert_eq!(
@@ -271,17 +308,17 @@ mod ack_content_snapshot_tests {
         );
         assert!(
             !proof.source_buffer_matches,
-            "ACK-content must not remain authoritative after active typing publishes a newer editor buffer"
+            "visible-write must not remain authoritative after active typing publishes a newer editor buffer"
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ack_content_disk_write_proof_typing_settle"),
+            log.contains("visible_write_disk_proof_typing_settle"),
             "typing-settle proof should be auditable:\n{log}"
         );
     }
 
     #[test]
-    fn reconcile_ack_snapshot_forward_adopts_newer_operator_buffer_presenting_response() {
+    fn reconcile_visible_write_snapshot_forward_adopts_newer_operator_buffer_presenting_response() {
         // #adoc-live-prompt-drift-operator-edit: the ack snapshot the closeout is
         // about to persist is stale (agent's exact body) relative to the operator's
         // newer live buffer (edited body, response still present). Reconcile forward
@@ -307,9 +344,12 @@ mod ack_content_snapshot_tests {
         )
         .unwrap();
 
-        let mut decision = IpcRepairDecision::ack_content(stale_ack.to_string());
-        let reconciled =
-            reconcile_ack_snapshot_to_newer_operator_buffer(&doc, Some(editor_id), &mut decision);
+        let mut decision = IpcRepairDecision::lazily_visible_write(stale_ack.to_string());
+        let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
+            &doc,
+            Some(editor_id),
+            &mut decision,
+        );
 
         assert!(
             reconciled,
@@ -321,13 +361,13 @@ mod ack_content_snapshot_tests {
         );
         let log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ack_content_snapshot_reconciled_forward"),
+            log.contains("visible_write_snapshot_reconciled_forward"),
             "forward reconcile must be auditable:\n{log}"
         );
     }
 
     #[test]
-    fn reconcile_ack_snapshot_forward_declines_when_newer_buffer_dropped_the_response() {
+    fn reconcile_visible_write_snapshot_forward_declines_when_newer_buffer_dropped_the_response() {
         // Fail closed: the newer buffer no longer carries the response, so the stale
         // ack must NOT reconcile forward (the existing proof stays authoritative).
         let tmp = TempDir::new().unwrap();
@@ -352,9 +392,12 @@ mod ack_content_snapshot_tests {
         )
         .unwrap();
 
-        let mut decision = IpcRepairDecision::ack_content(stale_ack.to_string());
-        let reconciled =
-            reconcile_ack_snapshot_to_newer_operator_buffer(&doc, Some(editor_id), &mut decision);
+        let mut decision = IpcRepairDecision::lazily_visible_write(stale_ack.to_string());
+        let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
+            &doc,
+            Some(editor_id),
+            &mut decision,
+        );
 
         assert!(
             !reconciled,
@@ -403,11 +446,11 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn guard_keeps_live_ack_candidate_when_agent_target_would_absorb_drift() {
+    fn guard_replaces_visible_write_candidate_when_agent_target_would_absorb_drift() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
         let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
-        let live_ack_content = concat!(
+        let live_visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ operator typed while closeout was running\n",
             "<!-- /agent:exchange -->\n"
@@ -418,11 +461,12 @@ mod ack_content_snapshot_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(live_ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(live_visible_write_content.to_string());
 
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("p-live-no-snapshot"),
             Some(baseline),
             Some(agent_target),
@@ -435,20 +479,24 @@ mod ack_content_snapshot_tests {
         );
         assert_eq!(
             decision.snap_source,
-            IpcSnapshotSource::AckContentSidecar,
-            "the binary agent target must not replace the live editor ACK as snapshot authority"
+            IpcSnapshotSource::ContentOurs,
+            "the visible-write candidate must not remain snapshot authority when it would absorb drift"
         );
-        assert_eq!(decision.snapshot_content, live_ack_content);
-        assert_eq!(decision.disk_repair_reason, None);
-        assert!(!decision.redeliver_editor);
+        assert_eq!(decision.snapshot_content, agent_target);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert!(decision.redeliver_editor);
+        assert!(decision.editor_bad_state.is_some());
     }
 
     #[test]
-    fn guard_live_prompt_drift_requires_visible_repair() {
+    fn guard_live_prompt_drift_reconciles_independent_visible_prompt() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
         let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
-        let editor_ack_content = concat!(
+        let editor_visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ operator typed while closeout was running\n",
             "<!-- /agent:exchange -->\n"
@@ -459,11 +507,12 @@ mod ack_content_snapshot_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(editor_ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(editor_visible_write_content.to_string());
 
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("p-live"),
             Some(baseline),
             Some(response_target),
@@ -472,24 +521,27 @@ mod ack_content_snapshot_tests {
 
         assert!(
             adopted,
-            "live editor ACK drift should be classified and logged"
+            "live editor visible-write drift should be classified and logged"
         );
         assert_eq!(
             decision.snap_source,
-            IpcSnapshotSource::AckContentSidecar,
-            "the turn path must not promote the agent target to snapshot authority without realtime proof"
+            IpcSnapshotSource::ContentOurs,
+            "the turn path may keep only the agent-owned target as snapshot authority before repair proof"
         );
-        assert_eq!(decision.snapshot_content, editor_ack_content);
+        assert_eq!(decision.snapshot_content, response_target);
         assert!(
-            !decision.redeliver_editor,
-            "the turn path must fail closed/retry rather than repair the live editor from the agent target"
+            decision.redeliver_editor,
+            "the visible candidate is missing the response and must require repair"
         );
-        assert_eq!(decision.disk_repair_reason, None);
-        assert_eq!(decision.editor_bad_state, None);
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert!(decision.editor_bad_state.is_some());
     }
 
     #[test]
-    fn guard_live_prompt_drift_accepts_ack_visible_union() {
+    fn guard_live_prompt_drift_uses_content_ours_for_visible_write_union() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
         let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
@@ -499,40 +551,48 @@ mod ack_content_snapshot_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let editor_ack_content = concat!(
+        let editor_visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ operator typed while closeout was running\n",
             "### Re: queued prompt — gpt-5\n\n",
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(editor_ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(editor_visible_write_content.to_string());
 
         let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &file,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("p-union"),
             Some(baseline),
             Some(response_target),
             &mut decision,
         );
 
-        assert!(adopted, "ACK-visible union should be classified and logged");
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
-        assert_eq!(decision.snapshot_content, editor_ack_content);
+        assert!(
+            adopted,
+            "visible-write union still contains unowned live prompt drift and must be classified"
+        );
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::ContentOurs,
+            "the visible-write candidate must not remain snapshot authority for unowned live prompt drift"
+        );
+        assert_eq!(decision.snapshot_content, response_target);
         assert!(
             !decision.redeliver_editor,
-            "ACK content already contains the response delta, so no turn-local repair is required"
+            "the lazily receipt already proves the editor-visible buffer contains the response"
         );
         assert_eq!(decision.disk_repair_reason, None);
-        assert_eq!(decision.editor_bad_state, None);
+        assert!(decision.editor_bad_state.is_none());
     }
 
     #[test]
-    fn socket_ack_drift_missing_response_materializes_only_with_content_ours_proof() {
+    fn socket_visible_write_drift_missing_response_materializes_only_with_content_ours_proof() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ queued prompt\n",
             "<!-- /agent:exchange -->\n"
@@ -545,9 +605,10 @@ mod ack_content_snapshot_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(visible_write_content.to_string());
 
-        let repaired = materialize_missing_response_for_socket_ack_drift(
+        let repaired = materialize_missing_response_for_socket_visible_write_drift(
             &file,
             Some("p-response"),
             Some(content_ours),
@@ -558,9 +619,12 @@ mod ack_content_snapshot_tests {
 
         assert!(
             repaired,
-            "socket ACK drift should repair only when content_ours proves the exact response"
+            "socket visible-write drift should repair only when content_ours proves the exact response"
         );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::LivePromptDrift)
@@ -572,7 +636,7 @@ mod ack_content_snapshot_tests {
                 .as_ref()
                 .expect("bad state fingerprint")
                 .content(),
-            ack_content
+            visible_write_content
         );
         assert!(decision.snapshot_content.contains("❯ queued prompt"));
         assert!(
@@ -583,8 +647,8 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn socket_ack_drift_missing_response_materializes_over_prefix_repair() {
-        // #ackdriftprefixmaterialize regression: a stale ACK sidecar that went
+    fn socket_visible_write_drift_missing_response_materializes_over_prefix_repair() {
+        // #ackdriftprefixmaterialize regression: a stale lazily visible-write event that went
         // through a prefix-divergence repair (`disk_repair_reason =
         // Some(PrefixDivergence)`) but is still missing the agent response must
         // NOT be blocked from the missing-response materialization rescue. Before
@@ -614,7 +678,7 @@ mod ack_content_snapshot_tests {
             "<!-- /agent:exchange -->\n"
         );
         let prefix_lines = vec!["❯ queued prompt".to_string()];
-        let mut decision = IpcRepairDecision::ack_content_prefix_repair(
+        let mut decision = IpcRepairDecision::lazily_visible_write_prefix_repair(
             prefix_repaired.to_string(),
             original_bad_state.to_string(),
             &prefix_lines,
@@ -624,7 +688,7 @@ mod ack_content_snapshot_tests {
             Some(IpcDiskRepairReason::PrefixDivergence)
         );
 
-        let repaired = materialize_missing_response_for_socket_ack_drift(
+        let repaired = materialize_missing_response_for_socket_visible_write_drift(
             &file,
             Some("p-prefix"),
             Some(content_ours),
@@ -635,9 +699,12 @@ mod ack_content_snapshot_tests {
 
         assert!(
             repaired,
-            "a prefix-diverged ACK still missing the response must materialize it from content_ours proof"
+            "a prefix-diverged visible-write receipt still missing the response must materialize it from content_ours proof"
         );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::LivePromptDrift)
@@ -662,10 +729,10 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn socket_ack_drift_missing_response_refuses_partial_heading() {
+    fn socket_visible_write_drift_missing_response_refuses_partial_heading() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let partial_ack_content = concat!(
+        let partial_visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ queued prompt\n",
             "### Re: queued prompt - gpt-5\n",
@@ -679,9 +746,10 @@ mod ack_content_snapshot_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(partial_ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(partial_visible_write_content.to_string());
 
-        let repaired = materialize_missing_response_for_socket_ack_drift(
+        let repaired = materialize_missing_response_for_socket_visible_write_drift(
             &file,
             Some("p-partial"),
             Some(content_ours),
@@ -694,16 +762,16 @@ mod ack_content_snapshot_tests {
             !repaired,
             "partial response headings must fail closed instead of appending a second body"
         );
-        assert_eq!(decision.snapshot_content, partial_ack_content);
+        assert_eq!(decision.snapshot_content, partial_visible_write_content);
         assert_eq!(decision.disk_repair_reason, None);
         assert!(!decision.redeliver_editor);
     }
 
     #[test]
-    fn socket_ack_drift_missing_response_refuses_without_content_ours_response() {
+    fn socket_visible_write_drift_missing_response_refuses_without_content_ours_response() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "<!-- agent:exchange -->\n",
             "❯ queued prompt\n",
             "<!-- /agent:exchange -->\n"
@@ -714,9 +782,10 @@ mod ack_content_snapshot_tests {
             "❯ queued prompt\n",
             "<!-- /agent:exchange -->\n"
         );
-        let mut decision = IpcRepairDecision::ack_content(ack_content.to_string());
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(visible_write_content.to_string());
 
-        let repaired = materialize_missing_response_for_socket_ack_drift(
+        let repaired = materialize_missing_response_for_socket_visible_write_drift(
             &file,
             Some("p-no-proof"),
             Some(content_ours_without_response),
@@ -729,7 +798,7 @@ mod ack_content_snapshot_tests {
             !repaired,
             "missing content_ours response proof must fail closed"
         );
-        assert_eq!(decision.snapshot_content, ack_content);
+        assert_eq!(decision.snapshot_content, visible_write_content);
         assert_eq!(decision.disk_repair_reason, None);
         assert!(!decision.redeliver_editor);
     }
@@ -1160,7 +1229,7 @@ mod ack_content_snapshot_tests {
         let doc = project_root.join("session.md");
         record_lazily_visible_write_candidate(&doc, patch_id, "immediate content");
 
-        let result = poll_ack_content_lazily_event(
+        let result = poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
             std::time::Duration::from_millis(100),
@@ -1186,7 +1255,7 @@ mod ack_content_snapshot_tests {
             record_lazily_visible_write_candidate(&doc_for_thread, patch_id, "delayed content");
         });
 
-        let result = poll_ack_content_lazily_event(
+        let result = poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
             std::time::Duration::from_millis(500),
@@ -1208,7 +1277,7 @@ mod ack_content_snapshot_tests {
         std::fs::write(&doc, "unproven content").unwrap();
 
         let start = std::time::Instant::now();
-        let result = poll_ack_content_lazily_event(
+        let result = poll_visible_write_content_lazily_event(
             &doc,
             patch_id,
             std::time::Duration::from_millis(100),
@@ -1229,18 +1298,15 @@ mod ack_content_snapshot_tests {
     }
 
     #[test]
-    fn normalization_fallback_fails_closed_when_sidecar_missing_prefix_without_editor_proof() {
-        // When the sidecar is missing a ❯ prefix expected by normalize_prefix_lines,
-        // try_ipc must not fall back to content_ours for the snapshot (#jbpfx2).
-        // Simulates the IntelliJ exact-match failure: plugin wrote sidecar without
-        // the ❯ prefix. The repaired candidate is derived from the ACK sidecar and
-        // must be proven in the editor before closeout can persist it.
+    fn normalization_fallback_fails_closed_when_lazily_receipt_is_missing() {
+        // When the plugin consumes file IPC but does not publish the lazily
+        // visible-write receipt, try_ipc must not fall back to content_ours for
+        // the snapshot (#jbpfx2).
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
 
         let doc = dir.path().join("test.md");
         let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\n<!-- agent:boundary:test-bnd-001 -->\n<!-- /agent:exchange -->\n";
@@ -1252,9 +1318,8 @@ mod ack_content_snapshot_tests {
         let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\n❯ do #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
         let normalize_prefix_lines = vec!["do #jbpfx2".to_string()];
 
-        // Simulate plugin: reads patch_id, writes sidecar WITHOUT prefix (bug), ACKs
+        // Simulate plugin consumption without publishing the durable lazily event.
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1264,14 +1329,6 @@ mod ack_content_snapshot_tests {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = std::fs::read_to_string(&path)
-                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                        {
-                            // Write sidecar WITHOUT ❯ prefix (plugin failure)
-                            let bad_sidecar = "---\nsession: test\n---\n\n<!-- agent:exchange -->\ndo #jbpfx2\nagent response\n<!-- /agent:exchange -->\n";
-                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
-                        }
                         let _ = std::fs::remove_file(&path);
                         return;
                     }
@@ -1279,7 +1336,7 @@ mod ack_content_snapshot_tests {
             }
         });
 
-        let err = try_ipc(
+        let result = try_ipc(
             &doc,
             &[patch],
             "",
@@ -1289,16 +1346,16 @@ mod ack_content_snapshot_tests {
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap_err();
+        .unwrap();
         assert!(
-            err.to_string().contains("refusing direct document write"),
-            "normalization fallback must fail closed instead of repairing disk: {err}"
+            !result.success,
+            "missing lazily receipt must fail closed instead of repairing disk: {result:?}"
         );
 
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             original,
-            "missing-prefix sidecar must not trigger a direct document rewrite"
+            "missing lazily receipt must not trigger a direct document rewrite"
         );
         assert!(
             agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
@@ -1306,21 +1363,22 @@ mod ack_content_snapshot_tests {
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("sidecar_normalization_fallback")
+            ops_log.contains("ipc_proof_insufficient")
+                && ops_log.contains("invariant=no_lazily_visible_write_receipt")
                 && ops_log.contains("recovery=retry_without_disk_write"),
-            "ops log should record retry-only normalization fallback:\n{ops_log}"
+            "ops log should record retry-only missing lazily receipt:\n{ops_log}"
         );
     }
 
     #[test]
-    fn normalization_divergence_repair_decision_keeps_ack_sidecar_authoritative() {
+    fn normalization_divergence_repair_decision_keeps_lazily_event_authoritative() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
         std::fs::write(&doc, "disk state\n").unwrap();
-        let sidecar = "\
+        let visible_write = "\
 <!-- agent:exchange patch=append -->
 do #sidecar
-operator sidecar text
+operator visible-write text
 <!-- /agent:exchange -->
 ";
         let content_ours = "\
@@ -1331,27 +1389,32 @@ agent-owned response
 ";
         let lines = vec!["do #sidecar".to_string()];
 
-        let decision = ipc_repair_decision_from_sidecar(
+        let decision = ipc_repair_decision_from_visible_write(
             &doc,
             Some("patch-1"),
             None,
-            sidecar.to_string(),
+            visible_write.to_string(),
             Some(content_ours),
             Some(lines.as_slice()),
         );
 
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergence)
         );
         assert!(
             decision.snapshot_content.contains("❯ do #sidecar"),
-            "normalization retry may add the missing prefix to the ACK sidecar"
+            "normalization retry may add the missing prefix to the lazily visible-write event"
         );
         assert!(
-            decision.snapshot_content.contains("operator sidecar text"),
-            "operator-visible sidecar text must be preserved"
+            decision
+                .snapshot_content
+                .contains("operator visible-write text"),
+            "operator-visible lazily event text must be preserved"
         );
         assert!(
             !decision.snapshot_content.contains("agent-owned response"),
@@ -1360,16 +1423,16 @@ agent-owned response
     }
 
     #[test]
-    fn normalization_fallback_retries_missing_prompt_prefix_from_ack_sidecar() {
-        // Regression for #bppfxstrip: if sidecar verification rejects the plugin
-        // snapshot, normalization retry may add normalize_prefix_lines only to the
-        // ACK sidecar candidate and must fail closed without editor proof.
+    fn normalization_fallback_retries_missing_prompt_prefix_from_visible_write_event() {
+        // Regression for #bppfxstrip: if visible-write verification rejects the
+        // plugin snapshot, normalization retry may add normalize_prefix_lines
+        // only to the lazily event candidate and must fail closed without editor
+        // proof.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
 
         let doc = dir.path().join("test.md");
         let original = "\
@@ -1400,7 +1463,6 @@ agent response
             vec!["do #bppfxstrip. spec-test-build-install-commit-push".to_string()];
 
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
@@ -1426,8 +1488,11 @@ agent response
 <!-- agent:boundary:test-bnd-002 -->
 <!-- /agent:exchange -->
 ";
-                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
-                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                            record_lazily_visible_write_candidate(
+                                &doc_for_watcher,
+                                pid,
+                                bad_sidecar,
+                            );
                         }
                         let _ = std::fs::remove_file(&path);
                         return;
@@ -1456,7 +1521,7 @@ agent response
         assert!(
             disk.contains("do #bppfxstrip. spec-test-build-install-commit-push")
                 && !disk.contains("❯ do #bppfxstrip. spec-test-build-install-commit-push"),
-            "unproven normalization fallback must leave the editor-visible sidecar state untouched; got: {}",
+            "unproven normalization fallback must leave the editor-visible lazily state untouched; got: {}",
             disk
         );
         assert!(
@@ -1466,9 +1531,9 @@ agent response
     }
 
     #[test]
-    fn normfallback_records_repaired_working_tree_when_sidecar_strips_prompt_prefix() {
+    fn normfallback_records_repaired_working_tree_when_lazily_event_strips_prompt_prefix() {
         // Regression for #normfallback: the observed ops-log signal should be
-        // backed by deterministic coverage. A plugin sidecar that drops a
+        // backed by deterministic coverage. A lazily visible-write event that drops a
         // required prompt prefix must be rejected, and an unproven editor repair
         // must not rewrite the live file behind the editor.
         let dir = TempDir::new().unwrap();
@@ -1476,7 +1541,6 @@ agent response
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
 
         let doc = dir.path().join("agent-doc-bugs2.md");
         let original = "\
@@ -1511,7 +1575,6 @@ Covered.
         let normalize_prefix_lines = vec!["do [#normfallback]".to_string()];
 
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
@@ -1539,8 +1602,11 @@ Covered.
 <!-- agent:boundary:test-bnd-002 -->
 <!-- /agent:exchange -->
 ";
-                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
-                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                            record_lazily_visible_write_candidate(
+                                &doc_for_watcher,
+                                pid,
+                                bad_sidecar,
+                            );
                         }
                         let _ = std::fs::remove_file(&path);
                         return;
@@ -1596,7 +1662,6 @@ Covered.
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -1642,8 +1707,12 @@ agent response
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let patch_id = v
+                    .get("patch_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("unknown");
                 if let Some(full_content) = v.get("fullContent").and_then(|value| value.as_str()) {
-                    let _ = std::fs::write(&listener_doc, full_content);
+                    record_lazily_visible_write_candidate(&listener_doc, patch_id, full_content);
                     listener_repair_payloads.lock().unwrap().push(v.clone());
                     return Some(serde_json::json!({"type": "ack"}).to_string());
                 }
@@ -1664,7 +1733,7 @@ agent response
                 {
                     let current = std::fs::read_to_string(&listener_doc).ok()?;
                     let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
-                    let _ = std::fs::write(&listener_doc, repaired);
+                    record_lazily_visible_write_candidate(&listener_doc, patch_id, &repaired);
                     listener_repair_payloads.lock().unwrap().push(v.clone());
                     return Some(serde_json::json!({"type": "ack"}).to_string());
                 }
@@ -1730,7 +1799,6 @@ agent response
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -1772,7 +1840,6 @@ agent response
             std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
         let watcher_doc = doc.clone();
         let watcher_patch_file = patch_file.clone();
-        let watcher_ack_dir = agent_doc_dir.join("ack-content");
         let watcher_repair_payloads = seen_repair_payloads.clone();
         let watcher = std::thread::spawn(move || {
             let start = std::time::Instant::now();
@@ -1816,8 +1883,7 @@ agent response
                     .unwrap_or_default();
                 let current = std::fs::read_to_string(&watcher_doc).unwrap();
                 let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
-                std::fs::write(&watcher_doc, &repaired).unwrap();
-                std::fs::write(watcher_ack_dir.join(format!("{patch_id}.md")), repaired).unwrap();
+                record_lazily_visible_write_candidate(&watcher_doc, &patch_id, &repaired);
                 std::fs::remove_file(&watcher_patch_file).unwrap();
                 return true;
             }
@@ -2177,7 +2243,7 @@ Implemented.
     }
 
     #[test]
-    fn normalization_fallback_adopts_ack_content_response_delta_before_merge() {
+    fn normalization_fallback_adopts_visible_write_response_delta_before_merge() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("test.md");
         let baseline = "\
@@ -2195,7 +2261,7 @@ Done.
 <!-- agent:boundary:ours -->
 <!-- /agent:exchange -->
 ";
-        let disk_after_ack_content = "\
+        let disk_after_visible_write = "\
 <!-- agent:exchange patch=append -->
 do #ackdelta
 while typing next prompt
@@ -2205,7 +2271,7 @@ Done.
 <!-- agent:boundary:current -->
 <!-- /agent:exchange -->
 ";
-        std::fs::write(&doc, disk_after_ack_content).unwrap();
+        std::fs::write(&doc, disk_after_visible_write).unwrap();
 
         let fallback = normalized_content_ours_fallback(
             &doc,
@@ -2217,26 +2283,25 @@ Done.
         assert_eq!(
             fallback.matches("### Re: ack delta — gpt-5").count(),
             1,
-            "ack-content normalization fallback must not replay an already-applied response: {fallback}"
+            "visible-write normalization fallback must not replay an already-applied response: {fallback}"
         );
         assert!(
             fallback.contains("while typing next prompt"),
-            "ack-content fallback should preserve concurrent disk edits: {fallback}"
+            "visible-write fallback should preserve concurrent disk edits: {fallback}"
         );
         assert!(
             fallback.contains("❯ do #ackdelta"),
-            "ack-content fallback should still normalize the prompt prefix: {fallback}"
+            "visible-write fallback should still normalize the prompt prefix: {fallback}"
         );
     }
 
     #[test]
-    fn normalization_fallback_splices_pending_mutations_from_disk() {
+    fn normalization_fallback_missing_lazily_receipt_preserves_pending_mutations() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
 
         let doc = dir.path().join("test.md");
         let original = "\
@@ -2285,7 +2350,6 @@ agent response
         let normalize_prefix_lines = vec!["do #splpend".to_string()];
 
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2295,25 +2359,6 @@ agent response
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = std::fs::read_to_string(&path)
-                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                        {
-                            let bad_sidecar = "\
----
-session: test
----
-
-<!-- agent:exchange -->
-do #splpend
-agent response
-<!-- /agent:exchange -->
-
-<!-- agent:backlog -->
-<!-- /agent:backlog -->
-";
-                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
-                        }
                         let _ = std::fs::remove_file(&path);
                         return;
                     }
@@ -2321,7 +2366,7 @@ agent response
             }
         });
 
-        let err = try_ipc(
+        let result = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2331,10 +2376,10 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap_err();
+        .unwrap();
         assert!(
-            err.to_string().contains("refusing direct document write"),
-            "normalization fallback must fail closed instead of repairing disk: {err}"
+            !result.success,
+            "missing lazily receipt must fail closed instead of repairing disk: {result:?}"
         );
 
         let disk = std::fs::read_to_string(&doc).unwrap();
@@ -2349,13 +2394,12 @@ agent response
     }
 
     #[test]
-    fn normalization_sidecar_retry_preserves_concurrent_comment_deletion() {
+    fn normalization_visible_write_retry_preserves_concurrent_comment_deletion() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
 
         let doc = dir.path().join("test.md");
         let original = "\
@@ -2392,7 +2436,6 @@ The tmux focus should be snappy.
         let normalize_prefix_lines = vec!["do #commentdel".to_string()];
 
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let _watcher = std::thread::spawn(move || {
             for _ in 0..40 {
@@ -2417,8 +2460,11 @@ do #commentdel
 agent response
 <!-- /agent:exchange -->
 ";
-                            let _ = std::fs::write(&doc_for_watcher, bad_sidecar);
-                            let _ = std::fs::write(ack_dir.join(format!("{pid}.md")), bad_sidecar);
+                            record_lazily_visible_write_candidate(
+                                &doc_for_watcher,
+                                pid,
+                                bad_sidecar,
+                            );
                         }
                         let _ = std::fs::remove_file(&path);
                         return;
@@ -2427,7 +2473,7 @@ agent response
             }
         });
 
-        let result = try_ipc(
+        let err = try_ipc(
             &doc,
             &[patch],
             "",
@@ -2437,34 +2483,35 @@ agent response
             Some(normalize_prefix_lines.as_slice()),
             None,
         )
-        .unwrap();
-        assert!(result.success);
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("refusing direct document write"),
+            "prefix-divergent visible write must fail closed: {err}"
+        );
 
         let disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
             disk.contains("do #commentdel"),
-            "ACK-sidecar-derived retry should preserve the sidecar prompt text: {disk}"
+            "visible-write-derived retry should preserve the visible prompt text: {disk}"
         );
         assert!(
             disk.contains("agent response"),
-            "agent response from the ACK sidecar should be preserved: {disk}"
+            "agent response from the visible-write event should be preserved: {disk}"
         );
         assert!(
             !disk.contains("The tmux focus should be snappy."),
             "operator-visible deletion from the sidecar must not be resurrected from content_ours: {disk}"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc)
-            .unwrap()
-            .expect("snapshot should be saved");
+        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap();
         assert!(
-            !snapshot.contains("The tmux focus should be snappy."),
-            "snapshot must not resurrect content_ours-only comment text: {snapshot}"
+            snapshot.is_none(),
+            "unproven prefix-divergent visible write must not save a snapshot"
         );
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("snap_source=ack_content_sidecar")
-                && !ops_log.contains("snap_source=content_ours"),
-            "normalization retry must not promote content_ours as snapshot authority:\n{ops_log}"
+            ops_log.contains("snap_source=lazily_visible_write_event")
+                && ops_log.contains("recovery=retry_without_disk_write"),
+            "normalization retry must fail closed without promoting content_ours:\n{ops_log}"
         );
     }
 
@@ -2922,7 +2969,7 @@ mod core_tests {
     use tempfile::TempDir;
 
     #[test]
-    fn ipc_live_prompt_drift_keeps_live_ack_candidate_and_records_queue_proof() {
+    fn ipc_live_prompt_drift_replaces_visible_write_candidate_and_records_queue_proof() {
         let dir = tempfile::tempdir().unwrap();
         let baseline = concat!(
             "---\nqueue_active: true\n---\n\n",
@@ -2961,7 +3008,7 @@ mod core_tests {
         );
         let doc = agent_doc_test_support::init_repo_with_doc(dir.path(), "session.md", baseline);
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let mut decision = IpcRepairDecision::ack_content(candidate.to_string());
+        let mut decision = IpcRepairDecision::lazily_visible_write(candidate.to_string());
 
         let blocked = guard_ipc_snapshot_adoption_against_live_prompt_drift(
             &doc,
@@ -2975,38 +3022,56 @@ mod core_tests {
         assert!(blocked);
         assert_eq!(
             decision.snap_source,
-            IpcSnapshotSource::AckContentSidecar,
-            "turn closeout must not promote the agent target to snapshot authority"
-        );
-        assert!(
-            !decision
-                .snapshot_content
-                .contains("### Re: original prompt — gpt-5"),
-            "the missing response remains unproven; the caller must retry instead of saving a snapshot:\n{}",
-            decision.snapshot_content
+            IpcSnapshotSource::ContentOurs,
+            "turn closeout must not promote the visible-write candidate to snapshot authority"
         );
         assert!(
             decision
                 .snapshot_content
+                .contains("### Re: original prompt — gpt-5"),
+            "the snapshot candidate should carry the agent-owned response:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            !decision
+                .snapshot_content
+                .contains("❯ live prompt after preflight"),
+            "a response-missing lazily visible-write receipt must not become snapshot authority:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            !decision.snapshot_content.contains("do [#manual]"),
+            "a response-missing lazily visible-write receipt must not carry queue additions into the snapshot:\n{}",
+            decision.snapshot_content
+        );
+        assert!(
+            decision.snapshot_content.contains("do [#deleted]"),
+            "content_ours remains the snapshot when the visible write only proves delivery, not whole-buffer authority:\n{}",
+            decision.snapshot_content
+        );
+        assert_eq!(
+            decision.disk_repair_reason,
+            Some(IpcDiskRepairReason::LivePromptDrift)
+        );
+        assert!(decision.redeliver_editor);
+        let bad_state = decision
+            .editor_bad_state
+            .as_ref()
+            .expect("visible repair should retain the response-missing visible-write candidate");
+        assert!(
+            bad_state
+                .content()
                 .contains("❯ live prompt after preflight")
         );
-        assert!(
-            decision.snapshot_content.contains("do [#manual]"),
-            "operator-visible queue additions stay in the live ACK candidate:\n{}",
-            decision.snapshot_content
-        );
-        assert!(
-            !decision.snapshot_content.contains("do [#deleted]"),
-            "the live ACK candidate is preserved as observed; no turn-local repair is applied:\n{}",
-            decision.snapshot_content
-        );
+        assert!(bad_state.content().contains("do [#manual]"));
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            log.contains("queue_live_deletion_ignored")
-                && log.contains("reason=unproven_ipc_candidate_queue_deletion")
-                && log.contains("dropped_queue_prompt_recorded"),
-            "queue deletion must be ignored while queue additions still leave dropped-edit proof:\n{log}"
+            log.contains("live_prompt_drift_agent_target_not_snapshot_authority")
+                && log.contains("visible_repair_required=true")
+                && log.contains("queue_live_deletion_ignored")
+                && log.contains("reason=unproven_ipc_candidate_queue_deletion"),
+            "response-missing visible-write proof must fail closed while recording queue deletion proof:\n{log}"
         );
     }
     #[test]
@@ -3211,12 +3276,28 @@ mod core_tests {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
-                        if entry.path().extension().is_some_and(|e| e == "json") {
-                            let _ = fs::write(
-                                &doc_for_watcher,
-                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
-                            );
-                            let _ = fs::remove_file(entry.path());
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            let patch_id = fs::read_to_string(&path)
+                                .ok()
+                                .and_then(|text| {
+                                    serde_json::from_str::<serde_json::Value>(&text).ok()
+                                })
+                                .and_then(|json| {
+                                    json.get("patch_id")
+                                        .and_then(|value| value.as_str())
+                                        .map(str::to_string)
+                                });
+                            let applied = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n";
+                            let _ = fs::write(&doc_for_watcher, applied);
+                            if let Some(patch_id) = patch_id {
+                                record_lazily_visible_write_candidate(
+                                    &doc_for_watcher,
+                                    &patch_id,
+                                    applied,
+                                );
+                            }
+                            let _ = fs::remove_file(path);
                             return;
                         }
                     }
@@ -3304,7 +3385,6 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -3322,7 +3402,6 @@ mod core_tests {
         );
 
         let watcher_dir = agent_doc_dir.join("patches");
-        let watcher_ack_dir = agent_doc_dir.join("ack-content");
         let watcher_doc = doc.clone();
         let watcher_target = target.clone();
         let watcher = std::thread::spawn(move || {
@@ -3342,12 +3421,11 @@ mod core_tests {
                             .and_then(|value| value.as_str())
                             .unwrap()
                             .to_string();
-                        fs::write(&watcher_doc, &watcher_target).unwrap();
-                        fs::write(
-                            watcher_ack_dir.join(format!("{patch_id}.md")),
+                        record_lazily_visible_write_candidate(
+                            &watcher_doc,
+                            &patch_id,
                             &watcher_target,
-                        )
-                        .unwrap();
+                        );
                         fs::remove_file(path).unwrap();
                         return true;
                     }
@@ -3410,7 +3488,7 @@ mod core_tests {
 
         log_ipc_snapshot_adoption_allowed(
             &doc,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("pid-allowed"),
             Some(baseline),
             Some(content_ours),
@@ -3421,7 +3499,7 @@ mod core_tests {
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_snapshot_adoption_allowed")
-                && log.contains("source=socket_ack_content")
+                && log.contains("source=socket_visible_write_content")
                 && log.contains("patch_id=pid-allowed")
                 && log.contains("drift_recheck=false")
                 && log.contains("dup_growth_recheck=0"),
@@ -3482,7 +3560,7 @@ mod core_tests {
 
         log_ipcfullprompt_corruption_if_any(
             &doc,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("pid-corrupt"),
             Some(baseline),
             candidate,
@@ -3491,7 +3569,7 @@ mod core_tests {
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("ipcfullprompt_corruption_suspected")
-                && log.contains("source=socket_ack_content")
+                && log.contains("source=socket_visible_write_content")
                 && log.contains("patch_id=pid-corrupt")
                 && log.contains("deleted=1")
                 && log.contains("response_deleted(### Re: second — opus-4-8:1->0)"),
@@ -3534,7 +3612,7 @@ mod core_tests {
 
         log_ipcfullprompt_corruption_if_any(
             &doc,
-            "socket_ack_content",
+            "socket_visible_write_content",
             Some("pid-x"),
             None,
             candidate,

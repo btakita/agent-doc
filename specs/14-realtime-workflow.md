@@ -17,7 +17,7 @@ body, frontmatter edit, queue/backlog edit, prompt, comment, partial word, or
 plugin-defined component content that appears in the editor or visible file and
 was not produced by the current binary-owned write.
 
-`content_ours`, snapshots, CRDT sidecars, ACK-content sidecars, and captured
+`content_ours`, snapshots, CRDT sidecars, lazily visible-write receipts, and captured
 responses are candidates for merge. They are never authority to delete or reset
 operator-authored text.
 
@@ -56,8 +56,8 @@ an editor listener does own the document, the saved file and the live editor
 buffer are competing operator sources; the binary must reconcile them, preserve
 both when possible, or fail closed before applying any agent delta.
 
-ACK-content proves what an editor observed after a patch. It does not prove that
-older snapshot text should overwrite newer operator text.
+Lazily visible-write receipts prove what an editor observed after a patch. They
+do not prove that older snapshot text should overwrite newer operator text.
 
 ## Editor Frontend Hot Path
 
@@ -435,21 +435,21 @@ Realtime transitions are continuous and must work regardless of agent state:
 | Merge conflicts | `AgentDeltaReady` plus latest realtime source | `ConflictBlocked` | Typed conflict describing the same-node or ambiguous placement failure. |
 | Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. For CRDT remote text delivery, the handoff carries the expected editor text observed before convergence. |
 | Disk delivery starts | `MergePlanned` with no editor owner | `ApplyInFlight` | Current file still matches the merge input, or the merge is recomputed first. |
-| Delivery ACK/content verifies | `ApplyInFlight` | `AppliedVerified` | Post-apply owner-visible text equals the intended target and contains the agent delta plus every observed operator edit. Editor API success alone is not proof. |
-| Delivery fails, ACK mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
+| Delivery receipt/content verifies | `ApplyInFlight` | `AppliedVerified` | Post-apply owner-visible text equals the intended target and contains the agent delta plus every observed operator edit. Editor API success alone is not proof. |
+| Delivery fails, receipt mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
 | Realtime handoff completes | `AppliedVerified` | `EditorQuiescent` or `DiskAuthoritative` | Realtime publishes the verified apply proof and latest source-of-truth text without committing. |
 
 Forbidden transitions:
 
 - `Snapshot -> AppliedVerified`;
-- `ACK-content -> AppliedVerified` without comparing the owner-visible document;
+- `VisibleWriteReceipt -> AppliedVerified` without comparing the owner-visible document;
 - `AgentDeltaReady -> ApplyInFlight` without `agent-doc-merge`;
 - `DiskDriftObserved -> AgentDeltaReady` before reconciling disk and editor
   operator sources;
 - `MergePlanned` or `ApplyInFlight` to any document commit;
 - `agent-doc-merge` or `agent-doc-document-realtime` running `git commit`;
 - any transition that drops visible operator text to match `content_ours`, a
-  snapshot, a CRDT sidecar, or an ACK-content sidecar.
+  snapshot, a CRDT sidecar, or a lazily visible-write receipt.
 
 ## Realtime Parse State
 
@@ -728,10 +728,10 @@ The following are correctness violations:
 - adopting `content_ours` or a snapshot as a whole document when a narrower
   agent delta can be rebased onto the current visible document;
 - dropping any visible operator-authored text, including non-prompt text;
-- using ACK-content or a socket `already_applied` result to authorize a
+- using a lazily visible-write receipt or a socket `already_applied` result to authorize a
   whole-document replacement;
 - treating a pluginless editor save or other out-of-band disk write as stale
-  drift to reset from `content_ours`, a snapshot, ACK-content, or HEAD;
+  drift to reset from `content_ours`, a snapshot, a lazily visible-write receipt, or HEAD;
 - storing realtime authority only in a turn-local cycle sidecar, backup
   snapshot, ops log, or harness state instead of a lazily-backed projection;
 - sending live-prompt-drift recovery patches for non-response components or
@@ -781,6 +781,6 @@ Implementations must keep tests for these cases:
   visible file state;
 - out-of-band disk writes while an editor owns the document reconcile with the
   live editor buffer or fail closed before any agent response lands;
-- ACK-content drift cannot reset operator-visible file content;
+- lazily visible-write drift cannot reset operator-visible file content;
 - harness Stop-hook recovery cannot commit transcript-shaped or direct-patched
   responses.

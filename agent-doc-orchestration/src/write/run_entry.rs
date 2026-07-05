@@ -1603,7 +1603,7 @@ pub fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result
                 consumed_without_materialization = true;
                 break;
             }
-            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log(
                 file,
                 "explicit_file_ipc",
                 Some(&patch_id),

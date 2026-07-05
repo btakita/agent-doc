@@ -188,7 +188,7 @@ mod core_tests {
 
     fn start_ack_mismatch_then_refresh_listener(
         project_root: &Path,
-        ack_content: String,
+        visible_write_content: String,
     ) -> std::thread::JoinHandle<()> {
         let listener_root = project_root.to_path_buf();
         std::thread::spawn(move || {
@@ -205,7 +205,7 @@ mod core_tests {
                         .unwrap_or("")
                         .to_string()
                 } else {
-                    ack_content.clone()
+                    visible_write_content.clone()
                 };
                 if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(file_path, &content);
@@ -311,7 +311,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::compact_convergence_source();
@@ -359,7 +359,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
@@ -399,12 +399,12 @@ mod core_tests {
         // then reject the terminal apply (`status:error`) because the editor is
         // busy or the socket-side apply path lost its generation race. That must
         // not authorize a raw disk write, but it should try the plugin-owned
-        // file-IPC queue in the same cycle and accept it only with ack-content.
+        // file-IPC queue in the same cycle and accept it only with visible-write.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
@@ -520,13 +520,13 @@ mod core_tests {
     fn queue_consume_ack_mismatch_refreshes_editor_back_to_preconsume() {
         // `#fcc0-ack-mismatch`: when the editor acks with content that does not
         // match the target, the disk write must still fail closed. The previous
-        // behavior left that untrusted ACK content in the live editor buffer, so a
+        // behavior left that untrusted visible-write content in the live editor buffer, so a
         // later flush could persist a stale queue strike. Refresh it back to the
-        // pre-consume document using the ACK content as the stale hash guard.
+        // pre-consume document using the visible-write content as the stale hash guard.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
@@ -552,7 +552,7 @@ mod core_tests {
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             source,
-            "untrusted ACK content should be refreshed back to the pre-consume editor buffer"
+            "untrusted visible-write content should be refreshed back to the pre-consume editor buffer"
         );
 
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -564,7 +564,7 @@ mod core_tests {
         );
         assert!(
             log.contains("queue_consume_ack_mismatch_editor_refresh")
-                && log.contains("action=revert_untrusted_ack_content"),
+                && log.contains("action=revert_untrusted_visible_write"),
             "ACK mismatch should refresh the editor back to the pre-consume buffer:\n{log}"
         );
         assert!(
@@ -582,7 +582,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
@@ -630,7 +630,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = doc_with_queue_and_exchange("- do [#head]\n", "");
@@ -679,13 +679,13 @@ mod core_tests {
 
     #[test]
     fn queue_consume_ack_mismatch_does_not_refresh_user_prompt_drift() {
-        // If the ACK content carries a genuine concurrent editor prompt, the
+        // If the visible-write content carries a genuine concurrent editor prompt, the
         // binary must still refuse the disk write but must not refresh the editor
         // back to the pre-consume document, because that would drop user work.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
@@ -716,13 +716,13 @@ mod core_tests {
 
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("queue_consume_ack_mismatch_editor_refresh")
-                && log.contains("untrusted_ack_content_contains_user_drift")
-                && log.contains("action=leave_editor_owned_ack_content"),
+            log.contains("queue_consume_visible_write_mismatch_editor_refresh")
+                && log.contains("untrusted_visible_write_contains_user_drift")
+                && log.contains("action=leave_editor_owned_visible_write"),
             "user drift should block the refresh path:\n{log}"
         );
         assert!(
-            !log.contains("action=revert_untrusted_ack_content"),
+            !log.contains("action=revert_untrusted_visible_write"),
             "user drift must not be reverted:\n{log}"
         );
     }
@@ -1174,7 +1174,8 @@ mod core_tests {
         }
     }
     #[test]
-    fn converge_document_or_disk_blocks_disk_fallback_with_active_listener_without_ack_content() {
+    fn converge_document_or_disk_blocks_disk_fallback_with_active_listener_without_visible_write_receipt()
+     {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -1196,7 +1197,7 @@ mod core_tests {
             .to_string();
         assert!(
             err.contains("refused direct disk write"),
-            "active listener without ack-content should block disk fallback: {err}"
+            "active listener without visible-write receipt should block disk fallback: {err}"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -1207,7 +1208,7 @@ mod core_tests {
         assert!(
             log.contains("queue_consume_writeback")
                 && log.contains("transport=blocked")
-                && log.contains("reason=no_ack_content"),
+                && log.contains("reason=no_visible_write_receipt"),
             "active listener failure must be logged as a blocked disk write:\n{log}"
         );
         assert!(
@@ -1251,8 +1252,8 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_or_disk_write_blocks_plain_disk_fallback_with_active_listener_without_ack_content()
-    {
+    fn converge_or_disk_write_blocks_plain_disk_fallback_with_active_listener_without_visible_write_receipt()
+     {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -1273,7 +1274,7 @@ mod core_tests {
             .to_string();
         assert!(
             err.contains("refused direct disk write"),
-            "active listener without ack-content should block plain disk fallback: {err}"
+            "active listener without visible-write receipt should block plain disk fallback: {err}"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -1284,7 +1285,7 @@ mod core_tests {
         assert!(
             log.contains("pending_write_writeback")
                 && log.contains("transport=blocked")
-                && log.contains("reason=no_ack_content"),
+                && log.contains("reason=no_visible_write_receipt"),
             "active listener failure must be logged as a blocked plain disk write:\n{log}"
         );
         assert!(
@@ -1317,7 +1318,7 @@ mod core_tests {
             .to_string();
         assert!(
             err.contains("editor convergence is unproven"),
-            "editorless socket without ack proof should fail closed: {err}"
+            "editorless socket without visible-write proof should fail closed: {err}"
         );
 
         assert_eq!(
@@ -1329,7 +1330,7 @@ mod core_tests {
         assert!(
             log.contains("queue_consume_writeback")
                 && log.contains("transport=blocked")
-                && log.contains("reason=no_ack_content")
+                && log.contains("reason=no_visible_write_receipt")
                 && log.contains("editor_endpoint=absent")
                 && log.contains("action=editor_convergence_required"),
             "editorless socket must record a fail-closed convergence requirement:\n{log}"
@@ -1598,7 +1599,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("test.md");
 
         let snapshot = agent_doc_test_support::drift_content_ours();
@@ -1650,7 +1651,7 @@ mod core_tests {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("test.md");
 
         let snapshot = agent_doc_test_support::drift_content_ours();
@@ -1697,12 +1698,12 @@ mod core_tests {
     }
 
     #[test]
-    fn try_auto_recover_live_prompt_drift_blocks_disk_fallback_with_active_listener_without_ack_content()
+    fn try_auto_recover_live_prompt_drift_blocks_disk_fallback_with_active_listener_without_visible_write_receipt()
      {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         let doc = dir.path().join("test.md");
 
         let snapshot = agent_doc_test_support::drift_content_ours();
@@ -1719,7 +1720,7 @@ mod core_tests {
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
             recovered.is_none(),
-            "active listener without ack-content must block binary-owned disk recovery"
+            "active listener without visible-write receipt must block binary-owned disk recovery"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -1728,7 +1729,7 @@ mod core_tests {
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("[jbstalecache] editor_convergence_no_ack_content")
+            log.contains("[jbstalecache] editor_convergence_no_visible_write_receipt")
                 && log.contains("action=block_external_disk_write"),
             "unproven editor convergence must be logged as a blocked write:\n{log}"
         );

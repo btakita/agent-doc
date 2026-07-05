@@ -1492,8 +1492,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // harness `turn_boundary` cannot provide. A recycle / restart-reexec is
                 // a true `execve` that tears down the in-flight IPC listener; firing it
                 // while an agent-doc cycle is still open (preflight taken, finalize not
-                // committed) or an IPC ack connection is in flight severs the
-                // ack-content round-trip mid-cycle and drives the next finalize into
+                // committed) or an IPC receipt connection is in flight severs the
+                // visible-write receipt round-trip mid-cycle and drives the next finalize into
                 // `live_prompt_drift_after_preflight` against the pre-recycle preflight
                 // baseline. Defer until the cycle commits and IPC drains. Gates BOTH the
                 // operator `restart_drain_reexec` path below and the `#supselfheal`

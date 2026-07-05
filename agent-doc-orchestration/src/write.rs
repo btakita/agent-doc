@@ -2604,6 +2604,27 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    fn record_test_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
+        let file_key = file.to_string_lossy();
+        let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            file_key.as_ref(),
+            content,
+            "test-editor",
+            "test",
+            "test",
+            &[
+                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            ],
+        );
+        let _ = agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file,
+            patch_id,
+            content,
+            "test_visible_write_listener",
+        );
+    }
+
     /// #pcp2: a document disk write records write-provenance, but `.agent-doc/`
     /// sidecar/snapshot writes do not (provenance is only meaningful for the
     /// editor-visible document).
@@ -3690,13 +3711,29 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
-                        if entry.path().extension().is_some_and(|e| e == "json") {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            let patch_id = fs::read_to_string(&path)
+                                .ok()
+                                .and_then(|text| {
+                                    serde_json::from_str::<serde_json::Value>(&text).ok()
+                                })
+                                .and_then(|json| {
+                                    json.get("patch_id")
+                                        .and_then(|value| value.as_str())
+                                        .map(str::to_string)
+                                });
                             // Simulate plugin applying the patch by modifying the doc
-                            let _ = fs::write(
-                                &doc_for_watcher,
-                                "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n",
-                            );
-                            let _ = fs::remove_file(entry.path());
+                            let applied = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n";
+                            let _ = fs::write(&doc_for_watcher, applied);
+                            if let Some(patch_id) = patch_id {
+                                record_test_visible_write_receipt(
+                                    &doc_for_watcher,
+                                    &patch_id,
+                                    applied,
+                                );
+                            }
+                            let _ = fs::remove_file(path);
                             return;
                         }
                     }
@@ -3717,7 +3754,7 @@ mod tests {
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -3743,7 +3780,6 @@ mod tests {
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let partial_for_watcher = partial.to_string();
         let _watcher = std::thread::spawn(move || {
@@ -3760,8 +3796,11 @@ mod tests {
                             && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                         {
                             let _ = fs::write(&doc_for_watcher, &partial_for_watcher);
-                            let _ =
-                                fs::write(ack_dir.join(format!("{pid}.md")), &partial_for_watcher);
+                            record_test_visible_write_receipt(
+                                &doc_for_watcher,
+                                pid,
+                                &partial_for_watcher,
+                            );
                         }
                         let _ = fs::remove_file(path);
                         return;
@@ -3795,7 +3834,7 @@ mod tests {
         );
     }
     #[test]
-    fn file_ipc_consumed_with_live_exchange_edit_requires_ack_content() {
+    fn file_ipc_consumed_with_live_exchange_edit_requires_visible_write_content() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -3857,25 +3896,20 @@ mod tests {
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("file_ipc_live_exchange_unacknowledged")
-                && log.contains("patch_id=patch-live-edit"),
-            "unacknowledged live-edit IPC should be logged:\n{log}"
-        );
-        assert!(
             log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=live_exchange_without_ack_content")
+                && log.contains("invariant=no_lazily_visible_write_receipt")
                 && log.contains("recovery=retry_without_disk_write"),
             "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
         );
     }
     #[test]
-    fn file_ipc_accepts_ack_content_sidecar_when_disk_lags_live_exchange() {
+    fn file_ipc_accepts_visible_write_receipt_when_disk_lags_live_exchange() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -3892,7 +3926,7 @@ mod tests {
             "live prompt\n",
             "<!-- /agent:exchange -->\n"
         );
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "---\nsession: test\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "content\n",
@@ -3916,8 +3950,7 @@ mod tests {
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let ack_dir = agent_doc_dir.join("ack-content");
-        let ack_for_watcher = ack_content.to_string();
+        let visible_for_watcher = visible_write_content.to_string();
         let doc_for_watcher = doc_str.clone();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
@@ -3930,10 +3963,14 @@ mod tests {
                         && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
                         && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                     {
-                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                        record_test_visible_write_receipt(
+                            Path::new(&doc_for_watcher),
+                            pid,
+                            &visible_for_watcher,
+                        );
                         let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
                             &doc_for_watcher,
-                            &ack_for_watcher,
+                            &visible_for_watcher,
                             editor_id,
                             "jetbrains",
                             "test",
@@ -3958,43 +3995,43 @@ mod tests {
             Some(baseline),
             None,
             None,
-            Some("patch-live-edit-ack"),
+            Some("patch-live-edit-visible-write"),
         )
         .unwrap();
         watcher.join().unwrap();
 
         assert!(
             result.success,
-            "ack-content proof should let file IPC accept an applied response even when disk still shows the pre-ack live exchange edit"
+            "visible-write receipt should let file IPC accept an applied response even when disk still shows the pre-receipt live exchange edit"
         );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(ack_content),
-            "snapshot must use the authoritative ack-content sidecar"
+            Some(visible_write_content),
+            "snapshot must use the authoritative visible-write receipt"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            ack_content,
-            "proven ack-content must be written through so stale disk cannot overwrite the editor-visible response"
+            visible_write_content,
+            "proven visible-write content must be written through so stale disk cannot overwrite the editor-visible response"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             !log.contains("file_ipc_live_exchange_unacknowledged"),
-            "ack-content proof must bypass the unacknowledged live-edit fallback:\n{log}"
+            "visible-write proof must bypass the unacknowledged live-edit fallback:\n{log}"
         );
         assert!(
-            log.contains("ack_content_disk_write_through"),
-            "ack-content disk write-through should be auditable:\n{log}"
+            log.contains("visible_write_disk_write_through"),
+            "visible-write disk write-through should be auditable:\n{log}"
         );
     }
     #[test]
-    fn file_ipc_ack_content_live_prompt_drift_requires_visible_repair() {
+    fn file_ipc_visible_write_content_live_prompt_drift_requires_visible_repair() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -4019,7 +4056,7 @@ mod tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "---\nsession: test\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
@@ -4030,9 +4067,8 @@ mod tests {
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
-        let ack_for_watcher = ack_content.to_string();
+        let ack_for_watcher = visible_write_content.to_string();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -4045,7 +4081,7 @@ mod tests {
                         && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                     {
                         let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
                     }
                     let _ = fs::remove_file(entry.path());
                     return;
@@ -4081,7 +4117,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            ack_content,
+            visible_write_content,
             "visible live prompt should remain in the working tree for the next cycle"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4092,13 +4128,13 @@ mod tests {
     }
 
     #[test]
-    fn file_ipc_ack_content_partial_exchange_word_requires_visible_repair() {
+    fn file_ipc_visible_write_content_partial_exchange_word_requires_visible_repair() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -4123,7 +4159,7 @@ mod tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "---\nsession: test\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
@@ -4134,9 +4170,8 @@ mod tests {
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
-        let ack_for_watcher = ack_content.to_string();
+        let ack_for_watcher = visible_write_content.to_string();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -4149,7 +4184,7 @@ mod tests {
                         && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                     {
                         let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
                     }
                     let _ = fs::remove_file(entry.path());
                     return;
@@ -4185,7 +4220,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            ack_content,
+            visible_write_content,
             "visible partial operator word should remain in the working tree for the next cycle"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4200,13 +4235,13 @@ mod tests {
     // fire (it is a false-positive drop record, not real user-content loss). This
     // is the exact live wedge from agent-doc-bugs2 #opsproof-falsepos closeout.
     #[test]
-    fn file_ipc_ack_content_post_exchange_comment_drift_uses_content_ours_snapshot() {
+    fn file_ipc_visible_write_content_post_exchange_comment_drift_uses_content_ours_snapshot() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -4240,7 +4275,7 @@ mod tests {
             "<!--\n",
             "-->\n"
         );
-        let ack_content = concat!(
+        let visible_write_content = concat!(
             "---\nsession: test\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
@@ -4256,9 +4291,8 @@ mod tests {
 
         let patches_dir = agent_doc_dir.join("patches");
         let watcher_dir = patches_dir.clone();
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
-        let ack_for_watcher = ack_content.to_string();
+        let ack_for_watcher = visible_write_content.to_string();
         let watcher = std::thread::spawn(move || {
             for _ in 0..40 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -4271,7 +4305,7 @@ mod tests {
                         && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
                     {
                         let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        let _ = fs::write(ack_dir.join(format!("{pid}.md")), &ack_for_watcher);
+                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
                     }
                     let _ = fs::remove_file(entry.path());
                     return;
@@ -4307,7 +4341,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            ack_content,
+            visible_write_content,
             "visible post-exchange comment text should remain in the working tree for the next cycle"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -4320,7 +4354,7 @@ mod tests {
         );
     }
     #[test]
-    fn file_ipc_post_dedupe_unchanged_exchange_requires_ack_content() {
+    fn file_ipc_post_dedupe_unchanged_exchange_requires_visible_write_content() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -4384,7 +4418,7 @@ mod tests {
 
         assert!(
             !result.success,
-            "file IPC must fall back when final deduped exchange is unchanged without ack-content proof"
+            "file IPC must fall back when final deduped exchange is unchanged without visible-write proof"
         );
         assert!(
             agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
@@ -4392,7 +4426,8 @@ mod tests {
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("file_ipc_live_exchange_unacknowledged")
+            log.contains("ipc_proof_insufficient")
+                && log.contains("invariant=no_lazily_visible_write_receipt")
                 && log.contains("patch_id=patch-post-dedupe"),
             "post-dedupe unacknowledged live-edit IPC should be logged:\n{log}"
         );
@@ -4487,10 +4522,28 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 if let Ok(entries) = fs::read_dir(&watcher_dir) {
                     for entry in entries.flatten() {
-                        if entry.path().extension().is_some_and(|e| e == "json") {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            let patch_id = fs::read_to_string(&path)
+                                .ok()
+                                .and_then(|text| {
+                                    serde_json::from_str::<serde_json::Value>(&text).ok()
+                                })
+                                .and_then(|json| {
+                                    json.get("patch_id")
+                                        .and_then(|value| value.as_str())
+                                        .map(str::to_string)
+                                });
                             // Simulate plugin applying patch + leaving user edits in file
                             let _ = fs::write(&doc_for_watcher, &after_plugin_write_owned);
-                            let _ = fs::remove_file(entry.path());
+                            if let Some(patch_id) = patch_id {
+                                record_test_visible_write_receipt(
+                                    &doc_for_watcher,
+                                    &patch_id,
+                                    &after_plugin_write_owned,
+                                );
+                            }
+                            let _ = fs::remove_file(path);
                             return;
                         }
                     }
@@ -4655,7 +4708,7 @@ mod tests {
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -4684,7 +4737,6 @@ mod tests {
 
         let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let doc_str_for_watcher = doc_str.clone();
         let seen_for_watcher = seen_payload.clone();
@@ -4702,8 +4754,9 @@ mod tests {
                             && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text)
                         {
                             if let Some(pid) = payload.get("patch_id").and_then(|v| v.as_str()) {
-                                let _ = fs::write(
-                                    ack_dir.join(format!("{pid}.md")),
+                                record_test_visible_write_receipt(
+                                    &doc_for_watcher,
+                                    pid,
                                     &after_for_watcher,
                                 );
                             }
@@ -4770,7 +4823,7 @@ mod tests {
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -4795,7 +4848,6 @@ mod tests {
 
         let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
         let patches_dir = agent_doc_dir.join("patches");
-        let ack_dir = agent_doc_dir.join("ack-content");
         let doc_for_watcher = doc.clone();
         let doc_str_for_watcher = doc_str.clone();
         let normalized_for_watcher = normalized.clone();
@@ -4829,11 +4881,11 @@ mod tests {
                         &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
                     )
                     .unwrap();
-                    fs::write(
-                        ack_dir.join(format!("{patch_id}.md")),
+                    record_test_visible_write_receipt(
+                        &doc_for_watcher,
+                        &patch_id,
                         &normalized_for_watcher,
-                    )
-                    .unwrap();
+                    );
                     *seen_for_watcher.lock().unwrap() = Some(payload);
                     fs::remove_file(path).unwrap();
                     return true;
@@ -5157,11 +5209,11 @@ mod tests {
             !repaired.contains(
                 "\n<!--\nThe duplicate content corrupting document and duplicate prompt issues happened yet again."
             ),
-            "IPC ack-content dedupe must scrub duplicate post-exchange prompt text:\n{repaired}"
+            "IPC visible-write dedupe must scrub duplicate post-exchange prompt text:\n{repaired}"
         );
         assert!(
             repaired.contains("\n<!--\n-->\n\n<!-- agent:backlog -->"),
-            "IPC ack-content dedupe must preserve the ordinary HTML comment shell:\n{repaired}"
+            "IPC visible-write dedupe must preserve the ordinary HTML comment shell:\n{repaired}"
         );
         assert!(repaired.contains("<!-- agent:backlog -->\n- [ ] keep me"));
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -5216,7 +5268,7 @@ mod tests {
         repaired.contains(&format!(
             "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep this owned scratch note visible.\n-->"
         )),
-        "IPC ack-content dedupe must preserve owned mixed scratch comments:\n{repaired}"
+        "IPC visible-write dedupe must preserve owned mixed scratch comments:\n{repaired}"
     );
     }
     #[test]

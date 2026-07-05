@@ -217,7 +217,7 @@ mod tests {
             "<!-- agent:exchange -->\n",
             "❯ earlier\n### Re: earlier — gpt-5\n\nAnswered.\n",
             "<!-- agent:boundary:committed -->\n",
-            "ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required\n",
+            "ipc_proof_insufficient file=/tmp/session.md source=socket_visible_write patch_id=abc invariant=live_prompt_drift_after_preflight recovery=visible_repair_required\n",
             "<!-- /agent:exchange -->\n",
         );
         assert_eq!(unresolved_exchange_prompt_in_content(content), None);

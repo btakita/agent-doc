@@ -135,7 +135,7 @@ pub struct GitDoctorFacts {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EditorDoctorFacts {
     pub patches_dir_present: bool,
-    pub ack_content_dir_present: bool,
+    pub legacy_ack_content_dir_present: bool,
     pub live_buffer_dir_present: bool,
     pub live_buffer_diverges: Option<bool>,
 }
@@ -423,12 +423,17 @@ fn evaluate_editor_convergence(
             operator_steps(invariant),
         );
     }
-    if facts.editor.patches_dir_present || facts.editor.ack_content_dir_present {
+    if facts.editor.legacy_ack_content_dir_present && !facts.editor.live_buffer_dir_present {
+        result
+            .disproof_markers
+            .push("legacy ack-content directory is ignored as editor proof".to_string());
+    }
+    if facts.editor.patches_dir_present || facts.editor.live_buffer_dir_present {
         return result
-            .ok("editor IPC sidecar directories are present and no failure markers were found");
+            .ok("editor IPC/lazily projection directories are present and no failure markers were found");
     }
     result.blocked_missing(
-        "editor_proof_sidecar",
+        "editor_lazily_projection",
         "open the managed document in an editor with the agent-doc plugin or rerun with --force-disk only when no live editor owns the file",
     )
 }

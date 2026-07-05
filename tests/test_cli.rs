@@ -1660,9 +1660,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // `guard_live_prompt_drift_uses_content_ours_snapshot_when_ack_union_carries_unowned_drift`,
         // and their direct
         // calls to the existing live-prompt-drift IPC adoption guard. These prove
-        // content_ours adoption after a live editor ACK requires visible response
-        // proof; a response-bearing ACK union suppresses redelivery but does not
-        // make the ACK sidecar snapshot authority when it carries unowned drift.
+        // content_ours adoption after a live editor receipt requires visible
+        // response proof; a response-bearing visible union suppresses redelivery
+        // but does not make the lazily visible-write receipt snapshot authority
+        // when it carries unowned drift.
         ("agent-doc-orchestration/src/write/ipc.rs", "guard_") => 21,
         // 17 -> 18 (#smconv): +1 production `reason=node_keyed_semantic_merge` on
         // the new `live_prompt_drift_semantic_merged` ops_log — the node-keyed
@@ -1673,23 +1674,23 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // regression now asserts `reason=listener_degraded_editor_detached`,
         // proving the path tries file IPC first and only then uses guarded
         // DetachedDisk when no live editor sidecar owns the document.
-        // 19 -> 20 (#ack-content-live-buffer-sync): already-applied ack-content
-        // adoption logs `reason=no_editor_id` when the binary has no editor id
+        // 19 -> 20 (#visible-write-live-buffer-sync): already-applied
+        // visible-write adoption logs `reason=no_editor_id` when the binary has no editor id
         // to mark the live-buffer epoch as synced. The snapshot still follows
-        // the existing ack-content proof path; this is diagnostic context for
+        // the existing visible-write proof path; this is diagnostic context for
         // skipping the live-buffer barrier update.
-        // 20 -> 21 (#ack-content-disk-write-through): proven ACK-content disk
-        // write-through logs `reason=already_current` when disk already matches
+        // 20 -> 21 (#visible-write-disk-write-through): proven visible-write
+        // disk write-through logs `reason=already_current` when disk already matches
         // the editor-proven content. This is diagnostic context for skipping the
         // write-through effect, not a new flow branch.
-        // 21 -> 24 (#whole-buffer-authority): ACK-content write-through and
+        // 21 -> 24 (#whole-buffer-authority): visible-write write-through and
         // editor-repair redelivery now log the `decide_whole_buffer_delivery`
         // policy-table reason when the focused realtime policy rejects a
         // whole-buffer effect. These are diagnostics for the shared authority
         // decision, not ad hoc orchestration flow branches.
-        // 24 -> 25 (#ack-source-buffer): ACK-content write-through now logs
+        // 24 -> 25 (#visible-write-source-buffer): visible-write write-through now logs
         // `reason=stale_source_buffer` when a live operator-authoritative editor
-        // buffer has moved past the ACK sidecar. This is the same realtime
+        // buffer has moved past the visible-write receipt. This is the same realtime
         // policy-table reason as other whole-buffer source-proof rejections.
         // 25 -> 26 (#ipcvisredeliver-incycle): in-cycle live-prompt visible
         // repair logs the existing disk-repair reason on successful editor IPC
@@ -1700,8 +1701,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // falling back to file-IPC instead of hard-erroring the closeout. The
         // recovery still routes through the existing file-IPC fallback outcome.
         // 27 -> 32 (#adoc-live-prompt-drift-operator-edit): the operator-edit
-        // reconcile path adds diagnostic `reason=` log tokens on the ack-content
-        // forward-reconcile — `operator_buffer_ahead` (Phase 1 + Phase 2 loop),
+        // reconcile path adds diagnostic `reason=` log tokens on the visible-write
+        // forward-reconcile: `operator_buffer_ahead` (Phase 1 + Phase 2 loop),
         // `settled_buffer_dropped_response` (fail-closed), and
         // `operator_still_editing` (bounded-loop timeout). These are ops.log
         // diagnostics for the existing snapshot-adoption recovery, not new flow
@@ -1718,9 +1719,9 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // plus stale-source regression assertions. The write remains blocked
         // before socket/file delivery; the reasons are routed through the shared
         // realtime whole-buffer authority policy.
-        // 14 -> 15 (#ack-source-buffer): the stale ACK-content regression asserts
-        // the same shared `reason=stale_source_buffer` table outcome so an old ACK
-        // sidecar cannot overwrite a newer live operator edit.
+        // 14 -> 15 (#visible-write-source-buffer): the stale visible-write regression
+        // asserts the same shared `reason=stale_source_buffer` table outcome so a
+        // stale receipt cannot overwrite a newer live operator edit.
         ("agent-doc-orchestration/src/write/ipc/transport.rs", "reason=") => 15,
         // #write-ipc-transport-graph: the production socket-first/file-IPC
         // transport graph moved from orchestration into the focused write IPC
@@ -1744,7 +1745,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +9 (#fcc0-no-external-write): active editor listeners no longer allow
         // disk fallback when component convergence cannot prove editor apply.
         // The added `reason=` tokens are the blocked production reasons
-        // (`no_component_delta`, `no_ack_content`, `ack_mismatch`, `no_ack`,
+        // (`no_component_delta`, `no_visible_write_receipt`, `ack_mismatch`, `no_ack`,
         // `send_failed`, and auto-recovery `editor_ipc_unconfirmed`) plus focused
         // regression assertions proving the guarded and plain fallback gates do
         // not write behind the plugin. No new flow guard; this tightens the
@@ -1761,7 +1762,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // which is a test-assertion string, not a new hot-path flow reason.
         // +1 (#supselfheal Ph2): write_wedged_supervisor_recycle_requested ops-log
         // line carries `reason=repeated_ack_timeout_active_listener` — audited.
-        // 19 -> 17 (#6b5h): the no_ack / no_ack_content / send_failed converge
+        // 19 -> 17 (#6b5h): the no_ack / no_visible_write_receipt / send_failed converge
         // refusals were centralized into `refuse_or_editorless_disk_fallback`,
         // which decides fail-closed (live editor) vs editor-less disk fallback.
         // The four per-branch `reason=` literals collapsed into the helper's three
@@ -1770,7 +1771,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 17 -> 20 (#fcc0-ack-mismatch): ACK-mismatched editor convergence now
         // attempts a hash-guarded refresh only for the narrow stale queue-prompt
         // artifact shape. The three added production reasons log why that refresh
-        // did not rewrite the editor buffer (`untrusted_ack_content_contains_user_drift`,
+        // did not rewrite the editor buffer (`untrusted_visible_write_contains_user_drift`,
         // `no_ack`, `send_failed`) while the existing `ack_mismatch` writeback
         // reason remains the fail-closed flow boundary.
         // +1 (#docdriftgrace): `stale_snapshot_visible_rebased ... reason={}` logs
@@ -1842,7 +1843,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // resurrecting them; live additions remain covered by the existing
         // dropped-queue evidence path.
         // +6 (#w42v) for the audited `compact_writeback ... transport=disk_fallback
-        // reason=<no_listener|no_component_delta|no_ack_content|ack_mismatch|no_ack|
+        // reason=<no_listener|no_component_delta|no_visible_write_receipt|ack_mismatch|no_ack|
         // send_failed>` markers in `try_editor_converge` (the #fcc0-generalized
         // former `try_compact_editor_converge`). These are diagnostic
         // disk-fallback reasons on the editor-IPC convergence path (not flow
@@ -10759,13 +10760,13 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Write editor convergence IO graph",
             "agent-doc-orchestration/src/write/converge.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move the file-IPC poller and its ACK/NACK/content validation",
+            "Move the file-IPC poller and its status/NACK/content validation",
         ),
         (
             "Write file-IPC delivery proof loop",
             "agent-doc-orchestration/src/write/ipc/transport.rs",
             "agent-doc-write-converge-io/src/lib.rs",
-            "Move the remaining post-consumption ack-content snapshot repair",
+            "Move the remaining post-consumption visible-write snapshot repair",
         ),
         (
             "Write IPC transport delivery-loop delegation",
@@ -10852,7 +10853,7 @@ fn test_coarse_orchestration_extractions_are_tracked() {
             "Extract the post-delivery repair effect graph",
         ),
         (
-            "Write ack-content write-through IO graph",
+            "Write visible-write write-through IO graph",
             "agent-doc-orchestration/src/write/ipc.rs",
             "agent-doc-write-converge-io/src/lib.rs",
             "Move the remaining post-delivery IPC repair orchestration",
@@ -22307,7 +22308,7 @@ fn test_agent_doc_ipc_protocol_owns_ack_classification() {
         "pub fn is_socket_status_error(",
         "pub fn existing_patch_is_reposition_only(",
         "pub enum IpcSnapshotSource",
-        "pub const fn is_ack_content_proven(self) -> bool",
+        "pub const fn is_visible_write_proven(self) -> bool",
         "pub enum IpcDiskRepairReason",
         "pub const fn redelivery_kind(self) -> FullContentRepairRedelivery",
         "pub const fn merge_with_ipc_dedupe(self) -> Self",
@@ -24887,7 +24888,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub fn exchange_has_live_user_edit",
         "pub struct ExchangeShrinkGuardBlock",
         "pub fn exchange_shrink_guard_block",
-        "pub fn live_exchange_without_ack_content_retry_required",
+        "pub fn live_exchange_without_visible_write_retry_required",
         "pub fn exchange_prompt_prefix_count",
         "pub fn exchange_prompt_text_duplicated",
         "pub fn normalization_target_counts",
@@ -24936,7 +24937,8 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-element-exchange-io/src/lib.rs")).unwrap();
     assert!(
         exchange_io.contains("pub fn check_exchange_shrink_guard_with_log(")
-            && exchange_io.contains("pub fn file_ipc_consumed_without_live_exchange_ack_with_log("),
+            && exchange_io
+                .contains("pub fn file_ipc_consumed_without_live_exchange_visible_write_with_log("),
         "agent-doc-element-exchange-io must own logged exchange write adapters"
     );
     let snapshot_source =
@@ -25000,10 +25002,10 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
     assert!(
         write_run_entry.contains("agent_doc_element_exchange_io::check_exchange_shrink_guard_with_log(")
             && write_run_entry.contains(
-                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log("
+                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log("
             )
             && write_ipc_transport.contains(
-                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log("
+                "agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log("
             ),
         "write adapters should call focused exchange IO directly instead of an orchestration exchange_reconcile module"
     );
@@ -25068,7 +25070,7 @@ fn test_agent_doc_element_exchange_owns_exchange_prompt_policy() {
         "pub(crate) fn exchange_has_live_user_edit",
         "pub(crate) struct ExchangeShrinkGuardBlock",
         "pub(crate) fn exchange_shrink_guard_block",
-        "pub(crate) fn live_exchange_without_ack_content_retry_required",
+        "pub(crate) fn live_exchange_without_visible_write_retry_required",
         "pub(crate) fn exchange_prompt_prefix_count",
         "pub(crate) fn exchange_prompt_text_duplicated",
         "pub(crate) fn exchange_user_region",
@@ -25632,7 +25634,7 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "pub fn prompt_bearing_user_changes_between",
         "pub fn exchange_component_text",
         "pub fn new_agent_response_headings",
-        "pub fn ack_content_contains_latest_response",
+        "pub fn response_converged_in_visible_target",
         "pub fn normalize_patch_content",
         "fn latest_exchange_response_block",
         "fn exchange_content",
@@ -25661,7 +25663,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
         "fn prompt_bearing_user_changes_between(",
         "fn exchange_component_text(",
         "fn new_agent_response_headings(",
-        "fn ack_content_contains_latest_response(",
+        "fn response_converged_in_visible_target(",
+        "fn visible_write_contains_latest_response(",
         "fn latest_exchange_response_block(",
         "fn exchange_content(",
         "fn first_response_heading(",
@@ -25727,12 +25730,13 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
             && write_converge.contains("guard_ipc_snapshot_adoption_against_live_prompt_drift(")
             && write_converge.contains("response_target_disjoint_from_user_edit")
             && write_converge.contains("dropped_prompt_lines_after_content_ours")
-            && write_converge.contains("ack_content_contains_latest_response")
-            && write_converge.contains("materialize_missing_response_for_socket_ack_drift(")
+            && write_converge.contains("response_converged_in_visible_target")
+            && write_converge
+                .contains("materialize_missing_response_for_socket_visible_write_drift(")
             && write_converge.contains("try_semantic_merge_convergence(")
             && write_converge.contains("new_agent_response_headings")
             && write_converge.contains("first_response_heading")
-            && write_converge.contains("prefer_visible_content_over_stale_ack_content(")
+            && write_converge.contains("prefer_visible_content_over_stale_visible_write_snapshot(")
             && write_converge.contains("persist_already_applied_socket_content_ours_snapshot("),
         "write IPC paths should route snapshot/live-drift adoption decisions through the focused write-converge owner"
     );
@@ -25745,7 +25749,8 @@ fn test_agent_doc_document_realtime_owns_snapshot_persistence_policy() {
     );
     for forbidden_snippet in [
         "fn new_agent_response_headings(",
-        "fn ack_content_contains_latest_response(",
+        "fn response_converged_in_visible_target(",
+        "fn visible_write_contains_latest_response(",
         "fn latest_exchange_response_block(",
         "fn exchange_content(",
         "fn first_response_heading(",
@@ -27776,7 +27781,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn ipc_direct_disk_degraded",
         "pub fn record_ipc_socket_ack_timeout",
         "pub fn clear_ipc_socket_ack_timeouts",
-        "pub fn poll_ack_content_lazily_event",
+        "pub fn poll_visible_write_content_lazily_event",
         "pub fn poll_visible_write_content_lazily_event_or_projection",
         "pub fn editor_ipc_write_wedged",
         "pub fn stale_supervisor_write_short_circuit",
@@ -27793,7 +27798,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub struct FileIpcDeliveryOptions",
         "pub fn write_file_ipc_and_poll_delivery(",
         "fn log_file_ipc_proof_failure(",
-        "pub fn ipc_repair_decision_from_sidecar(",
+        "pub fn ipc_repair_decision_from_visible_write(",
         "pub fn redelivery_missing_operator_text_authority(",
         "pub fn verify_normalization_repair_observed(",
         "pub fn try_ipc_normalization_repair_patch(",
@@ -27803,11 +27808,11 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(",
         "pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
         "pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(",
-        "pub fn prefer_visible_content_over_stale_ack_content(",
+        "pub fn prefer_visible_content_over_stale_visible_write_snapshot(",
         "pub fn persist_already_applied_socket_content_ours_snapshot(",
         "pub fn dedupe_consecutive_response_blocks(",
         "pub fn dedupe_ipc_snapshot_content(",
-        "fn visible_content_supersedes_ack_content(",
+        "fn visible_content_supersedes_visible_write_snapshot(",
         "ipc_socket_already_applied_snapshot",
         "content_ours_adoption_refused_stale_supervisor",
     ] {
@@ -27882,7 +27887,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub(crate) fn record_ipc_socket_ack_timeout",
         "pub(crate) fn ipc_direct_disk_degraded",
         "pub(crate) const IPC_DEWEDGE_TIMEOUT_THRESHOLD",
-        "pub(crate) fn ipc_repair_decision_from_sidecar(",
+        "pub(crate) fn ipc_repair_decision_from_visible_write(",
         "fn redelivery_missing_operator_text_authority(",
         "pub(crate) fn verify_normalization_repair_observed(",
         "pub(crate) fn try_ipc_normalization_repair_patch(",
@@ -27896,10 +27901,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "fn guard_ipc_snapshot_adoption_against_prompt_duplication(",
         "fn stale_supervisor_content_ours_adoption_warning(",
         "fn log_content_ours_adoption_refused_stale_supervisor(",
-        "struct StaleAckContentContext",
-        "fn visible_content_supersedes_ack_content(",
-        "pub(crate) fn prefer_visible_content_over_stale_ack_content(",
-        "fn prefer_visible_content_over_stale_ack_content(",
+        "struct StaleVisibleWriteContext",
+        "fn visible_content_supersedes_visible_write_snapshot(",
+        "pub(crate) fn prefer_visible_content_over_stale_visible_write_snapshot(",
+        "fn prefer_visible_content_over_stale_visible_write_snapshot(",
         "pub(crate) fn persist_already_applied_socket_content_ours_snapshot(",
         "fn persist_already_applied_socket_content_ours_snapshot(",
         "pub fn dedupe_ipc_snapshot_content(",
@@ -29675,8 +29680,8 @@ fn assert_operator_authority_instructions(content: &str, surface: &str) {
         "{surface} should state the operator-visible document is authoritative"
     );
     assert!(
-        content.contains("never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or ACK-content"),
-        "{surface} should forbid content_ours/snapshot/ACK-content replacement that drops operator text"
+        content.contains("never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt"),
+        "{surface} should forbid content_ours/snapshot/receipt replacement that drops operator text"
     );
     assert!(
         content.contains("Snapshots are backup/audit state, not hot-path authority"),

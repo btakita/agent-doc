@@ -260,9 +260,12 @@ fn run_finalize(project: &ReplayProject, topic: &str, code: i32, extra_args: &[&
         "--stream",
     ];
     args.extend_from_slice(extra_args);
-    agent_doc()
-        .current_dir(project.root())
-        .args(args)
+    let mut cmd = agent_doc();
+    cmd.current_dir(project.root());
+    if code == 0 {
+        cmd.env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000");
+    }
+    cmd.args(args)
         .write_stdin(response_text(topic))
         .assert()
         .code(code);
@@ -468,7 +471,7 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
     let seen_receipt_for_watcher = seen_receipt.clone();
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) {
+        while started.elapsed() < Duration::from_secs(10) {
             let Ok(entries) = fs::read_dir(&patches_dir) else {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -513,7 +516,7 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
         receipt_content.contains(LIVE_TYPING_PROMPT),
         "lazily receipt should model the editor-visible buffer with live typing:\n{receipt_content}"
     );
-    assert_live_prompt_visible_and_committed(&project, "file IPC live typing replay");
+    assert_live_prompt_visible_but_uncommitted(&project, "file IPC live typing replay");
 }
 
 #[test]

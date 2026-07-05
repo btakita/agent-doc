@@ -61,7 +61,6 @@ mod th {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             let result = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
@@ -79,36 +78,42 @@ mod th {
                         .to_string(),
                     );
                 }
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                if let Err(err) = std::fs::create_dir_all(&ack_dir) {
-                    eprintln!(
-                        "[test] fake listener failed to create ack dir {}: {err}",
-                        ack_dir.display()
-                    );
-                }
                 // Model the JB plugin's behavior: refresh_content messages carry
                 // the new content in the message body (the IDE applies it to its
                 // in-memory buffer without reading disk). Other message types
                 // fall back to disk (patch files, etc.).
+                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
                 let content = if v.get("type").and_then(|t| t.as_str()) == Some("refresh_content") {
                     v.get("content")
                         .and_then(|c| c.as_str())
                         .unwrap_or("")
                         .to_string()
+                } else if !file_path.is_empty() {
+                    std::fs::read_to_string(file_path).unwrap_or_default()
                 } else {
-                    let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
-                    if !file_path.is_empty() {
-                        std::fs::read_to_string(file_path).unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
+                    String::new()
                 };
-                let ack_path = ack_dir.join(format!("{patch_id}.md"));
-                if let Err(err) = std::fs::write(&ack_path, &content) {
-                    eprintln!(
-                        "[test] fake listener failed to write ack content {}: {err}",
-                        ack_path.display()
+                if !file_path.is_empty() {
+                    let file = Path::new(file_path);
+                    let file_key = file.to_string_lossy();
+                    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+                        file_key.as_ref(),
+                        &content,
+                        "test-editor",
+                        "test",
+                        "test",
+                        &[
+                            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+                        ],
                     );
+                    let _ =
+                        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                            file,
+                            patch_id,
+                            &content,
+                            "test_socket_listener",
+                        );
                 }
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });

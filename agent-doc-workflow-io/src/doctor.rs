@@ -332,7 +332,7 @@ fn read_editor_facts(
     };
     EditorDoctorFacts {
         patches_dir_present: root.join(".agent-doc/patches").is_dir(),
-        ack_content_dir_present: root.join(".agent-doc/ack-content").is_dir(),
+        legacy_ack_content_dir_present: root.join(".agent-doc/ack-content").is_dir(),
         live_buffer_dir_present: root.join(".agent-doc/live-buffer").is_dir(),
         live_buffer_diverges,
     }

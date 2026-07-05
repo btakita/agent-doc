@@ -61,15 +61,15 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Idempotent:** lines already starting with `❯ ` are left unchanged.
 - **Agent region excluded:** lines at or after the last boundary marker must not be prefixed.
 - **Blank target lines skipped:** entries in `normalize_prefix_lines` that are blank after trimming must be ignored.
-- **Binary-side verification:** The binary verifies the ack-content sidecar by checking that each non-blank `normalize_prefix_lines` target appears with a `❯ ` prefix (using `trimEnd()` comparison). If any target is missing its prefix, the binary falls back to `content_ours` as the snapshot source instead of the sidecar, then re-applies the same `normalize_prefix_lines` to that fallback before saving the snapshot. If the rejected sidecar can be repaired by normalization and boundary reposition alone, the binary should send a narrow repair payload (`patches: []`, `unmatched: ""`, `normalize_prefix_lines`, `reposition_boundary: true`). Full-content redelivery is disabled; when a narrow repair is unavailable or not consumed, the binary uses the normal snapshot/disk repair path.
+- **Binary-side verification:** The binary verifies the lazily visible-write receipt/projection by checking that each non-blank `normalize_prefix_lines` target appears with a `❯ ` prefix (using `trimEnd()` comparison). If any target is missing its prefix, the binary falls back to `content_ours` as the snapshot source instead of the receipt payload, then re-applies the same `normalize_prefix_lines` to that fallback before saving the snapshot. If the rejected visible-write payload can be repaired by normalization and boundary reposition alone, the binary should send a narrow repair payload (`patches: []`, `unmatched: ""`, `normalize_prefix_lines`, `reposition_boundary: true`). Full-content redelivery is disabled; when a narrow repair is unavailable or not consumed, the binary uses the normal snapshot/disk repair path.
 - **Typed repair decision:** Before repairing a sidecar-normalization divergence or duplicate-response IPC snapshot, the binary resolves a typed decision with the repaired snapshot content, snapshot source, disk-repair reason, normalization targets, editor bad-state length/hash fingerprint, and an explicit `redeliver_editor` boolean. Plugins must not synthesize `fullContent` redelivery when the binary skips it; skipped or rejected redelivery leaves the binary to repair disk/snapshot state without editor replacement.
 - **Narrow repair shape:** the CLI may send an otherwise empty patch payload (`patches: []`, `unmatched: ""`) that carries only `normalize_prefix_lines` plus `reposition_boundary: true`. This is editor redelivery work, not snapshot-only repair and not pure reposition. Plugins must process it through the normal patch path: apply component/unmatched changes, reposition the exchange boundary, then run `normalize_prefix_lines` so prompts typed after a stale boundary are still in scope.
 - **Pure reposition fast path:** editor-specific "reposition only" shortcuts are valid only when the payload has no `normalize_prefix_lines`, `frontmatter`, `fullContent`, or unmatched text. A `patches: []` payload that still carries normalization work is not a pure boundary move.
 
-**ACK protocol:**
-- On successful application: delete the patch JSON file. This signals to the CLI that the patch was consumed.
+**Delivery and receipt protocol:**
+- On successful file-IPC application: publish a lazily visible-write receipt for `patch_id`, then delete the patch JSON file. Deletion is only the file-delivery signal; the receipt/projection is the closeout proof.
 - On failure: leave the file in place and log a warning. The CLI will time out and exit with code 75 (`EX_TEMPFAIL`).
-- For typed `save_document` recovery, the editor-side ACK is `.agent-doc/ack-content/<patch_id>.md` containing the exact buffer text after the native save returns. This operation is allowed to call the editor save API, but must not replace the document buffer or replay `fullContent`.
+- For typed `save_document` recovery, the editor must save the already-open buffer through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`. This operation is allowed to call the editor save API, but must not replace the document buffer, write `.agent-doc/ack-content`, or replay `fullContent`. Missing receipt support is an incompatible plugin/native-library version error.
 
 **File-not-found retry:**
 - If the target file is not found in the editor's VFS, wait 200ms, refresh VFS, and try once more.
@@ -238,8 +238,8 @@ Three states must be reconciled:
 
 - Socket-capable editors accept `{"type":"save_document","file":"<absolute path>","patch_id":"<uuid>"}` on the IPC socket.
 - VS Code accepts the same payload from `.agent-doc/patches/save-document.signal`; the binary uses that file signal when no socket listener is active.
-- The receiver must locate an already-open markdown document for `file`, wait for typing idle, save through the native editor API, then write `.agent-doc/ack-content/<patch_id>.md` with the saved text.
-- The receiver must reject missing documents, non-markdown targets, active-typing timeout, and failed saves without writing ack-content. The binary treats absent ack-content as an unproven flush.
+- The receiver must locate an already-open markdown document for `file`, wait for typing idle, save through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`.
+- The receiver must reject missing documents, non-markdown targets, active-typing timeout, failed saves, and missing receipt support without writing `.agent-doc/ack-content`. The binary treats an absent lazily visible-write receipt/projection as an unproven flush.
 - This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, reconnect reread repair, or legacy `fullContent` redelivery.
 
 ### 4.3 Future: CRDT State Exchange

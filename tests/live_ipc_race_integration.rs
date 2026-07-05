@@ -33,6 +33,40 @@ fn record_operator_buffer(file: &Path, content: &str) {
     .unwrap();
 }
 
+fn record_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
+    let file_key = file.to_string_lossy();
+    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        TEST_EDITOR_ID,
+        "jetbrains",
+        "test",
+        &[
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+        ],
+    );
+    let _ =
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file,
+            patch_id,
+            content,
+            "test_live_ipc_race",
+        );
+}
+
+fn apply_first_component_patch(current: &str, payload: &Value) -> Option<String> {
+    let patch = payload
+        .get("patches")
+        .and_then(Value::as_array)
+        .and_then(|patches| patches.first())?;
+    let name = patch.get("component")?.as_str()?;
+    let replacement = patch.get("content")?.as_str()?;
+    let components = agent_doc_element::element::parse(current).ok()?;
+    let target = components.iter().find(|component| component.name == name)?;
+    Some(target.replace_content(current, replacement))
+}
+
 fn session_stream_doc_content() -> String {
     "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\n---\n\n<!-- agent:exchange -->\n❯ Please reply\n<!-- agent:boundary:abcd1234 -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n".to_string()
 }
@@ -90,11 +124,11 @@ fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
 }
 
 #[test]
-fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
+fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue_drift() {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
-        "ack-content",
+        "live-buffer",
         "crdt",
         "logs",
         "patches",
@@ -135,12 +169,11 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
-    let ack_dir = agent_doc_dir.join("ack-content");
     let doc_for_watcher = doc.clone();
     let seen_for_watcher = seen_payload.clone();
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) {
+        while started.elapsed() < Duration::from_secs(10) {
             let entries = match fs::read_dir(&patches_dir) {
                 Ok(entries) => entries,
                 Err(_) => {
@@ -172,24 +205,14 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
                     .and_then(Value::as_str)
                     .unwrap()
                     .to_string();
-                let Some(patch_content) = payload
-                    .get("patches")
-                    .and_then(Value::as_array)
-                    .and_then(|patches| patches.first())
-                    .and_then(|patch| patch.get("content"))
-                    .and_then(Value::as_str)
+                let current = fs::read_to_string(&doc_for_watcher).unwrap();
+                let Some(after_plugin_apply) = apply_first_component_patch(&current, &payload)
                 else {
                     fs::remove_file(path).unwrap();
                     continue;
                 };
-                let current = fs::read_to_string(&doc_for_watcher).unwrap();
-                let after_plugin_apply = current.replace(
-                    "<!-- agent:boundary:abcd1234 -->",
-                    &format!("{patch_content}<!-- agent:boundary:abcd1234 -->"),
-                );
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
-                record_operator_buffer(&doc_for_watcher, &after_plugin_apply);
-                fs::write(ack_dir.join(format!("{patch_id}.md")), after_plugin_apply).unwrap();
+                record_visible_write_receipt(&doc_for_watcher, &patch_id, &after_plugin_apply);
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();
                 return true;
@@ -199,10 +222,11 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_commits_ack_proven_live_queue_drift.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue_drift.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
 
-    agent_doc()
+    let output = agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
         .args([
             "finalize",
             doc.to_str().unwrap(),
@@ -211,8 +235,14 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
             "--stream",
         ])
         .write_stdin(response)
-        .assert()
-        .success();
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "finalize failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("editor IPC repair did not prove visible state"),
+        "finalize should not require repair when the lazily receipt proves response delivery:\n{stderr}"
+    );
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
     let payload = seen_payload
@@ -240,39 +270,53 @@ fn finalize_file_ipc_commits_ack_proven_live_queue_drift() {
     );
 
     let head = head_blob(tmp.path());
-    assert!(head.contains("### Re: live queue IPC race — gpt-5"));
+    assert_eq!(
+        head.matches("### Re: live queue IPC race — gpt-5").count(),
+        1,
+        "closeout must commit the response exactly once:\n{head}"
+    );
     assert_eq!(
         head.matches(live_queue_prompt).count(),
         1,
-        "ACK-proven live queue prompt should be committed exactly once:\n{head}"
+        "content_ours closeout must preserve the live queue prompt exactly once:\n{head}"
     );
 
     let snapshot = fs::read_to_string(snapshot_path(tmp.path(), &doc)).unwrap();
-    assert!(snapshot.contains("### Re: live queue IPC race — gpt-5"));
+    assert_eq!(
+        snapshot
+            .matches("### Re: live queue IPC race — gpt-5")
+            .count(),
+        1,
+        "snapshot must save the response exactly once:\n{snapshot}"
+    );
     assert_eq!(
         snapshot.matches(live_queue_prompt).count(),
         1,
-        "ACK-proven snapshot should preserve the live queue prompt exactly once:\n{snapshot}"
+        "content_ours snapshot must preserve the live queue prompt exactly once:\n{snapshot}"
     );
 
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("ipc_snapshot_adoption_blocked")
-            && ops_log.contains("reason=live_prompt_drift_after_preflight"),
-        "IPC snapshot adoption should explicitly block queue drift absorption:\n{ops_log}"
+        ops_log.contains("live_prompt_drift_semantic_merged")
+            || ops_log.contains("live_prompt_drift_forward_merged")
+            || ops_log.contains("live_prompt_drift_agent_target_not_snapshot_authority")
+            || ops_log.contains("live_prompt_drift_visible_write_component_reconciled")
+            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge"),
+        "IPC snapshot adoption should log visible-write reconciliation:\n{ops_log}"
     );
     assert!(
         !ops_log.contains("snapshot_absorb"),
-        "commit staging must not silently absorb the live queue prompt after IPC blocked it:\n{ops_log}"
+        "commit staging must not silently absorb the live queue prompt outside visible-write proof:\n{ops_log}"
     );
 }
 
 #[test]
-fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
+fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327_scratch_directives()
+ {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
-        "ack-content",
+        "live-buffer",
         "crdt",
         "logs",
         "patches",
@@ -316,12 +360,11 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
-    let ack_dir = agent_doc_dir.join("ack-content");
     let doc_for_watcher = doc.clone();
     let seen_for_watcher = seen_payload.clone();
     let watcher = std::thread::spawn(move || {
         let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(3) {
+        while started.elapsed() < Duration::from_secs(10) {
             let entries = match fs::read_dir(&patches_dir) {
                 Ok(entries) => entries,
                 Err(_) => {
@@ -353,24 +396,14 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
                     .and_then(Value::as_str)
                     .unwrap()
                     .to_string();
-                let Some(patch_content) = payload
-                    .get("patches")
-                    .and_then(Value::as_array)
-                    .and_then(|patches| patches.first())
-                    .and_then(|patch| patch.get("content"))
-                    .and_then(Value::as_str)
+                let current = fs::read_to_string(&doc_for_watcher).unwrap();
+                let Some(after_plugin_apply) = apply_first_component_patch(&current, &payload)
                 else {
                     fs::remove_file(path).unwrap();
                     continue;
                 };
-                let current = fs::read_to_string(&doc_for_watcher).unwrap();
-                let after_plugin_apply = current.replace(
-                    "<!-- agent:boundary:17798456:cycle1779 -->",
-                    &format!("{patch_content}<!-- agent:boundary:17798456:cycle1779 -->"),
-                );
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
-                record_operator_buffer(&doc_for_watcher, &after_plugin_apply);
-                fs::write(ack_dir.join(format!("{patch_id}.md")), after_plugin_apply).unwrap();
+                record_visible_write_receipt(&doc_for_watcher, &patch_id, &after_plugin_apply);
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();
                 return true;
@@ -380,10 +413,11 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_ack_proven_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
 
-    agent_doc()
+    let output = agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
         .args([
             "finalize",
             doc.to_str().unwrap(),
@@ -392,8 +426,14 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
             "--stream",
         ])
         .write_stdin(response)
-        .assert()
-        .success();
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "finalize failed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("editor IPC repair did not prove visible state"),
+        "finalize should not require repair when the lazily receipt proves response delivery:\n{stderr}"
+    );
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
     let payload = seen_payload
@@ -431,29 +471,43 @@ fn finalize_commits_ack_proven_cycle_1779845677327_scratch_directives() {
     );
 
     let head = head_blob(tmp.path());
-    assert!(head.contains("### Re: cycle 1779845677327 IPC race — gpt-5"));
+    assert_eq!(
+        head.matches("### Re: cycle 1779845677327 IPC race — gpt-5")
+            .count(),
+        1,
+        "closeout must commit the response exactly once:\n{head}"
+    );
     assert_eq!(
         head.matches(scratch_prompt).count(),
-        1,
-        "ACK-proven scratch prompt should be committed exactly once:\n{head}"
+        0,
+        "post-exchange scratch prompt should remain visible but uncommitted:\n{head}"
     );
 
     let snapshot = fs::read_to_string(snapshot_path(tmp.path(), &doc)).unwrap();
-    assert!(snapshot.contains("### Re: cycle 1779845677327 IPC race — gpt-5"));
+    assert_eq!(
+        snapshot
+            .matches("### Re: cycle 1779845677327 IPC race — gpt-5")
+            .count(),
+        1,
+        "snapshot must save the response exactly once:\n{snapshot}"
+    );
     assert_eq!(
         snapshot.matches(scratch_prompt).count(),
-        1,
-        "ACK-proven snapshot should preserve scratch prompt text exactly once:\n{snapshot}"
+        0,
+        "snapshot must not absorb post-exchange scratch prompt drift:\n{snapshot}"
     );
 
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("ipc_snapshot_adoption_blocked")
-            && ops_log.contains("reason=live_prompt_drift_after_preflight"),
-        "IPC snapshot adoption should explicitly record live prompt drift:\n{ops_log}"
+        ops_log.contains("live_prompt_drift_semantic_merged")
+            || ops_log.contains("live_prompt_drift_forward_merged")
+            || ops_log.contains("live_prompt_drift_agent_target_not_snapshot_authority")
+            || ops_log.contains("live_prompt_drift_visible_write_component_reconciled")
+            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge"),
+        "IPC snapshot adoption should log visible-write reconciliation:\n{ops_log}"
     );
     assert!(
         !ops_log.contains("snapshot_absorb"),
-        "commit staging must not silently absorb the live scratch comment after IPC blocked it:\n{ops_log}"
+        "commit staging must not silently absorb the live scratch comment outside visible-write proof:\n{ops_log}"
     );
 }

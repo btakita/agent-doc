@@ -1038,7 +1038,7 @@ pub fn malformed_agent_comment_reason(doc: &str) -> Option<String> {
 /// - an unterminated double-quoted attribute on a component opening marker.
 ///
 /// Returns `None` when the document is structurally sound. Used to fail closed
-/// before adopting a `content_ours` / `ack_content_sidecar` IPC buffer whose
+/// before adopting a `content_ours` / visible-write IPC buffer whose
 /// prior CRDT merge produced duplicate singleton blocks or a split attribute,
 /// so the corrupt buffer never reaches disk.
 pub fn structural_corruption_reason(doc: &str) -> Option<String> {

@@ -16,20 +16,20 @@ use agent_doc_ipc_protocol::{
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
 use agent_doc_write_converge_io::{
-    AlreadyAppliedSocketSnapshotContext, VisibleWriteContentAuthority,
-    ack_content_disk_write_proof, cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts,
-    dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
+    AlreadyAppliedSocketSnapshotContext, cleanup_legacy_ipc_degraded,
+    clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
     guard_ipc_snapshot_adoption_against_live_prompt_drift,
     guard_ipc_snapshot_adoption_against_prompt_duplication, ipc_direct_disk_degraded,
-    ipc_repair_decision_from_sidecar, log_full_content_ipc_disabled,
+    ipc_repair_decision_from_visible_write, log_full_content_ipc_disabled,
     log_ipc_dewedge_prefer_file_ipc, log_ipc_snapshot_adoption_allowed,
-    log_ipcfullprompt_corruption_if_any, mark_ack_content_live_buffer_synced_after_write,
-    materialize_missing_response_for_socket_ack_drift,
+    log_ipcfullprompt_corruption_if_any, mark_visible_write_live_buffer_synced_after_write,
+    materialize_missing_response_for_socket_visible_write_drift,
     persist_already_applied_socket_content_ours_snapshot,
     poll_visible_write_content_lazily_event_or_projection,
-    prefer_visible_content_over_stale_ack_content, reconcile_ack_snapshot_to_newer_operator_buffer,
-    record_ipc_socket_ack_timeout, save_ipc_snapshot_and_crdt_nonfatal,
-    stale_supervisor_write_short_circuit, write_ack_content_through_to_disk,
+    prefer_visible_content_over_stale_visible_write_snapshot,
+    reconcile_visible_write_snapshot_to_newer_operator_buffer, record_ipc_socket_ack_timeout,
+    save_ipc_snapshot_and_crdt_nonfatal, stale_supervisor_write_short_circuit,
+    visible_write_disk_proof, write_visible_write_through_to_disk,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -454,7 +454,7 @@ fn try_ipc_inner(
                 )?;
                 if let Some(visible_write_content) = visible_write {
                     let snap_content = visible_write_content.content;
-                    let mut repair_decision = ipc_repair_decision_from_sidecar(
+                    let mut repair_decision = ipc_repair_decision_from_visible_write(
                         file,
                         Some(&patch_id),
                         baseline,
@@ -462,12 +462,6 @@ fn try_ipc_inner(
                         content_ours,
                         normalize_prefix_lines,
                     );
-                    if visible_write_content.authority == VisibleWriteContentAuthority::LazilyEvent
-                        && repair_decision.snap_source == IpcSnapshotSource::AckContentSidecar
-                    {
-                        repair_decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
-                    }
-
                     let pre_dedupe_snap = repair_decision.snapshot_content.clone();
                     let (effective_snap, dedupe_repair) = dedupe_ipc_snapshot_content(
                         file,
@@ -486,7 +480,7 @@ fn try_ipc_inner(
                             patches, unmatched,
                         );
                     let visible_source = "socket_visible_write";
-                    prefer_visible_content_over_stale_ack_content(
+                    prefer_visible_content_over_stale_visible_write_snapshot(
                         file,
                         visible_source,
                         Some(&patch_id),
@@ -513,14 +507,15 @@ fn try_ipc_inner(
                         content_ours,
                         &mut repair_decision,
                     );
-                    let missing_response_repair = materialize_missing_response_for_socket_ack_drift(
-                        file,
-                        Some(&patch_id),
-                        content_ours,
-                        &expected_response,
-                        drift_fired,
-                        &mut repair_decision,
-                    );
+                    let missing_response_repair =
+                        materialize_missing_response_for_socket_visible_write_drift(
+                            file,
+                            Some(&patch_id),
+                            content_ours,
+                            &expected_response,
+                            drift_fired,
+                            &mut repair_decision,
+                        );
                     log_ipc_snapshot_adoption_allowed(
                         file,
                         visible_source,
@@ -586,7 +581,7 @@ fn try_ipc_inner(
                     // proof, so the closeout persists the operator's latest edits and
                     // the proof matches the live buffer instead of wedging on a stale
                     // source buffer.
-                    reconcile_ack_snapshot_to_newer_operator_buffer(
+                    reconcile_visible_write_snapshot_to_newer_operator_buffer(
                         file,
                         socket_editor_id.as_deref(),
                         &mut repair_decision,
@@ -605,13 +600,13 @@ fn try_ipc_inner(
                             )
                         },
                     )?;
-                    if repair_decision.snap_source.is_ack_content_proven() {
-                        let proof = ack_content_disk_write_proof(
+                    if repair_decision.snap_source.is_visible_write_proven() {
+                        let proof = visible_write_disk_proof(
                             file,
                             socket_editor_id.as_deref(),
                             &repair_decision.snapshot_content,
                         );
-                        let disk_synced = write_ack_content_through_to_disk(
+                        let disk_synced = write_visible_write_through_to_disk(
                             effects,
                             file,
                             &patch_id,
@@ -625,7 +620,7 @@ fn try_ipc_inner(
                                 skipped_committed_cycle: false,
                             });
                         }
-                        mark_ack_content_live_buffer_synced_after_write(
+                        mark_visible_write_live_buffer_synced_after_write(
                             file,
                             &patch_id,
                             socket_editor_id.as_deref(),
@@ -1074,12 +1069,13 @@ pub(crate) fn write_ipc_and_poll(
     {
         // Plugin consumed the patch file. The authoritative post-apply proof is
         // the lazily visible-write receipt/projection, not deletion of the file
-        // and not a compatibility ack-content sidecar.
+        // and not a compatibility sidecar.
         let patch_id = payload
             .get("patch_id")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let (mut current_on_disk, mut repair_decision, ack_content_proven) = if !patch_id.is_empty()
+        let (mut current_on_disk, mut repair_decision, visible_write_proven) = if !patch_id
+            .is_empty()
         {
             match poll_visible_write_content_lazily_event_or_projection(
                 doc_file,
@@ -1093,7 +1089,7 @@ pub(crate) fn write_ipc_and_poll(
                         .get("baseline")
                         .and_then(|value| value.as_str())
                         .filter(|value| !value.is_empty());
-                    let mut decision = ipc_repair_decision_from_sidecar(
+                    let decision = ipc_repair_decision_from_visible_write(
                         doc_file,
                         Some(patch_id),
                         baseline,
@@ -1101,20 +1097,15 @@ pub(crate) fn write_ipc_and_poll(
                         options.content_ours,
                         options.normalize_prefix_lines,
                     );
-                    if visible_write_content.authority == VisibleWriteContentAuthority::LazilyEvent
-                        && decision.snap_source == IpcSnapshotSource::AckContentSidecar
-                    {
-                        decision.snap_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
-                    }
                     if decision.snap_source == IpcSnapshotSource::LazilyVisibleWriteEvent {
                         eprintln!(
                             "[write] snapshot from lazily visible-write receipt ({} bytes)",
                             decision.snapshot_content.len()
                         );
                     }
-                    let ack_content_proven = decision.ack_content_proven();
+                    let visible_write_proven = decision.visible_write_proven();
                     let snapshot_content = decision.snapshot_content.clone();
-                    (snapshot_content, decision, ack_content_proven)
+                    (snapshot_content, decision, visible_write_proven)
                 }
                 None => {
                     eprintln!(
@@ -1210,7 +1201,7 @@ pub(crate) fn write_ipc_and_poll(
         }
         let expected_response =
             agent_doc_template_io::response_materialization_probe_from_ipc_payload(payload);
-        if prefer_visible_content_over_stale_ack_content(
+        if prefer_visible_content_over_stale_visible_write_snapshot(
             doc_file,
             "file_ipc",
             Some(patch_id),
@@ -1237,7 +1228,7 @@ pub(crate) fn write_ipc_and_poll(
             )?;
             return Ok(false);
         }
-        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log(
             doc_file,
             "file_ipc",
             Some(patch_id),
@@ -1247,7 +1238,7 @@ pub(crate) fn write_ipc_and_poll(
                 .filter(|value| !value.is_empty()),
             before_content.as_deref(),
             &current_on_disk,
-            ack_content_proven,
+            visible_write_proven,
             agent_doc_ops_log_io::log_op,
             log_ipc_proof_failure,
         ) {
@@ -1269,7 +1260,7 @@ pub(crate) fn write_ipc_and_poll(
         } else {
             repair_decision.snapshot_content = snap_content;
         }
-        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_ack_with_log(
+        if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log(
             doc_file,
             "file_ipc",
             Some(patch_id),
@@ -1279,7 +1270,7 @@ pub(crate) fn write_ipc_and_poll(
                 .filter(|value| !value.is_empty()),
             before_content.as_deref(),
             &repair_decision.snapshot_content,
-            ack_content_proven,
+            visible_write_proven,
             agent_doc_ops_log_io::log_op,
             log_ipc_proof_failure,
         ) {
@@ -1337,14 +1328,11 @@ pub(crate) fn write_ipc_and_poll(
                 )
             },
         )?;
-        if repair_decision.snap_source.is_ack_content_proven() {
+        if repair_decision.snap_source.is_visible_write_proven() {
             let editor_id = payload.get("editor_id").and_then(|value| value.as_str());
-            let proof = ack_content_disk_write_proof(
-                doc_file,
-                editor_id,
-                &repair_decision.snapshot_content,
-            );
-            let disk_synced = write_ack_content_through_to_disk(
+            let proof =
+                visible_write_disk_proof(doc_file, editor_id, &repair_decision.snapshot_content);
+            let disk_synced = write_visible_write_through_to_disk(
                 effects,
                 doc_file,
                 patch_id,
@@ -1354,7 +1342,7 @@ pub(crate) fn write_ipc_and_poll(
             if !disk_synced {
                 return Ok(false);
             }
-            mark_ack_content_live_buffer_synced_after_write(
+            mark_visible_write_live_buffer_synced_after_write(
                 doc_file,
                 patch_id,
                 editor_id,

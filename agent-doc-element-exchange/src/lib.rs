@@ -253,15 +253,15 @@ pub fn exchange_shrink_guard_block(
 }
 
 /// True when a file-IPC apply consumed the patch while live exchange edits were
-/// present, but the caller lacks ack-content proof and the resulting exchange
+/// present, but the caller lacks visible-write proof and the resulting exchange
 /// text did not materialize those live edits.
-pub fn live_exchange_without_ack_content_retry_required(
+pub fn live_exchange_without_visible_write_retry_required(
     baseline: Option<&str>,
     before: Option<&str>,
     after: &str,
-    ack_content_proven: bool,
+    visible_write_proven: bool,
 ) -> bool {
-    if ack_content_proven {
+    if visible_write_proven {
         return false;
     }
     let Some(before) = before else {
@@ -1980,7 +1980,7 @@ Small content here, not much.
     }
 
     #[test]
-    fn live_exchange_without_ack_content_retry_requires_unmaterialized_live_edit() {
+    fn live_exchange_without_visible_write_retry_requires_unmaterialized_live_edit() {
         let baseline = "\
 <!-- agent:exchange -->
 same prompt
@@ -2011,25 +2011,25 @@ Done.
 <!-- /agent:exchange -->
 ";
 
-        assert!(live_exchange_without_ack_content_retry_required(
+        assert!(live_exchange_without_visible_write_retry_required(
             Some(baseline),
             Some(before),
             after_same,
             false
         ));
-        assert!(!live_exchange_without_ack_content_retry_required(
+        assert!(!live_exchange_without_visible_write_retry_required(
             Some(baseline),
             Some(before),
             after_same,
             true
         ));
-        assert!(!live_exchange_without_ack_content_retry_required(
+        assert!(!live_exchange_without_visible_write_retry_required(
             Some(baseline),
             Some(before),
             after_changed,
             false
         ));
-        assert!(!live_exchange_without_ack_content_retry_required(
+        assert!(!live_exchange_without_visible_write_retry_required(
             Some(before),
             Some(before),
             after_same,

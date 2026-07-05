@@ -3770,7 +3770,7 @@ Done.\n\
             +**IPC proof issue dogfood log**\n\
             +This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.\n\
             +Issue class: `ipc_proof_insufficient`\n\
-            +ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
+            +ipc_proof_insufficient file=/tmp/session.md source=socket_visible_write patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
             +```\n\
             <!-- /agent:exchange -->\n";
         let changes = classify_prompt_bearing_changes(diff);
@@ -3790,7 +3790,7 @@ Done.\n\
     fn classify_prompt_bearing_changes_marks_separated_ipc_proof_line_as_recovery_artifact() {
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,5 @@\n\
             ctx\n\
-            +ipc_proof_insufficient file=/tmp/session.md source=socket_ack_content patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
+            +ipc_proof_insufficient file=/tmp/session.md source=socket_visible_write patch_id=abc invariant=live_prompt_drift_after_preflight recovery=content_ours_snapshot_next_cycle\n\
             <!-- /agent:exchange -->\n";
         let changes = classify_prompt_bearing_changes(diff);
         assert!(

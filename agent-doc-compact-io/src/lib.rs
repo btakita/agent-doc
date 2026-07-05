@@ -563,6 +563,18 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
     let path_str = canonical.to_string_lossy().to_string();
     let patch_id = format!("compact-flush-{}", uuid::Uuid::new_v4());
 
+    if compact_disk_matches_expected(&canonical, expected_content) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_editor_buffer_flush file={} patch_id={} transport=already_disk",
+                file.display(),
+                patch_id
+            ),
+        );
+        return true;
+    }
+
     let flushed = if agent_doc_ipc_io::is_listener_active(&project_root) {
         agent_doc_ipc_io::send_save_document(&project_root, &path_str, &patch_id)
     } else if project_root.join(".agent-doc").join("patches").is_dir() {
@@ -583,7 +595,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
         return false;
     }
 
-    // The socket `save_document` acks after saving; a file-IPC signal is applied
+    // The socket `save_document` responds after saving; a file-IPC signal is applied
     // asynchronously, so poll the working tree until the flush lands (or time out).
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
@@ -2841,7 +2853,6 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/ack-content")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
@@ -2874,7 +2885,7 @@ mod tests {
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "finalized response head"]);
 
-        let _listener = start_component_patch_ack_listener(root);
+        let _listener = start_component_patch_visible_write_listener(root);
         crate::test_support::wait_for_live_prompt_drift_listener(root);
 
         run(
@@ -3010,11 +3021,31 @@ mod tests {
         assert!(out.status.success(), "git {:?} failed", args);
     }
 
-    fn start_component_patch_ack_listener(root: &Path) -> std::thread::JoinHandle<()> {
+    fn record_compact_lazily_receipt(file: &Path, patch_id: &str, content: &str) -> Option<()> {
+        let file_key = file.to_string_lossy();
+        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+            file_key.as_ref(),
+            content,
+            "compact-test-editor",
+            "test",
+            "test",
+            &[
+                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            ],
+        )
+        .ok()?;
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file, patch_id, content, "compact_test",
+        )
+        .ok()?;
+        Some(())
+    }
+
+    fn start_component_patch_visible_write_listener(root: &Path) -> std::thread::JoinHandle<()> {
         let root = root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload
@@ -3035,10 +3066,8 @@ mod tests {
 
                 if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(file_path, &content);
+                    record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
                 }
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
@@ -3047,7 +3076,7 @@ mod tests {
     /// A live-editor listener that mimics the real JetBrains plugin: it applies a
     /// convergence patch to an in-memory "buffer" and, critically, does NOT write
     /// the working-tree file — it only flushes the buffer to disk when it receives
-    /// a `save_document` message. The disk-writing `start_component_patch_ack_listener`
+    /// a `save_document` message. The disk-writing `start_component_patch_visible_write_listener`
     /// hides `#jb-compact-editor-buffer-flush` because it saves on every patch.
     fn start_buffer_only_patch_listener(root: &Path) -> std::thread::JoinHandle<()> {
         use std::collections::HashMap;
@@ -3055,7 +3084,6 @@ mod tests {
         let root = root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             // Per-file in-memory editor buffer, seeded lazily from the patch baseline.
             let buffers: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
@@ -3064,17 +3092,28 @@ mod tests {
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
 
                 match payload.get("type").and_then(|value| value.as_str()) {
                     Some("save_document") => {
                         // Flush the in-memory buffer to disk, exactly like the real
                         // plugin's `saveDocumentViaDocument`.
                         let file_path = payload.get("file").and_then(|value| value.as_str())?;
-                        let content = buffers.lock().unwrap().get(file_path).cloned()?;
+                        let content = buffers
+                            .lock()
+                            .unwrap()
+                            .get(file_path)
+                            .cloned()
+                            .or_else(|| std::fs::read_to_string(file_path).ok())?;
                         std::fs::write(file_path, &content).ok()?;
-                        let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                        let receipt_file = Path::new(file_path).to_path_buf();
+                        let receipt_patch_id = patch_id.to_string();
+                        std::thread::spawn(move || {
+                            let _ = record_compact_lazily_receipt(
+                                &receipt_file,
+                                &receipt_patch_id,
+                                &content,
+                            );
+                        });
                         Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
                     }
                     _ => {
@@ -3100,8 +3139,12 @@ mod tests {
                                 .lock()
                                 .unwrap()
                                 .insert(file_path.to_string(), content.clone());
+                            record_compact_lazily_receipt(
+                                Path::new(file_path),
+                                patch_id,
+                                &content,
+                            )?;
                         }
-                        let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                         Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
                     }
                 }
@@ -3123,7 +3166,6 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/ack-content")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
@@ -3178,8 +3220,9 @@ mod tests {
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("compact_editor_buffer_flush")
-                && ops_log.contains("transport=save_document"),
-            "compact --commit must flush the editor buffer to disk:\n{ops_log}"
+                && (ops_log.contains("transport=save_document")
+                    || ops_log.contains("transport=already_disk")),
+            "compact --commit must converge the editor buffer to disk:\n{ops_log}"
         );
     }
 

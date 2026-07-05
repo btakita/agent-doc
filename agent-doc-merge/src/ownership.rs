@@ -15,7 +15,7 @@ pub enum MergeOwnershipPhase {
     Attached,
     EditorOwnsBuffer,
     BinaryWriteRequested,
-    #[serde(rename = "lazily_patch_applied_proven", alias = "ipc_ack_proven")]
+    #[serde(rename = "lazily_patch_applied_proven")]
     LazilyPatchAppliedProven,
     Committed,
 }

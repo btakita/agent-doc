@@ -14,7 +14,7 @@ use agent_doc_document::write_normalization::{
 use agent_doc_element_exchange::{
     dedupe_adjacent_prompt_prefix_duplicates_in_doc, dedupe_live_prompt_prefix_variants_in_doc,
     dedupe_prompt_lines_against_before_doc, exchange_shrink_guard_block,
-    live_exchange_without_ack_content_retry_required, normalize_user_prompts_in_exchange,
+    live_exchange_without_visible_write_retry_required, normalize_user_prompts_in_exchange,
     preserve_head_exchange_prompt_prefix_state,
 };
 
@@ -53,25 +53,25 @@ pub fn check_exchange_shrink_guard_with_log(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn file_ipc_consumed_without_live_exchange_ack_with_log(
+pub fn file_ipc_consumed_without_live_exchange_visible_write_with_log(
     file: &Path,
     source: &str,
     patch_id: Option<&str>,
     baseline: Option<&str>,
     before: Option<&str>,
     after: &str,
-    ack_content_proven: bool,
+    visible_write_proven: bool,
     mut logger: impl FnMut(&Path, &str),
     mut proof_failure_logger: impl FnMut(&Path, &str, Option<&str>, &str, &str, &str),
 ) -> bool {
     let Some(before) = before else {
         return false;
     };
-    if !live_exchange_without_ack_content_retry_required(
+    if !live_exchange_without_visible_write_retry_required(
         baseline,
         Some(before),
         after,
-        ack_content_proven,
+        visible_write_proven,
     ) {
         return false;
     }
@@ -79,13 +79,13 @@ pub fn file_ipc_consumed_without_live_exchange_ack_with_log(
     let before_hash = agent_doc_hash::content_hash(before);
     let after_hash = agent_doc_hash::content_hash(after);
     eprintln!(
-        "[write] file IPC consumed for {} with live exchange edits but no ack-content proof and no exchange materialization - retry required before snapshot/commit",
+        "[write] file IPC consumed for {} with live exchange edits but no visible-write proof and no exchange materialization - retry required before snapshot/commit",
         file.display()
     );
     logger(
         file,
         &format!(
-            "file_ipc_live_exchange_unacknowledged file={} source={} patch_id={} before_hash={} after_hash={}",
+            "file_ipc_live_exchange_without_visible_write file={} source={} patch_id={} before_hash={} after_hash={}",
             file.display(),
             source,
             patch_id.unwrap_or("-"),
@@ -97,7 +97,7 @@ pub fn file_ipc_consumed_without_live_exchange_ack_with_log(
         file,
         source,
         patch_id,
-        "live_exchange_without_ack_content",
+        "live_exchange_without_visible_write",
         "retry_without_disk_write",
         &format!("before_hash={} after_hash={}", before_hash, after_hash),
     );

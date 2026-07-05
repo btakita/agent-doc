@@ -9,6 +9,31 @@ use agent_doc_write_converge_io::{
     persist_already_applied_socket_content_ours_snapshot,
 };
 
+#[cfg(test)]
+pub(crate) fn record_test_visible_write_receipt(
+    file: &Path,
+    patch_id: &str,
+    content: &str,
+    source: &str,
+) {
+    let file_key = file.to_string_lossy();
+    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
+        file_key.as_ref(),
+        content,
+        "test-editor",
+        "test",
+        "test",
+        &[
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+        ],
+    );
+    let _ =
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+            file, patch_id, content, source,
+        );
+}
+
 /// Attempt to write via IPC (socket-first, file-based fallback).
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
@@ -169,18 +194,14 @@ mod submodule_patch_routing_tests {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
-                // Write ack-content sidecar so poll_ack_content_sidecar succeeds
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
                 let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
-                let content = if !file_path.is_empty() {
+                if !file_path.is_empty() {
                     let file = Path::new(file_path);
                     let before = std::fs::read_to_string(file).unwrap_or_default();
                     let patches = v
@@ -209,11 +230,13 @@ mod submodule_patch_routing_tests {
                         agent_doc_template_io::apply_patches(&before, &patches, unmatched, file)
                             .unwrap_or(before);
                     let _ = std::fs::write(file, &after);
-                    after
-                } else {
-                    String::new()
-                };
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
+                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                        file,
+                        patch_id,
+                        &after,
+                        "test_socket_listener",
+                    );
+                }
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
@@ -236,48 +259,54 @@ mod submodule_patch_routing_tests {
         })
     }
 
-    fn start_fixed_ack_content_listener(
+    fn start_fixed_visible_write_listener(
         project_root: &Path,
-        ack_content: String,
+        visible_write_content: String,
     ) -> std::thread::JoinHandle<()> {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
                 if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
-                    let _ = std::fs::write(file_path, &ack_content);
+                    let _ = std::fs::write(file_path, &visible_write_content);
+                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                        Path::new(file_path),
+                        patch_id,
+                        &visible_write_content,
+                        "test_socket_listener",
+                    );
                 }
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
     }
 
-    fn start_ack_content_only_listener(
+    fn start_visible_write_only_listener(
         project_root: &Path,
-        ack_content: String,
+        visible_write_content: String,
     ) -> std::thread::JoinHandle<()> {
         let root = project_root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
-            let root_clone = root.clone();
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = v
                     .get("patch_id")
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
-                let ack_dir = root_clone.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &ack_content);
+                if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
+                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                        Path::new(file_path),
+                        patch_id,
+                        &visible_write_content,
+                        "test_socket_listener",
+                    );
+                }
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         })
@@ -299,7 +328,7 @@ mod submodule_patch_routing_tests {
         // Verify that try_ipc routes patches to the SUBMODULE's own .agent-doc/
         // root, not the superproject. The submodule has its own .agent-doc/ so
         // the IDE plugin's resolveRootFor and Rust's find_project_root both
-        // return the submodule root, keeping ack-content paths in sync.
+        // return the submodule root, keeping IPC state paths in sync.
         let parent_dir = TempDir::new().unwrap();
         let sub_src_dir = TempDir::new().unwrap();
         let parent = parent_dir.path().canonicalize().unwrap();
@@ -516,11 +545,11 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn try_ipc_already_applied_socket_adopts_ack_content_when_disk_lags() {
+    fn try_ipc_already_applied_socket_adopts_visible_write_content_when_disk_lags() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in [
-            "ack-content",
+            "visible-write",
             "patches",
             "snapshots",
             "crdt",
@@ -552,7 +581,7 @@ mod submodule_patch_routing_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let editor_ack_content = concat!(
+        let editor_visible_write_content = concat!(
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
@@ -571,7 +600,7 @@ mod submodule_patch_routing_tests {
         let editor_id = "jetbrains-test-editor";
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
-            editor_ack_content,
+            editor_visible_write_content,
             editor_id,
             "jetbrains",
             "test",
@@ -585,13 +614,13 @@ mod submodule_patch_routing_tests {
             "fixture should start with an in-flight editor epoch"
         );
 
-        let patch_id = "already-applied-ack-content";
-        fs::write(
-            root.join(".agent-doc/ack-content")
-                .join(format!("{patch_id}.md")),
-            editor_ack_content,
-        )
-        .unwrap();
+        let patch_id = "already-applied-visible-write";
+        crate::write::ipc::transport::record_test_visible_write_receipt(
+            &doc,
+            patch_id,
+            editor_visible_write_content,
+            "test_already_applied",
+        );
 
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
@@ -614,42 +643,42 @@ mod submodule_patch_routing_tests {
 
         assert!(
             result.success,
-            "already_applied socket ack with ack-content is a proven editor write"
+            "already_applied socket response with lazily visible-write receipt is a proven editor write"
         );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(editor_ack_content),
-            "already_applied must adopt fresh editor ack-content when disk still lags"
+            Some(editor_visible_write_content),
+            "already_applied must adopt fresh editor visible-write content when disk still lags"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            editor_ack_content,
-            "proven ack-content must be written through so stale disk cannot later overwrite the editor buffer"
+            editor_visible_write_content,
+            "proven visible-write content must be written through so stale disk cannot later overwrite the editor buffer"
         );
         assert!(
             agent_doc_debounce::editor_sync_statuses(&doc_str)
                 .iter()
                 .all(|status| !status.in_flight),
-            "already_applied ack-content should mark the targeted live-buffer epoch synced"
+            "already_applied visible-write receipt should mark the targeted live-buffer epoch synced"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_already_applied_skip_file_fallback")
                 && log.contains("ipc_socket_already_applied_snapshot")
-                && log.contains("snap_source=ack_content_sidecar")
-                && log.contains("ack_content_live_buffer_synced")
-                && log.contains("ack_content_disk_write_through"),
-            "already_applied ack-content adoption should be auditable:\n{log}"
+                && log.contains("snap_source=lazily_visible_write_event")
+                && log.contains("visible_write_live_buffer_synced")
+                && log.contains("visible_write_disk_write_through"),
+            "already_applied visible-write adoption should be auditable:\n{log}"
         );
     }
 
     #[test]
-    fn already_applied_ack_content_does_not_overwrite_newer_visible_operator_edit() {
+    fn already_applied_visible_write_content_does_not_overwrite_newer_visible_operator_edit() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in [
-            "ack-content",
+            "visible-write",
             "patches",
             "snapshots",
             "crdt",
@@ -690,20 +719,20 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "### Re: Please reply — gpt-5\n\n",
             "Answered.\n",
-            "Operator typed after ack-content was captured.\n",
+            "Operator typed after visible-write was captured.\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
-        let patch_id = "already-applied-stale-ack-content";
-        fs::write(
-            root.join(".agent-doc/ack-content")
-                .join(format!("{patch_id}.md")),
+        let patch_id = "already-applied-stale-visible-write";
+        crate::write::ipc::transport::record_test_visible_write_receipt(
+            &doc,
+            patch_id,
             content_ours,
-        )
-        .unwrap();
+            "test_already_applied",
+        );
         fs::write(&doc, newer_visible).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -729,21 +758,21 @@ mod submodule_patch_routing_tests {
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             newer_visible,
-            "stale ack-content must not be written over a newer visible editor edit"
+            "stale visible-write content must not be written over a newer visible editor edit"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("already_applied_ack_content_stale_visible_adopted"),
-            "stale ack-content adoption should be auditable:\n{log}"
+            log.contains("already_applied_visible_write_snapshot_stale_visible_adopted"),
+            "stale visible-write adoption should be auditable:\n{log}"
         );
     }
 
     #[test]
-    fn already_applied_ack_content_does_not_overwrite_unsaved_live_editor_edit() {
+    fn already_applied_visible_write_content_does_not_overwrite_unsaved_live_editor_edit() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in [
-            "ack-content",
+            "visible-write",
             "patches",
             "snapshots",
             "crdt",
@@ -764,7 +793,7 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "<!-- /agent:exchange -->\n"
         );
-        let stale_ack_content = concat!(
+        let stale_visible_write_content = concat!(
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
@@ -784,7 +813,7 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "### Re: Please reply — gpt-5\n\n",
             "Answered.\n",
-            "Operator typed after ack-content was captured.\n",
+            "Operator typed after visible-write was captured.\n",
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
@@ -793,12 +822,12 @@ mod submodule_patch_routing_tests {
 
         let patch_id = "already-applied-unsaved-live-editor";
         let editor_id = "jetbrains-test-editor";
-        fs::write(
-            root.join(".agent-doc/ack-content")
-                .join(format!("{patch_id}.md")),
-            stale_ack_content,
-        )
-        .unwrap();
+        crate::write::ipc::transport::record_test_visible_write_receipt(
+            &doc,
+            patch_id,
+            stale_visible_write_content,
+            "test_already_applied",
+        );
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc.to_string_lossy(),
             unsaved_live_editor,
@@ -816,7 +845,7 @@ mod submodule_patch_routing_tests {
                 patch_id,
                 editor_id: Some(editor_id),
                 baseline: Some(baseline),
-                content_ours: Some(stale_ack_content),
+                content_ours: Some(stale_visible_write_content),
                 normalize_prefix_lines: None,
                 expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
             },
@@ -827,28 +856,28 @@ mod submodule_patch_routing_tests {
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
-            "stale ack-content must not replace the snapshot when the live editor buffer has moved on"
+            "stale visible-write content must not replace the snapshot when the live editor buffer has moved on"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             baseline,
-            "stale ack-content must not be written over an unsaved live editor edit"
+            "stale visible-write content must not be written over an unsaved live editor edit"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ack_content_disk_write_through_blocked")
+            log.contains("visible_write_disk_write_through_blocked")
                 && log.contains("reason=stale_source_buffer")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
-            "stale live-editor ACK write-through should fail closed:\n{log}"
+            "stale live-editor visible-write write-through should fail closed:\n{log}"
         );
     }
 
     #[test]
-    fn try_ipc_socket_ack_content_writes_through_when_disk_lags() {
+    fn try_ipc_socket_visible_write_content_writes_through_when_disk_lags() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in [
-            "ack-content",
+            "visible-write",
             "patches",
             "snapshots",
             "crdt",
@@ -880,7 +909,7 @@ mod submodule_patch_routing_tests {
             "Answered.\n",
             "<!-- /agent:exchange -->\n"
         );
-        let editor_ack_content = concat!(
+        let editor_visible_write_content = concat!(
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
@@ -898,7 +927,7 @@ mod submodule_patch_routing_tests {
         let editor_id = "jetbrains-test-editor";
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &doc_str,
-            editor_ack_content,
+            editor_visible_write_content,
             editor_id,
             "jetbrains",
             "test",
@@ -906,8 +935,9 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        let patch_id = "socket-ack-content-disk-lags";
-        let _listener = start_ack_content_only_listener(&root, editor_ack_content.to_string());
+        let patch_id = "socket-visible-write-disk-lags";
+        let _listener =
+            start_visible_write_only_listener(&root, editor_visible_write_content.to_string());
         wait_for_listener(&root);
 
         let patch = agent_doc_template::PatchBlock::new(
@@ -926,31 +956,34 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert!(result.success, "socket ACK-content should prove delivery");
+        assert!(
+            result.success,
+            "socket visible-write receipt should prove delivery"
+        );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(editor_ack_content),
-            "socket ACK-content should remain the snapshot authority"
+            Some(editor_visible_write_content),
+            "socket visible-write content should remain the snapshot authority"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            editor_ack_content,
-            "socket ACK-content must update stale disk after the sidecar proves editor-visible content"
+            editor_visible_write_content,
+            "socket visible-write receipt must update stale disk after lazily proves editor-visible content"
         );
         assert!(
             agent_doc_debounce::editor_sync_statuses(&doc_str)
                 .iter()
                 .all(|status| !status.in_flight),
-            "socket ACK-content should mark the targeted live-buffer epoch synced"
+            "socket visible-write receipt should mark the targeted live-buffer epoch synced"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ipc_socket_ack_content")
-                && log.contains("snap_source=ack_content_sidecar")
-                && log.contains("ack_content_live_buffer_synced")
-                && log.contains("ack_content_disk_write_through"),
-            "socket ACK-content disk write-through should be auditable:\n{log}"
+            log.contains("ipc_socket_visible_write")
+                && log.contains("snap_source=lazily_visible_write_event")
+                && log.contains("visible_write_live_buffer_synced")
+                && log.contains("visible_write_disk_write_through"),
+            "socket visible-write disk write-through should be auditable:\n{log}"
         );
     }
 
@@ -1124,7 +1157,7 @@ mod submodule_patch_routing_tests {
     }
 
     // #stale-already-applied — when the `already_applied` visible-buffer repair
-    // cannot go idle (the ack-content `current` diverges from a disk that keeps
+    // cannot go idle (the visible-write `current` diverges from a disk that keeps
     // changing — e.g. a stale/dead IPC endpoint oscillating a phantom buffer, or
     // a real editor mid-type), the guard defers. That deferral must NOT hard-error
     // finalize (which wedges the cycle at `response_captured` and can leave a
@@ -1133,7 +1166,7 @@ mod submodule_patch_routing_tests {
     fn already_applied_socket_missing_disk_response_not_idle_falls_back_to_file_ipc() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
-        for subdir in ["ack-content", "snapshots", "crdt", "logs", "state/cycles"] {
+        for subdir in ["visible-write", "snapshots", "crdt", "logs", "state/cycles"] {
             fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
         }
         let doc = root.join("session.md");
@@ -1142,7 +1175,7 @@ mod submodule_patch_routing_tests {
             "❯ Please reply\n",
             "<!-- /agent:exchange -->\n"
         );
-        // Disk and the ack-content `current` both lack the response, but differ
+        // Disk and the visible-write `current` both lack the response, but differ
         // from each other, so the visible-write guard re-reads disk, sees drift,
         // and defers.
         let disk_now = concat!(
@@ -1168,12 +1201,12 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
-        fs::write(
-            root.join(".agent-doc/ack-content")
-                .join(format!("{patch_id}.md")),
+        crate::write::ipc::transport::record_test_visible_write_receipt(
+            &doc,
+            patch_id,
             ack_current,
-        )
-        .unwrap();
+            "test_already_applied",
+        );
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &crate::write::WRITE_CONVERGENCE_EFFECTS,
@@ -1294,7 +1327,7 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn socket_ack_content_prompt_duplication_fails_closed_without_editor_repair() {
+    fn socket_visible_write_content_prompt_duplication_fails_closed_without_editor_repair() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let agent_doc_dir = root.join(".agent-doc");
@@ -1326,7 +1359,7 @@ mod submodule_patch_routing_tests {
             "<!-- agent:boundary:ours -->\n",
             "<!-- /agent:exchange -->\n"
         );
-        let duplicated_ack_content = concat!(
+        let duplicated_visible_write_content = concat!(
             "---\n",
             "agent_doc_session: test\n",
             "agent_doc_format: template\n",
@@ -1343,7 +1376,8 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
-        let _listener = start_fixed_ack_content_listener(&root, duplicated_ack_content.to_string());
+        let _listener =
+            start_fixed_visible_write_listener(&root, duplicated_visible_write_content.to_string());
         wait_for_listener(&root);
 
         let patch = agent_doc_template::PatchBlock::new(
@@ -1358,23 +1392,23 @@ mod submodule_patch_routing_tests {
             Some(baseline),
             Some(content_ours),
             None,
-            Some("duplicated-ack-content"),
+            Some("duplicated-visible-write"),
         )
         .unwrap_err();
 
         assert!(
             err.to_string().contains("refusing direct document write"),
-            "duplicated ack-content repair must fail closed instead of repairing disk: {err}"
+            "duplicated visible-write repair must fail closed instead of repairing disk: {err}"
         );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
-            "duplicated ack-content must not replace the existing snapshot without editor proof"
+            "duplicated visible-write must not replace the existing snapshot without editor proof"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            duplicated_ack_content,
-            "visible duplicated ack-content should remain editor-owned"
+            duplicated_visible_write_content,
+            "duplicated visible-write content should remain editor-owned"
         );
         assert!(
             agent_doc_cycle_state_io::load(&doc)
@@ -1385,17 +1419,17 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            log.contains("reason=prompt_duplication_in_ack_content")
+            log.contains("reason=prompt_duplication_in_visible_write")
                 && log.contains("duplicate_prompt_count=1")
                 && log.contains("ipc_visible_repair_retry_required_no_disk_write"),
-            "duplicate sidecar rejection and retry should be logged:\n{log}"
+            "duplicate visible-write rejection and retry should be logged:\n{log}"
         );
         assert!(
             log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=prompt_duplication_in_ack_content")
+                && log.contains("invariant=prompt_duplication_in_visible_write")
                 && log.contains("recovery=content_ours_snapshot_and_visible_repair")
                 && log.contains("recovery=retry_without_disk_write"),
-            "duplicate prompt ACK should name its failed invariant and recovery:\n{log}"
+            "duplicate prompt visible-write receipt should name its failed invariant and recovery:\n{log}"
         );
     }
 
@@ -2243,14 +2277,17 @@ mod late_fallback_patch_guard_tests {
 
     #[test]
     fn ipc_repair_decision_records_ack_prefix_repair_bad_state() {
-        let decision = IpcRepairDecision::ack_content_prefix_repair(
+        let decision = IpcRepairDecision::lazily_visible_write_prefix_repair(
             "fixed snapshot".to_string(),
             "bad editor state".to_string(),
             &["bad editor state".to_string()],
         );
 
         assert_eq!(decision.snapshot_content, "fixed snapshot");
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergence)
@@ -2271,7 +2308,7 @@ mod late_fallback_patch_guard_tests {
 
     #[test]
     fn ipc_repair_decision_preserves_original_bad_state_when_dedupe_follows_prefix_repair() {
-        let decision = IpcRepairDecision::ack_content_prefix_repair(
+        let decision = IpcRepairDecision::lazily_visible_write_prefix_repair(
             "prefix fallback with duplicate response".to_string(),
             "visible sidecar before fallback".to_string(),
             &["visible sidecar before fallback".to_string()],
@@ -2282,7 +2319,10 @@ mod late_fallback_patch_guard_tests {
         );
 
         assert_eq!(decision.snapshot_content, "deduped snapshot");
-        assert_eq!(decision.snap_source, IpcSnapshotSource::AckContentSidecar);
+        assert_eq!(
+            decision.snap_source,
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+        );
         assert_eq!(
             decision.disk_repair_reason,
             Some(IpcDiskRepairReason::PrefixDivergenceThenIpcDedupe)
@@ -3102,7 +3142,7 @@ mod late_fallback_patch_guard_tests {
 
         let tmp = TempDir::new().unwrap();
         let agent_doc_dir = tmp.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("ack-content")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -3114,14 +3154,17 @@ mod late_fallback_patch_guard_tests {
 
         let root = tmp.path().to_path_buf();
         let listener_root = root.clone();
-        let ack_root = root.clone();
         let server = std::thread::spawn(move || {
             agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload.get("patch_id")?.as_str()?;
-                let ack_dir = ack_root.join(".agent-doc/ack-content");
-                fs::create_dir_all(&ack_dir).ok()?;
-                fs::write(ack_dir.join(format!("{patch_id}.md")), "wrong\n").ok()?;
+                let file_path = payload.get("file")?.as_str()?;
+                crate::write::ipc::transport::record_test_visible_write_receipt(
+                    Path::new(file_path),
+                    patch_id,
+                    "wrong\n",
+                    "test_socket_listener",
+                );
                 Some(serde_json::json!({"type": "ack", "status": "ok"}).to_string())
             })
             .ok();
@@ -3137,7 +3180,7 @@ mod late_fallback_patch_guard_tests {
         );
         assert!(
             agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
-            "mismatched socket ack-content must not become the saved snapshot"
+            "mismatched socket visible-write must not become the saved snapshot"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -3446,7 +3489,7 @@ Implemented.
     /// buffer) must now converge IN-CYCLE via the editor IPC listener instead of
     /// bailing with `retry_without_disk_write` and only recovering on a later
     /// commit-path cycle. A component-patch listener that publishes the
-    /// ack-content sidecar proves the editor reached the repaired target.
+    /// lazily visible-write receipt proves the editor reached the repaired target.
     #[test]
     fn live_prompt_drift_repair_converges_in_cycle_via_editor_ipc() {
         // Disk lags the editor: the on-disk buffer equals neither the stale
@@ -3476,11 +3519,10 @@ Implemented.
         let agent_doc_dir = tmp.path().join(".agent-doc");
 
         // Editor listener: apply the component patch to the payload baseline and
-        // publish the converged buffer as the ack-content sidecar, exactly like
-        // the JetBrains plugin's Document-API convergence.
+        // publish the converged buffer as a lazily visible-write receipt, exactly
+        // like the JetBrains plugin's Document-API convergence.
         let listener_root = tmp.path().to_path_buf();
         let server = std::thread::spawn(move || {
-            let root = listener_root.clone();
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload
@@ -3498,10 +3540,13 @@ Implemented.
                 }
                 if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
                     let _ = std::fs::write(file_path, &content);
+                    crate::write::ipc::transport::record_test_visible_write_receipt(
+                        Path::new(file_path),
+                        &patch_id,
+                        &content,
+                        "test_socket_listener",
+                    );
                 }
-                let ack_dir = root.join(".agent-doc/ack-content");
-                let _ = std::fs::create_dir_all(&ack_dir);
-                let _ = std::fs::write(ack_dir.join(format!("{patch_id}.md")), &content);
                 Some(serde_json::json!({"type": "ack", "id": patch_id}).to_string())
             });
         });

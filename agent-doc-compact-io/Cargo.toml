@@ -33,6 +33,7 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
 agent-doc-orchestration = { path = "../agent-doc-orchestration", version = "0.34.67" }

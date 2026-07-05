@@ -316,6 +316,7 @@ name = "agent-doc-compact-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",

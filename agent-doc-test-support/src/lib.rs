@@ -485,7 +485,7 @@ pub fn drift_content_ours() -> String {
 
 pub fn start_live_prompt_drift_ack_listener(
     project_root: &Path,
-    ack_content: String,
+    visible_write_content: String,
 ) -> std::thread::JoinHandle<()> {
     let root = project_root.to_path_buf();
     std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -497,12 +497,12 @@ pub fn start_live_prompt_drift_ack_listener(
                 .and_then(|value| value.as_str())
                 .unwrap_or("unknown");
             if let Some(file_path) = v.get("file").and_then(|value| value.as_str()) {
-                let _ = std::fs::write(file_path, &ack_content);
+                let _ = std::fs::write(file_path, &visible_write_content);
                 let _ =
                     agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                         Path::new(file_path),
                         patch_id,
-                        &ack_content,
+                        &visible_write_content,
                         "test_live_prompt_drift_listener",
                     );
             }

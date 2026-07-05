@@ -326,7 +326,7 @@ mod tests {
         );
         assert_ne!(
             project_root, parent,
-            "superproject routing would split patch and ack-content paths"
+            "superproject routing would split patch and lazily projection paths"
         );
     }
 

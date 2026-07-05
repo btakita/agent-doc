@@ -506,14 +506,14 @@ One.
             .substringAfter("\"patch\" -> {")
             .substringBefore("\"reposition\" -> {")
         val socketPrecheck = socketPatch.indexOf("isAlreadyApplied(patch.patchId)")
-        val socketAckContent = socketPatch.indexOf("writeAlreadyAppliedContentProjection(patch, \"socket_precheck\")")
-        val socketAlreadyApplied = socketPatch.indexOf("APPLY_ALREADY_APPLIED", socketAckContent)
-        assertTrue("socket dedup must publish content projection before already_applied", socketPrecheck >= 0 && socketPrecheck < socketAckContent && socketAckContent < socketAlreadyApplied)
+        val socketProjection = socketPatch.indexOf("writeAlreadyAppliedContentProjection(patch, \"socket_precheck\")")
+        val socketAlreadyApplied = socketPatch.indexOf("APPLY_ALREADY_APPLIED", socketProjection)
+        assertTrue("socket dedup must publish content projection before already_applied", socketPrecheck >= 0 && socketPrecheck < socketProjection && socketProjection < socketAlreadyApplied)
 
         val filePrecheck = patchWatcher.indexOf("// patch_id dedup: if socket IPC already applied")
-        val fileAckContent = patchWatcher.indexOf("writeAlreadyAppliedContentProjection(patch, \"file_precheck\")", filePrecheck)
-        val fileDelete = patchWatcher.indexOf("patchFile.delete()", fileAckContent)
-        assertTrue("file watcher dedup must publish content projection before deleting the patch", filePrecheck >= 0 && filePrecheck < fileAckContent && fileAckContent < fileDelete)
+        val fileProjection = patchWatcher.indexOf("writeAlreadyAppliedContentProjection(patch, \"file_precheck\")", filePrecheck)
+        val fileDelete = patchWatcher.indexOf("patchFile.delete()", fileProjection)
+        assertTrue("file watcher dedup must publish content projection before deleting the patch", filePrecheck >= 0 && filePrecheck < fileProjection && fileProjection < fileDelete)
     }
 
     @Test

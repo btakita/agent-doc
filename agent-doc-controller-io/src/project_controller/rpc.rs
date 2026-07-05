@@ -4804,7 +4804,21 @@ fn visible_write_commit_candidate_events(
 ) -> (
     agent_doc_state_backbone::StateEvent,
     agent_doc_state_backbone::StateEvent,
+    agent_doc_state_backbone::StateEvent,
 ) {
+    let generation_event = agent_doc_state_backbone::StateEvent::new(
+        visible_write_event_id(
+            "generation",
+            document_hash,
+            &payload.patch_id,
+            &payload.model_revision.to_string(),
+        ),
+        agent_doc_state_backbone::StateFact::OwnerGenerationChanged {
+            document_hash: document_hash.to_string(),
+            owner: agent_doc_state_backbone::StateOwner::EditorIpcBridge,
+            generation: payload.model_revision,
+        },
+    );
     let applied_event = agent_doc_state_backbone::StateEvent::new(
         visible_write_event_id(
             "applied",
@@ -4834,7 +4848,7 @@ fn visible_write_commit_candidate_events(
             source: payload.source.clone(),
         },
     );
-    (applied_event, proof_event)
+    (generation_event, applied_event, proof_event)
 }
 
 fn record_visible_write_commit_candidate_direct(
@@ -4844,8 +4858,9 @@ fn record_visible_write_commit_candidate_direct(
     payload: &VisibleWriteCommitCandidatePayload,
     controller_err: &anyhow::Error,
 ) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
-    let (applied_event, proof_event) =
+    let (generation_event, applied_event, proof_event) =
         visible_write_commit_candidate_events(document_hash, payload);
+    let generation_inserted = append_state_event(project_root, &generation_event)?;
     let applied_inserted = append_state_event(project_root, &applied_event)?;
     let candidate_inserted = append_state_event(project_root, &proof_event)?;
     let projection = load_state_backbone_projection(project_root)?;
@@ -4864,12 +4879,13 @@ fn record_visible_write_commit_candidate_direct(
     agent_doc_ops_log_io::log_op(
         canonical,
         &format!(
-            "visible_write_commit_candidate_durable_event_recorded file={} patch_id={} model_revision={} commit_candidate_hash={} source={} applied_inserted={} candidate_inserted={} authority=state_backbone recovery=controller_reconcile controller_error={}",
+            "visible_write_commit_candidate_durable_event_recorded file={} patch_id={} model_revision={} commit_candidate_hash={} source={} generation_inserted={} applied_inserted={} candidate_inserted={} authority=state_backbone recovery=controller_reconcile controller_error={}",
             canonical.display(),
             payload.patch_id,
             proof.model_revision,
             proof.commit_candidate_hash,
             proof.source,
+            generation_inserted,
             applied_inserted,
             candidate_inserted,
             compact_controller_error(controller_err)
@@ -5020,8 +5036,9 @@ pub(crate) fn handle_visible_write_commit_candidate_observed(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let payload: VisibleWriteCommitCandidatePayload = serde_json::from_str(&payload_json)
         .context("parse visible write commit candidate payload")?;
-    let (applied_event, proof_event) =
+    let (generation_event, applied_event, proof_event) =
         visible_write_commit_candidate_events(&document_hash, &payload);
+    append_apply_state_event(bootstrap, runtime, generation_event)?;
     append_apply_state_event(bootstrap, runtime, applied_event)?;
     append_apply_state_event(bootstrap, runtime, proof_event)?;
     let projection = runtime

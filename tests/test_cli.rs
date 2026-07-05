@@ -981,7 +981,7 @@ fn live_tmux_tests_are_not_in_default_development_suite() {
         "src/autoclaim.rs",
         "agent-doc-focus-io/src/lib.rs",
         "agent-doc-sync-io/src/resync.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "src/session_actor_cmd.rs",
         "agent-doc-session-registry-io/src/registration.rs",
         "agent-doc-orchestration/src/start.rs",
@@ -1108,7 +1108,7 @@ fn agent_doc_test_support_owns_orchestration_test_helpers() {
     let test_support =
         fs::read_to_string(manifest_dir.join("agent-doc-test-support/src/lib.rs")).unwrap();
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     for required in [
         "pub struct ProcessGlobalLockGuard",
         "pub fn env_lock()",
@@ -1167,11 +1167,11 @@ fn flowcore_hot_path_guard_and_proof_tokens_are_budgeted() {
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-preflight-io/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-route-io/src/dispatch_only.rs",
         "agent-doc-route-io/src/dispatch_only/proof.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
-        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-orchestration/tests/route/pane_resolution.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
         "agent-doc-route-io/src/startup.rs",
@@ -1338,8 +1338,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         ("agent-doc-preflight-io/src/lib.rs", "guard_") => 3,
         ("agent-doc-orchestration/src/repair.rs", "guard_") => 10,
         ("agent-doc-orchestration/src/repair.rs", "reason=") => 5,
-        ("agent-doc-orchestration/src/route.rs", "accepted_only") => 2,
-        ("agent-doc-orchestration/src/route.rs", "flow_reason=") => 2,
+        ("agent-doc-orchestration/tests/route.rs", "accepted_only") => 2,
+        ("agent-doc-orchestration/tests/route.rs", "flow_reason=") => 2,
         // +5 for the audited `#snrun` blocked-in-interactive-substate guard:
         // the `dispatch_only_blocked_guard_reason` import + its `guard_reason`
         // binding, the prompt-ready FlowEvent proof-log emission, and the
@@ -1356,11 +1356,11 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // authoritative actor runtime eligibility wrapper moved to
         // `agent-doc-supervisor::route_runtime`; route.rs now calls the focused
         // supervisor policy directly.
-        ("agent-doc-orchestration/src/route.rs", "guard_") => 6,
+        ("agent-doc-orchestration/tests/route.rs", "guard_") => 6,
         // 3 -> 0: route submit-observation proof rendering moved to
         // `agent-doc-controller::dispatch`; route now adapts proof facts into
         // the focused controller formatter instead of owning `proof=` log text.
-        ("agent-doc-orchestration/src/route.rs", "proof=") => 0,
+        ("agent-doc-orchestration/tests/route.rs", "proof=") => 0,
         // +1 for the audited route resilience diagnostic
         // `route_queue_dispatch_unparseable_preserved ... reason={parse_err}`:
         // when the existing agent:queue is polluted/unparseable the route
@@ -1380,7 +1380,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // +1 (`reason=force_disk`): route's explicit no-listener/headless
         // escape hatch logs when `--force-disk` bypasses editor convergence for
         // route-owned session/queue writes.
-        ("agent-doc-orchestration/src/route.rs", "reason=") => 10,
+        ("agent-doc-orchestration/tests/route.rs", "reason=") => 10,
         // Route dispatch-only send/retry moved out of orchestration with its
         // remaining route-local guard terms. Proof wording lives in the nested
         // proof module below.
@@ -1410,8 +1410,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // re-send. Routed through the `RouteDispatchAuthorization::CoalescedDeduped`
         // outcome so every dispatch site handles the coalesce at compile time.
         ("agent-doc-route-io/src/authoritative_actor.rs", "reason=") => 2,
-        ("agent-doc-orchestration/src/route/pane_resolution.rs", "guard_") => 1,
-        ("agent-doc-orchestration/src/route/pane_resolution.rs", "reason=") => 4,
+        ("agent-doc-orchestration/tests/route/pane_resolution.rs", "guard_") => 1,
+        ("agent-doc-orchestration/tests/route/pane_resolution.rs", "reason=") => 4,
         // +1 (#kjw0 / #jbrunautobug): the busy-pane short-circuit logs the
         // existing busy proof line before returning the typed queued outcome,
         // so an accepted trigger queued behind an active turn is auditable
@@ -5162,7 +5162,7 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "agent-doc-flow-io must stay free of orchestration and concrete ops-log sinks"
     );
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_authoritative_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
             .unwrap();
@@ -9510,7 +9510,7 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
     }
 
     let route =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_authoritative_actor =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
             .unwrap();
@@ -11612,7 +11612,7 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         "agent-doc-orchestration/src/preflight.rs",
         "agent-doc-orchestration/src/preflight/run.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-orchestration/src/write.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
@@ -11774,7 +11774,7 @@ fn test_agent_doc_flow_io_owns_closeout_effect_adapter() {
         "src/session_actor_cmd.rs",
         "agent-doc-orchestration/src/lib.rs",
         "agent-doc-orchestration/src/repair.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-orchestration/src/write.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(production_source)).unwrap();
@@ -14221,7 +14221,7 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
     let orchestration_route_startup_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route/startup.rs"))
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route/startup.rs"))
             .unwrap();
     for forbidden_snippet in [
         "pub fn auto_start(",
@@ -15203,7 +15203,7 @@ fn test_agent_doc_controller_owns_route_trigger_matching_policy() {
     for relative in [
         "agent-doc-route-io/src/cycle_ack.rs",
         "agent-doc-route-io/src/dispatch.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-supervisor-io/src/detection.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -15739,7 +15739,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
             .unwrap();
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_command_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/command.rs")).unwrap();
     let route_dispatch_source =
@@ -15779,7 +15779,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let route_closeout_drain_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/closeout_drain.rs")).unwrap();
     let route_pane_resolution_source = fs::read_to_string(
-        manifest_dir.join("agent-doc-orchestration/src/route/pane_resolution.rs"),
+        manifest_dir.join("agent-doc-orchestration/tests/route/pane_resolution.rs"),
     )
     .unwrap();
     let route_cycle_ack_source =
@@ -18335,7 +18335,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     );
     for relative in [
         "agent-doc-controller-io/src/project_controller/rpc.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-orchestration/src/start.rs",
         "agent-doc-sync-io/src/sync.rs",
         "src/queue_dispatch.rs",
@@ -18453,7 +18453,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     let orchestration_route =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_dispatch_recovery =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_recovery.rs"))
             .unwrap();
@@ -21022,7 +21022,7 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/write.rs")).unwrap();
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_diagnostics =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/diagnostics.rs")).unwrap();
 
@@ -21742,7 +21742,7 @@ fn test_agent_doc_tmux_owns_editor_column_split_policy() {
     }
 
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_pane_resolution_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
     let sync_source =
@@ -22163,9 +22163,9 @@ fn test_agent_doc_tmux_owns_associated_pane_resolution_policy() {
     );
 
     for relative_path in [
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-sync-io/src/resync.rs",
-        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-orchestration/tests/route/pane_resolution.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
         assert!(
@@ -22276,10 +22276,10 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
         }
     }
     for relative in [
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/session_resolution.rs",
-        "agent-doc-orchestration/src/route/pane_resolution.rs",
+        "agent-doc-orchestration/tests/route/pane_resolution.rs",
         "agent-doc-route-io/src/startup.rs",
         "agent-doc-route-io/src/startup_sync.rs",
         "agent-doc-route-io/src/pane_provenance.rs",
@@ -22316,7 +22316,7 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
     let route_dispatch_target =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/dispatch_target.rs")).unwrap();
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let test_support_source =
         fs::read_to_string(manifest_dir.join("agent-doc-test-support/src/lib.rs")).unwrap();
     let sessions_source =
@@ -22835,7 +22835,7 @@ fn test_agent_doc_tmux_commands_owns_submit_profile_policy() {
     let supervisor_ipc_protocol_source =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/ipc_protocol.rs")).unwrap();
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     for source in [
         &supervisor_ipc_protocol_source,
         &route_dispatch_source,
@@ -22938,7 +22938,7 @@ fn test_agent_doc_hash_owns_sha256_content_policy() {
         "agent-doc-op-capture-io/src/lib.rs",
         "agent-doc-element-backlog-io/src/backlog_cmd.rs",
         "agent-doc-run-context-io/src/lib.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-debounce/src/lib.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
@@ -23555,7 +23555,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "route busy-pane IO should call focused project-root IO instead of owning .agent-doc root discovery"
     );
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_queue_dispatch_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/queue_dispatch.rs")).unwrap();
     assert!(
@@ -24145,7 +24145,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         "src/session_actor_cmd.rs",
         "agent-doc-controller-io/src/project_controller/rpc.rs",
         "agent-doc-orchestration/tests/direct_run.rs",
-        "agent-doc-orchestration/src/route.rs",
+        "agent-doc-orchestration/tests/route.rs",
         "agent-doc-route-io/src/dispatch.rs",
         "agent-doc-route-io/src/startup.rs",
         "agent-doc-session-registry-io/src/registration.rs",
@@ -24198,7 +24198,7 @@ fn test_agent_doc_tmux_commands_and_io_own_input_diag_layers() {
         }
     }
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     assert!(
         !route_source.contains("const EDITOR_ROUTE_ATTEMPT_ID_ENV"),
         "route diagnostics should use the focused editor route attempt-id env constant"
@@ -28419,7 +28419,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
     }
 
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_queue_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/queue_dispatch.rs")).unwrap();
     let route_dispatch_only =
@@ -28517,7 +28517,7 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
 fn test_agent_doc_route_io_owns_route_document_prep() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let document_prep =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/document_prep.rs")).unwrap();
     let route_command =
@@ -28567,7 +28567,7 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
 fn test_agent_doc_route_io_owns_route_document_write_authority() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/Cargo.toml")).unwrap();
     let route_io_lib =
@@ -28612,7 +28612,7 @@ fn test_agent_doc_route_io_owns_route_document_write_authority() {
 fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let runtime_effects =
@@ -28688,7 +28688,7 @@ fn test_agent_doc_route_io_owns_route_runtime_effect_bundles() {
 fn test_agent_doc_route_io_owns_route_closeout_drain() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let closeout_drain =
@@ -28728,7 +28728,7 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
 fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let authoritative_dispatch =
@@ -28774,7 +28774,7 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
 fn test_agent_doc_route_io_owns_route_command_runtime() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let route_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/route.rs")).unwrap();
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/tests/route.rs")).unwrap();
     let route_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let route_command =

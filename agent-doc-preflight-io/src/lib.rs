@@ -3,6 +3,7 @@
 pub mod debounce;
 pub mod gc;
 pub mod layout;
+pub mod sweep;
 pub mod warnings;
 
 use agent_doc_document::queue_projection::{

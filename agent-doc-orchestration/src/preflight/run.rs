@@ -9,6 +9,7 @@ use agent_doc_preflight_io::{
     enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
     read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
     run_pending_maintenance, run_queue_maintenance, save_baseline_content,
+    sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
 };
 use agent_doc_preflight_runtime_io::{
     relocate_out_of_exchange_prompt_before_diff,

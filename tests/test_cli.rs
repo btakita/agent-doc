@@ -20145,6 +20145,78 @@ fn test_agent_doc_preflight_runtime_io_owns_closeout_drift_recovery_graph() {
 }
 
 #[test]
+fn test_agent_doc_preflight_io_owns_sweep_owner_graph() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let preflight_io_lib =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    let preflight_sweep =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/sweep.rs")).unwrap();
+    let preflight_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/Cargo.toml")).unwrap();
+    let orchestration_preflight =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight.rs")).unwrap();
+    let orchestration_preflight_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/preflight/run.rs"))
+            .unwrap();
+
+    assert!(
+        preflight_io_lib.contains("pub mod sweep;"),
+        "agent-doc-preflight-io should expose the focused sweep owner module"
+    );
+    for required in [
+        "pub struct SweepOwner",
+        "fn actor_sweep_owner(",
+        "agent_doc_controller_io::project_controller::authoritative_actor_binding(",
+        "tmux_router::registry::canonical_registry_key_in(",
+        "pub fn sweep_owner_for_doc(",
+        "pub fn current_sweep_owner(",
+        "pub fn log_and_skip_foreign_owned_sweep_if_needed(",
+        "agent_doc_workflow::preflight_policy::should_skip_foreign_owned_sweep(",
+        "foreign_owned_sweep_owner_warning file=",
+        "foreign_owned_sweep_skip file=",
+    ] {
+        assert!(
+            preflight_sweep.contains(required),
+            "agent-doc-preflight-io sweep module must own sweep owner marker: {required}"
+        );
+    }
+    for required_dep in [
+        "agent-doc-controller-io =",
+        "agent-doc-ops-log-io =",
+        "agent-doc-workflow =",
+        "tmux-router =",
+    ] {
+        assert!(
+            preflight_manifest.contains(required_dep),
+            "agent-doc-preflight-io should declare sweep owner dependency: {required_dep}"
+        );
+    }
+    for forbidden in [
+        "struct SweepOwner",
+        "enum ActorSweepOwner",
+        "fn actor_sweep_owner(",
+        "fn registry_sweep_owner(",
+        "fn sweep_owner_for_doc(",
+        "fn current_sweep_owner(",
+        "fn log_and_skip_foreign_owned_sweep_if_needed(",
+        "foreign_owned_sweep_skip file=",
+    ] {
+        assert!(
+            !orchestration_preflight.contains(forbidden),
+            "orchestration preflight.rs must not re-own sweep owner marker: {forbidden}"
+        );
+    }
+    assert!(
+        orchestration_preflight_run.contains("agent_doc_preflight_io::{")
+            && orchestration_preflight_run.contains("sweep::{")
+            && orchestration_preflight_run.contains("current_sweep_owner(")
+            && orchestration_preflight_run.contains("sweep_owner_for_doc(")
+            && orchestration_preflight_run.contains("log_and_skip_foreign_owned_sweep_if_needed("),
+        "preflight run sequencing should call focused sweep owner helpers"
+    );
+}
+
+#[test]
 fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let orchestration_preflight =

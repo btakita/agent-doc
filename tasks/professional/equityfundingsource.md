@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: start
 ---
 
 ## Status
@@ -38,7 +38,20 @@ complete
 Compacted content:
 - Archived 10 response topic(s): Advance-lender dialog; deploy; Realtime pipeline events + notifications; 7 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lend...
-<!-- agent:boundary:0fb4a148 -->
+
+### Re: stop-hook closeout — gpt-5
+
+No repo work was performed for `#sy71` in this cycle. The prior turn found no new document prompt body to answer, repaired the stale snapshot/CRDT sidecars from the current visible document, and verified the session cycle after recovery.
+
+This write is the required hook closeout: it moves the captured assistant response through the binary-owned `agent-doc write --commit` boundary so the turn is represented in the session document and git history.
+
+Verification already completed in this turn path:
+- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
+- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reported `no_changes: true`
+- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reached committed state after recovery
+
+Remaining operator-visible notes: the queue is still paused by dangling `/goal #zhfn`, and the installed `agent-doc` binary is stale relative to local source edits.
+<!-- agent:boundary:d84f183b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

@@ -63,6 +63,10 @@ Operator correction 2026-07-04: early agent-doc VIDEOS drew real enthusiasm; com
 
 Discipline: concentrate ~70% of posts on the signals narrative for a quarter so the audience associates Brian with it (current feed spreads across ontology/security/module-harness/resume topics). Cross-post technical rungs (benchmarks, lazily-formal) to HN/lobste.rs; pitch localfirst.fm / FOSDEM with the demo-driven "music patchboard for signals" talk once #spb5 footage exists. Marketing plan therefore reinforces starting #spb1→#spb5: the stack only becomes visually marketable at Phase 4/5.
 
+## 6. agent-doc open vs closed source (2026-07-05)
+
+Decision input: btakita/agent-doc is already PUBLIC (GitHub + historical crates.io releases + operator's own architecture posts); agent-loop superproject (plans, failure memories, war stories, positioning) is PRIVATE. **Recommendation: stay open.** Rationale: (a) the durable alpha is the failure taxonomy + merge judgment, which lives in the private repo and in experience — source shows solutions, not the map of dead ends; (b) closing now forfeits trust/marketing upside without recovering secrecy (history is already public); (c) an agent tool that runs with danger-full-access against repos/editors has a near-zero adoption ceiling as a closed indie binary — open source is the adoption prerequisite, not just marketing; (d) realistic copiers copy the IDEA (which leaks via marketing anyway), and the implementation is high-friction to lift (coupled to lazily/tmux-router/JB plugin stack). Protect instead: keep agent-loop private, publish war stories deliberately on own schedule, put future commercial leverage in hosted/team/collab services (Zed-style open-core), and hold FSL/BSL as a license lever only if a hosted-clone threat becomes real post-traction.
+
 ## Open threads
 
 - [ ] Run `tsift dci-benchmark` memory-retrieval parity eval + one clean session cycle → then retire direct claude-mem reads.

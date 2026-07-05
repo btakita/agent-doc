@@ -16,6 +16,7 @@ agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.67" }
 agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.67" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }

@@ -179,6 +179,10 @@ impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects
         try_resolve_current_document_content(file, source)
     }
 
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        resolve_disk_current_document_content(file, source)
+    }
+
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         atomic_write_through_authority(file, content)
     }
@@ -1014,6 +1018,35 @@ pub fn try_resolve_current_doc_from_file(file: &std::path::Path) -> Result<Recon
 pub fn try_resolve_current_document(file: &std::path::Path) -> Result<CurrentDocument> {
     try_resolve_current_doc_from_file(file)
         .map(|reconciliation| CurrentDocument::new(file.to_path_buf(), reconciliation))
+}
+
+/// Resolve the current document from disk while preserving the typed document
+/// model boundary.
+///
+/// This is for explicit force-disk recovery paths. Normal cycle reads should
+/// prefer [`try_resolve_current_document`] so live editor authority can win.
+pub fn resolve_disk_current_document(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<CurrentDocument> {
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to read disk-authoritative document {}",
+            file.display()
+        )
+    })?;
+    record_disk_replica_authority(file, source, &content);
+    Ok(CurrentDocument::new(
+        file.to_path_buf(),
+        reconcile_current_doc(&content, None),
+    ))
+}
+
+pub fn resolve_disk_current_document_content(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<String> {
+    Ok(resolve_disk_current_document(file, source)?.into_content())
 }
 
 pub fn try_resolve_current_document_content(

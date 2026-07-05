@@ -80,41 +80,8 @@ use crate::{
     detect_jb_cache_conflict_accept_duplicate_replay,
     detect_jb_cache_conflict_cancel_recoverable_with_context,
     detect_late_ipc_response_overapplication, detect_unstarted_prompt_bearing_diff,
+    operator_live_buffer_contains_heading,
 };
-
-fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
-    let file_key = file.to_string_lossy();
-    let heading = heading.trim();
-    if heading.is_empty() {
-        return false;
-    }
-    for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
-        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
-            continue;
-        }
-        if !agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
-            continue;
-        }
-        let Some(content) = snapshot.content.as_deref() else {
-            continue;
-        };
-        let content_norm =
-            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content);
-        if content_norm.lines().any(|line| line.trim() == heading) {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "session_check_committed_response_visible_in_live_buffer file={} heading={:?} editor_id={:?}",
-                    file.display(),
-                    heading,
-                    snapshot.editor_id
-                ),
-            );
-            return true;
-        }
-    }
-    false
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionCheckStatus {

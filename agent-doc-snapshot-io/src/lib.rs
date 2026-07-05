@@ -232,6 +232,53 @@ pub fn verify_snapshot_committed(file: &Path) -> Result<SnapshotCommitStatus> {
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotHeadContentHashStatus {
+    Matching {
+        hash: String,
+    },
+    SnapshotDiffersFromHead {
+        snapshot_hash: String,
+        head_hash: String,
+        snapshot_len: usize,
+        head_len: usize,
+    },
+    NoSnapshot,
+    NoHead,
+    NotInGitRepo,
+}
+
+/// Compare the raw snapshot content hash against the raw `HEAD:<file>` hash.
+///
+/// This is stricter than [`verify_snapshot_committed`], which normalizes
+/// transient markers for user-facing drift guards. Terminal closeout proof
+/// records raw hashes, so its retry gate must use the same raw equality.
+pub fn verify_snapshot_head_content_hash(file: &Path) -> Result<SnapshotHeadContentHashStatus> {
+    if !agent_doc_git_io::status::is_in_git_repo(file) {
+        return Ok(SnapshotHeadContentHashStatus::NotInGitRepo);
+    }
+    let Some(snapshot) = load(file)? else {
+        return Ok(SnapshotHeadContentHashStatus::NoSnapshot);
+    };
+    let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(SnapshotHeadContentHashStatus::NoHead);
+    };
+    let snapshot_hash = agent_doc_hash::content_hash(&snapshot);
+    let head_hash = agent_doc_hash::content_hash(&head_doc);
+    if snapshot_hash == head_hash {
+        Ok(SnapshotHeadContentHashStatus::Matching {
+            hash: snapshot_hash,
+        })
+    } else {
+        Ok(SnapshotHeadContentHashStatus::SnapshotDiffersFromHead {
+            snapshot_hash,
+            head_hash,
+            snapshot_len: snapshot.len(),
+            head_len: head_doc.len(),
+        })
+    }
+}
+
 /// Create the initial markdown snapshot if no snapshot exists yet.
 ///
 /// The caller supplies the content projection so domain-specific stripping or

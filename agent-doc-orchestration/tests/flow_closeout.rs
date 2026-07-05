@@ -34,7 +34,7 @@ pub fn gather_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecovery
 pub fn observe_closeout_recovery_evidence(file: &Path) -> Result<CloseoutRecoveryEvidence> {
     agent_doc_flow_io::closeout::observe_closeout_recovery_evidence(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 
@@ -43,7 +43,7 @@ pub fn load_current_observed_closeout_recovery_evidence(
 ) -> Result<Option<CloseoutRecoveryEvidence>> {
     agent_doc_flow_io::closeout::load_current_observed_closeout_recovery_evidence(
         file,
-        &agent_doc_orchestration::closeout_effects(),
+        &agent_doc_closeout_runtime_io::closeout_effects(),
     )
 }
 

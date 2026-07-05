@@ -250,13 +250,31 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
     let last = content
         .lines()
         .filter(|line| !line.trim().is_empty())
+        .filter(|line| !is_read_only_document_resolution_event(strip_timestamp_prefix(line)))
         .rfind(|line| {
             line.contains(&format!("file={canonical_display}"))
                 || line.contains(&format!("file={requested_display}"))
         })
-        .or_else(|| content.lines().rfind(|line| !line.trim().is_empty()))
+        .or_else(|| {
+            content
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .filter(|line| {
+                    !is_read_only_document_resolution_event(strip_timestamp_prefix(line))
+                })
+                .rfind(|_| true)
+        })
         .map(|line| strip_timestamp_prefix(line).to_string());
     Ok(last)
+}
+
+fn is_read_only_document_resolution_event(event: &str) -> bool {
+    event.starts_with("realtime_doc_resolve ")
+        || event.starts_with("realtime_doc_resolve_crdt_error ")
+        || event.starts_with("crdt_current_text_unavailable ")
+        || event.starts_with("document_model_ensure_start ")
+        || event.starts_with("document_model_ensure_publish_requested ")
+        || event.starts_with("document_model_ensure_failed ")
 }
 
 pub fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
@@ -441,6 +459,26 @@ mod tests {
                 "[100] ipc_write_consumed file={} patches=1\n[101] preflight_diff_start file={}\n",
                 doc.display(),
                 other.display()
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            last_ops_event(&doc).unwrap().unwrap(),
+            format!("ipc_write_consumed file={} patches=1", doc.display())
+        );
+    }
+
+    #[test]
+    fn last_ops_event_ignores_read_only_document_resolution_telemetry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/ops.log"),
+            format!(
+                "[100] ipc_write_consumed file={} patches=1\n[101] realtime_doc_resolve authority=disk reason=editor_absent file={}\n",
+                doc.display(),
+                doc.display()
             ),
         )
         .unwrap();

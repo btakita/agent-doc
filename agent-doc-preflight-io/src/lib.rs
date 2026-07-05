@@ -4283,6 +4283,10 @@ mod tests {
         TestQueueConsumeWriteEffects;
 
     impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for TestQueueConsumeWriteEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
         fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
             std::fs::write(file, content)?;
             Ok(())

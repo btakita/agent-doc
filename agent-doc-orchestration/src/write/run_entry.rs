@@ -1501,8 +1501,18 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         )?;
     }
     let pending_flags = super::pending_write_flags(&flags);
-    agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
-    agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
+    if let Err(err) =
+        agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)
+    {
+        retain_ipc_patch_for_retry_error(file, baseline, &response, &err, "pending_capture")?;
+        return Err(err);
+    }
+    if let Err(err) =
+        agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)
+    {
+        retain_ipc_patch_for_retry_error(file, baseline, &response, &err, "pending_done")?;
+        return Err(err);
+    }
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
 
@@ -1669,6 +1679,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         eprintln!(
             "[write] IPC patch was consumed without materializing the response — refusing direct document write; retry required"
         );
+        retain_consumed_ipc_patch_for_retry(file, &patch_file, &ipc_payload, &patch_id)?;
     } else {
         eprintln!(
             "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
@@ -1731,7 +1742,54 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     );
 }
 
-fn retain_ipc_patch_for_editor_authority_retry(
+fn retain_consumed_ipc_patch_for_retry(
+    file: &Path,
+    patch_file: &Path,
+    payload: &serde_json::Value,
+    patch_id: &str,
+) -> Result<()> {
+    atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "run_ipc_consumed_without_materialization_patch_retained file={} patch_id={} patch_file={} recovery=retry_without_disk_write",
+            file.display(),
+            patch_id,
+            patch_file.display()
+        ),
+    );
+    Ok(())
+}
+
+fn retain_ipc_patch_for_retry_error(
+    file: &Path,
+    baseline: Option<&str>,
+    response: &str,
+    err: &anyhow::Error,
+    source: &str,
+) -> Result<()> {
+    let retry_without_disk = error_requests_retry_without_disk(err);
+    if !retry_without_disk {
+        return Ok(());
+    }
+    retain_ipc_patch_for_editor_authority_retry(file, baseline, response).with_context(|| {
+        format!(
+            "failed to retain IPC retry patch after {source} authority failure for {}",
+            file.display()
+        )
+    })
+}
+
+pub(crate) fn error_requests_retry_without_disk(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains("retry_without_disk_write")
+            || message.contains("disk is not consulted until the editor is detached")
+            || message.contains("disk remained non-authoritative")
+    })
+}
+
+pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
     file: &Path,
     baseline: Option<&str>,
     response: &str,

@@ -644,7 +644,7 @@ fn semantic_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeA
 
 enum SemanticMergeAckQueueSource {
     Projection(ProjectedCloseoutState),
-    Cycle(CycleState),
+    Cycle(Box<CycleState>),
 }
 
 impl SemanticMergeAckQueueSource {
@@ -669,7 +669,7 @@ fn load_semantic_merge_ack_queue_source(
 ) -> Result<Option<SemanticMergeAckQueueSource>> {
     let raw = load(file)?;
     let Some(projection) = load_closeout_projection(file)? else {
-        return Ok(raw.map(SemanticMergeAckQueueSource::Cycle));
+        return Ok(raw.map(|state| SemanticMergeAckQueueSource::Cycle(Box::new(state))));
     };
     if !projection.pending_semantic_merge_acks.is_empty() {
         return Ok(Some(SemanticMergeAckQueueSource::Projection(projection)));
@@ -677,7 +677,7 @@ fn load_semantic_merge_ack_queue_source(
     if let Some(raw) = raw
         && projection.matches_cycle(&raw.cycle_id)
     {
-        return Ok(Some(SemanticMergeAckQueueSource::Cycle(raw)));
+        return Ok(Some(SemanticMergeAckQueueSource::Cycle(Box::new(raw))));
     }
     Ok(Some(SemanticMergeAckQueueSource::Projection(projection)))
 }

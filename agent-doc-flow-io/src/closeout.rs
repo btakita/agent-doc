@@ -39,6 +39,15 @@ pub trait CloseoutEffects {
         source: &str,
     ) -> Result<agent_doc_document_realtime::CurrentDocument>;
 
+    fn resolve_current_document_for_authority(
+        &self,
+        file: &Path,
+        source: &str,
+        _force_disk: bool,
+    ) -> Result<agent_doc_document_realtime::CurrentDocument> {
+        self.resolve_current_document(file, source)
+    }
+
     fn write_current_document(
         &self,
         doc: &agent_doc_document_realtime::CurrentDocument,
@@ -55,6 +64,11 @@ pub trait CloseoutEffects {
     ) -> Result<agent_doc_cycle_state_io::CycleState>;
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompleteRequiredCloseoutOptions {
+    pub force_disk: bool,
+}
+
 pub fn log_closeout_guard_event(
     file: &Path,
     stage: FlowStage,
@@ -69,6 +83,18 @@ pub fn log_closeout_guard_event(
 }
 
 pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) -> Result<bool> {
+    complete_required_closeout_with_options(
+        file,
+        effects,
+        CompleteRequiredCloseoutOptions::default(),
+    )
+}
+
+pub fn complete_required_closeout_with_options(
+    file: &Path,
+    effects: &dyn CloseoutEffects,
+    options: CompleteRequiredCloseoutOptions,
+) -> Result<bool> {
     let mut timer = CloseoutTimer::start(file);
     let rc = agent_doc_run_context_io::run_context(file.to_path_buf());
 
@@ -104,6 +130,7 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
     // barrier (no-op under the Detached / headless path).
     agent_doc_crdt_relay_io::record_committed_baseline_for_file(file);
     rc.invalidate_head_content();
+    rc.invalidate_snapshot_content();
     timer.mark("git_commit");
     ensure_cycle_committed(file)?;
     timer.mark("cycle_state");
@@ -124,36 +151,32 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
     let editor_attached =
         agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
             .editor_attached();
-    let pending_maintenance = effects.run_pending_maintenance(file, !editor_attached);
+    let pending_maintenance =
+        effects.run_pending_maintenance(file, options.force_disk || !editor_attached);
     match pending_maintenance {
         Ok(_) => {
             rc.invalidate_head_content();
+            rc.invalidate_snapshot_content();
             timer.mark("closeout_reap");
         }
         Err(e) => eprintln!("[commit] closeout pending-reap maintenance failed (non-fatal): {e}"),
     }
 
-    if let agent_doc_snapshot_io::SnapshotCommitStatus::SnapshotDiffersFromHead { .. } =
-        rc.snapshot_commit_status()
-    {
-        eprintln!("[commit] snapshot differs from HEAD after commit - retrying");
-        log_closeout_guard_event(
-            file,
-            FlowStage::SnapshotConvergence,
-            FlowOutcome::Blocked,
-            CloseoutGuardReason::SnapshotDiffersFromHead,
-        );
-        did_commit |= effects.commit(file)?;
-        rc.invalidate_head_content();
-        timer.mark("git_commit_retry_snapshot");
-        ensure_cycle_committed(file)?;
-        timer.mark("cycle_state_retry_snapshot");
-    }
+    retry_snapshot_head_content_hash_drift(
+        file,
+        effects,
+        &rc,
+        &mut did_commit,
+        &mut timer,
+        "git_commit_retry_snapshot",
+        "cycle_state_retry_snapshot",
+    )?;
 
     if agent_doc_git_io::submodule::submodule_pointer_drift(file)?.is_some() {
         eprintln!("[commit] parent submodule pointer still stale after commit - retrying");
         did_commit |= effects.commit(file)?;
         rc.invalidate_head_content();
+        rc.invalidate_snapshot_content();
         timer.mark("git_commit_retry_parent_pointer");
         ensure_cycle_committed(file)?;
         timer.mark("cycle_state_retry_parent_pointer");
@@ -189,7 +212,16 @@ pub fn complete_required_closeout(file: &Path, effects: &dyn CloseoutEffects) ->
     timer.mark("session_check");
     agent_doc_controller_io::project_controller::persist_session_actor_closeout(file)?;
     timer.mark("session_actor_closeout");
-    record_terminal_closeout_proof(file, did_commit, effects)?;
+    retry_snapshot_head_content_hash_drift(
+        file,
+        effects,
+        &rc,
+        &mut did_commit,
+        &mut timer,
+        "git_commit_retry_terminal_snapshot",
+        "cycle_state_retry_terminal_snapshot",
+    )?;
+    record_terminal_closeout_proof(file, did_commit, effects, options)?;
     timer.mark("terminal_proof");
     cleanup_fallback_patch_files(file);
     timer.mark("fallback_cleanup");
@@ -481,10 +513,43 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
     Ok(())
 }
 
+fn retry_snapshot_head_content_hash_drift(
+    file: &Path,
+    effects: &dyn CloseoutEffects,
+    rc: &impl AgentDocContextExt,
+    did_commit: &mut bool,
+    timer: &mut CloseoutTimer<'_>,
+    commit_mark: &str,
+    cycle_mark: &str,
+) -> Result<()> {
+    if !matches!(
+        agent_doc_snapshot_io::verify_snapshot_head_content_hash(file)?,
+        agent_doc_snapshot_io::SnapshotHeadContentHashStatus::SnapshotDiffersFromHead { .. }
+    ) {
+        return Ok(());
+    }
+
+    eprintln!("[commit] snapshot differs from HEAD after commit - retrying");
+    log_closeout_guard_event(
+        file,
+        FlowStage::SnapshotConvergence,
+        FlowOutcome::Blocked,
+        CloseoutGuardReason::SnapshotDiffersFromHead,
+    );
+    *did_commit |= effects.commit(file)?;
+    rc.invalidate_head_content();
+    rc.invalidate_snapshot_content();
+    timer.mark(commit_mark);
+    ensure_cycle_committed(file)?;
+    timer.mark(cycle_mark);
+    Ok(())
+}
+
 pub fn record_terminal_closeout_proof(
     file: &Path,
     did_commit: bool,
     effects: &dyn CloseoutEffects,
+    options: CompleteRequiredCloseoutOptions,
 ) -> Result<()> {
     let canonical = file
         .canonicalize()
@@ -510,7 +575,11 @@ pub fn record_terminal_closeout_proof(
             state.phase.as_str()
         );
     }
-    let current_doc = effects.resolve_current_document(&canonical, "terminal_closeout_proof")?;
+    let current_doc = effects.resolve_current_document_for_authority(
+        &canonical,
+        "terminal_closeout_proof",
+        options.force_disk,
+    )?;
     let file_content = current_doc.content();
     let snapshot_content = agent_doc_snapshot_io::load(&canonical)?.with_context(|| {
         format!(
@@ -640,7 +709,7 @@ fn open_cycle_recovery_command_input(file: &Path) -> Option<OpenCycleRecoveryCom
 }
 
 enum CloseoutRecoveryCycleView {
-    Sidecar(agent_doc_cycle_state_io::CycleState),
+    Sidecar(Box<agent_doc_cycle_state_io::CycleState>),
     Projection(agent_doc_cycle_state_io::ProjectedCloseoutState),
 }
 
@@ -674,6 +743,7 @@ impl CloseoutRecoveryCycleView {
     fn open_cycle_recovery_command_input(self) -> Option<OpenCycleRecoveryCommandInput> {
         match self {
             Self::Sidecar(state) => {
+                let state = *state;
                 if !state.phase.is_open() {
                     return None;
                 }
@@ -718,7 +788,7 @@ impl CloseoutRecoveryCycleView {
 
 fn load_closeout_recovery_cycle_view(file: &Path) -> Result<Option<CloseoutRecoveryCycleView>> {
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
-        return Ok(Some(CloseoutRecoveryCycleView::Sidecar(state)));
+        return Ok(Some(CloseoutRecoveryCycleView::Sidecar(Box::new(state))));
     }
     Ok(agent_doc_cycle_state_io::load_closeout_projection(file)?
         .filter(|projection| projection.cycle_id.is_some() && projection.phase.is_some())

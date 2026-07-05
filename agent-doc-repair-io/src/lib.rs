@@ -203,10 +203,17 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let has_pending_response = pending_response.is_some();
     let capture = agent_doc_capture_io::load_active(&canonical)?
         .filter(|capture| capture_state_is_repairable(capture.state));
-    let doc_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "repair_current_document",
-    )?;
+    let doc_content = if repair_replay_force_disk_with_override(file, force_disk_override) {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "repair_current_document",
+        )?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "repair_current_document",
+        )?
+    };
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let historical_capture = if !has_pending_response && capture.is_none() {
         historical_committed_capture_replay(&canonical, &doc_content)?

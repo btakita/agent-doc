@@ -167,7 +167,7 @@ mod submodule_patch_routing_tests {
         std::fs::write(&doc, &updated).unwrap();
         agent_doc_snapshot_io::save(&doc, &updated, agent_doc_ops_log_io::log_op).unwrap();
 
-        let err = super::complete_required_closeout(&doc).unwrap_err();
+        let err = super::complete_required_closeout(&doc, false).unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("parent submodule pointer is not committed"),

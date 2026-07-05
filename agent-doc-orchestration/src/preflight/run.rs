@@ -77,6 +77,7 @@ fn maybe_record_preflight_terminal_closeout_proof(file: &Path, did_commit: bool)
             file,
             did_commit,
             &agent_doc_closeout_runtime_io::closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions::default(),
         )
     }) {
         eprintln!("[preflight] terminal proof warning: {err}");
@@ -379,7 +380,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 2: Commit previous cycle.
     eprintln!("[preflight] step 2: commit");
-    let mut did_commit_this_preflight = false;
+    let mut did_commit_this_preflight = committed_prior;
     let committed = committed_prior
         || if options.probe {
             false
@@ -402,24 +403,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         maybe_record_preflight_terminal_closeout_proof(file, did_commit_this_preflight);
     }
 
-    let current_for_prompt_tail_relocation =
-        resolve_current_preflight_document(file, "prompt_tail_relocation")?;
-    if !options.probe
-        && let Some(repaired_doc) =
-            relocate_out_of_exchange_prompt_before_diff(file, &current_for_prompt_tail_relocation)?
-    {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired_doc)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "preflight_repair_prompt_tail_outside_exchange file={}",
-                file.display()
-            ),
-        );
-        eprintln!(
-            "[preflight] repaired prompt tail outside exchange in {}",
-            file.display()
-        );
+    if !options.probe && relocate_out_of_exchange_prompt_before_diff(file)? {
         recovered = true;
     }
     if !options.probe && remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)? {

@@ -132,7 +132,7 @@ pub fn check_queue_head_removal_guard(file: &Path, rc: &RunContext) -> Result<Gu
 
     let decision = agent_doc_queue::queue_closeout_guard::queue_head_removal_decision(
         &state.active_queue_heads,
-        &content,
+        content,
         &open_backlog,
         &resolved,
         &directive_targets,

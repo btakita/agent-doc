@@ -187,6 +187,9 @@ pub fn check_snapshot_committed_guard(
             if crate::detect_jb_cache_conflict_cancel_recoverable_with_context(file, rc)? {
                 return Ok(GuardResult::None);
             }
+            if current_document_matches_head(file)? {
+                return Ok(GuardResult::None);
+            }
             let side_effects = agent_doc_git_io::status::tracked_side_effect_note(file)?;
             let recovery_hint = recovery_hint(file);
             let msg = agent_doc_workflow::session_check::snapshot_committed_guard_message(
@@ -208,6 +211,29 @@ pub fn check_snapshot_committed_guard(
             Ok(GuardResult::Error(msg))
         }
     }
+}
+
+fn current_document_matches_head(file: &Path) -> Result<bool> {
+    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    let current = match crate::resolve_current_document_content(file, "snapshot_committed_guard") {
+        Ok(current) => current,
+        Err(_) => return Ok(false),
+    };
+    let comparison =
+        agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(&head, &current);
+    if !(comparison.is_equal() || comparison.normalized_exchange_equal()) {
+        return Ok(false);
+    }
+    if let Some(heading) =
+        agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
+            &head, "",
+        )
+    {
+        return Ok(crate::operator_live_buffer_contains_heading(file, &heading));
+    }
+    Ok(false)
 }
 
 /// `#codex-final-response-not-written`: a completed turn that committed real

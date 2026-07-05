@@ -5,7 +5,18 @@ use agent_doc_run_context_io::{AgentDocContextExt, RunContext};
 use anyhow::Result;
 
 pub fn resolve_pending_capture_guard_mode(file: &Path) -> Result<PendingCaptureGuardMode> {
-    let content = crate::resolve_current_document_content(file, "pending_capture_guard_mode")?;
+    resolve_pending_capture_mode_with_force_disk(file, false)
+}
+
+pub fn resolve_pending_capture_mode_with_force_disk(
+    file: &Path,
+    force_disk: bool,
+) -> Result<PendingCaptureGuardMode> {
+    let content = crate::resolve_current_document_content_with_force_disk(
+        file,
+        "pending_capture_guard_mode",
+        force_disk,
+    )?;
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
     let project_config = agent_doc_project_config_io::load_project_for_doc(file);
     Ok(
@@ -31,7 +42,18 @@ pub fn resolve_pending_capture_guard_mode_with_context(
 }
 
 pub fn resolve_pending_done_guard_mode(file: &Path) -> Result<PendingCaptureGuardMode> {
-    let content = crate::resolve_current_document_content(file, "pending_done_guard_mode")?;
+    resolve_pending_done_mode_with_force_disk(file, false)
+}
+
+pub fn resolve_pending_done_mode_with_force_disk(
+    file: &Path,
+    force_disk: bool,
+) -> Result<PendingCaptureGuardMode> {
+    let content = crate::resolve_current_document_content_with_force_disk(
+        file,
+        "pending_done_guard_mode",
+        force_disk,
+    )?;
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
     let project_config = agent_doc_project_config_io::load_project_for_doc(file);
     Ok(
@@ -64,7 +86,12 @@ pub fn resolve_review_done_guard_mode(file: &Path) -> Result<PendingCaptureGuard
 }
 
 pub fn resolve_auto_done(file: &Path) -> Result<bool> {
-    let content = crate::resolve_current_document_content(file, "auto_done")?;
+    resolve_auto_done_with_force_disk(file, false)
+}
+
+pub fn resolve_auto_done_with_force_disk(file: &Path, force_disk: bool) -> Result<bool> {
+    let content =
+        crate::resolve_current_document_content_with_force_disk(file, "auto_done", force_disk)?;
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
     let project_config = agent_doc_project_config_io::load_project_for_doc(file);
     Ok(agent_doc_frontmatter::project_config::resolve_auto_done(

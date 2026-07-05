@@ -5532,21 +5532,22 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         "closeout_guards should keep only file adapters over focused exchange-tail policy"
     );
     for required in [
-        "agent_doc_turn::document_drift::{",
-        "active_session_drift_is_only_exchange_or_backlog_metadata",
+        "agent_doc_document_realtime::baseline_comparison::BaselineComparison",
+        "BaselineComparison::new(&snapshot, &current)",
+        "active_session_delta_is_only_exchange_or_backlog_metadata",
         "exchange_has_new_appended_content",
-        "exchange_only_promptless_content_drift",
-        "promptless_comment_only_drift",
+        "exchange_only_promptless_content_delta",
+        "promptless_comment_only_delta",
     ] {
         assert!(
             closeout_guards.contains(required),
-            "closeout_guards should call focused document-drift policy directly: {required}"
+            "closeout_guards should call focused realtime baseline comparison policy directly: {required}"
         );
     }
     assert!(
         closeout_guards
-            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between"),
-        "closeout_guards should call focused bypassed-response classifier directly"
+            .contains("agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between"),
+        "closeout_guards should call focused realtime bypassed-response classifier directly"
     );
     let workflow_session_check =
         fs::read_to_string(manifest_dir.join("agent-doc-workflow/src/session_check.rs")).unwrap();
@@ -11689,8 +11690,8 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     )
     .unwrap();
     for required in [
-        "crate::resolve_pending_capture_guard_mode",
-        "crate::resolve_pending_done_guard_mode",
+        "crate::resolve_pending_capture_mode_with_force_disk",
+        "crate::resolve_pending_done_mode_with_force_disk",
         "crate::resolve_review_done_guard_mode",
     ] {
         assert!(
@@ -13414,9 +13415,10 @@ fn test_project_config_io_tmux_helpers_have_no_config_facade() {
         "agent-doc-turn document drift should call the focused diff helper directly"
     );
     assert!(
-        closeout_guards
-            .contains("agent_doc_turn::document_drift::detect_bypassed_response_write_between",),
-        "session_check closeout guards should adapt file IO into the focused document drift classifier"
+        closeout_guards.contains(
+            "agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between",
+        ),
+        "session_check closeout guards should adapt current-document IO into the focused realtime drift classifier"
     );
 }
 
@@ -19815,7 +19817,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         "backlog_sync::collect_one_shot_backlog_queue_sync",
         "document_queue::sync_backlog_into_queue",
         "backlog_sync::backlog_queue_sync_report",
-        "std::fs::write(file, &new_content)",
+        "write_document(file, content, &new_content)",
     ] {
         assert!(
             queue_io_one_shot.contains(required_snippet),
@@ -20173,6 +20175,7 @@ fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
         "agent_doc_template::remove_post_exchange_duplicate_prompt_comments_preserving_docs(",
         "agent_doc_document_realtime_io::atomic_write_through_authority(",
         "agent_doc_snapshot_io::load(file)",
+        "preflight_repair_prompt_tail_outside_exchange file=",
         "post_exchange_duplicate_prompt_comment_removed file=",
     ] {
         assert!(
@@ -20210,10 +20213,9 @@ fn test_agent_doc_preflight_runtime_io_owns_prompt_cleanup_graph() {
     }
 
     assert!(
-        orchestration_preflight_run.contains(
-            "relocate_out_of_exchange_prompt_before_diff(file, &std::fs::read_to_string(file)?)?"
-        ) && orchestration_preflight_run
-            .contains("remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)?")
+        orchestration_preflight_run.contains("relocate_out_of_exchange_prompt_before_diff(file)?")
+            && orchestration_preflight_run
+                .contains("remove_duplicate_answered_exchange_prompt_tail_for_preflight(file)?")
             && orchestration_preflight_run.contains(
                 "remove_post_exchange_duplicate_prompt_comments_for_preflight(file, &rc)?"
             ),

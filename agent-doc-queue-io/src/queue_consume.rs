@@ -33,6 +33,10 @@ use agent_doc_queue::{
 pub trait QueueConsumeWriteEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
 
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        self.current_document_content(file, source)
+    }
+
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
 
     fn converge_document_or_disk(
@@ -159,7 +163,11 @@ pub fn consume_queue_prompts_with_outcome(
     // Hold the document lock for the entire read-parse-write cycle to prevent
     // concurrent edits from invalidating parsed offsets (TOCTOU fix).
     let _lock = acquire_doc_lock(file)?;
-    let content = effects.current_document_content(file, "queue_consume")?;
+    let content = if skip_visible_guard {
+        effects.force_disk_document_content(file, "queue_consume force_disk")?
+    } else {
+        effects.current_document_content(file, "queue_consume")?
+    };
     let Some(plan) = plan_queue_prompt_consumption(file, &content, done_ids)? else {
         return Ok(None);
     };

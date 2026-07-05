@@ -33,6 +33,13 @@ fn log_closeout_guard(
 }
 
 pub fn precommit_pending_capture_check(file: &Path) -> Result<()> {
+    precommit_pending_capture_check_with_force_disk(file, false)
+}
+
+pub fn precommit_pending_capture_check_with_force_disk(
+    file: &Path,
+    force_disk: bool,
+) -> Result<()> {
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(());
     };
@@ -175,7 +182,7 @@ pub fn precommit_pending_capture_check(file: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let mode = crate::resolve_pending_capture_guard_mode(file)?;
+    let mode = crate::resolve_pending_capture_mode_with_force_disk(file, force_disk)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -379,7 +386,7 @@ pub fn prewrite_pending_capture_check(
         return Ok(());
     }
 
-    let mode = crate::resolve_pending_capture_guard_mode(file)?;
+    let mode = crate::resolve_pending_capture_mode_with_force_disk(file, flags.force_disk)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -443,7 +450,7 @@ pub fn precommit_pending_done_check_with_options(
     file: &Path,
     options: PendingDoneCheckOptions,
 ) -> Result<()> {
-    let mode = crate::resolve_pending_done_guard_mode(file)?;
+    let mode = crate::resolve_pending_done_mode_with_force_disk(file, options.force_disk)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -461,7 +468,11 @@ pub fn precommit_pending_done_check_with_options(
 
     let response_text =
         agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
-    let doc = crate::resolve_current_document(file, "precommit_pending_done_check")?;
+    let doc = crate::resolve_current_document_with_force_disk(
+        file,
+        "precommit_pending_done_check",
+        options.force_disk,
+    )?;
     let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
     if !malformed.is_empty() {
         log_closeout_guard(
@@ -489,7 +500,7 @@ pub fn precommit_pending_done_check_with_options(
         return Ok(());
     }
 
-    if crate::resolve_auto_done(file)? {
+    if crate::resolve_auto_done_with_force_disk(file, options.force_disk)? {
         let Some(backlog_effects) = options.backlog_effects else {
             anyhow::bail!(
                 "auto_done is enabled for {} but backlog command effects are not installed",
@@ -557,7 +568,7 @@ pub fn prewrite_pending_done_check(
         return Ok(());
     }
 
-    let mode = crate::resolve_pending_done_guard_mode(file)?;
+    let mode = crate::resolve_pending_done_mode_with_force_disk(file, flags.force_disk)?;
     if mode != agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Strict {
         return Ok(());
     }
@@ -578,7 +589,11 @@ pub fn prewrite_pending_done_check(
     }
 
     let response_text = agent_doc_turn::closeout_signal::response_text_for_guards(response_body);
-    let doc = crate::resolve_current_document(file, "prewrite_pending_done_check")?;
+    let doc = crate::resolve_current_document_with_force_disk(
+        file,
+        "prewrite_pending_done_check",
+        flags.force_disk,
+    )?;
     let file = doc.key().as_path();
     let malformed = malformed_tracked_item_refs_completed_by_response(&doc, &response_text)?;
     if !malformed.is_empty() {
@@ -595,7 +610,7 @@ pub fn prewrite_pending_done_check(
             )
         );
     }
-    if crate::resolve_auto_done(file)? {
+    if crate::resolve_auto_done_with_force_disk(file, flags.force_disk)? {
         return Ok(());
     }
     let open_tracked_work_ids =
@@ -778,7 +793,7 @@ pub fn run_closeout_pending_maintenance(
     if !commit_required {
         return Ok(());
     }
-    if !closeout_pending_maintenance_required(file)? {
+    if !closeout_pending_maintenance_required(file, force_disk)? {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -791,7 +806,7 @@ pub fn run_closeout_pending_maintenance(
     run_pending_maintenance(file, force_disk)
 }
 
-fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
+fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Result<bool> {
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
         && (state.had_pending_mutations
             || state.pending_added_this_cycle
@@ -803,19 +818,54 @@ fn closeout_pending_maintenance_required(file: &Path) -> Result<bool> {
         return Ok(true);
     }
 
-    let doc = crate::resolve_current_document(file, "closeout_pending_maintenance_required")?;
-    let Ok(components) = agent_doc_element::element::parse(doc.content()) else {
-        return Ok(false);
+    let doc = match crate::resolve_current_document_with_force_disk(
+        file,
+        "closeout_pending_maintenance_required",
+        force_disk,
+    ) {
+        Ok(doc) => doc,
+        Err(err) if !force_disk && current_document_resolution_needs_editor_retry(&err) => {
+            if agent_doc_snapshot_io::load(file)?
+                .as_deref()
+                .is_some_and(|snapshot| !document_has_done_tracked_work(snapshot))
+            {
+                return Ok(false);
+            }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "closeout_pending_maintenance_deferred file={} reason=editor_authority_unavailable recovery=retry_without_disk_write",
+                    file.display()
+                ),
+            );
+            return Err(err);
+        }
+        Err(err) => return Err(err),
     };
+    Ok(document_has_done_tracked_work(doc.content()))
+}
 
-    Ok(components
+fn current_document_resolution_needs_editor_retry(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains("retry_without_disk_write")
+            || message.contains("disk is not consulted until the editor is detached")
+            || message.contains("disk remained non-authoritative")
+    })
+}
+
+fn document_has_done_tracked_work(content: &str) -> bool {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    components
         .iter()
         .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
         .any(|component| {
             let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(doc.content()));
+                agent_doc_element_backlog::backlog::parse_items(component.content(content));
             items.iter().any(|item| item.is_done())
-        }))
+        })
 }
 
 #[cfg(test)]

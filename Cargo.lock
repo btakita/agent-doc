@@ -1934,6 +1934,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-git-io",
+ "agent-doc-hash",
  "agent-doc-project-root-io",
  "agent-doc-secret-redact",
  "agent-doc-session-registry-io",

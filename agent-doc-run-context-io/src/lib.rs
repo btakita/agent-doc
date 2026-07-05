@@ -566,10 +566,12 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
 
     fn invalidate_snapshot_content(&self) {
         snapshot_content_slot(self).clear(self);
+        snapshot_commit_status_slot(self).clear(self);
     }
 
     fn invalidate_head_content(&self) {
         head_content_slot(self).clear(self);
+        snapshot_commit_status_slot(self).clear(self);
     }
 
     fn invalidate_global_config(&self) {

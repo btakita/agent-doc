@@ -254,6 +254,22 @@ pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> 
         return Ok(None);
     };
     let current = crate::resolve_current_document_content(file, "uncommitted_exchange_drift")?;
+    if let Some(head) = agent_doc_git_io::revision::show_head(file)? {
+        let head_comparison = BaselineComparison::new(&head, &current);
+        if head_comparison.is_equal()
+            || head_comparison.normalized_exchange_equal()
+            || !head_comparison.exchange_has_new_appended_content()
+        {
+            if let Some(heading) =
+                agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
+                    &head, "",
+                )
+            {
+                crate::operator_live_buffer_contains_heading(file, &heading);
+            }
+            return Ok(None);
+        }
+    }
     let comparison = BaselineComparison::new(&snapshot, &current);
     if comparison.is_equal() {
         return Ok(None);

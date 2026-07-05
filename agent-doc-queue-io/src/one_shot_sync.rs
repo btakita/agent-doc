@@ -37,7 +37,7 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     write_document: impl FnOnce(&Path, &str, &str) -> Result<()>,
     save_snapshot: impl FnOnce(&Path, &str) -> Result<()>,
 ) -> Result<OneShotQueueSyncResult> {
-    let components = element::parse(&content)
+    let components = element::parse(content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
     let queue_comp = components.iter().find(|c| c.name == "queue");
@@ -49,7 +49,7 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     };
 
     let Some(sync_request) =
-        backlog_sync::collect_one_shot_backlog_queue_sync(&components, &content)
+        backlog_sync::collect_one_shot_backlog_queue_sync(&components, content)
     else {
         bail!(
             "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
@@ -80,7 +80,7 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     };
 
     let new_body = document_queue::render(&synced);
-    let new_content = qc.replace_content(&content, &new_body);
+    let new_content = qc.replace_content(content, &new_body);
 
     write_document(file, content, &new_content)
         .with_context(|| format!("failed to write {}", file.display()))?;

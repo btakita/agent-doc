@@ -41,6 +41,62 @@ pub(crate) fn resolve_current_document(
     })
 }
 
+pub(crate) fn resolve_current_document_with_force_disk(
+    file: &Path,
+    source: &str,
+    force_disk: bool,
+) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
+    if !force_disk {
+        return resolve_current_document(file, source);
+    }
+    agent_doc_document_realtime_io::resolve_disk_current_document(
+        file,
+        &format!("session-check {source}"),
+    )
+}
+
 pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
     Ok(resolve_current_document(file, source)?.into_content())
+}
+
+pub(crate) fn resolve_current_document_content_with_force_disk(
+    file: &Path,
+    source: &str,
+    force_disk: bool,
+) -> Result<String> {
+    Ok(resolve_current_document_with_force_disk(file, source, force_disk)?.into_content())
+}
+
+pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
+    let file_key = file.to_string_lossy();
+    let heading = heading.trim();
+    if heading.is_empty() {
+        return false;
+    }
+    for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
+        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
+            continue;
+        }
+        if !agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
+            continue;
+        }
+        let Some(content) = snapshot.content.as_deref() else {
+            continue;
+        };
+        let content_norm =
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content);
+        if content_norm.lines().any(|line| line.trim() == heading) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_check_committed_response_visible_in_live_buffer file={} heading={:?} editor_id={:?}",
+                    file.display(),
+                    heading,
+                    snapshot.editor_id
+                ),
+            );
+            return true;
+        }
+    }
+    false
 }

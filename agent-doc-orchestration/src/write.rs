@@ -282,6 +282,13 @@ fn resolve_current_document(
     })
 }
 
+fn resolve_force_disk_document(
+    file: &Path,
+    source: &'static str,
+) -> Result<agent_doc_document_realtime::CurrentDocument> {
+    agent_doc_document_realtime_io::resolve_disk_current_document(file, source)
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WriteFlags {
     pub(crate) allow_replace_pending: bool,
@@ -593,7 +600,7 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
     }
     let target_doc = resolve_current_document(target, "validate_backlog_add_to_target")?;
     let content = target_doc.content();
-    let components = agent_doc_element::element::parse(&content).with_context(|| {
+    let components = agent_doc_element::element::parse(content).with_context(|| {
         format!(
             "failed to parse --backlog-add-to target {}",
             target.display()
@@ -613,8 +620,23 @@ fn ensure_pending_add_target(target: &Path) -> Result<()> {
 
 fn is_session_document(file: &Path) -> Result<bool> {
     let current = resolve_current_document(file, "is_session_document")?;
-    let content = current.content();
-    let (fm, _) = frontmatter::parse(&content)?;
+    is_session_document_content(current.content())
+}
+
+fn is_session_document_with_force_disk(file: &Path, force_disk: bool) -> Result<bool> {
+    if !force_disk {
+        return match is_session_document(file) {
+            Ok(is_session) => Ok(is_session),
+            Err(err) if error_requests_retry_without_disk(&err) => Ok(true),
+            Err(err) => Err(err),
+        };
+    }
+    let current = resolve_force_disk_document(file, "is_session_document")?;
+    is_session_document_content(current.content())
+}
+
+fn is_session_document_content(content: &str) -> Result<bool> {
+    let (fm, _) = frontmatter::parse(content)?;
     Ok(fm
         .session
         .as_deref()
@@ -625,11 +647,12 @@ fn resolve_commit_mode(
     file: &Path,
     requested: CommitMode,
     pending_only: bool,
+    force_disk: bool,
 ) -> Result<CommitMode> {
     if pending_only || requested != CommitMode::BestEffort {
         return Ok(requested);
     }
-    if is_session_document(file)? {
+    if is_session_document_with_force_disk(file, force_disk)? {
         return Ok(CommitMode::Required);
     }
     Ok(CommitMode::BestEffort)
@@ -1082,9 +1105,44 @@ fn run_command_inner(
         &options.review_edit,
         options.pending_reorder.as_deref(),
     );
-    let mut commit_mode = resolve_commit_mode(file, commit_mode, options.pending_only)?;
+    let mut commit_mode = match resolve_commit_mode(
+        file,
+        commit_mode,
+        options.pending_only,
+        options.force_disk,
+    ) {
+        Ok(mode) => mode,
+        Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
+            let response = read_response_input()?;
+            let retention_baseline =
+                read_explicit_baseline(file, options.baseline_file.as_deref()).unwrap_or(None);
+            if !response.trim().is_empty()
+                && let Err(retain_err) = retain_ipc_patch_for_editor_authority_retry(
+                    file,
+                    retention_baseline.as_deref(),
+                    &response,
+                )
+            {
+                eprintln!(
+                    "[write] warning: failed to retain IPC retry patch for {}: {}",
+                    file.display(),
+                    retain_err
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "commit_mode_ipc_retry_patch_retention_failed file={} error={} recovery=retry_without_disk_write",
+                        file.display(),
+                        retain_err
+                    ),
+                );
+            }
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
     if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
-        if is_session_document(file)? {
+        if is_session_document_with_force_disk(file, options.force_disk)? {
             anyhow::bail!(
                 "write --commit requires a git repository for session documents so the cycle can reach a committed state"
             );
@@ -1128,7 +1186,7 @@ fn run_command_inner(
                 agent_doc_ops_log_io::log_op,
             )?;
         }
-        return finalize_commit(file, commit_mode);
+        return finalize_commit(file, commit_mode, options.force_disk);
     }
 
     let write_flags = WriteFlags {
@@ -1199,7 +1257,39 @@ fn run_command_inner(
         None => read_explicit_baseline(file, options.baseline_file.as_deref())?,
     };
 
-    let current_doc = resolve_current_document(file, "pre_write_guards")?;
+    let current_doc = if options.force_disk {
+        resolve_force_disk_document(file, "pre_write_guards")?
+    } else {
+        match resolve_current_document(file, "pre_write_guards") {
+            Ok(current) => current,
+            Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
+                let response = read_response_input()?;
+                if !response.trim().is_empty()
+                    && let Err(retain_err) = retain_ipc_patch_for_editor_authority_retry(
+                        file,
+                        baseline.as_deref(),
+                        &response,
+                    )
+                {
+                    eprintln!(
+                        "[write] warning: failed to retain IPC retry patch for {}: {}",
+                        file.display(),
+                        retain_err
+                    );
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "pre_write_guard_ipc_retry_patch_retention_failed file={} error={} recovery=retry_without_disk_write",
+                            file.display(),
+                            retain_err
+                        ),
+                    );
+                }
+                return Err(err);
+            }
+            Err(err) => return Err(err),
+        }
+    };
     let current_content = current_doc.content();
     guard_no_exchange_compaction_request_between(file, baseline.as_deref(), current_content)?;
     let current_resolved_mode = if options.is_template || (!options.is_ipc && !options.is_stream) {
@@ -1273,7 +1363,7 @@ fn run_command_inner(
     // genuinely-uncommitted placed body has no other recovery path, so we must commit.
     if write_result.is_ok()
         && commit_mode == CommitMode::None
-        && is_session_document(file)?
+        && is_session_document_with_force_disk(file, options.force_disk)?
         && bare_write_placed_response_body(file)?
     {
         if agent_doc_git_io::status::is_in_git_repo(file) {
@@ -1332,7 +1422,10 @@ fn run_command_inner(
 
     // Phase 3b: pre-commit pending closeout gates (strict mode only).
     if write_result.is_ok() && commit_mode == CommitMode::Required {
-        agent_doc_session_check_io::precommit_pending_capture_check(file)?;
+        agent_doc_session_check_io::precommit_pending_capture_check_with_force_disk(
+            file,
+            options.force_disk,
+        )?;
         agent_doc_session_check_io::precommit_pending_done_check_with_options(
             file,
             agent_doc_session_check_io::PendingDoneCheckOptions {
@@ -1383,7 +1476,7 @@ fn run_command_inner(
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
-            &current_content,
+            current_content,
             &response_body,
             &queue_completion_ids,
         )?;
@@ -1391,7 +1484,7 @@ fn run_command_inner(
             && let Some(head_id) = queue_targeted_completion_id_for_current_head(
                 file,
                 baseline.as_deref(),
-                &current_content,
+                current_content,
                 &response_body,
                 &options.pending_done,
             )?
@@ -1510,7 +1603,7 @@ fn run_command_inner(
     }
 
     let commit_result = if write_result.is_ok() {
-        let primary = finalize_commit(file, commit_mode);
+        let primary = finalize_commit(file, commit_mode, options.force_disk);
         if primary.is_ok() && !options.commit_sibling.is_empty() {
             let pairs: Vec<(std::path::PathBuf, String)> = options
                 .commit_sibling
@@ -1528,19 +1621,21 @@ fn run_command_inner(
     // boundary above (#bare-write-captured-uncommitted), so reaching here with
     // CommitMode::None means the write placed no response body. Any open cycle now is
     // a pre-existing interrupted closeout, not content this write stranded.
-    let bare_session_write_result =
-        if write_result.is_ok() && commit_mode == CommitMode::None && is_session_document(file)? {
-            agent_doc_session_check_io::enforce_clean_closeout(
-                file,
-                &agent_doc_closeout_runtime_io::session_check_effects(),
-            )
-            .context(
-                "bare `agent-doc write` did not place a response body, but the session \
+    let bare_session_write_result = if write_result.is_ok()
+        && commit_mode == CommitMode::None
+        && is_session_document_with_force_disk(file, options.force_disk)?
+    {
+        agent_doc_session_check_io::enforce_clean_closeout(
+            file,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .context(
+            "bare `agent-doc write` did not place a response body, but the session \
              document still has an open cycle outside the commit boundary",
-            )
-        } else {
-            Ok(())
-        };
+        )
+    } else {
+        Ok(())
+    };
 
     match (write_result, commit_result, bare_session_write_result) {
         (Ok(()), Ok(()), Ok(())) => Ok(()),
@@ -1560,12 +1655,12 @@ fn run_command_inner(
     }
 }
 
-fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
+fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Result<()> {
     match commit_mode {
         CommitMode::None => Ok(()),
         CommitMode::BestEffort => {
             if agent_doc_git_io::status::is_in_git_repo(file) {
-                let session_document = is_session_document(file)?;
+                let session_document = is_session_document_with_force_disk(file, force_disk)?;
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
@@ -1622,14 +1717,15 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode) -> Result<()> {
             }
             Ok(())
         }
-        CommitMode::Required => complete_required_closeout(file).map(|_| ()),
+        CommitMode::Required => complete_required_closeout(file, force_disk).map(|_| ()),
     }
 }
 
-fn complete_required_closeout(file: &Path) -> Result<bool> {
-    agent_doc_flow_io::closeout::complete_required_closeout(
+fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool> {
+    agent_doc_flow_io::closeout::complete_required_closeout_with_options(
         file,
         &agent_doc_closeout_runtime_io::closeout_effects(),
+        agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions { force_disk },
     )
 }
 
@@ -2263,7 +2359,7 @@ mod tests {
         );
         agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
-        let err = finalize_commit(&doc, CommitMode::BestEffort)
+        let err = finalize_commit(&doc, CommitMode::BestEffort, false)
             .expect_err("session best-effort commit must fail closed on active editor authority");
         assert!(
             err.to_string().contains("editor is the current authority")
@@ -2465,7 +2561,8 @@ mod tests {
         let err = consume_queue_prompts_for_done_ids_closeout(&doc, &[], false).unwrap_err();
         let err = format!("{err:?}");
         assert!(
-            err.contains("refused direct disk write"),
+            err.contains("editor is the current authority")
+                || err.contains("failed to resolve editor authority"),
             "non-force queue consume must fail closed with an active listener: {err}"
         );
         assert_eq!(
@@ -2537,8 +2634,10 @@ mod tests {
         .unwrap_err();
         let err = format!("{err:?}");
         assert!(
-            err.contains("editor is the current authority")
-                && err.contains("disk is a non-authoritative replica"),
+            (err.contains("editor is the current authority")
+                || err.contains("failed to resolve editor authority"))
+                && (err.contains("disk is a non-authoritative replica")
+                    || err.contains("disk remained non-authoritative")),
             "non-force closeout pending maintenance must protect the active listener: {err}"
         );
         assert_eq!(
@@ -2658,9 +2757,11 @@ mod tests {
         let err = format!("{err:?}");
         assert!(
             (err.contains("editor is the current authority")
-                || err.contains("editor authority unavailable"))
+                || err.contains("editor authority unavailable")
+                || err.contains("failed to resolve editor authority"))
                 && err.contains("editor_attached_model_missing")
-                && err.contains("disk is a non-authoritative replica"),
+                && (err.contains("disk is a non-authoritative replica")
+                    || err.contains("disk remained non-authoritative")),
             "pending maintenance should defer on editor authority before IPC: {err}"
         );
         assert_eq!(
@@ -2670,9 +2771,9 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_editor_authority_unavailable")
-                && log.contains("source=pending_maintenance")
-                && log.contains("reason=missing_replica"),
+            log.contains("closeout_pending_maintenance_deferred")
+                && log.contains("reason=editor_authority_unavailable")
+                && log.contains("recovery=retry_without_disk_write"),
             "defer should be attributed to editor authority resolution:\n{log}"
         );
         assert!(

@@ -267,23 +267,21 @@ pub fn enforce_no_uncommitted_closeout_drift(
     Ok(())
 }
 
-pub fn relocate_out_of_exchange_prompt_before_diff(
-    file: &Path,
-    doc_content: &str,
-) -> Result<Option<String>> {
-    let (frontmatter, _) = frontmatter::parse(doc_content).map_err(|err| {
+pub fn relocate_out_of_exchange_prompt_before_diff(file: &Path) -> Result<bool> {
+    let doc_content = resolve_current_preflight_document(file, "prompt_tail_relocation")?;
+    let (frontmatter, _) = frontmatter::parse(&doc_content).map_err(|err| {
         anyhow::anyhow!(
             "failed to parse document frontmatter {}: {err}",
             file.display()
         )
     })?;
     if !frontmatter.resolve_mode().is_template() {
-        return Ok(None);
+        return Ok(false);
     }
 
-    let Some(mut repaired) = agent_doc_template::repair_prompt_tail_outside_exchange(doc_content)?
+    let Some(mut repaired) = agent_doc_template::repair_prompt_tail_outside_exchange(&doc_content)?
     else {
-        return Ok(None);
+        return Ok(false);
     };
 
     if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
@@ -292,7 +290,23 @@ pub fn relocate_out_of_exchange_prompt_before_diff(
         repaired = agent_doc_template_io::normalize_template_structure_or_fail(&repaired, file)?;
     }
 
-    Ok((repaired != doc_content).then_some(repaired))
+    if repaired == doc_content {
+        return Ok(false);
+    }
+
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_repair_prompt_tail_outside_exchange file={}",
+            file.display()
+        ),
+    );
+    eprintln!(
+        "[preflight] repaired prompt tail outside exchange in {}",
+        file.display()
+    );
+    Ok(true)
 }
 
 pub fn remove_duplicate_answered_exchange_prompt_tail_for_preflight(file: &Path) -> Result<bool> {

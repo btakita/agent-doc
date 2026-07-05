@@ -179,6 +179,19 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         agent_doc_document_realtime_io::try_resolve_current_document(file)
     }
 
+    fn resolve_current_document_for_authority(
+        &self,
+        file: &Path,
+        source: &str,
+        force_disk: bool,
+    ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
+        if force_disk {
+            agent_doc_document_realtime_io::resolve_disk_current_document(file, source)
+        } else {
+            self.resolve_current_document(file, source)
+        }
+    }
+
     fn write_current_document(
         &self,
         doc: &agent_doc_document_realtime_io::CurrentDocument,

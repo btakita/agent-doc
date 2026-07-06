@@ -836,13 +836,23 @@ pub fn apply_template_response_with_authority(
         (merged, state)
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
-        let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
+        let base_state = match agent_doc_snapshot_io::crdt_merge_base_state_with(
             file,
             baseline,
             agent_doc_op_capture_io::has_pending_editor_ops,
             agent_doc_ops_log_io::log_op,
-        )?
-        .state;
+        ) {
+            Ok(base) => base.state,
+            Err(e) => {
+                // A corrupt/unreadable overlay CRDT sidecar must not abort the run and
+                // lose the response. Fall back to a merge base derived from the baseline
+                // text (mirrors the write-runtime IPC path).
+                eprintln!(
+                    "[crdt] WARNING: failed to load overlay CRDT merge base, falling back to baseline text: {e}"
+                );
+                agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state()
+            }
+        };
         if let Err(e) = agent_doc_controller_io::project_controller::
             reconcile_disk_projection_via_controller_model_for_doc(file, &base_state)
         {

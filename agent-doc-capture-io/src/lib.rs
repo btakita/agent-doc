@@ -411,9 +411,20 @@ pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>
     else {
         return Ok(None);
     };
-    let record: CaptureRecord = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse capture {}", path.display()))?;
-    Ok(Some(record))
+    // The capture sidecar is an optional crash-recovery replay artifact. A corrupt
+    // or torn capture is unusable and must degrade to absent (fail-closed to "no
+    // captured response") instead of failing a hot/critical-path caller such as
+    // commit materialization.
+    match serde_json::from_str::<CaptureRecord>(&content) {
+        Ok(record) => Ok(Some(record)),
+        Err(err) => {
+            eprintln!(
+                "[capture] WARNING: ignoring unreadable capture sidecar {} (treating as absent): {err}",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
 }
 
 pub fn load_partial_by_cycle(file: &Path, cycle_id: &str) -> Result<Option<PartialCaptureRecord>> {
@@ -423,9 +434,18 @@ pub fn load_partial_by_cycle(file: &Path, cycle_id: &str) -> Result<Option<Parti
     else {
         return Ok(None);
     };
-    let record: PartialCaptureRecord = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse partial capture {}", path.display()))?;
-    Ok(Some(record))
+    // Partial checkpoints are optional crash-recovery artifacts; a corrupt/torn
+    // partial capture degrades to absent rather than failing the streaming hot path.
+    match serde_json::from_str::<PartialCaptureRecord>(&content) {
+        Ok(record) => Ok(Some(record)),
+        Err(err) => {
+            eprintln!(
+                "[capture] WARNING: ignoring unreadable partial capture sidecar {} (treating as absent): {err}",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -1036,6 +1056,39 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    #[test]
+    fn corrupt_capture_sidecar_reads_as_absent_not_a_hot_path_error() {
+        // A corrupt/torn capture replay sidecar must degrade to absent (fail-closed to
+        // "no captured response") rather than propagate a serde parse error onto a
+        // hot/critical-path caller such as commit materialization.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            "---\nsession: sid\nagent: codex\nmodel: gpt-5\n---\n\n## User\n\nHello\n",
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            &std::fs::read_to_string(&doc).unwrap(),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let record = capture_response(&doc, "response body").unwrap();
+        let capture_path = capture_path_for(&doc, &record.capture_id).unwrap();
+        std::fs::write(&capture_path, "{ not valid capture json").unwrap();
+
+        assert!(
+            load_by_id(&doc, &record.capture_id).unwrap().is_none(),
+            "corrupt capture must read as absent, not error"
+        );
+        assert!(
+            load_active(&doc).unwrap().is_none(),
+            "load_active must also degrade to absent on a corrupt capture sidecar"
+        );
     }
 
     #[test]

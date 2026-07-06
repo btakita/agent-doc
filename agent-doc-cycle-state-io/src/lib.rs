@@ -358,8 +358,22 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
         return Ok(None);
     };
-    let state: CycleState = serde_json::from_str(&content)?;
-    Ok(Some(state))
+    // `#lzsidecaratomic`: the cycle-state JSON is a compatibility crash-recovery
+    // projection, not authoritative state (the state machine + state backbone own
+    // that). A corrupt, torn, or legacy-format sidecar must never fail a
+    // hot/critical-path caller: treat it as absent so the caller falls back to the
+    // durable state-backbone projection (and git), and the next accepted transition
+    // re-persists a clean sidecar.
+    match serde_json::from_str::<CycleState>(&content) {
+        Ok(state) => Ok(Some(state)),
+        Err(err) => {
+            eprintln!(
+                "[cycle-state] WARNING: ignoring unreadable cycle-state sidecar {} (treating as absent): {err}",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,7 +555,17 @@ pub fn load_with_closeout_projection(file: &Path) -> Result<Option<CycleState>> 
     let Some(mut state) = load(file)? else {
         return Ok(None);
     };
-    if let Some(projection) = load_closeout_projection(file)?
+    // The closeout projection is read from the durable state backbone (state.db). If
+    // that store is unreadable or corrupt it must not fail the hot/critical path
+    // either — degrade to the sidecar-only state rather than propagating the error.
+    let projection = load_closeout_projection(file).unwrap_or_else(|err| {
+        eprintln!(
+            "[cycle-state] WARNING: ignoring unreadable closeout projection for {} (using sidecar state only): {err}",
+            file.display()
+        );
+        None
+    });
+    if let Some(projection) = projection
         && projection.matches_cycle(&state.cycle_id)
     {
         apply_closeout_projection_to_cycle_state(&mut state, &projection);
@@ -2256,6 +2280,33 @@ mod tests {
         assert!(
             !recorded.surfaced,
             "freshly recorded ack is not yet surfaced"
+        );
+    }
+
+    #[test]
+    fn corrupt_cycle_sidecar_is_treated_as_absent_not_a_hot_path_error() {
+        // `#lzsidecaratomic`: a corrupt/torn/legacy-format cycle-state sidecar must
+        // never fail a hot/critical-path read. `load` treats it as absent, and
+        // `load_with_closeout_projection` (used across commit/capture/write) does the
+        // same instead of propagating a serde parse error.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle sidecar path");
+        // Overwrite the durable sidecar with unparseable bytes.
+        fs::write(&sidecar_path, "{ this is not valid cycle-state json").unwrap();
+
+        assert!(
+            load(&doc).unwrap().is_none(),
+            "corrupt sidecar must read as absent, not error"
+        );
+        assert!(
+            load_with_closeout_projection(&doc).unwrap().is_none(),
+            "projection-backed read must also degrade to absent on a corrupt sidecar"
         );
     }
 

@@ -217,8 +217,47 @@ The link is **LinkedIn's AI-guided intro interview** — an async, recorded vide
 
 Sources: [Haiven home](https://haiven.gg/) · [Haiven developers](https://haiven.gg/developers) · [Haiven on LinkedIn](https://www.linkedin.com/company/haiven-inc) · [Job post](https://www.linkedin.com/jobs/view/backend-platform-software-engineer-at-haiven-4433645177) · [Craig Fryar](https://www.linkedin.com/in/craigfryar/)
 
-> **Recovery note:** the editor IPC/CRDT path wedged mid-write (no live editor process was running), which scrambled and duplicated an earlier draft into this document. I rebuilt the exchange cleanly on disk, preserved all your prompts + the inline job posting verbatim, and cleared the `go` queue marker (the queue is empty and it was re-triggering churn). Re-add `go` if you want autonomous queue-drain mode.
-<!-- agent:boundary:haiven01 -->
+"I build the real-time, reactive, eventually-consistent plumbing this platform runs on"...please describe "this platform runs on". What are you referring to? Please don't use AI tells such as ` — `.
+
+❯ Please give me some scripted snippets for me to say in the AI screen.
+### Re: What "this platform runs on" meant, rewritten — opus-4-8
+
+**What it referred to:** "this platform" is **Haiven's platform** (the digital distribution + communications platform in the job post). The sentence was trying to say: *I build the kind of low-level real-time infrastructure that Haiven's platform is built on top of* ... their WebSocket chat/DM/presence, their NATS/JetStream signals system, and the eventual-consistency layer across their Go services.
+
+**Why it read wrong:** cold, "this platform" has no antecedent (the listener doesn't know which platform), and "runs on" makes it sound like the platform depends on *me* personally. Plus the `...please don't use ` `` ` — ` `` `` spaced-dash tell. Here's a clean rewrite that names Haiven directly and drops every em-dash:
+
+> I build the real-time, reactive, eventually-consistent systems a platform like Haiven runs on: live messaging, presence, and a signals layer that stays consistent across services. I architected Presence AI's production WebRTC avatar pipeline and ran real-time video social events at scale at Milyoni. I also author lazily, a cross-language reactive-signals and CRDT library with a Go port built on goroutines and channels, so SolidJS-style reactivity on the frontend and a Go concurrency backend are the same problem to me. And agent-doc, a project of mine, uses a CRDT document tree that is the same replica-sync model behind chat, presence, and event signals. My Go is newer than the rest of my systems experience, but I ship in it and ramp fast, because the hard part (real-time state, event pipelines, and reactive UIs) is already what I do every day.
+
+### Re: Scripted snippets for the AI screen — opus-4-8
+
+Short, spoken-voice lines you can say almost verbatim. No em-dashes, no "delve/leverage." Say the company + role back early, lead with the outcome, keep each to 45-90 seconds.
+
+**Why Haiven / why this role**
+> "I've spent my career building real-time, reactive systems, and that's exactly what Haiven is. I ran live video social events at scale at Milyoni and built a production real-time avatar pipeline at Presence AI, so the WebSocket chat, presence, and signals side of this backend role is familiar ground. What draws me is owning player-facing real-time features end to end, on a small team, on a gaming platform I'd actually use."
+
+**A real-time / backend system you built**
+> "At Presence AI I architected a pipeline that turns text into audio and then into lip-synced video, streamed live over WebRTC on H100 GPUs, and it had to stay low-latency under real load. On the open-source side I built agent-doc, a document that syncs in real time across a controller process, editor plugins, and a task supervisor using CRDTs, with a live work queue you can reorder and consume while other clients are editing. That's the same shape as real-time chat and presence plus an event-driven queue, which is the WebSocket and NATS part of this role."
+
+**Your Go experience (say the gap once, then move on)**
+> "I'll be straight with you: my Go is newer than the rest of my systems experience, but it's real and current. I authored lazily-go, a full port of my reactive-primitives library, built on goroutines and channels, with CRDT collection types and a distributed sync plane. I've also worked with go-fuse and Cerebrium's Go CLI. I ramp fast on a new language's ecosystem, because the hard part, the concurrency and the real-time state, is already what I do."
+
+**Event-driven / pub-sub / message brokers**
+> "My reactive frameworks are essentially pub-sub under the hood: signals propagate through a dependency graph, and my lazily library has a distributed CRDT plane for syncing state across nodes. That maps straight onto NATS and JetStream. I think about a trust-and-safety signals system as a stream of events fanning out to consumers, which is the model I already build in."
+
+**AI/ML features in production**
+> "I built tsift, a code-retrieval system that uses embeddings and a graph to score and rank results under a token budget, and at Presence AI I shipped AI-driven media generation under tight latency constraints. So content scoring, moderation signals, and recommendations are a familiar problem shape for your trust-and-safety engine."
+
+**Small, fast-moving team / ownership**
+> "Most of my career has been small teams and full ownership. I was at Pivotal Labs helping launch startups, and right now I deliver end to end for my own clients, from database schema to deploy. I'm comfortable owning a feature all the way to production, and I like shipping fast and iterating with the team."
+
+**A hard technical problem**
+> "One that sticks with me is keeping a document correct when several clients edit it at once. I used CRDTs with a cell-identity merge so that reordering or editing items in a live queue never duplicates or drops one, even under concurrent edits. Getting that merge right is the same core problem as consistent chat history or a reliable work queue."
+
+**A question to ask them (have one ready)**
+> "How is the trust-and-safety signals engine architected on NATS and JetStream today, and where do you expect it to need to scale as you move into Beta?"
+
+**Delivery reminders:** camera framed, decent light and audio; lead with the result, then how; name real systems (Presence AI, Milyoni, lazily-go, agent-doc, tsift); keep energy up and answers tight.
+<!-- agent:boundary:a2ee48e1 -->
 <!-- /agent:exchange -->
 
 ## Queue

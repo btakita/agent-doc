@@ -711,12 +711,20 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         Ok(s) => s,
         Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
     };
-    // No cycle state (or an unreadable one) means no turn is in flight → idle.
-    let phase = agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))
-        .ok()
-        .flatten()
-        .map(|state| state.phase)
-        .unwrap_or(agent_doc_turn::CyclePhase::Committed);
+    // `#sidecardemote`: the CPC document model (the actor's live state in the
+    // state store) is AUTHORITATIVE for whether a turn is in flight; the
+    // cycle-state sidecar is only a cold-start recovery snapshot + fine-label
+    // hint. So a stale/failed sidecar can neither assert a phantom in-flight turn
+    // (model idle → idle) nor hide a live one (model busy → in-flight even if the
+    // sidecar lags or was falsely abandoned).
+    let sidecar_phase =
+        agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))
+            .ok()
+            .flatten()
+            .map(|state| state.phase)
+            .unwrap_or(agent_doc_turn::CyclePhase::Committed);
+    let phase =
+        resolve_turn_phase(document_model_actor_state(std::path::Path::new(path)), sidecar_phase);
     let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
     if proj.turn_in_flight {
         let steering =
@@ -730,6 +738,59 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
     CString::new(json)
         .unwrap_or_else(|_| CString::new(idle_json()).unwrap())
         .into_raw()
+}
+
+/// `#sidecardemote` — resolve the turn phase for the projection with the CPC
+/// document model authoritative and the cycle-state sidecar demoted to a
+/// cold-start snapshot + fine-label hint. Pure so the authority policy is
+/// exhaustively unit-testable without a state store.
+///
+/// - Model `Busy`/`Blocked` → a turn is live: keep the sidecar's phase for the
+///   awaiting/persisting label, but if the sidecar is stale/closed use a generic
+///   in-flight phase so a lagging or falsely-abandoned sidecar cannot hide it.
+/// - Model any other state → no turn is running: `Committed` (idle), so a stale
+///   sidecar cannot assert a phantom in-flight turn.
+/// - Model unavailable (`None`, cold start) → the sidecar snapshot, best-effort.
+fn resolve_turn_phase(
+    model_state: Option<agent_doc_sqlite::state_store::ActorState>,
+    sidecar_phase: agent_doc_turn::CyclePhase,
+) -> agent_doc_turn::CyclePhase {
+    use agent_doc_sqlite::state_store::ActorState;
+    match model_state {
+        Some(ActorState::Busy | ActorState::Blocked) => {
+            if sidecar_phase.is_open() {
+                sidecar_phase
+            } else {
+                agent_doc_turn::CyclePhase::PreflightStarted
+            }
+        }
+        Some(_) => agent_doc_turn::CyclePhase::Committed,
+        None => sidecar_phase,
+    }
+}
+
+/// `#sidecardemote` — the CPC document model's authoritative actor state for a
+/// document, read directly from the state store (a local sqlite read, NOT a
+/// controller RPC, so it stays cheap and works even while the controller is
+/// busy). `None` when there is no state store yet (cold start / never-registered)
+/// or the row is unreadable, so the projection falls back to the cycle-state
+/// sidecar snapshot — the sidecar's only sanctioned authority.
+///
+/// Reads WITHOUT creating the store (checks the path first), so a bare read from
+/// the editor plugin never materializes controller state as a side effect.
+fn document_model_actor_state(file: &Path) -> Option<agent_doc_sqlite::state_store::ActorState> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    let db_path = agent_doc_sqlite::state_store::state_db_path(&root);
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root).ok()?;
+    let document_id =
+        agent_doc_session_actor_io::canonical_document_id_in(&root, &file.to_string_lossy());
+    agent_doc_sqlite::state_store::load_actor_record_from_db(&conn, &document_id)
+        .ok()
+        .flatten()
+        .map(|record| record.state)
 }
 
 fn turn_steering_projection_from_realtime(
@@ -2719,6 +2780,49 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_turn_phase_makes_document_model_authoritative() {
+        use agent_doc_sqlite::state_store::ActorState;
+        use agent_doc_turn::CyclePhase;
+        // `#sidecardemote`: model Busy/Blocked + a stale/closed sidecar → in-flight
+        // (a lagging or falsely-abandoned sidecar cannot hide a live turn).
+        assert_eq!(
+            resolve_turn_phase(Some(ActorState::Busy), CyclePhase::Committed),
+            CyclePhase::PreflightStarted
+        );
+        assert_eq!(
+            resolve_turn_phase(Some(ActorState::Blocked), CyclePhase::Abandoned),
+            CyclePhase::PreflightStarted
+        );
+        // Model Busy + an open sidecar → keep the sidecar's fine awaiting/persisting label.
+        assert_eq!(
+            resolve_turn_phase(Some(ActorState::Busy), CyclePhase::ResponseCaptured),
+            CyclePhase::ResponseCaptured
+        );
+        // Model not-in-flight → idle regardless of a stale OPEN sidecar (no phantom turn).
+        for st in [
+            ActorState::Ready,
+            ActorState::Closed,
+            ActorState::Starting,
+            ActorState::WaitingInput,
+        ] {
+            assert_eq!(
+                resolve_turn_phase(Some(st), CyclePhase::PreflightStarted),
+                CyclePhase::Committed,
+                "{st:?} must not let a stale sidecar assert an in-flight turn"
+            );
+        }
+        // No document model (cold start) → best-effort sidecar snapshot, its only authority.
+        assert_eq!(
+            resolve_turn_phase(None, CyclePhase::PreflightStarted),
+            CyclePhase::PreflightStarted
+        );
+        assert_eq!(
+            resolve_turn_phase(None, CyclePhase::Committed),
+            CyclePhase::Committed
+        );
+    }
 
     #[test]
     fn turn_projection_prefers_terminal_projection_over_stale_open_sidecar() {

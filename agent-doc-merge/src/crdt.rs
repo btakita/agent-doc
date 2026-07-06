@@ -219,7 +219,7 @@ fn merge_inner(
                 "[crdt] cell_merge(op-routed): {} captured op(s) routed to cells and replayed",
                 ops.len()
             );
-            return Ok(outcome.merged_text);
+            return guard_merge_growth(outcome.merged_text, ours_text, theirs_text);
         }
         eprintln!(
             "[crdt] cell_merge(op-routed): fell back to legacy merge_inner path (boundary-crossing/framing/stale ops)"
@@ -392,7 +392,7 @@ fn merge_inner(
         guard_committed_responses(merged, &committed_response_headings, ours_text, theirs_text);
 
     // Post-merge dedup: remove identical adjacent blocks (#15)
-    Ok(dedup_adjacent_blocks(&merged))
+    guard_merge_growth(dedup_adjacent_blocks(&merged), ours_text, theirs_text)
 }
 
 /// One node of the per-component document segmentation (`#qcellmerge1`).
@@ -1714,6 +1714,54 @@ fn is_structural_block(trimmed: &str) -> bool {
     first.len() >= 3 && first.chars().all(|c| c == '-' || c == '*' || c == '_')
 }
 
+/// `#crdtmergeguard` — bytes below which [`guard_merge_growth`] never trips, so
+/// small documents (where framing/whitespace deltas are proportionally large)
+/// are unaffected. The runaway-duplicate wedge grew the buffer into the
+/// megabytes/gigabytes, far above this floor.
+const CRDT_MERGE_GROWTH_FLOOR_BYTES: usize = 64 * 1024;
+
+/// `#crdtmergeguard` — slack added to the `ours + theirs` upper bound so a
+/// legitimately content-adding merge (plus minor framing normalization) is never
+/// mistaken for runaway duplication.
+const CRDT_MERGE_GROWTH_MARGIN_BYTES: usize = 4 * 1024;
+
+/// `#crdtmergeguard` — fail closed when a merge output is pathologically larger
+/// than its inputs, the signature of runaway duplicate accumulation.
+///
+/// A conflict-free 3-way merge is `base + ours_additions + theirs_additions`,
+/// which can never legitimately exceed `len(ours) + len(theirs)` (each side
+/// already contains the base). An output beyond that bound means duplicates are
+/// accreting — the non-adjacent / mirror-ordered duplicates that
+/// [`dedup_adjacent_blocks`] cannot collapse. Adopting such a result balloons the
+/// CRDT buffer merge-after-merge and pegs the merge authority's CPU (the observed
+/// 1.7 GB / 111% controller wedge). Failing closed keeps the prior authoritative
+/// text and routes the caller to its fallback, so the buffer cannot grow
+/// unbounded even if a new divergence slips past the upstream (baseline / cell
+/// identity) fixes.
+fn guard_merge_growth(merged: String, ours_text: &str, theirs_text: &str) -> Result<String> {
+    let bound = ours_text
+        .len()
+        .saturating_add(theirs_text.len())
+        .saturating_add(CRDT_MERGE_GROWTH_MARGIN_BYTES);
+    if merged.len() > CRDT_MERGE_GROWTH_FLOOR_BYTES && merged.len() > bound {
+        eprintln!(
+            "[crdt] merge growth guard tripped (#crdtmergeguard): merged {} bytes > bound {} bytes (ours={}, theirs={})",
+            merged.len(),
+            bound,
+            ours_text.len(),
+            theirs_text.len(),
+        );
+        anyhow::bail!(
+            "crdt merge growth guard tripped (#crdtmergeguard): merged {} bytes exceeds bound {} bytes (ours={}, theirs={}); refusing a runaway-duplicate merge that would balloon the buffer",
+            merged.len(),
+            bound,
+            ours_text.len(),
+            theirs_text.len(),
+        );
+    }
+    Ok(merged)
+}
+
 /// Compact a CRDT state by re-encoding (GC tombstones where possible).
 pub fn compact(state: &[u8]) -> Result<Vec<u8>> {
     let doc = CrdtDoc::decode_state(state)?;
@@ -2687,6 +2735,36 @@ commit and push all rappstack packages.
     // -----------------------------------------------------------------------
     // dedup_adjacent_blocks tests (#15)
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn merge_growth_guard_passes_legitimate_content_adding_merge() {
+        // A merge whose output is within `ours + theirs (+ margin)` is legitimate
+        // content addition — the guard must never trip on it.
+        let ours = "a".repeat(100_000);
+        let theirs = "b".repeat(100_000);
+        let merged = format!("{ours}{theirs}"); // == ours + theirs, within bound
+        assert!(guard_merge_growth(merged, &ours, &theirs).is_ok());
+    }
+
+    #[test]
+    fn merge_growth_guard_trips_on_runaway_duplication() {
+        // Output far exceeding `ours + theirs` is runaway duplicate accretion —
+        // the 1.7 GB / 111% wedge signature. Fail closed rather than adopt it.
+        let ours = "a".repeat(100_000);
+        let theirs = "b".repeat(100_000);
+        let ballooned = "x".repeat(1_000_000); // 1 MB >> 200k bound, > 64k floor
+        assert!(guard_merge_growth(ballooned, &ours, &theirs).is_err());
+    }
+
+    #[test]
+    fn merge_growth_guard_ignores_small_documents_under_floor() {
+        // Below the absolute floor the guard is inert, so ordinary small-doc
+        // merges (where framing deltas are proportionally large) never trip it.
+        let ours = "a\n\n".repeat(3);
+        let theirs = "b\n\n".repeat(3);
+        let small = "c".repeat(10_000); // > ours+theirs but < 64k floor
+        assert!(guard_merge_growth(small, &ours, &theirs).is_ok());
+    }
 
     #[test]
     fn dedup_removes_identical_adjacent_blocks() {

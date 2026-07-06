@@ -8776,6 +8776,101 @@ pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// Outcome of a controller restart (`#cpcrestart`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ControllerRestartOutcome {
+    /// Controller PIDs verified same-project and reaped (SIGTERM → SIGKILL).
+    pub reaped_pids: Vec<u32>,
+    /// Whether a bounded graceful `shutdown` RPC was accepted before the reap.
+    pub graceful: bool,
+    /// Whether the caller forced the signal reap without the graceful RPC.
+    pub force: bool,
+}
+
+/// `#cpcrestart` — restart/recycle the current project controller out-of-band.
+///
+/// The CPC is the live state authority; a restart is only for cold-start recovery
+/// (recycle onto a new binary, or recover from a bug that wedged it). Because a
+/// spin-wedged controller stops servicing RPCs (`shutdown` times out), the reap
+/// signals the controller PID(s) directly (SIGTERM → 750ms → SIGKILL, via
+/// [`reap_verified_controller_pid`], which is guarded by
+/// [`is_same_project_controller_pid`] so it never touches this process or another
+/// project's controller). Route-owned document state is durably checkpointed
+/// first so the fresh controller rebuilds its model from disk. With
+/// `--launch-mode lazy` the next request relaunches a fresh controller, so no
+/// explicit relaunch is issued here.
+///
+/// `force == false` first attempts a bounded graceful `shutdown` RPC (clean exit
+/// when the controller is healthy); `force == true` skips straight to the signal
+/// reap — the correct path for a spin-wedged / RPC-unreachable controller.
+pub fn force_restart_controller(
+    project_root: &Path,
+    force: bool,
+) -> Result<ControllerRestartOutcome> {
+    // Best-effort durable snapshot so the fresh controller recovers in-flight
+    // route-owned document state. Never block the restart on a checkpoint failure.
+    if let Err(err) =
+        checkpoint_route_owned_documents_for_project(project_root, "controller_restart_request")
+    {
+        eprintln!("[controller] restart: durable checkpoint warning: {err:#}");
+    }
+
+    let mut graceful = false;
+    if !force {
+        // A healthy controller exits cleanly here; a wedged one times out and we
+        // fall through to the signal reap below (bounded inside `request`).
+        graceful = request(project_root, "shutdown").is_ok();
+    }
+
+    let self_pid = std::process::id();
+    let mut reaped = Vec::new();
+    for pid in crate::process::project_controller_pids(project_root) {
+        if pid == self_pid {
+            continue;
+        }
+        reap_verified_controller_pid(project_root, pid, 0);
+        if !process_is_alive(pid) {
+            reaped.push(pid);
+        }
+    }
+    reaped.sort_unstable();
+    reaped.dedup();
+
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_restart_requested project_root={} force={} graceful={} reaped={:?} (#cpcrestart)",
+            project_root.display(),
+            force,
+            graceful,
+            reaped,
+        ),
+    );
+
+    Ok(ControllerRestartOutcome {
+        reaped_pids: reaped,
+        graceful,
+        force,
+    })
+}
+
+pub fn run_restart(root: Option<&Path>, force: bool) -> Result<()> {
+    let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
+    let outcome = force_restart_controller(&project_root, force)?;
+    println!("{}", serde_json::to_string_pretty(&outcome)?);
+    if outcome.reaped_pids.is_empty() && !outcome.graceful {
+        println!(
+            "[controller] no live project controller to restart; a lazy launcher starts a fresh one on the next request"
+        );
+    } else {
+        println!(
+            "[controller] restarted: reaped {} controller pid(s); a fresh controller launches on the next request",
+            outcome.reaped_pids.len()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -8784,6 +8879,23 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    #[test]
+    fn force_restart_controller_with_no_running_controller_is_a_noop_ok() {
+        // `#cpcrestart`: with no project controller running, a force restart must
+        // succeed as a no-op (nothing reaped, no graceful RPC) — the lazy launcher
+        // will start a fresh controller on the next request. Never errors so an
+        // operator recovery path can't itself fail closed.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let outcome = force_restart_controller(dir.path(), true).unwrap();
+        assert!(
+            outcome.reaped_pids.is_empty(),
+            "no controller serves this fresh temp project, so nothing is reaped"
+        );
+        assert!(!outcome.graceful, "force skips the graceful shutdown RPC");
+        assert!(outcome.force);
+    }
 
     #[test]
     fn controller_client_handler_errors_return_error_envelope() {

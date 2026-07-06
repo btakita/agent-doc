@@ -2954,6 +2954,18 @@ enum ControllerAction {
         #[arg(long)]
         project_root: Option<PathBuf>,
     },
+    /// Restart/recycle the project controller (out-of-band; works on a
+    /// spin-wedged controller that no longer services RPCs). Checkpoints
+    /// route-owned state first; the lazy launcher relaunches a fresh controller.
+    Restart {
+        /// Project root to restart (defaults to nearest project from CWD)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        /// Skip the graceful `shutdown` RPC and reap the controller PID(s)
+        /// directly — use when the controller is spin-wedged / RPC-unreachable.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4495,6 +4507,13 @@ fn try_main() -> anyhow::Result<()> {
             ControllerAction::Shutdown { project_root } => {
                 agent_doc_controller_io::project_controller::run_shutdown(project_root.as_deref())
             }
+            ControllerAction::Restart {
+                project_root,
+                force,
+            } => agent_doc_controller_io::project_controller::run_restart(
+                project_root.as_deref(),
+                force,
+            ),
         },
         Commands::Admin { action } => {
             let admin_effects = CliAdminControllerEffects::default();

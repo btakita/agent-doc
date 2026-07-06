@@ -74,6 +74,8 @@
 
 ## Decision / Communication
 
+- [Refactor-spiral pattern + guardrails](user_refactor_spiral_pattern_guardrails.md) — spike-before-commit, conviction gates, recovery-rate tripwire, strangler-not-big-bang, behavioral done-bar; raise proactively.
+
 - [AskUserQuestion no-option + note → confirm actual choice](feedback_askuserquestion_no_option_confirm_actual_choice.md) — note ≠ endorsement.
 - [Explain decisions plainly, not jargon](feedback_explain_decisions_plainly_not_jargon.md) — plain-English + recommended default.
 - [No sycophancy](feedback_no_sycophancy.md) — no superlatives/promo.

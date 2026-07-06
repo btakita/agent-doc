@@ -196,7 +196,7 @@ The link is **LinkedIn's AI-guided intro interview** — an async, recorded vide
 1. *"Why Haiven / why this role?"* → Real-time + reactive + gaming/community platform is exactly where your work lives (Milyoni real-time video social; lazily reactive signals; agent-doc CRDT sync). You want to build player-facing real-time systems on a small team where you own features end-to-end.
 2. *"Tell me about backend/real-time systems you've built."* → Presence AI WebRTC avatar pipeline (H100s, low-latency) **and** agent-doc's multi-replica CRDT DocumentCellTree. Land the "chat/presence/eventual consistency" parallel to their WebSocket stack.
 3. *"Your Go experience?"* → Be honest + specific: you **authored lazily-go** (goroutines/channels, CRDT plane, reactive primitives), plus go-fuse and Cerebrium CLI. Frame: strong systems fundamentals, ramp fast, already writing idiomatic concurrent Go.
-4. *"Event-driven / pub-sub / message brokers?"* → Your reactive frameworks + lazily's distributed CRDT anti-entropy plane are pub/sub signal propagation; map directly to NATS/JetStream for their trust & safety signals.
+4. *"Event-driven / pub-sub / message brokers?"* → Your reactive frameworks + lazily's distributed CRDT anti-entropy plane are pub/sub signal propagatio n; map directly to NATS/JetStream for their trust & safety signals.
 5. *"AI/ML features in production?"* → tsift RAG (embeddings/scoring) + Presence AI + NDA audio-avatar work → their moderation/scoring/recommendation engine.
 6. *"Working in a small, fast-moving team / ownership?"* → Pivotal Labs (20+ startups), current solo client delivery (EFS, MonsterRodHolders), open-source maintainer shipping end-to-end.
 7. *"A hard technical problem / production incident?"* → Pick one: real-time merge/CRDT correctness under concurrent edits in agent-doc, or latency tuning in the avatar pipeline. Concrete numbers > adjectives.
@@ -214,6 +214,10 @@ The link is **LinkedIn's AI-guided intro interview** — an async, recorded vide
 - Draft your **LinkedIn application survey answers** ("why you're a perfect fit") — `#haivenapply`.
 - A full **rehearsal script** (6 STAR answers written out) for the AI screen — `#haivenscreen`.
 - Persist the Haiven + Craig Fryar profiles as standalone files — `#haivenprofiles`.
+- Numbers help if one comes naturally (H100s, live concert scale), but don't force them here.
+- Land on Haiven in the last sentence so the answer points forward, not just backward.
+- Name at most three or four systems. Depth beats breadth; you can expand on any of them in later questions.
+- Open with the one-line through-line ("real-time, reactive systems") before any specific job, so the AI hears a theme, not a resume dump.
 
 Sources: [Haiven home](https://haiven.gg/) · [Haiven developers](https://haiven.gg/developers) · [Haiven on LinkedIn](https://www.linkedin.com/company/haiven-inc) · [Job post](https://www.linkedin.com/jobs/view/backend-platform-software-engineer-at-haiven-4433645177) · [Craig Fryar](https://www.linkedin.com/in/craigfryar/)
 
@@ -257,7 +261,30 @@ Short, spoken-voice lines you can say almost verbatim. No em-dashes, no "delve/l
 > "How is the trust-and-safety signals engine architected on NATS and JetStream today, and where do you expect it to need to scale as you move into Beta?"
 
 **Delivery reminders:** camera framed, decent light and audio; lead with the result, then how; name real systems (Presence AI, Milyoni, lazily-go, agent-doc, tsift); keep energy up and answers tight.
-<!-- agent:boundary:a2ee48e1 -->
+❯ Please give me a script for.
+❯ > Great, let's dive right in. First question: Can you walk me through your professional background, highlighting the most relevant accomplishments?
+<!-- agent:boundary:bfa09c6f -->
+### Re: Script for "walk me through your background + most relevant accomplishments" — opus-4-8
+
+This is the classic opener. They asked for the **most relevant** accomplishments, so lead with real-time + Go + reactive and skip a full chronology. Aim for 90 to 110 seconds. Say it in your own cadence; this is a script to internalize, not read flat.
+
+**Primary script (~100s)**
+> "Sure. I'm a software engineer with about twenty years of experience, and the through-line of my career has been real-time, reactive systems, which is exactly what Haiven is building.
+>
+> A few highlights that map to this role. At Presence AI I architected a production pipeline that turns text into audio and then into lip-synced video, streamed live over WebRTC on H100 GPUs, all under tight latency. At Milyoni I built and ran real-time video social events at scale, live concerts for partners like Warner Bros and Universal Music, so I've handled real-time media and presence with real users watching.
+>
+> On the open-source side, I author lazily, a cross-language reactive-signals and CRDT library, including a Go port built on goroutines and channels. That's the same fine-grained reactivity SolidJS is built on, and it's real, current Go. I also built agent-doc, a document that syncs in real time across several clients using CRDTs, with a live work queue you can reorder and consume during concurrent edits. That's the same shape as real-time chat, presence, and an event-driven signals system.
+>
+> Earlier I was at Pivotal Labs helping launch startups, and today I deliver end to end for my own clients, from database schema all the way to production. So what I bring to Haiven is deep real-time and reactive systems experience, current Go, and comfort owning features end to end on a small, fast-moving team."
+
+**Tight fallback (~45s, if you feel the clock)**
+> "I'm a software engineer with about twenty years of experience, focused on real-time, reactive systems, which is exactly Haiven's space. I architected Presence AI's live WebRTC avatar pipeline on H100 GPUs, and I ran real-time video social events at scale at Milyoni. I author lazily, a reactive-signals and CRDT library with a Go port built on goroutines and channels, and I built agent-doc, a real-time CRDT-synced document with a live work queue. So real-time media, reactive frontends, and concurrent Go are all daily work for me, and I like owning features end to end on a small team."
+
+**Delivery notes for this question**
+- Open with the one-line through-line ("real-time, reactive systems") before any specific job, so the AI hears a theme, not a resume dump.
+- Name at most three or four systems. Depth beats breadth; you can expand on any of them in later questions.
+- Land on Haiven in the last sentence so the answer points forward, not just backward.
+- Numbers help if one comes naturally (H100s, live concert scale), but don't force them here.
 <!-- /agent:exchange -->
 
 ## Queue

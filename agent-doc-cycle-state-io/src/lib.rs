@@ -70,15 +70,15 @@ pub struct BacklogTargetRequirement {
     pub baseline_item_ids: Vec<String>,
 }
 
-/// `#semmerge-ack-turn` (semantic_merge Phase 4): a node-keyed acknowledgement
+/// `#semmerge-ack-turn` (document_cell_merge Phase 4): a node-keyed acknowledgement
 /// that a node-disjoint semantic merge could NOT apply the agent's change
 /// verbatim — the operator deleted an agent-edited node, overrode the same node,
 /// or revived an agent-deleted node, and the operator value won in `merged_doc`.
 /// The agent's content is never silently discarded: the next cycle surfaces these
 /// so the agent emits an exchange turn acknowledging the non-applied change.
 ///
-/// `reason` is the stable [`agent_doc_merge::semantic_merge::AckReason`]
-/// token (see [`AckReason::token`](agent_doc_merge::semantic_merge::AckReason::token)).
+/// `reason` is the stable [`agent_doc_merge::document_cell_merge::AckReason`]
+/// token (see [`AckReason::token`](agent_doc_merge::document_cell_merge::AckReason::token)).
 /// `recorded_cycle_id` is the cycle whose convergence recorded the ack (forensic
 /// info). `surfaced` drives the one-cycle lifecycle: [`start_preflight_with_task`]
 /// carries forward only un-surfaced acks and marks them surfaced, so each ack
@@ -238,11 +238,11 @@ pub struct CycleState {
     /// for a committed response, binary consume, or explicit deferral proof.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_free_text_queue_heads: Vec<String>,
-    /// `#semmerge-ack-turn` (semantic_merge Phase 4): node-keyed acks carried into
+    /// `#semmerge-ack-turn` (document_cell_merge Phase 4): node-keyed acks carried into
     /// the NEXT cycle's response. Recorded at convergence time
     /// ([`record_semantic_merge_acks`]) and carried forward exactly one cycle by
     /// [`start_preflight_with_task`], which preflight surfaces as
-    /// `semantic_merge_acks` so the agent emits an acknowledgement exchange turn.
+    /// `document_cell_merge_acks` so the agent emits an acknowledgement exchange turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
     /// `#closeoutstall`: typed operator-gated closeout state. A response may be
@@ -702,27 +702,27 @@ pub fn load_pending_semantic_merge_acks(file: &Path) -> Result<Vec<PendingSemant
         .unwrap_or_default())
 }
 
-fn semantic_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
+fn document_cell_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeAck>> {
     Ok(load_semantic_merge_ack_queue_source(file)?
-        .map(|source| source.semantic_merge_acks_to_carry())
+        .map(|source| source.document_cell_merge_acks_to_carry())
         .unwrap_or_default())
 }
 
-enum SemanticMergeAckQueueSource {
+enum DocumentCellMergeAckQueueSource {
     Projection(Box<ProjectedCloseoutState>),
     Cycle(Box<CycleState>),
 }
 
-impl SemanticMergeAckQueueSource {
+impl DocumentCellMergeAckQueueSource {
     fn pending_semantic_merge_acks(&self) -> Vec<PendingSemanticMergeAck> {
-        self.semantic_merge_ack_queue().to_vec()
+        self.document_cell_merge_ack_queue().to_vec()
     }
 
-    fn semantic_merge_acks_to_carry(&self) -> Vec<PendingSemanticMergeAck> {
-        carry_forward_unsurfaced_semantic_merge_acks(self.semantic_merge_ack_queue())
+    fn document_cell_merge_acks_to_carry(&self) -> Vec<PendingSemanticMergeAck> {
+        carry_forward_unsurfaced_semantic_merge_acks(self.document_cell_merge_ack_queue())
     }
 
-    fn semantic_merge_ack_queue(&self) -> &[PendingSemanticMergeAck] {
+    fn document_cell_merge_ack_queue(&self) -> &[PendingSemanticMergeAck] {
         match self {
             Self::Projection(projection) => &projection.pending_semantic_merge_acks,
             Self::Cycle(state) => &state.pending_semantic_merge_acks,
@@ -732,22 +732,22 @@ impl SemanticMergeAckQueueSource {
 
 fn load_semantic_merge_ack_queue_source(
     file: &Path,
-) -> Result<Option<SemanticMergeAckQueueSource>> {
+) -> Result<Option<DocumentCellMergeAckQueueSource>> {
     let raw = load(file)?;
     let Some(projection) = load_closeout_projection(file)? else {
-        return Ok(raw.map(|state| SemanticMergeAckQueueSource::Cycle(Box::new(state))));
+        return Ok(raw.map(|state| DocumentCellMergeAckQueueSource::Cycle(Box::new(state))));
     };
     if !projection.pending_semantic_merge_acks.is_empty() {
-        return Ok(Some(SemanticMergeAckQueueSource::Projection(Box::new(
+        return Ok(Some(DocumentCellMergeAckQueueSource::Projection(Box::new(
             projection,
         ))));
     }
     if let Some(raw) = raw
         && projection.matches_cycle(&raw.cycle_id)
     {
-        return Ok(Some(SemanticMergeAckQueueSource::Cycle(Box::new(raw))));
+        return Ok(Some(DocumentCellMergeAckQueueSource::Cycle(Box::new(raw))));
     }
-    Ok(Some(SemanticMergeAckQueueSource::Projection(Box::new(
+    Ok(Some(DocumentCellMergeAckQueueSource::Projection(Box::new(
         projection,
     ))))
 }
@@ -843,7 +843,7 @@ pub fn start_preflight_with_task(
     // ack the prior cycle itself carried IN was already surfaced there, so it
     // drops. Driven by the `surfaced` flag rather than a cycle-id comparison
     // because `cycle_id` is millisecond-derived and can collide across cycles.
-    let carried_semantic_merge_acks = semantic_merge_acks_to_carry(file).unwrap_or_default();
+    let carried_semantic_merge_acks = document_cell_merge_acks_to_carry(file).unwrap_or_default();
     let phase = CyclePhaseMachine::transition(CyclePhase::Committed, CycleEvent::StartPreflight)
         .unwrap_or(CyclePhase::PreflightStarted);
     let state = CycleState {
@@ -1498,14 +1498,14 @@ pub fn record_dropped_queue_prompts(file: &Path, prompts: &[String]) -> Result<O
     Ok(Some(state))
 }
 
-/// `#semmerge-ack-turn` (semantic_merge Phase 4): record node-keyed acks emitted
+/// `#semmerge-ack-turn` (document_cell_merge Phase 4): record node-keyed acks emitted
 /// by the convergence semantic merge so the NEXT cycle can acknowledge the
 /// non-applied agent change in an exchange turn. Tags each ack with the current
 /// cycle id ([`start_preflight_with_task`] carries it forward exactly one cycle).
 /// Appends only previously-unseen `(component, id, reason)` triples.
 pub fn record_semantic_merge_acks(
     file: &Path,
-    acks: &[agent_doc_merge::semantic_merge::AckRequest],
+    acks: &[agent_doc_merge::document_cell_merge::AckRequest],
 ) -> Result<Option<CycleState>> {
     let Some(mut state) = load_with_closeout_projection(file)? else {
         if let Some(projection) = load_closeout_projection(file)?
@@ -1851,7 +1851,7 @@ fn append_semantic_merge_ack_recorded_event(
     append_state_fact(
         file,
         event_id,
-        agent_doc_state_backbone::StateFact::SemanticMergeAckRecorded {
+        agent_doc_state_backbone::StateFact::DocumentCellMergeAckRecorded {
             document_hash,
             cycle_id: cycle_id.to_string(),
             component: ack.component.clone(),
@@ -1880,7 +1880,7 @@ fn append_semantic_merge_ack_carried_forward_events(
         append_state_fact(
             file,
             event_id,
-            agent_doc_state_backbone::StateFact::SemanticMergeAckCarriedForward {
+            agent_doc_state_backbone::StateFact::DocumentCellMergeAckCarriedForward {
                 document_hash: document_hash.clone(),
                 source_cycle_id,
                 target_cycle_id: target_cycle_id.to_string(),
@@ -2213,9 +2213,9 @@ mod tests {
     fn ack(
         component: &str,
         id: &str,
-        reason: agent_doc_merge::semantic_merge::AckReason,
-    ) -> agent_doc_merge::semantic_merge::AckRequest {
-        agent_doc_merge::semantic_merge::AckRequest {
+        reason: agent_doc_merge::document_cell_merge::AckReason,
+    ) -> agent_doc_merge::document_cell_merge::AckRequest {
+        agent_doc_merge::document_cell_merge::AckRequest {
             component: component.to_string(),
             id: id.to_string(),
             reason,
@@ -2225,7 +2225,7 @@ mod tests {
 
     #[test]
     fn record_semantic_merge_acks_tags_current_cycle_and_dedupes() {
-        use agent_doc_merge::semantic_merge::AckReason;
+        use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -2260,8 +2260,8 @@ mod tests {
     }
 
     #[test]
-    fn semantic_merge_acks_survive_missing_cycle_sidecar_via_projection() {
-        use agent_doc_merge::semantic_merge::AckReason;
+    fn document_cell_merge_acks_survive_missing_cycle_sidecar_via_projection() {
+        use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -2297,7 +2297,7 @@ mod tests {
 
     #[test]
     fn start_preflight_carries_prior_cycle_acks_forward_exactly_once() {
-        use agent_doc_merge::semantic_merge::AckReason;
+        use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -2336,8 +2336,8 @@ mod tests {
     }
 
     #[test]
-    fn semantic_merge_ack_recorded_after_carry_chains_to_next_cycle() {
-        use agent_doc_merge::semantic_merge::AckReason;
+    fn document_cell_merge_ack_recorded_after_carry_chains_to_next_cycle() {
+        use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();

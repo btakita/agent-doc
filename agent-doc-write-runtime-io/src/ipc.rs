@@ -786,7 +786,7 @@ mod visible_write_content_snapshot_tests {
 
     // --- #smconv: node-keyed semantic-merge convergence on live drift ---
     //
-    // The shipped Phase-1 `semantic_merge` models exchange turns (and all
+    // The shipped Phase-1 `document_cell_merge` models exchange turns (and all
     // component content) as list *items* keyed by id; it reconstructs each
     // operator-skeleton component body from items and keeps only the operator's
     // non-item prose (documented assumption). These fixtures therefore use the
@@ -971,7 +971,7 @@ mod visible_write_content_snapshot_tests {
     #[test]
     fn smconv_merges_heading_prose_response_preserving_both_changesets() {
         // The real-session `### Re:` heading-prose exchange turn is now modeled by
-        // semantic_merge as an append-only node (#semmerge-owner heading-prose
+        // document_cell_merge as an append-only node (#semmerge-owner heading-prose
         // extension), so a live drift no longer drops the agent's response: the
         // node-disjoint merge applies BOTH the agent's new `### Re:` turn AND the
         // operator's concurrent frontmatter/queue edits. This is the root-cause

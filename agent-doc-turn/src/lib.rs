@@ -95,7 +95,7 @@ pub enum CycleBookkeepingEvent {
     IpcSnapshotAdoptionBlocked,
     DroppedExchangePrompts,
     DroppedQueuePrompts,
-    SemanticMergeAcks,
+    DocumentCellMergeAcks,
 }
 
 pub struct CyclePhaseMachine {

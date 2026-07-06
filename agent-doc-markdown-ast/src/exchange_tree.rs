@@ -16,7 +16,7 @@
 //! `tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md`. Phase 3 maps each
 //! node onto a `lazily::SeqCrdt` element (structure) + `TextCrdt` (body), replacing
 //! the whole-doc `yrs` merge that allows cross-response bleed. The heading helpers
-//! here intentionally mirror `agent-doc-merge::semantic_merge` (`is_h3_heading` /
+//! here intentionally mirror `agent-doc-merge::document_cell_merge` (`is_h3_heading` /
 //! `normalize_heading_key`) and should be unified into this module in Phase 3.
 
 use agent_doc_hash::short_content_hash;

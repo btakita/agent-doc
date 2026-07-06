@@ -12,7 +12,7 @@ pub mod crdt_sync;
 pub mod document_cell;
 pub mod exchange_node_merge;
 pub mod frontmatter_crdt;
-pub mod semantic_merge;
+pub mod document_cell_merge;
 
 pub use document_cell::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
@@ -20,7 +20,7 @@ pub use document_cell::{
 };
 pub use frontmatter_crdt::merge_contents_crdt;
 
-use semantic_merge::AckRequest;
+use document_cell_merge::AckRequest;
 
 /// Merge implementation to use for a pure three-way merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,7 +85,7 @@ pub fn merge(request: MergeRequest<'_>) -> MergePlan {
     match request.engine {
         MergeEngine::Semantic => {
             let outcome =
-                semantic_merge::semantic_merge(request.base, request.agent, request.operator);
+                document_cell_merge::document_cell_merge(request.base, request.agent, request.operator);
             MergePlan {
                 merged_doc: outcome.merged_doc,
                 acknowledgements: outcome.requires_ack,
@@ -267,7 +267,7 @@ pub fn merge_contents_crdt_classified(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_merge::AckReason;
+    use crate::document_cell_merge::AckReason;
 
     #[test]
     fn classified_sound_merge_is_clean() {
@@ -304,7 +304,7 @@ mod tests {
 "#;
 
     #[test]
-    fn semantic_merge_keeps_operator_edit_on_same_queue_node() {
+    fn document_cell_merge_keeps_operator_edit_on_same_queue_node() {
         let agent = r#"<!-- agent:queue -->
 - [ ] [#task] agent text
 <!-- /agent:queue -->

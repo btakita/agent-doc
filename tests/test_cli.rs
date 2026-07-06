@@ -15676,16 +15676,16 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     let markdown_ast_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-markdown-ast/src/lib.rs")).unwrap();
     assert!(
-        merge_lib.contains("pub mod semantic_merge;")
-            && !merge_lib.contains("pub use agent_doc_markdown_ast::semantic_merge"),
-        "agent-doc-merge should own semantic_merge directly, not re-export markdown-ast"
+        merge_lib.contains("pub mod document_cell_merge;")
+            && !merge_lib.contains("pub use agent_doc_markdown_ast::document_cell_merge"),
+        "agent-doc-merge should own document_cell_merge directly, not re-export markdown-ast"
     );
     assert!(
-        !markdown_ast_lib.contains("pub mod semantic_merge;")
+        !markdown_ast_lib.contains("pub mod document_cell_merge;")
             && !manifest_dir
-                .join("agent-doc-markdown-ast/src/semantic_merge.rs")
+                .join("agent-doc-markdown-ast/src/document_cell_merge.rs")
                 .exists(),
-        "agent-doc-markdown-ast must not keep semantic_merge as a compatibility module"
+        "agent-doc-markdown-ast must not keep document_cell_merge as a compatibility module"
     );
     for relative in [
         "agent-doc-cycle-state-io/src/lib.rs",
@@ -15695,7 +15695,7 @@ fn test_agent_doc_merge_is_pure_workspace_boundary() {
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            !source.contains("agent_doc_markdown_ast::semantic_merge"),
+            !source.contains("agent_doc_markdown_ast::document_cell_merge"),
             "{relative} should call semantic merge through agent-doc-merge directly"
         );
     }
@@ -21536,7 +21536,7 @@ fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
         "agent_doc_memory::format_semantic_completion_warning",
         "code: \"semantic_completion_match\".to_string()",
         "code: \"semantic_completion_retrieval_unavailable\".to_string()",
-        "code: \"semantic_merge_ack_pending\".to_string()",
+        "code: \"document_cell_merge_ack_pending\".to_string()",
         ".map(|ack| format!(\"{}:{} ({})\", ack.component, ack.id, ack.reason))",
     ] {
         assert!(
@@ -21548,17 +21548,17 @@ fn test_agent_doc_preflight_io_owns_semantic_advisory_warning_graph() {
         orchestration_preflight_run
             .contains("agent_doc_preflight_io::warnings::semantic_completion_warnings(file)")
             && orchestration_preflight_run
-                .contains("agent_doc_preflight_io::warnings::semantic_merge_ack_warning("),
+                .contains("agent_doc_preflight_io::warnings::document_cell_merge_ack_warning("),
         "preflight command should call focused semantic advisory warning adapters"
     );
     for required in [
         "pub fn semantic_completion_warnings(",
-        "pub fn semantic_merge_ack_warning(",
+        "pub fn document_cell_merge_ack_warning(",
         "agent_doc_memory_io::session::semantic_completion_matches",
         "agent_doc_memory::format_semantic_completion_warning",
         "code: \"semantic_completion_match\".to_string()",
         "code: \"semantic_completion_retrieval_unavailable\".to_string()",
-        "code: \"semantic_merge_ack_pending\".to_string()",
+        "code: \"document_cell_merge_ack_pending\".to_string()",
     ] {
         assert!(
             preflight_warnings.contains(required),

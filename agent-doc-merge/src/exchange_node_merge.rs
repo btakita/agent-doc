@@ -10,7 +10,7 @@
 //! order; agent response turns present in `ours` but absent from `theirs` (matched
 //! by [`ExchangeNode::node_id`]) are appended before any trailing boundary marker.
 //!
-//! This function is intentionally NOT yet wired into `semantic_merge`'s hot path —
+//! This function is intentionally NOT yet wired into `document_cell_merge`'s hot path —
 //! that swap is the deliberate, separately-reviewed Phase 3 step. It exists now as
 //! the verified drop-in, mirroring `merge_exchange_inner`'s append-agent-new-turns
 //! contract at the node level.

@@ -132,7 +132,7 @@ pub fn try_semantic_merge_convergence(
     base: &str,
     candidate: &str,
     content_ours: &str,
-) -> Option<agent_doc_merge::semantic_merge::SemanticMerge> {
+) -> Option<agent_doc_merge::document_cell_merge::DocumentCellMerge> {
     if agent_doc_markdown_ast::overlay::components(base).is_empty()
         || agent_doc_markdown_ast::overlay::components(candidate).is_empty()
         || agent_doc_markdown_ast::overlay::components(content_ours).is_empty()
@@ -140,8 +140,8 @@ pub fn try_semantic_merge_convergence(
         return None;
     }
 
-    let active = agent_doc_merge::semantic_merge::ActiveNodes::new().active_component("exchange");
-    let sm = agent_doc_merge::semantic_merge::semantic_merge_scoped(
+    let active = agent_doc_merge::document_cell_merge::ActiveNodes::new().active_component("exchange");
+    let sm = agent_doc_merge::document_cell_merge::document_cell_merge_scoped(
         base,
         candidate,
         content_ours,
@@ -982,7 +982,7 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "semantic_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
+                    "document_cell_merge_ack_pending file={} source={} patch_id={} ack_count={} reasons={}",
                     file.display(),
                     source,
                     patch_id.unwrap_or("-"),
@@ -994,7 +994,7 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 agent_doc_cycle_state_io::record_semantic_merge_acks(file, &sm.requires_ack)
             {
                 eprintln!(
-                    "[write] warning: failed to record semantic_merge acks for carry-forward: {e}"
+                    "[write] warning: failed to record document_cell_merge acks for carry-forward: {e}"
                 );
             }
         }

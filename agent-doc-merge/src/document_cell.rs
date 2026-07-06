@@ -54,7 +54,7 @@ use agent_doc_element_queue::QueueItemLifecycle;
 /// 3-way path ([`merge_3way`], routed from [`crate::crdt::merge_by_component`]).
 /// **Default ON** with an env kill-switch: per-cell merge is the production
 /// default. Only an explicit falsy value (`0`/`false`/`off`/`no`) turns it off;
-/// absent / empty / any other value ⇒ ON. See [`cell_merge_enabled`].
+/// absent / empty / any other value ⇒ ON. See [`document_cell_merge_enabled`].
 pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 
 /// Process-global serialization lock for tests that mutate the
@@ -68,7 +68,7 @@ pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::
 /// into the op-level [`TextCrdt`] 3-way merge (`#qcellmerge1` opcapture rung).
 ///
 /// **Sub-gate of [`CELL_MERGE_ENV`], default ON** with an env kill-switch. With
-/// the per-cell merge seam ON ([`cell_merge_enabled`]), the `(both changed)`
+/// the per-cell merge seam ON ([`document_cell_merge_enabled`]), the `(both changed)`
 /// branch first attempts a deterministic character-granular 3-way merge: two
 /// edits to DISJOINT regions of one cell converge with BOTH preserved and NO
 /// conflict; a true same-region overlap still records a [`CellConflict`] and
@@ -121,7 +121,7 @@ fn env_truthy(name: &str) -> bool {
 /// an env kill-switch: per-cell merge is the production default and only an
 /// explicit falsy `AGENT_DOC_CELL_MERGE` (`0`/`false`/`off`/`no`, case/space-
 /// insensitive) turns it off. Absent / empty / any non-falsy value ⇒ ON.
-pub fn cell_merge_enabled() -> bool {
+pub fn document_cell_merge_enabled() -> bool {
     !env_falsy(CELL_MERGE_ENV)
 }
 
@@ -129,10 +129,10 @@ pub fn cell_merge_enabled() -> bool {
 /// enabled (`#qcellmerge1` opcapture). **Default ON** with an env kill-switch:
 /// only an explicit falsy `AGENT_DOC_CELL_MERGE_OPCAPTURE` turns it off. As a
 /// sub-feature of the per-cell merge stack, it is also forced OFF whenever the
-/// master switch [`cell_merge_enabled`] is explicitly disabled — disabling the
+/// master switch [`document_cell_merge_enabled`] is explicitly disabled — disabling the
 /// master kills the whole stack regardless of the sub-gate value.
 pub fn cell_merge_opcapture_enabled() -> bool {
-    cell_merge_enabled() && !env_falsy(CELL_MERGE_OPCAPTURE_ENV)
+    document_cell_merge_enabled() && !env_falsy(CELL_MERGE_OPCAPTURE_ENV)
 }
 
 /// Whether recorded same-region [`CellConflict`]s are surfaced as operator-visible
@@ -144,9 +144,9 @@ pub fn cell_merge_opcapture_enabled() -> bool {
 /// which is exactly what the provenance principle forbids. The marker machinery
 /// is retained behind an explicit opt-in (`AGENT_DOC_CELL_MERGE_CONFLICT_MARKERS`
 /// truthy) for debugging/inspection only. As a sub-feature of the per-cell merge
-/// stack it is still forced OFF whenever [`cell_merge_enabled`] is disabled.
+/// stack it is still forced OFF whenever [`document_cell_merge_enabled`] is disabled.
 pub fn cell_merge_conflict_markers_enabled() -> bool {
-    cell_merge_enabled() && env_truthy(CELL_MERGE_CONFLICT_MARKERS_ENV)
+    document_cell_merge_enabled() && env_truthy(CELL_MERGE_CONFLICT_MARKERS_ENV)
 }
 
 /// The stable per-item identity: `component:occurrence:item-id:index`, matching
@@ -2777,7 +2777,7 @@ while I was typing the next queue item\n\
         // Re-run, still OFF — deterministic, identical.
         let off2 = crate::crdt::merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
         assert_eq!(off, off2, "legacy path is deterministic with the flag off");
-        assert!(!cell_merge_enabled(), "kill-switch must disable");
+        assert!(!document_cell_merge_enabled(), "kill-switch must disable");
         // The legacy path produced a valid merged doc.
         assert!(off.contains("first task OURS"));
         assert!(off.contains("third task THEIRS"));
@@ -2788,26 +2788,26 @@ while I was typing the next queue item\n\
     }
 
     #[test]
-    fn cell_merge_enabled_default_on_with_kill_switch() {
+    fn document_cell_merge_enabled_default_on_with_kill_switch() {
         let _guard = ENV_LOCK.lock().unwrap();
         // Default-ON: absent var ⇒ enabled.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
         }
-        assert!(cell_merge_enabled(), "absent ⇒ default ON");
+        assert!(document_cell_merge_enabled(), "absent ⇒ default ON");
         // Empty / truthy / any unrecognized value ⇒ still ON.
         for v in ["1", "true", "on", "yes", "TRUE", " On ", "", "maybe"] {
             unsafe {
                 std::env::set_var(CELL_MERGE_ENV, v);
             }
-            assert!(cell_merge_enabled(), "{v:?} should stay ON");
+            assert!(document_cell_merge_enabled(), "{v:?} should stay ON");
         }
         // Only an explicit falsy kill-switch turns it off.
         for v in ["0", "false", "off", "no", "FALSE", " Off "] {
             unsafe {
                 std::env::set_var(CELL_MERGE_ENV, v);
             }
-            assert!(!cell_merge_enabled(), "{v:?} should kill (OFF)");
+            assert!(!document_cell_merge_enabled(), "{v:?} should kill (OFF)");
         }
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);

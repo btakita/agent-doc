@@ -146,10 +146,10 @@ pub struct AckRequest {
     pub detail: String,
 }
 
-/// The result of a [`semantic_merge`]: the merged document plus the per-node
+/// The result of a [`document_cell_merge`]: the merged document plus the per-node
 /// outcomes and any acknowledgement requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SemanticMerge {
+pub struct DocumentCellMerge {
     pub merged_doc: String,
     pub outcomes: Vec<NodeOutcome>,
     pub requires_ack: Vec<AckRequest>,
@@ -171,7 +171,7 @@ pub const FRONTMATTER_COMPONENT: &str = "__frontmatter__";
 /// Pure: no IO, no git, no agent-doc coupling. See the [module docs](self) for the
 /// full transition table, the frontmatter handling, and the documented prose
 /// reconstruction assumption.
-pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> SemanticMerge {
+pub fn document_cell_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> DocumentCellMerge {
     let mut outcomes = Vec::new();
     let mut requires_ack = Vec::new();
 
@@ -225,7 +225,7 @@ pub fn semantic_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> Se
         None => merged_body,
     };
 
-    SemanticMerge {
+    DocumentCellMerge {
         merged_doc,
         outcomes,
         requires_ack,
@@ -342,10 +342,10 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
 
 /// The set of structural nodes considered "active" in the current agent turn —
 /// the in-flight prompt and its response area (the `exchange` tail). Used by
-/// [`semantic_merge_scoped`] to gate which same-node conflicts raise an
+/// [`document_cell_merge_scoped`] to gate which same-node conflicts raise an
 /// [`AckRequest`].
 ///
-/// `#msn6` / `#smturnactive` (semantic_merge Phase 6, turn-active-area merge
+/// `#msn6` / `#smturnactive` (document_cell_merge Phase 6, turn-active-area merge
 /// gating): a same-node operator↔agent collision OUTSIDE the turn-active area
 /// auto-resolves to the operator value with no ack noise; only a collision
 /// INSIDE the active area produces an ack. The merged document is identical
@@ -365,9 +365,9 @@ pub struct ActiveNodes {
 }
 
 impl ActiveNodes {
-    /// An empty active set. In [`semantic_merge_scoped`] this means "nothing is
+    /// An empty active set. In [`document_cell_merge_scoped`] this means "nothing is
     /// active" — every out-of-area conflict auto-resolves and NO acks are emitted.
-    /// Callers that want the legacy all-active behavior call [`semantic_merge`].
+    /// Callers that want the legacy all-active behavior call [`document_cell_merge`].
     pub fn new() -> Self {
         Self::default()
     }
@@ -401,11 +401,11 @@ impl ActiveNodes {
     }
 }
 
-/// Like [`semantic_merge`], but scope ack emission to a turn-active node-set
+/// Like [`document_cell_merge`], but scope ack emission to a turn-active node-set
 /// (`#msn6` / `#smturnactive`, Phase 6). The merged document and per-node
-/// outcomes are IDENTICAL to [`semantic_merge`] — the operator still wins every
+/// outcomes are IDENTICAL to [`document_cell_merge`] — the operator still wins every
 /// same-node conflict, so no content is ever lost or changed. Only
-/// [`SemanticMerge::requires_ack`] is filtered: a same-node conflict whose node
+/// [`DocumentCellMerge::requires_ack`] is filtered: a same-node conflict whose node
 /// is NOT in `active` auto-resolves silently (no ack noise), while a conflict
 /// inside the active area still raises its [`AckRequest`].
 ///
@@ -413,13 +413,13 @@ impl ActiveNodes {
 /// concurrent edit collided with the in-flight turn's own response area, instead
 /// of acking every unrelated operator edit (queue strike, backlog tweak,
 /// frontmatter flip) that happened to touch the same node the agent did.
-pub fn semantic_merge_scoped(
+pub fn document_cell_merge_scoped(
     base: &str,
     ours_agent: &str,
     theirs_operator: &str,
     active: &ActiveNodes,
-) -> SemanticMerge {
-    let mut sm = semantic_merge(base, ours_agent, theirs_operator);
+) -> DocumentCellMerge {
+    let mut sm = document_cell_merge(base, ours_agent, theirs_operator);
     sm.requires_ack
         .retain(|ack| active.is_active(&ack.component, &ack.id));
     sm
@@ -1059,15 +1059,15 @@ fn merge_exchange_inner(
             out.push_str(&appended);
         }
     }
-    // `#exchangeconverge`: with `cell_merge_enabled` (default ON) this is the
+    // `#exchangeconverge`: with `document_cell_merge_enabled` (default ON) this is the
     // immediate replacement for the non-convergent heading-turn merge — collapse
     // any mirror-ordered duplicate response/prompt identities a prior poisoned
     // buffer carries, so the merge output converges instead of accreting
     // duplicates across cycles (the runaway-growth wedge). Keyed on
     // `ExchangeNode::node_id`, so only true duplicates collapse; idempotent and
     // byte-for-byte verbatim when there is nothing to collapse. The kill-switch
-    // (`cell_merge_enabled = false`) restores the prior pass-through behavior.
-    if crate::document_cell::cell_merge_enabled() {
+    // (`document_cell_merge_enabled = false`) restores the prior pass-through behavior.
+    if crate::document_cell::document_cell_merge_enabled() {
         crate::exchange_node_merge::dedup_exchange_nodes_by_identity(&out)
     } else {
         out
@@ -1393,7 +1393,7 @@ mod tests {
         format!("<!-- agent:queue -->\n{items}<!-- /agent:queue -->\n")
     }
 
-    fn outcome_for<'a>(m: &'a SemanticMerge, id: &str) -> Option<&'a NodeOutcome> {
+    fn outcome_for<'a>(m: &'a DocumentCellMerge, id: &str) -> Option<&'a NodeOutcome> {
         m.outcomes.iter().find(|o| o.id == id)
     }
 
@@ -1410,7 +1410,7 @@ mod tests {
     #[test]
     fn row_present_unchanged_unchanged_keep() {
         let base = q("- do [#a] task\n");
-        let m = semantic_merge(&base, &base, &base);
+        let m = document_cell_merge(&base, &base, &base);
         assert_eq!(outcome_for(&m, "a").unwrap().kind, OutcomeKind::Keep);
         assert!(m.requires_ack.is_empty());
         assert_eq!(reparses_to_ids(&m.merged_doc, "queue"), vec!["a"]);
@@ -1421,7 +1421,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task EDITED\n");
         let theirs = base.clone();
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::AppliedAgentEdit
@@ -1432,7 +1432,7 @@ mod tests {
 
     #[test]
     fn smqstrike_struck_head_survives_concurrent_operator_queue_add() {
-        // #smqstrike (semantic_merge Phase 3): an answered/consumed queue head is
+        // #smqstrike (document_cell_merge Phase 3): an answered/consumed queue head is
         // struck by the agent (ours) while the operator (theirs) concurrently adds
         // a new queue item. The node-keyed merge must keep BOTH — the head struck
         // on the merged structure AND the operator's add — with no ack
@@ -1442,7 +1442,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- ~~do [#a] task~~\n"); // agent struck the consumed head
         let theirs = q("- do [#a] task\n- do [#b] operator added\n"); // operator add
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert!(
             m.merged_doc.contains("~~do [#a] task~~"),
             "head must stay struck on the merged tree:\n{}",
@@ -1471,7 +1471,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = base.clone();
         let theirs = q("- do [#a] task OPEDIT\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::AppliedOperatorEdit
@@ -1484,7 +1484,7 @@ mod tests {
     fn row_present_both_edited_same_text_convergent() {
         let base = q("- do [#a] task\n");
         let same = q("- do [#a] task SAME\n");
-        let m = semantic_merge(&base, &same, &same);
+        let m = document_cell_merge(&base, &same, &same);
         assert_eq!(outcome_for(&m, "a").unwrap().kind, OutcomeKind::Convergent);
         assert!(m.merged_doc.contains("SAME"));
         // Applied once.
@@ -1497,7 +1497,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task AGENT\n");
         let theirs = q("- do [#a] task OPERATOR\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::OperatorWonConflict
@@ -1519,13 +1519,13 @@ mod tests {
         let ours = q("- do [#a] task AGENT\n");
         let theirs = q("- do [#a] task OPERATOR\n");
 
-        let unscoped = semantic_merge(&base, &ours, &theirs);
+        let unscoped = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(unscoped.requires_ack.len(), 1, "unscoped acks the conflict");
 
         // Scope the active area to `exchange` only — the queue conflict is OUTSIDE
         // it, so the ack is dropped while the merged doc + outcome are unchanged.
         let active = ActiveNodes::new().active_component("exchange");
-        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert!(
             scoped.requires_ack.is_empty(),
             "out-of-active-area conflict auto-resolves with no ack"
@@ -1551,7 +1551,7 @@ mod tests {
 
         // The conflict lives in `queue`; marking `queue` active keeps the ack.
         let active = ActiveNodes::new().active_component("queue");
-        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert_eq!(scoped.requires_ack.len(), 1, "active-area collision acks");
         assert_eq!(
             scoped.requires_ack[0].reason,
@@ -1567,7 +1567,7 @@ mod tests {
         let theirs = q("- do [#a] one OPERATOR\n- do [#b] two OPERATOR\n");
 
         let active = ActiveNodes::new().with_node("queue", "a");
-        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert_eq!(scoped.requires_ack.len(), 1, "only the active node acks");
         assert_eq!(scoped.requires_ack[0].id, "a");
         // Both operator values still win regardless of ack scoping.
@@ -1583,7 +1583,7 @@ mod tests {
 
         let active = ActiveNodes::new();
         assert!(active.is_empty());
-        let scoped = semantic_merge_scoped(&base, &ours, &theirs, &active);
+        let scoped = document_cell_merge_scoped(&base, &ours, &theirs, &active);
         assert!(
             scoped.requires_ack.is_empty(),
             "an empty active set means nothing is active → every conflict auto-resolves"
@@ -1598,7 +1598,7 @@ mod tests {
         let ours = q("- do [#a] task AGENTEDIT\n- do [#b] other\n");
         // operator deletes a entirely
         let theirs = q("- do [#b] other\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::DeletionKept
@@ -1617,7 +1617,7 @@ mod tests {
         let ours = q("- do [#b] other\n");
         // operator edits a
         let theirs = q("- do [#a] task OPEDIT\n- do [#b] other\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::OperatorRevived
@@ -1634,7 +1634,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task\n- do [#new] fresh\n");
         let theirs = base.clone();
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "new").unwrap().kind,
             OutcomeKind::AppliedAgentAdd
@@ -1648,7 +1648,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = base.clone();
         let theirs = q("- do [#a] task\n- do [#opnew] op-fresh\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "opnew").unwrap().kind,
             OutcomeKind::AppliedOperatorAdd
@@ -1662,7 +1662,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task\n- do [#agentadd] x\n");
         let theirs = q("- do [#a] task\n- do [#opadd] y\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert!(m.merged_doc.contains("[#agentadd]"));
         assert!(m.merged_doc.contains("[#opadd]"));
         assert_eq!(
@@ -1685,7 +1685,7 @@ mod tests {
         let base = q("- do [#a] task\n");
         let ours = q("- do [#a] task\n- do [#dup] AGENT-VERSION\n");
         let theirs = q("- do [#a] task\n- do [#dup] OPERATOR-VERSION\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert_eq!(
             outcome_for(&m, "dup").unwrap().kind,
             OutcomeKind::OperatorWonConflict
@@ -1753,7 +1753,7 @@ queue: stop
 - re [#cf-txn-email] prior turn
 <!-- /agent:exchange -->
 ";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         // Operator's queue: stop applied.
         assert!(
@@ -1809,7 +1809,7 @@ queue: stop
         let base = q("- do [#x] keep\n- do [#y] target\n");
         let ours = q("- do [#x] keep\n- do [#y] target AGENTEDIT\n");
         let theirs = q("- do [#x] keep\n"); // operator deleted y
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert!(!m.merged_doc.contains("[#y]"), "y deleted");
         assert_eq!(
             outcome_for(&m, "y").unwrap().kind,
@@ -1828,7 +1828,7 @@ queue: stop
         let base = q("- do [#z] orig\n");
         let ours = q("- do [#z] agent version\n");
         let theirs = q("- do [#z] operator version\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         assert!(m.merged_doc.contains("operator version"));
         assert!(!m.merged_doc.contains("agent version"));
         assert_eq!(m.requires_ack.len(), 1);
@@ -1859,7 +1859,7 @@ Done.
 ";
         let ours = base.replace("orig", "agent version");
         let theirs = base.replace("orig", "operator version");
-        let m = semantic_merge(base, &ours, &theirs);
+        let m = document_cell_merge(base, &ours, &theirs);
 
         let exchange_inner = component_inner_lines("exchange", &m.merged_doc).join("");
         assert!(
@@ -1876,7 +1876,7 @@ Done.
         let base = q("- do [#base] b\n");
         let ours = q("- do [#base] b\n- do [#a1] agent one\n- do [#a2] agent two\n");
         let theirs = q("- do [#base] b\n- do [#o1] op one\n");
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
         for id in ["base", "a1", "a2", "o1"] {
             assert!(
                 m.merged_doc.contains(&format!("[#{id}]")),
@@ -1892,7 +1892,7 @@ Done.
         let base = "---\nqueue: start\nmodel: opus\n---\n# body\n";
         let ours = base.to_string();
         let theirs = "---\nqueue: stop\nmodel: opus\n---\n# body\n";
-        let m = semantic_merge(base, &ours, theirs);
+        let m = document_cell_merge(base, &ours, theirs);
         assert!(m.merged_doc.contains("queue: stop"));
         assert!(m.merged_doc.contains("model: opus"));
         let fm_outcome = m
@@ -1909,7 +1909,7 @@ Done.
         let base = "---\nqueue: start\n---\n# body\n";
         let ours = "---\nqueue: paused\n---\n# body\n";
         let theirs = "---\nqueue: stop\n---\n# body\n";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
         assert!(m.merged_doc.contains("queue: stop"));
         assert_eq!(m.requires_ack.len(), 1);
         assert_eq!(
@@ -1924,7 +1924,7 @@ Done.
         let base = "---\nqueue: start\nmodel: opus\n---\n# body\n";
         let ours = "---\nqueue: start\nmodel: sonnet\n---\n# body\n";
         let theirs = base.to_string();
-        let m = semantic_merge(base, ours, &theirs);
+        let m = document_cell_merge(base, ours, &theirs);
         assert!(m.merged_doc.contains("model: sonnet"));
         assert!(m.requires_ack.is_empty());
     }
@@ -1935,7 +1935,7 @@ Done.
         let base = "intro\n\n<!-- agent:queue -->\n- do [#a] t\n<!-- /agent:queue -->\n";
         let ours = "AGENT-PROSE\n\n<!-- agent:queue -->\n- do [#a] t\n<!-- /agent:queue -->\n";
         let theirs = "OPERATOR-PROSE\n\n<!-- agent:queue -->\n- do [#a] t\n<!-- /agent:queue -->\n";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
         assert!(m.merged_doc.contains("OPERATOR-PROSE"));
         assert!(!m.merged_doc.contains("AGENT-PROSE"));
     }
@@ -1970,7 +1970,7 @@ Press Enter to restart, or 'q' to exit.
         // Operator buffer unchanged from base — still carries the free-text head.
         let theirs = base.clone();
 
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
 
         // Every meaningful line of the free-text head survives the merge.
         for needle in [
@@ -2002,7 +2002,7 @@ Press Enter to restart, or 'q' to exit.
     fn exchange_merge_converges_a_poisoned_duplicate_turn() {
         // `#exchangeconverge`: theirs carries a mirror-ordered DUPLICATE
         // `### Re: A` turn — the poison a prior failed 3-way merge leaves behind.
-        // With `cell_merge_enabled` (default ON) the exchange merge collapses it
+        // With `document_cell_merge_enabled` (default ON) the exchange merge collapses it
         // to a single occurrence instead of preserving a duplicate that would
         // accrete across cycles (the runaway-growth wedge).
         //
@@ -2046,7 +2046,7 @@ Answer to A.
 Answer to A.
 <!-- /agent:exchange -->
 ";
-        let m = semantic_merge(base, poisoned, poisoned);
+        let m = document_cell_merge(base, poisoned, poisoned);
         assert_eq!(
             m.merged_doc.matches("### Re: A").count(),
             1,
@@ -2120,7 +2120,7 @@ Answer to A.
 Answer to B.
 <!-- /agent:exchange -->
 ";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         // Agent's new heading + prose appended.
         assert!(
@@ -2181,7 +2181,7 @@ Answer to X.
 <!-- /agent:exchange -->
 ";
         let theirs = base.to_string();
-        let m = semantic_merge(base, ours, &theirs);
+        let m = document_cell_merge(base, ours, &theirs);
 
         // Exactly one X turn — the `(HEAD)` variant must NOT be appended as new.
         let count = m.merged_doc.matches("### Re: X — opus-4-8").count();
@@ -2220,7 +2220,7 @@ New turn B.
 <!-- /agent:exchange -->
 ";
         let theirs = base.to_string();
-        let m = semantic_merge(base, ours, &theirs);
+        let m = document_cell_merge(base, ours, &theirs);
 
         // New turn appended.
         assert!(
@@ -2296,7 +2296,7 @@ Fresh response.
 Prior answer.
 <!-- /agent:exchange -->
 ";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         // The operator's concurrent queue add appears EXACTLY ONCE.
         assert_eq!(
@@ -2361,7 +2361,7 @@ Steps:
 ";
         // Operator (theirs): exchange untouched.
         let theirs = base;
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         let s1 = m
             .merged_doc
@@ -2401,7 +2401,7 @@ Steps:
 <!-- /agent:exchange -->
 ";
         let theirs = base;
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         let s1 = m
             .merged_doc
@@ -2430,7 +2430,7 @@ Steps:
         let base = q("- do [#a] first\n- do [#b] second\n- do [#c] third\n");
         let ours = q("- do [#a] first\n- do [#b] SECOND EDITED\n- do [#c] third\n");
         let theirs = base.clone();
-        let m = semantic_merge(&base, &ours, &theirs);
+        let m = document_cell_merge(&base, &ours, &theirs);
 
         assert!(
             m.merged_doc.contains("- do [#a] first\n"),
@@ -2496,7 +2496,7 @@ Prior answer.
 Prior answer.
 <!-- /agent:exchange -->
 ";
-        let m = semantic_merge(base, ours, theirs);
+        let m = document_cell_merge(base, ours, theirs);
 
         // Deletion stands — #x is NOT resurrected.
         assert_eq!(

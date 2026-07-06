@@ -1273,10 +1273,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // `start_preflight` from the prior cycle's convergence semantic merge. Also
     // emit a companion warning so the existing "surface warnings" skill path
     // drives the acknowledgement without a SKILL.md change.
-    let semantic_merge_acks =
+    let document_cell_merge_acks =
         agent_doc_cycle_state_io::load_pending_semantic_merge_acks(file).unwrap_or_default();
     if let Some(warning) =
-        agent_doc_preflight_io::warnings::semantic_merge_ack_warning(&semantic_merge_acks)
+        agent_doc_preflight_io::warnings::document_cell_merge_ack_warning(&document_cell_merge_acks)
     {
         warnings.push(warning);
     }
@@ -1406,7 +1406,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         queue_continuation_guidance,
         session_accretion,
         pipeline,
-        semantic_merge_acks,
+        document_cell_merge_acks,
     };
 
     let json =

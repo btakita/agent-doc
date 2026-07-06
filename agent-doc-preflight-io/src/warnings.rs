@@ -119,22 +119,22 @@ pub fn semantic_completion_warnings(file: &Path) -> Vec<PreflightWarning> {
 
 /// Build the warning companion for semantic-merge acks carried from the prior
 /// cycle into this preflight output.
-pub fn semantic_merge_ack_warning(
-    semantic_merge_acks: &[agent_doc_cycle_state_io::PendingSemanticMergeAck],
+pub fn document_cell_merge_ack_warning(
+    document_cell_merge_acks: &[agent_doc_cycle_state_io::PendingSemanticMergeAck],
 ) -> Option<PreflightWarning> {
-    if semantic_merge_acks.is_empty() {
+    if document_cell_merge_acks.is_empty() {
         return None;
     }
-    let summary = semantic_merge_acks
+    let summary = document_cell_merge_acks
         .iter()
         .map(|ack| format!("{}:{} ({})", ack.component, ack.id, ack.reason))
         .collect::<Vec<_>>()
         .join(", ");
     Some(PreflightWarning {
-        code: "semantic_merge_ack_pending".to_string(),
+        code: "document_cell_merge_ack_pending".to_string(),
         message: format!(
             "{} node-keyed semantic-merge ack(s) from the prior cycle: {summary}. The operator's concurrent edit won these node(s); acknowledge the non-applied agent change(s) in an exchange turn this cycle.",
-            semantic_merge_acks.len()
+            document_cell_merge_acks.len()
         ),
         document_agent: None,
         active_harness: None,

@@ -584,7 +584,7 @@ pub struct PreflightOutput {
     pub pipeline: Option<agent_doc_frontmatter::frontmatter::AgentDocPipeline>,
     /// Semantic merge acknowledgements to surface once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub semantic_merge_acks: Vec<agent_doc_cycle_state_io::PendingSemanticMergeAck>,
+    pub document_cell_merge_acks: Vec<agent_doc_cycle_state_io::PendingSemanticMergeAck>,
 }
 
 fn is_zero_usize(n: &usize) -> bool {

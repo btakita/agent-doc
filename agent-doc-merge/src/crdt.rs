@@ -204,7 +204,7 @@ fn merge_inner(
     // to the legacy path.
     if let Some(ops) = theirs_editor_ops
         && !ops.is_empty()
-        && crate::document_cell::cell_merge_enabled()
+        && crate::document_cell::document_cell_merge_enabled()
     {
         let outcome =
             crate::document_cell::merge_3way_with_ops(&base_text, ours_text, theirs_text, ops);
@@ -471,7 +471,7 @@ fn segment_into_nodes(text: &str) -> Result<Vec<Node>> {
 /// caller should return that text and, on the persistence path, rebuild its
 /// advanced state from the SAME text). Returns `None` on `fell_back`, so the
 /// caller runs its existing legacy merge path unchanged. The caller is
-/// responsible for gating this behind [`document_cell::cell_merge_enabled`].
+/// responsible for gating this behind [`document_cell::document_cell_merge_enabled`].
 fn try_cell_merge_text(
     base_text: &str,
     ours_text: &str,
@@ -521,7 +521,7 @@ pub fn merge_by_component(
     // based per-cell 3-way merge first. It signals `fell_back` for any structural
     // divergence; on fallback (or the explicit kill-switch) the existing
     // whole-doc / per-node path below runs unchanged.
-    if crate::document_cell::cell_merge_enabled() {
+    if crate::document_cell::document_cell_merge_enabled() {
         let base_text = match base_state {
             Some(bytes) => CrdtDoc::decode_state(bytes)
                 .map(|d| d.to_text())
@@ -1535,7 +1535,7 @@ impl MultiNodeState {
         // cell-merge winner, not the legacy per-node winner). On `fell_back` (or
         // the explicit kill-switch) the existing per-node path below runs
         // byte-identically to legacy behavior.
-        if crate::document_cell::cell_merge_enabled() {
+        if crate::document_cell::document_cell_merge_enabled() {
             let base_text = match base {
                 Some(b) => b.to_text().unwrap_or_default(),
                 None => String::new(),
@@ -3582,7 +3582,7 @@ Second answer line three.
             unsafe {
                 std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "1");
             }
-            assert!(crate::document_cell::cell_merge_enabled());
+            assert!(crate::document_cell::document_cell_merge_enabled());
             CellMergeFlagOn { _guard: guard }
         }
     }
@@ -3714,7 +3714,7 @@ Second answer line three.
         unsafe {
             std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");
         }
-        assert!(!crate::document_cell::cell_merge_enabled(), "must be OFF");
+        assert!(!crate::document_cell::document_cell_merge_enabled(), "must be OFF");
 
         let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
         let base_state = MultiNodeState::from_text(&base).unwrap();

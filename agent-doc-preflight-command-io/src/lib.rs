@@ -1718,12 +1718,12 @@ mod tests {
         let empty_json: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&empty).unwrap()).unwrap();
         assert!(
-            empty_json.get("semantic_merge_acks").is_none(),
-            "semantic_merge_acks omitted when empty"
+            empty_json.get("document_cell_merge_acks").is_none(),
+            "document_cell_merge_acks omitted when empty"
         );
 
         let output = PreflightOutput {
-            semantic_merge_acks: vec![agent_doc_cycle_state_io::PendingSemanticMergeAck {
+            document_cell_merge_acks: vec![agent_doc_cycle_state_io::PendingSemanticMergeAck {
                 component: "exchange".to_string(),
                 id: "p3kj".to_string(),
                 reason: "operator_deleted_agent_edited_node".to_string(),
@@ -1735,10 +1735,10 @@ mod tests {
         };
         let parsed: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
-        assert_eq!(parsed["semantic_merge_acks"][0]["component"], "exchange");
-        assert_eq!(parsed["semantic_merge_acks"][0]["id"], "p3kj");
+        assert_eq!(parsed["document_cell_merge_acks"][0]["component"], "exchange");
+        assert_eq!(parsed["document_cell_merge_acks"][0]["id"], "p3kj");
         assert_eq!(
-            parsed["semantic_merge_acks"][0]["reason"],
+            parsed["document_cell_merge_acks"][0]["reason"],
             "operator_deleted_agent_edited_node"
         );
     }

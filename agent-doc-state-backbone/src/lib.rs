@@ -344,7 +344,7 @@ pub enum StateFact {
         cycle_id: String,
         reason: String,
     },
-    SemanticMergeAckRecorded {
+    DocumentCellMergeAckRecorded {
         document_hash: String,
         cycle_id: String,
         component: String,
@@ -352,7 +352,7 @@ pub enum StateFact {
         reason: String,
         detail: String,
     },
-    SemanticMergeAckCarriedForward {
+    DocumentCellMergeAckCarriedForward {
         document_hash: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_cycle_id: Option<String>,
@@ -528,8 +528,8 @@ impl StateFact {
             | Self::CommitObserved { document_hash, .. }
             | Self::SessionCheckPassed { document_hash, .. }
             | Self::CycleAbandoned { document_hash, .. }
-            | Self::SemanticMergeAckRecorded { document_hash, .. }
-            | Self::SemanticMergeAckCarriedForward { document_hash, .. }
+            | Self::DocumentCellMergeAckRecorded { document_hash, .. }
+            | Self::DocumentCellMergeAckCarriedForward { document_hash, .. }
             | Self::OwnerGenerationChanged { document_hash, .. }
             | Self::EditorPatchQueued { document_hash, .. }
             | Self::EditorPatchApplied { document_hash, .. }
@@ -570,8 +570,8 @@ impl StateFact {
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. }
-            | Self::SemanticMergeAckRecorded { .. }
-            | Self::SemanticMergeAckCarriedForward { .. } => StateDomain::Closeout,
+            | Self::DocumentCellMergeAckRecorded { .. }
+            | Self::DocumentCellMergeAckCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
             | Self::FileWatchChangeObserved { .. }
             | Self::DocumentAuthorityObserved { .. } => StateDomain::Document,
@@ -639,8 +639,8 @@ impl StateFact {
             Self::CommitObserved { .. } => "commit_observed",
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
-            Self::SemanticMergeAckRecorded { .. } => "semantic_merge_ack_recorded",
-            Self::SemanticMergeAckCarriedForward { .. } => "semantic_merge_ack_carried_forward",
+            Self::DocumentCellMergeAckRecorded { .. } => "document_cell_merge_ack_recorded",
+            Self::DocumentCellMergeAckCarriedForward { .. } => "document_cell_merge_ack_carried_forward",
             Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
             Self::EditorPatchQueued { .. } => "editor_patch_queued",
             Self::EditorPatchApplied { .. } => "editor_patch_applied",
@@ -1240,7 +1240,7 @@ impl DocumentStateProjection {
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "abandoned");
             }
-            StateFact::SemanticMergeAckRecorded {
+            StateFact::DocumentCellMergeAckRecorded {
                 cycle_id,
                 component,
                 id,
@@ -1257,7 +1257,7 @@ impl DocumentStateProjection {
                     false,
                 );
             }
-            StateFact::SemanticMergeAckCarriedForward {
+            StateFact::DocumentCellMergeAckCarriedForward {
                 source_cycle_id,
                 target_cycle_id,
                 component,
@@ -2308,7 +2308,7 @@ pub struct CloseoutProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_response_clear_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_semantic_merge_acks: Vec<SemanticMergeAckProjection>,
+    pub pending_semantic_merge_acks: Vec<DocumentCellMergeAckProjection>,
 }
 
 impl CloseoutProjection {
@@ -2367,7 +2367,7 @@ impl CloseoutProjection {
             return;
         }
         self.pending_semantic_merge_acks
-            .push(SemanticMergeAckProjection {
+            .push(DocumentCellMergeAckProjection {
                 component: component.to_string(),
                 id: id.to_string(),
                 reason: reason.to_string(),
@@ -2399,7 +2399,7 @@ pub struct CapturedResponseProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SemanticMergeAckProjection {
+pub struct DocumentCellMergeAckProjection {
     pub component: String,
     pub id: String,
     pub reason: String,
@@ -4140,7 +4140,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_merge_ack_projection_carries_forward_for_one_cycle() {
+    fn document_cell_merge_ack_projection_carries_forward_for_one_cycle() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
             "cycle-1-start",
@@ -4153,7 +4153,7 @@ mod tests {
         ));
         ledger.append(state_event(
             "cycle-1-ack",
-            StateFact::SemanticMergeAckRecorded {
+            StateFact::DocumentCellMergeAckRecorded {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 component: "exchange".into(),
@@ -4178,7 +4178,7 @@ mod tests {
         ));
         ledger.append(state_event(
             "cycle-2-carry",
-            StateFact::SemanticMergeAckCarriedForward {
+            StateFact::DocumentCellMergeAckCarriedForward {
                 document_hash: "doc-a".into(),
                 source_cycle_id: Some("cycle-1".into()),
                 target_cycle_id: "cycle-2".into(),

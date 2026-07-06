@@ -1059,7 +1059,19 @@ fn merge_exchange_inner(
             out.push_str(&appended);
         }
     }
-    out
+    // `#exchangeconverge`: with `cell_merge_enabled` (default ON) this is the
+    // immediate replacement for the non-convergent heading-turn merge — collapse
+    // any mirror-ordered duplicate response/prompt identities a prior poisoned
+    // buffer carries, so the merge output converges instead of accreting
+    // duplicates across cycles (the runaway-growth wedge). Keyed on
+    // `ExchangeNode::node_id`, so only true duplicates collapse; idempotent and
+    // byte-for-byte verbatim when there is nothing to collapse. The kill-switch
+    // (`cell_merge_enabled = false`) restores the prior pass-through behavior.
+    if crate::document_cell::cell_merge_enabled() {
+        crate::exchange_node_merge::dedup_exchange_nodes_by_identity(&out)
+    } else {
+        out
+    }
 }
 
 /// Recognize an `<!-- agent:boundary:HASH -->` marker line.
@@ -1985,6 +1997,64 @@ Press Enter to restart, or 'q' to exit.
     }
 
     // ----- exchange heading-prose turns (`#semmerge` real format) ----------
+
+    #[test]
+    fn exchange_merge_converges_a_poisoned_duplicate_turn() {
+        // `#exchangeconverge`: theirs carries a mirror-ordered DUPLICATE
+        // `### Re: A` turn — the poison a prior failed 3-way merge leaves behind.
+        // With `cell_merge_enabled` (default ON) the exchange merge collapses it
+        // to a single occurrence instead of preserving a duplicate that would
+        // accrete across cycles (the runaway-growth wedge).
+        //
+        // Serialize with the kill-switch tests (which mutate the process-global
+        // flag env) and pin the flag ON, so this integration assertion never
+        // races their env mutation under parallel test threads.
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        // SAFETY: held under the shared env lock; absent var ⇒ default ON.
+        unsafe {
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
+        }
+        let base = "\
+---
+queue: start
+---
+<!-- agent:queue -->
+- do [#a] task
+<!-- /agent:queue -->
+
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+<!-- /agent:exchange -->
+";
+        let poisoned = "\
+---
+queue: start
+---
+<!-- agent:queue -->
+- do [#a] task
+<!-- /agent:queue -->
+
+<!-- agent:exchange -->
+### Re: A — opus-4-8
+
+Answer to A.
+
+### Re: A — opus-4-8
+
+Answer to A.
+<!-- /agent:exchange -->
+";
+        let m = semantic_merge(base, poisoned, poisoned);
+        assert_eq!(
+            m.merged_doc.matches("### Re: A").count(),
+            1,
+            "the duplicate turn must converge to a single occurrence:\n{}",
+            m.merged_doc
+        );
+        assert!(m.merged_doc.contains("Answer to A."));
+    }
 
     #[test]
     fn exchange_appends_agent_new_heading_prose_turn() {

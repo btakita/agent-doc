@@ -51,7 +51,23 @@ Verification already completed in this turn path:
 - `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reached committed state after recovery
 
 Remaining operator-visible notes: the queue is still paused by dangling `/goal #zhfn`, and the installed `agent-doc` binary is stale relative to local source edits.
-<!-- agent:boundary:d84f183b -->
+
+### Re: CRDT relay compact-exchange hotpath — gpt-5
+
+Correction to the captured closeout above: the installed `agent-doc` binary is no longer stale. I rebuilt and installed `agent-doc` 0.34.67, restarted the project controller, and confirmed controller freshness reports the running inode matches the installed binary.
+
+Implemented the requested fixes in the binary: removed the legacy stale snapshot reset-drift guard, added compact-exchange CRDT relay projection recovery, covered stale editor publish rejection and transport-failure recovery, and kept force-disk/direct-run closeout disk-authoritative while preserving the exchange boundary and pending queue tail.
+
+Verification completed:
+- `make check` passed: 7269 tests run, 7269 passed, 239 skipped.
+- Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
+- Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI`; fallback `gh run list --limit 1` shows an existing `Agent Doc` workflow failure from 2026-07-06T07:17:09Z, not a run from these local changes.
+- `gh run list --workflow CI --limit 1` found no workflow named `CI`; fallback `gh run list --limit 1` shows an existing `Agent Doc` workflow failure from 2026-07-06T07:17:09Z, not a run from these local changes.
+- Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
+- Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
+- `make check` passed: 7267 tests run, 7267 passed, 239 skipped.
+<!-- agent:boundary:9e335653 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

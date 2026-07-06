@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use agent_doc_hash::short_content_hash;
@@ -8,6 +9,33 @@ use agent_doc_tmux_commands::input_diag::{
     format_route_pane_snapshot_log, sanitize_route_snapshot_field,
 };
 use anyhow::{Context, Result};
+
+thread_local! {
+    static EDITOR_ROUTE_ATTEMPT_ID_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub struct EditorRouteAttemptIdGuard {
+    previous: Option<String>,
+}
+
+impl EditorRouteAttemptIdGuard {
+    pub fn set(value: Option<&str>) -> Self {
+        let sanitized = value
+            .map(sanitize_route_snapshot_field)
+            .filter(|value| !value.is_empty());
+        let previous = EDITOR_ROUTE_ATTEMPT_ID_OVERRIDE.with(|cell| cell.replace(sanitized));
+        Self { previous }
+    }
+}
+
+impl Drop for EditorRouteAttemptIdGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        EDITOR_ROUTE_ATTEMPT_ID_OVERRIDE.with(|cell| {
+            cell.replace(previous);
+        });
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutePaneSnapshot {
@@ -23,6 +51,9 @@ pub struct RoutePaneSnapshotPreserveOutcome {
 }
 
 pub fn editor_route_attempt_id() -> Option<String> {
+    if let Some(value) = EDITOR_ROUTE_ATTEMPT_ID_OVERRIDE.with(|cell| cell.borrow().clone()) {
+        return Some(value);
+    }
     std::env::var(EDITOR_ROUTE_ATTEMPT_ID_ENV)
         .ok()
         .map(|value| sanitize_route_snapshot_field(&value))

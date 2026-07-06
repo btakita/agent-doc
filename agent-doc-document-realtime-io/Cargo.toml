@@ -8,6 +8,11 @@ repository = "https://github.com/btakita/agent-doc"
 
 [lib]
 name = "agent_doc_document_realtime_io"
+doctest = false
+
+[features]
+default = []
+test-support = []
 
 [dependencies]
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }

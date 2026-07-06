@@ -268,8 +268,7 @@ One.
         val sourceOutsideSave = source.substring(0, saveStart) + source.substring(saveEnd)
 
         assertTrue(source.contains("full-content IPC is disabled"))
-        assertTrue(source.contains("reread_disk repair is disabled"))
-        assertTrue(saveBody.contains("awaitIdleBeforeDocumentMutation(filePath, \"save_document\")"))
+        assertFalse(saveBody.contains("awaitIdleBeforeDocumentMutation"))
         assertTrue(saveBody.contains("fdm.saveDocument(document)"))
         assertTrue(saveBody.contains("writeEditorContentProjection(patchId, content, filePath)"))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
@@ -279,6 +278,8 @@ One.
         assertFalse(source.contains("applyReconnectReread("))
         assertFalse(source.contains("Agent Doc Reconnect Reread"))
         assertFalse(source.contains("re-read disk/HEAD into stale buffer"))
+        assertFalse(source.contains("agent_doc_reconnect_buffer_decision"))
+        assertFalse(source.contains("reread_disk repair is disabled"))
     }
 
     @Test
@@ -299,16 +300,23 @@ One.
         ).first { Files.exists(it) }
         val source = Files.readString(sourcePath)
         val socketFullContentGuard = source.indexOf("if (!patch.fullContent.isNullOrEmpty())")
-        val socketTypingGuard = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, \"socket patch\")")
+        val socketApplyStart = source.indexOf(
+            "ApplicationManager.getApplication().invokeAndWait",
+            if (socketFullContentGuard >= 0) socketFullContentGuard else 0,
+        )
         val fileFullContentGuard = source.indexOf("[patch-watcher] full-content IPC is disabled; deleting stale/foreign patch file")
-        val fileTypingGuard = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, \"file patch\")")
+        val fileApplyStart = source.indexOf(
+            "ApplicationManager.getApplication().invokeLater",
+            if (fileFullContentGuard >= 0) fileFullContentGuard else 0,
+        )
         val fullContent = requireNotNull(patch.fullContent)
 
         assertEquals("cycle-1779845677327", patch.patchId)
         assertTrue(fullContent.contains("#spec-test-build-install-commit-push"))
         assertTrue(fullContent.contains("dispatch #spec-test-build-install-commit-push"))
-        assertTrue(socketFullContentGuard >= 0 && socketFullContentGuard < socketTypingGuard)
-        assertTrue(fileFullContentGuard >= 0 && fileFullContentGuard < fileTypingGuard)
+        assertTrue(socketFullContentGuard >= 0 && socketApplyStart > socketFullContentGuard)
+        assertTrue(fileFullContentGuard >= 0 && fileApplyStart > fileFullContentGuard)
+        assertFalse(source.contains("awaitIdleBeforeDocumentMutation("))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
         assertFalse(source.contains("setBinaryContent("))

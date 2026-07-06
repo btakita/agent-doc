@@ -226,6 +226,13 @@ class EditorTabSyncListenerTest {
     fun `newer automatic sync generations replay after the running command finishes`() {
         assertEquals(true, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(3, 4))
         assertEquals(false, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(4, 4))
+        assertEquals(0L, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(3, 4, false))
+        assertEquals(null, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(4, 4, false))
+    }
+
+    @Test
+    fun `timed out automatic sync generations replay with backoff`() {
+        assertEquals(5_000L, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(3, 4, true))
     }
 
     @Test

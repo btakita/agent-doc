@@ -21,9 +21,7 @@ use agent_doc_write_converge_io::{
 };
 #[cfg(test)]
 use agent_doc_write_converge_io::{
-    guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning,
-    guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning, ipc_direct_disk_degraded,
-    record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
+    ipc_direct_disk_degraded, record_ipc_socket_ack_timeout, try_semantic_merge_convergence,
 };
 
 #[cfg(test)]
@@ -263,7 +261,7 @@ mod visible_write_content_snapshot_tests {
     fn visible_write_disk_proof_waits_for_typing_indicator_before_trusting_live_buffer() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-        std::fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/crdt")).unwrap();
         std::fs::create_dir_all(root.join(".agent-doc/typing")).unwrap();
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         let doc = root.join("session.md");
@@ -273,30 +271,22 @@ mod visible_write_content_snapshot_tests {
         let visible_write_content = "before\n### Re: done\n";
         let newer_editor_content = "before\n### Re: done\noperator typed after ack\n";
 
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            visible_write_content,
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
             editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
+            visible_write_content,
+        );
         agent_doc_debounce::document_changed(&doc_str);
         wait_until_typing_indicator_active(&doc_str);
 
-        let updater_doc = doc_str.clone();
+        let updater_doc = doc.clone();
         let updater = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(25));
-            agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            agent_doc_test_support::publish_editor_text_via_crdt_relay(
                 &updater_doc,
-                newer_editor_content,
                 editor_id,
-                "jetbrains",
-                "test",
-                &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-            )
-            .unwrap();
+                newer_editor_content,
+            );
         });
 
         let proof = visible_write_disk_proof(&doc, Some(editor_id), visible_write_content);
@@ -329,20 +319,11 @@ mod visible_write_content_snapshot_tests {
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         let doc = root.join("session.md");
         std::fs::write(&doc, "before\n").unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
         let editor_id = "jetbrains:test";
         let stale_ack = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nAgent exact body.\n<!-- /agent:exchange -->\n";
         let newer = "<!-- agent:exchange -->\n❯ fold it in\n### Re: folded — opus\n\nOperator reworded body, happy 4th.\n<!-- /agent:exchange -->\n";
 
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            newer,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(&doc, editor_id, newer);
 
         let mut decision = IpcRepairDecision::lazily_visible_write(stale_ack.to_string());
         let reconciled = reconcile_visible_write_snapshot_to_newer_operator_buffer(
@@ -541,7 +522,7 @@ mod visible_write_content_snapshot_tests {
     }
 
     #[test]
-    fn guard_live_prompt_drift_uses_content_ours_for_visible_write_union() {
+    fn guard_live_prompt_drift_preserves_visible_write_union_with_response() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("doc.md");
         let baseline = concat!("<!-- agent:exchange -->\n", "<!-- /agent:exchange -->\n");
@@ -576,10 +557,10 @@ mod visible_write_content_snapshot_tests {
         );
         assert_eq!(
             decision.snap_source,
-            IpcSnapshotSource::ContentOurs,
-            "the visible-write candidate must not remain snapshot authority for unowned live prompt drift"
+            IpcSnapshotSource::LazilyVisibleWriteEvent,
+            "the response-bearing visible-write candidate remains editor-buffer authority"
         );
-        assert_eq!(decision.snapshot_content, response_target);
+        assert_eq!(decision.snapshot_content, editor_visible_write_content);
         assert!(
             !decision.redeliver_editor,
             "the lazily receipt already proves the editor-visible buffer contains the response"
@@ -801,57 +782,6 @@ mod visible_write_content_snapshot_tests {
         assert_eq!(decision.snapshot_content, visible_write_content);
         assert_eq!(decision.disk_repair_reason, None);
         assert!(!decision.redeliver_editor);
-    }
-
-    #[test]
-    fn guard_refuses_stale_supervisor_content_ours_on_drift() {
-        let tmp = TempDir::new().unwrap();
-        let file = tmp.path().join("doc.md");
-        let clean_ours = "<!-- agent:status -->\nC\n<!-- /agent:status -->\n<!-- agent:exchange -->\nq\n<!-- /agent:exchange -->\n";
-        let mut decision = IpcRepairDecision::file_read(DC_CANDIDATE.to_string());
-
-        let adopted = guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
-            &file,
-            "test",
-            Some("p-stale"),
-            Some(DC_BASELINE),
-            Some(clean_ours),
-            &mut decision,
-            |_| Some("test supervisor_binary_stale".to_string()),
-        );
-
-        assert!(
-            !adopted,
-            "stale supervisor content_ours must be refused even when it would absorb drift"
-        );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::FileRead);
-        assert_eq!(decision.snapshot_content, DC_CANDIDATE);
-    }
-
-    #[test]
-    fn guard_refuses_stale_supervisor_content_ours_on_prompt_duplication() {
-        let tmp = TempDir::new().unwrap();
-        let file = tmp.path().join("doc.md");
-        let content_ours = "<!-- agent:exchange -->\n❯ do [#x]\n<!-- /agent:exchange -->\n";
-        let duplicate_candidate =
-            "<!-- agent:exchange -->\n❯ do [#x]\n❯ do [#x]\n<!-- /agent:exchange -->\n";
-        let mut decision = IpcRepairDecision::file_read(duplicate_candidate.to_string());
-
-        let adopted = guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
-            &file,
-            "test",
-            Some("p-stale-dup"),
-            Some(content_ours),
-            &mut decision,
-            |_| Some("test supervisor_binary_stale".to_string()),
-        );
-
-        assert!(
-            !adopted,
-            "stale supervisor content_ours must not become the repair snapshot"
-        );
-        assert_eq!(decision.snap_source, IpcSnapshotSource::FileRead);
-        assert_eq!(decision.snapshot_content, duplicate_candidate);
     }
 
     // --- #smconv: node-keyed semantic-merge convergence on live drift ---
@@ -2003,16 +1933,17 @@ Done.
     }
 
     #[test]
-    fn redelivery_skips_when_live_buffer_diverges_from_bad_state() {
+    fn redelivery_skips_when_cpc_editor_buffer_diverges_from_bad_state() {
         // #clearexchstale: disk still equals the bad state (so the disk-divergence
         // guard passes), but the operator has freshly cleared/edited the live editor
-        // buffer (a smaller cleared exchange reported via the live-buffer sidecar).
+        // buffer (a smaller cleared exchange published through the CRDT relay).
         // Redelivering the stale snapshot would REVIVE the cleared content, so the
-        // redeliver must fail closed on the proven live-buffer divergence.
+        // redeliver must fail closed on the CPC model divergence.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
         let doc = dir.path().join("test.md");
@@ -2026,27 +1957,17 @@ Stale response that the operator cleared.
         // Disk still holds the bad state (the redeliver's disk check will pass).
         std::fs::write(&doc, bad_state).unwrap();
 
-        // The operator cleared the exchange in the editor — the live buffer diverges
-        // from the bad state and from disk. Record it via the live-buffer sidecar the
-        // plugin maintains, using the same canonicalized path the guard consults.
-        let indicator_path = doc
-            .canonicalize()
-            .unwrap_or_else(|_| doc.clone())
-            .to_string_lossy()
-            .to_string();
+        // The operator cleared the exchange in the editor; the relay-published CPC
+        // current text diverges from the bad state and from disk.
         let cleared_buffer = "\
 <!-- agent:exchange patch=append -->
 <!-- /agent:exchange -->
 ";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &indicator_path,
-            cleared_buffer,
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
             "jetbrains-capable-diverged",
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
+            cleared_buffer,
+        );
 
         let repaired = bad_state; // the stale snapshot the repair would re-apply
         let delivered = agent_doc_write_converge_io::redeliver_full_content_repair_to_editor(
@@ -2073,8 +1994,8 @@ Stale response that the operator cleared.
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("skip=live_buffer_diverges"),
-            "live-buffer divergence skip should be logged:\n{ops_log}"
+            ops_log.contains("skip=cpc_model_diverges"),
+            "CPC model divergence skip should be logged:\n{ops_log}"
         );
     }
 

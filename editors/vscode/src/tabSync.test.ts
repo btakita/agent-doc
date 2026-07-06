@@ -5,8 +5,10 @@ import {
     buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
     buildTabChangeCommand,
+    replayDelayAfterTabSyncRun,
     shouldReplayQueuedTabChange,
     shouldScheduleDeferredTabSyncRetry,
+    tabSyncTimeoutBackoffDelayMs,
     visibleSignatureFromColumns,
 } from './tabSync';
 
@@ -267,6 +269,16 @@ describe('buildTabChangeCommand', () => {
     it('replays the latest queued tab change after a running sync finishes', () => {
         assert.strictEqual(shouldReplayQueuedTabChange(3, 4), true);
         assert.strictEqual(shouldReplayQueuedTabChange(4, 4), false);
+        assert.strictEqual(replayDelayAfterTabSyncRun(3, 4, false), 0);
+        assert.strictEqual(replayDelayAfterTabSyncRun(4, 4, false), null);
+    });
+
+    it('backs off queued tab replay after an automatic sync timeout', () => {
+        assert.strictEqual(replayDelayAfterTabSyncRun(3, 4, true), 5_000);
+        assert.strictEqual(tabSyncTimeoutBackoffDelayMs(1), 30_000);
+        assert.strictEqual(tabSyncTimeoutBackoffDelayMs(2), 60_000);
+        assert.strictEqual(tabSyncTimeoutBackoffDelayMs(5), 300_000);
+        assert.strictEqual(tabSyncTimeoutBackoffDelayMs(99), 300_000);
     });
 
     it('does not schedule deferred retry work for a superseded tab sync', () => {

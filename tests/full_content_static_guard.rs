@@ -200,13 +200,13 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         jetbrains,
         "private fun handleSocketMessageV2",
         "if (!patch.fullContent.isNullOrEmpty())",
-        "awaitIdleBeforeDocumentMutation(patch.file, \"socket patch\")",
+        "applyPatch(patch)",
     );
     assert_guard_before_sink(
         jetbrains,
         "private fun processPatchFile",
         "if (!patch.fullContent.isNullOrEmpty())",
-        "awaitIdleBeforeDocumentMutation(patch.file, \"file patch\")",
+        "applyPatch(patch)",
     );
     assert_guard_before_sink(
         jetbrains,
@@ -226,7 +226,7 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
         vscode,
         "private async onPatchFileCreated",
         "if ((patch.fullContent ?? '') !== '')",
-        "awaitIdleBeforeDocumentMutation(patch.file, 'file patch'",
+        "const applied = await this.applyPatch(patch, uri.fsPath)",
     );
     assert_guard_before_sink(
         vscode,

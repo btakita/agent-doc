@@ -45,7 +45,6 @@ agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
 agent-doc-start-io = { path = "../agent-doc-start-io", version = "0.34.67" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
-agent-doc-supervisor-crdt-io = { path = "../agent-doc-supervisor-crdt-io", version = "0.34.67" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
 agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
 agent-doc-supervisor-process-io = { path = "../agent-doc-supervisor-process-io", version = "0.34.67" }
@@ -62,9 +61,8 @@ portable-pty = "0.9"
 tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 
 [dev-dependencies]
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67", features = ["test-support"] }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.67" }
-base64 = "0.22"
 serde_json = "1"
 tempfile = "3"

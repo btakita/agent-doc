@@ -205,9 +205,8 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
         visible: &str,
         stage: &str,
     ) -> Result<bool> {
-        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-            file, projected, visible, stage,
-        )
+        let _ = (file, projected, visible, stage);
+        Ok(false)
     }
 }
 
@@ -1215,6 +1214,7 @@ mod tests {
     use super::*;
     use agent_doc_element::element::is_backlog_component;
     use agent_doc_topic::parse_topic_sections;
+    use anyhow::Context;
     use std::process::Command;
 
     const COMPACTDROPITEM_DOC: &str = concat!(
@@ -2886,6 +2886,8 @@ mod tests {
         fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/plugin-owner")).unwrap();
+        fs::write(root.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
 
         git(root, &["init", "-q"]);
         git(root, &["config", "user.email", "test@example.com"]);
@@ -2913,6 +2915,13 @@ mod tests {
         );
         fs::write(&file, doc).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            file.to_str().unwrap(),
+            COMPACT_TEST_EDITOR_ID,
+            std::process::id(),
+        ));
+        let _initial_editor =
+            CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "finalized response head"]);
 
@@ -3052,12 +3061,55 @@ mod tests {
         assert!(out.status.success(), "git {:?} failed", args);
     }
 
+    const COMPACT_TEST_EDITOR_ID: &str = "compact-test-listener";
+
+    struct CompactTestEditorBuffer {
+        content: String,
+        replica_identity: String,
+        replica: agent_doc_merge::crdt_sync::ReplicaState,
+    }
+
+    impl CompactTestEditorBuffer {
+        fn attach(file: &Path, editor_id: &str, seed: &str) -> Result<Self> {
+            let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            let replica_identity = format!("{}:{}", editor_id, canonical.display());
+            let (client_id, bootstrap) =
+                agent_doc_crdt_relay_io::register_replica_for_file(file, &replica_identity)?
+                    .context("compact test editor could not register CRDT replica")?;
+            let replica =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)?;
+            let mut editor = Self {
+                content: replica.text(),
+                replica_identity,
+                replica,
+            };
+            if editor.content != seed {
+                editor.publish(file, seed)?;
+            }
+            Ok(editor)
+        }
+
+        fn publish(&mut self, file: &Path, content: &str) -> Result<()> {
+            let delete_len = self.content.len() as u32;
+            self.replica.apply_local_edit(0, delete_len, content);
+            let update = self.replica.encode_state();
+            agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                file,
+                &self.replica_identity,
+                &update,
+            )?
+            .context("compact test editor CRDT relay update refused")?;
+            self.content = content.to_string();
+            Ok(())
+        }
+    }
+
     fn record_compact_lazily_receipt(file: &Path, patch_id: &str, content: &str) -> Option<()> {
         let file_key = file.to_string_lossy();
         agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             file_key.as_ref(),
             content,
-            "compact-test-editor",
+            COMPACT_TEST_EDITOR_ID,
             "test",
             "test",
             &[
@@ -3074,16 +3126,21 @@ mod tests {
     }
 
     fn start_component_patch_visible_write_listener(root: &Path) -> std::thread::JoinHandle<()> {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
         let root = root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
+            let buffers: Arc<Mutex<HashMap<String, CompactTestEditorBuffer>>> =
+                Arc::new(Mutex::new(HashMap::new()));
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
-                let mut content = payload.get("baseline")?.as_str()?.to_string();
+                let baseline = payload.get("baseline")?.as_str()?;
+                let mut content = baseline.to_string();
                 if let Some(frontmatter) = payload.get("frontmatter").and_then(|v| v.as_str()) {
                     content = replace_frontmatter(&content, frontmatter)?;
                 }
@@ -3096,6 +3153,22 @@ mod tests {
                 }
 
                 if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
+                    let mut buffers = buffers.lock().unwrap();
+                    if !buffers.contains_key(file_path) {
+                        buffers.insert(
+                            file_path.to_string(),
+                            CompactTestEditorBuffer::attach(
+                                Path::new(file_path),
+                                COMPACT_TEST_EDITOR_ID,
+                                baseline,
+                            )
+                            .ok()?,
+                        );
+                    }
+                    buffers
+                        .get_mut(file_path)?
+                        .publish(Path::new(file_path), &content)
+                        .ok()?;
                     let _ = std::fs::write(file_path, &content);
                     record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
                 }
@@ -3119,7 +3192,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
             // Per-file in-memory editor buffer, seeded lazily from the patch baseline.
-            let buffers: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+            let buffers: Arc<Mutex<HashMap<String, CompactTestEditorBuffer>>> =
+                Arc::new(Mutex::new(HashMap::new()));
             let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
                 let patch_id = payload
@@ -3136,7 +3210,7 @@ mod tests {
                             .lock()
                             .unwrap()
                             .get(file_path)
-                            .cloned()
+                            .map(|buffer| buffer.content.clone())
                             .or_else(|| std::fs::read_to_string(file_path).ok())?;
                         std::fs::write(file_path, &content).ok()?;
                         let receipt_file = Path::new(file_path).to_path_buf();
@@ -3172,10 +3246,22 @@ mod tests {
                         if let Some(file_path) =
                             payload.get("file").and_then(|value| value.as_str())
                         {
+                            let mut buffers = buffers.lock().unwrap();
+                            if !buffers.contains_key(file_path) {
+                                buffers.insert(
+                                    file_path.to_string(),
+                                    CompactTestEditorBuffer::attach(
+                                        Path::new(file_path),
+                                        COMPACT_TEST_EDITOR_ID,
+                                        payload.get("baseline")?.as_str()?,
+                                    )
+                                    .ok()?,
+                                );
+                            }
                             buffers
-                                .lock()
-                                .unwrap()
-                                .insert(file_path.to_string(), content.clone());
+                                .get_mut(file_path)?
+                                .publish(Path::new(file_path), &content)
+                                .ok()?;
                             record_compact_lazily_receipt(
                                 Path::new(file_path),
                                 patch_id,
@@ -3208,6 +3294,8 @@ mod tests {
         fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/plugin-owner")).unwrap();
+        fs::write(root.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
 
         git(root, &["init", "-q"]);
         git(root, &["config", "user.email", "test@example.com"]);
@@ -3224,13 +3312,21 @@ mod tests {
         );
         fs::write(&file, doc).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            canonical.to_string_lossy().as_ref(),
+            COMPACT_TEST_EDITOR_ID,
+            std::process::id(),
+        ));
+        let _initial_editor =
+            CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
         git(root, &["add", "session.md"]);
         git(root, &["commit", "-q", "-m", "seed"]);
 
         let _listener = start_buffer_only_patch_listener(root);
         crate::test_support::wait_for_live_prompt_drift_listener(root);
 
-        run(
+        if let Err(err) = run(
             &file,
             None,
             Some("exchange"),
@@ -3238,8 +3334,12 @@ mod tests {
             Some("skip"),
             true,
             false,
-        )
-        .expect("editor-IPC compact --commit must succeed");
+        ) {
+            let ops_log =
+                fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap_or_default();
+            eprintln!("compact_with_commit_flushes_editor_buffer_to_disk ops log:\n{ops_log}");
+            panic!("editor-IPC compact --commit must succeed: {err:?}");
+        }
 
         let head = agent_doc_git_io::revision::show_head(&file)
             .unwrap()

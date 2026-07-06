@@ -368,40 +368,6 @@ fn patch_jsons(project: &ReplayProject) -> Vec<PathBuf> {
         .collect()
 }
 
-fn assert_retry_left_live_prompt_without_response(project: &ReplayProject, topic: &str) {
-    let heading = response_heading(topic);
-    let body = response_payload_line(topic);
-    let visible = project.visible();
-    assert!(
-        visible.contains(LIVE_TYPING_PROMPT),
-        "live prompt should remain visible for retry:\n{visible}"
-    );
-    assert!(
-        !visible.contains(&heading) && !visible.contains(&body),
-        "IPC timeout must not write the response directly:\n{visible}"
-    );
-
-    let head = project.head();
-    assert!(
-        !head.contains(LIVE_TYPING_PROMPT),
-        "live prompt typed after preflight must not be committed:\n{head}"
-    );
-    assert!(
-        !head.contains(&heading) && !head.contains(&body),
-        "IPC timeout must fail before committing the response:\n{head}"
-    );
-
-    let snapshot = project.snapshot();
-    assert!(
-        !snapshot.contains(LIVE_TYPING_PROMPT),
-        "retry failure must not absorb the live prompt into the snapshot:\n{snapshot}"
-    );
-    assert!(
-        !snapshot.contains(&heading) && !snapshot.contains(&body),
-        "retry failure must not snapshot the unmaterialized response:\n{snapshot}"
-    );
-}
-
 #[test]
 fn socket_ipc_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
@@ -516,34 +482,50 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
         receipt_content.contains(LIVE_TYPING_PROMPT),
         "lazily receipt should model the editor-visible buffer with live typing:\n{receipt_content}"
     );
-    assert_live_prompt_visible_but_uncommitted(&project, "file IPC live typing replay");
+    assert_live_prompt_visible_and_committed(&project, "file IPC live typing replay");
 }
 
 #[test]
-fn live_typing_timeout_retains_patch_for_editor_retry() {
+fn live_typing_timeout_recovers_detached_response_and_keeps_prompt_uncommitted() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
-    run_finalize(&project, "stale patch live typing replay", 1, &[]);
+    agent_doc()
+        .current_dir(project.root())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
+        .args([
+            "finalize",
+            project.doc.to_str().unwrap(),
+            "--baseline-file",
+            project.baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(response_text("stale patch live typing replay"))
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "recovering through document authority (detached_disk_authority)",
+        ));
 
-    assert_retry_left_live_prompt_without_response(&project, "stale patch live typing replay");
+    assert_live_prompt_visible_but_uncommitted(&project, "stale patch live typing replay");
     let patches = patch_jsons(&project);
     assert!(
-        !patches.is_empty(),
-        "IPC timeout should retain queued patches for editor retry"
+        patches.is_empty(),
+        "detached timeout recovery should cancel queued patches"
     );
     let claimed = fs::read_dir(project.agent_doc_dir().join("claimed-patches"))
         .unwrap()
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
     assert!(
-        claimed.is_empty(),
-        "IPC timeout should not claim uncommitted patches"
+        !claimed.is_empty(),
+        "detached timeout recovery should claim cancelled patches"
     );
     let ops_log = fs::read_to_string(project.agent_doc_dir().join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("recovery=retry_without_disk_write"),
-        "IPC timeout should request an editor retry without direct document write:\n{ops_log}"
+        ops_log.contains("recovery=detached_disk_authority")
+            && ops_log.contains("ipc_patch_cancelled_for_document_authority"),
+        "IPC timeout should recover through detached document authority:\n{ops_log}"
     );
 }
 

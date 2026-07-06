@@ -271,12 +271,34 @@ pub struct AdmitOutput {
 
 /// `#suprecyclespin` — seconds an open cycle may sit untouched (no IPC ack
 /// connection in flight) at a harness turn boundary before the supervisor
-/// recycle/restart defer path force-closes it as abandoned. Generous enough never
-/// to abandon a live `preflight → finalize` cycle (each phase ticks `updated_at`
-/// and finalize holds IPC inflight), but bounded so a crashed/superseded older
-/// turn cannot wedge the recycle in `DeferCycleOpen` (~2/sec `cycle_open`
-/// spin-loop, `idle_watch.rs`) forever.
-pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 45;
+/// recycle/restart defer path force-closes it as abandoned. Bounded so a
+/// crashed/superseded older turn cannot wedge the recycle in `DeferCycleOpen`
+/// (~2/sec `cycle_open` spin-loop, `idle_watch.rs`) forever.
+///
+/// `#suprecyclespin-falseabandon`: the earlier 45s value assumed "each phase
+/// ticks `updated_at` and finalize holds IPC inflight", so a live cycle could
+/// never look stale. That assumption is FALSE for a slow first response: the
+/// cycle sits in `preflight_started` with an untouched `updated_at` and
+/// `inflight == 0` for the ENTIRE harness generation, which for a large prompt
+/// routinely exceeds 45s. Combined with a transiently-misread `turn_boundary`
+/// (`prompt_visible && !turn_active`, both pane-scraped) that abandoned a live
+/// turn mid-generation. The deadline is now generous enough to clear normal
+/// first-response latency; the primary guard is the consecutive-tick debounce
+/// below (a genuine generation does not hold `turn_boundary && stalled` across
+/// many back-to-back polls) plus the `MAX_CYCLE_OPEN_DEFER_TICKS` recycle
+/// escalation backstop, which force-recycles a never-closing cycle WITHOUT
+/// abandoning it (the durable checkpoint survives for the fresh boot).
+pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 120;
+
+/// `#suprecyclespin-falseabandon` — consecutive idle-watch polls
+/// (`AUTO_TRIGGER_POLL_INTERVAL`, 500ms) for which `stalled_pre_response_cycle`
+/// must hold at a `turn_boundary` before the supervisor force-abandons the
+/// cycle. A live harness generation never sustains `turn_boundary && stalled`
+/// for this long (the pane is not at a ready prompt while it streams output), so
+/// the debounce rejects the transient boundary misread that abandoned a live
+/// turn, while a genuinely orphaned/superseded cycle stays stalled every poll
+/// and still resolves after the confirm window (~10s at 20 ticks).
+pub const STALLED_CYCLE_RESOLVE_CONFIRM_TICKS: u32 = 20;
 
 impl CycleState {
     pub fn is_open(&self) -> bool {
@@ -2056,6 +2078,37 @@ mod tests {
         let committed = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::Committed);
         assert!(!committed.open_stalled(0, u64::MAX, deadline));
         assert!(!committed.stalled_pre_response_cycle(0, u64::MAX, deadline));
+    }
+
+    #[test]
+    fn stalled_resolve_deadline_survives_slow_first_response() {
+        // `#suprecyclespin-falseabandon` regression: a live preflight cycle whose
+        // harness is still generating its first response sits untouched with
+        // `inflight == 0` and an unadvanced `updated_at`. At an observed 46s the
+        // old 45s deadline abandoned this live turn; the bumped deadline must
+        // clear normal first-response latency.
+        let mut state = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::PreflightStarted);
+        state.updated_at = 1_000;
+        let incident_stalled_secs = 46; // observed stalled_secs that falsely abandoned a live turn
+        assert!(
+            !state.stalled_pre_response_cycle(
+                0,
+                1_000 + incident_stalled_secs,
+                STALLED_CYCLE_RESOLVE_SECS,
+            ),
+            "a 46s-stale live preflight cycle must not be resolvable after the deadline bump"
+        );
+        // Still bounded: a genuinely orphaned cycle past the (larger) deadline
+        // remains resolvable so the recycle spin cannot wedge forever.
+        assert!(state.stalled_pre_response_cycle(
+            0,
+            1_000 + STALLED_CYCLE_RESOLVE_SECS + 1,
+            STALLED_CYCLE_RESOLVE_SECS,
+        ));
+        // The consecutive-tick debounce is a second, independent gate on top of
+        // the deadline — a stale sidecar cannot abandon a live turn on a single
+        // transiently-misread boundary poll.
+        assert!(STALLED_CYCLE_RESOLVE_CONFIRM_TICKS > 0);
     }
 
     #[test]

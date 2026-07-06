@@ -19,7 +19,8 @@ use agent_doc_controller::dispatch::{
     RoutedTriggerPayloadFacts, busy_dispatch_start_outcome,
     direct_pane_should_await_dispatch_start_proof, direct_pane_submit_acceptance_budget,
     direct_pane_submit_outcome, dispatch_start_busy_probe_timeout,
-    routed_dispatch_start_timeout_for_binary, routed_trigger_payload_rejection,
+    dispatch_start_early_resubmit_probe_timeout, routed_dispatch_start_timeout_for_binary,
+    routed_trigger_payload_rejection,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry;
@@ -492,7 +493,10 @@ pub fn dispatch_routed_reopen_with_mode(
     let timeout =
         routed_dispatch_start_timeout_for_binary(Some(harness.binary.as_str()), cfg!(test));
     let proof_start = Instant::now();
-    if let Some(proof) = wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout)? {
+    let early_probe_timeout = dispatch_start_early_resubmit_probe_timeout(cfg!(test));
+    if let Some(proof) =
+        wait_for_routed_dispatch_start(tmux, file, &tracker, harness, early_probe_timeout)?
+    {
         log_route_latency(
             file,
             "direct_pane_submit",
@@ -555,8 +559,57 @@ pub fn dispatch_routed_reopen_with_mode(
                 file_path,
                 harness,
                 timeout,
-                || wait_for_routed_dispatch_start(tmux, file, &tracker, harness, timeout),
+                || {
+                    wait_for_routed_dispatch_start(
+                        tmux,
+                        file,
+                        &tracker,
+                        harness,
+                        timeout.saturating_sub(proof_start.elapsed()),
+                    )
+                },
             )? {
+                return Ok(proof);
+            }
+            if let Some(proof) = wait_for_routed_dispatch_start(
+                tmux,
+                file,
+                &tracker,
+                harness,
+                timeout.saturating_sub(proof_start.elapsed()),
+            )? {
+                log_route_latency(
+                    file,
+                    "dispatch_start_proof",
+                    proof_start.elapsed(),
+                    timeout,
+                    pane,
+                    harness,
+                    proof.dispatch_stage_label(),
+                );
+                log_route_submit_observation(RouteSubmitObservationLogFacts {
+                    file,
+                    pane,
+                    harness,
+                    phase: "dispatch_start_proof",
+                    observation: RouteSubmitObservation::DispatchStartProven,
+                    trigger_visible: None,
+                    elapsed: proof_start.elapsed(),
+                    capture_len: None,
+                    capture_hash: None,
+                    proof: Some(proof),
+                });
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                        proof.dispatch_stage_label(),
+                        timeout.as_secs()
+                    ),
+                );
                 return Ok(proof);
             }
             log_route_latency(

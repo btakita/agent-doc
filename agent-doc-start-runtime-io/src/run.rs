@@ -39,6 +39,17 @@ impl SupervisorLaunchLog for StartRunLaunchLog<'_> {
     }
 }
 
+fn current_text_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            "editor_attached_model_missing"
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
+        agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current",
+    }
+}
+
 fn configure_managed_capability_proof_for_spec(
     shared: &Arc<SupervisorShared>,
     spec: &HarnessLaunchSpec,
@@ -254,22 +265,15 @@ pub fn run_with_reap_policy(
             route_owned,
             "[start] live editor model unavailable during admission; rechecking after supervisor registration",
         );
-        let ensured = agent_doc_crdt_relay_io::ensure_document_model(
+        match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
             &canonical,
             "start_post_supervisor_registered",
-        )
-        .with_context(|| {
-            format!(
-                "post-start live document model ensure failed for {}",
-                canonical.display()
-            )
-        })?;
-        match ensured {
-            agent_doc_crdt_relay_io::CurrentText::Current {
+        ) {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
                 live_editors,
                 delivery_converged,
                 ..
-            } => {
+            })) => {
                 log_event(
                     &mut session_log,
                     &format!(
@@ -278,17 +282,37 @@ pub fn run_with_reap_policy(
                     ),
                 );
             }
-            agent_doc_crdt_relay_io::CurrentText::Detached => {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
                 log_event(
                     &mut session_log,
                     "post_start_document_model_ensure status=detached",
                 );
             }
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
-                anyhow::bail!(
-                    "post-start live document model ensure did not produce current editor text for {}",
-                    canonical.display()
+            Ok(Some(
+                current @ (agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending),
+            )) => {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "post_start_document_model_ensure status=deferred state={} recovery=continue_disk_metadata_bootstrap",
+                        current_text_label(&current),
+                    ),
+                );
+            }
+            Ok(None) => {
+                log_event(
+                    &mut session_log,
+                    "post_start_document_model_ensure status=deferred state=unavailable recovery=continue_disk_metadata_bootstrap",
+                );
+            }
+            Err(err) => {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "post_start_document_model_ensure status=deferred state=controller_read_unavailable error={} recovery=continue_disk_metadata_bootstrap",
+                        format!("{err:#}").replace('\n', "\\n"),
+                    ),
                 );
             }
         }

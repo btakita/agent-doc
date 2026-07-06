@@ -1,19 +1,18 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
-import com.intellij.util.Alarm
 
 /**
  * Status-bar widget that makes the CPC turn-state coordination VISIBLE in the
- * JetBrains editor (goal 1). Polls [TurnStateBridge] — which calls the
- * `agent_doc_turn_projection` FFI — for the active markdown document and shows the
- * CPC's turn phase ("⟳ agent-doc: awaiting response" / "persisting"), or nothing
- * when idle. Parity with the VS Code status-bar indicator
+ * JetBrains editor (goal 1). Reads the project turn-state cache updated by the
+ * event-driven [TurnStateBannerRefresher], so painting never calls native
+ * projection APIs on a Swing timer. Parity with the VS Code status-bar indicator
  * (`specs/14-realtime-workflow.md` § Editor Parity Requirement).
  */
 class TurnStateStatusBarWidgetFactory : StatusBarWidgetFactory {
@@ -30,13 +29,12 @@ class TurnStateStatusBarWidget(private val project: Project) :
 
     companion object {
         const val WIDGET_ID = "com.github.btakita.agentdoc.TurnStateStatusBar"
-        private const val REFRESH_MS = 1500
         private const val BRAND = "agent-doc"
         private val LOG = Logger.getInstance(TurnStateStatusBarWidget::class.java)
     }
 
     private var statusBar: StatusBar? = null
-    private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private var listenerDisposable: Disposable? = null
     // Never empty: an empty TextPresentation makes the platform build a zero-width
     // TextPanel at creation that a later updateWidget won't re-grow, so the widget
     // stays invisible. Seed with the brand so the component has a paintable size
@@ -49,25 +47,23 @@ class TurnStateStatusBarWidget(private val project: Project) :
 
     override fun install(statusBar: StatusBar) {
         this.statusBar = statusBar
-        LOG.info("[turn-widget] installed on status bar; polling every ${REFRESH_MS}ms")
-        // Paint immediately with real state instead of waiting a full poll interval.
-        refresh()
-        scheduleRefresh()
+        val refresher = TurnStateBannerRefresher.getInstance(project)
+        refresher.start()
+        listenerDisposable = refresher.addListener(TurnStateBannerRefresher.Listener {
+            refreshFromCache()
+        })
+        LOG.info("[turn-widget] installed on status bar; using event-driven turn-state cache")
+        refreshFromCache()
+        refresher.requestSelectedRefresh("statusbar-install")
     }
 
     override fun dispose() {
-        alarm.cancelAllRequests()
+        listenerDisposable?.dispose()
+        listenerDisposable = null
         statusBar = null
     }
 
-    private fun scheduleRefresh() {
-        alarm.addRequest({
-            refresh()
-            if (statusBar != null) scheduleRefresh()
-        }, REFRESH_MS)
-    }
-
-    private fun refresh() {
+    private fun refreshFromCache() {
         val file = FileEditorManager.getInstance(project).selectedFiles
             .firstOrNull { it.name.endsWith(".md") }
         // Always show a visible, non-empty indicator so the widget stays findable
@@ -76,7 +72,10 @@ class TurnStateStatusBarWidget(private val project: Project) :
         val next = if (file == null) {
             BRAND
         } else {
-            TurnStateBridge.presentationForFile(file.path).label.ifEmpty { "$BRAND: idle" }
+            TurnStateBannerRefresher.getInstance(project)
+                .cachedPresentationFor(file.path)
+                .label
+                .ifEmpty { "$BRAND: idle" }
         }
         if (next != widgetText) {
             LOG.info("[turn-widget] refresh: file=${file?.path ?: "(none)"} text=\"$next\"")

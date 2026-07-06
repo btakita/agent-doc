@@ -5,6 +5,8 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.vfs.VirtualFile
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -38,12 +40,19 @@ class EditorTabSyncListener : FileEditorManagerListener {
     private var lastFocusRequestedFile: String? = null
 
     private val latestSnapshot = java.util.concurrent.atomic.AtomicReference<AutomaticStateSnapshot?>(null)
+    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
+    }
 
     companion object {
         private const val DEBOUNCE_MS = 100L
         private const val DEFERRED_RETRY_BASE_MS = 750L
         private const val DEFERRED_RETRY_MAX_MS = 5_000L
-        private const val SYNC_GUARD_RETRY_MS = 150L
+        private const val SYNC_GUARD_RETRY_MS = 1_000L
+        private const val SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000L
+        private const val AUTOMATIC_SYNC_TIMEOUT_MS = 5_000L
+        private const val SYNC_TIMEOUT_BACKOFF_BASE_MS = 30_000L
+        private const val SYNC_TIMEOUT_BACKOFF_MAX_MS = 300_000L
         private const val FOCUS_TIMEOUT_MS = 750L
         private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
@@ -167,6 +176,15 @@ class EditorTabSyncListener : FileEditorManagerListener {
         fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration > startedGeneration
 
+        fun replayDelayAfterRun(
+            startedGeneration: Long,
+            latestGeneration: Long,
+            commandTimedOut: Boolean,
+        ): Long? {
+            if (!shouldReplayAfterRun(startedGeneration, latestGeneration)) return null
+            return if (commandTimedOut) SYNC_TIMEOUT_REPLAY_DELAY_MS else 0L
+        }
+
         fun shouldScheduleDeferredRetry(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration <= startedGeneration
 
@@ -203,15 +221,31 @@ class EditorTabSyncListener : FileEditorManagerListener {
     @Volatile
     private var deferredRetryCount: Int = 0
 
+    @Volatile
+    private var syncTimeoutBackoffKey: String? = null
+
+    @Volatile
+    private var syncTimeoutBackoffCount: Int = 0
+
+    @Volatile
+    private var syncTimeoutRetryAfterMs: Long = 0L
+
     private fun log(msg: String) {
-        LOG.info("[layout-sync] $msg")
+        LOG.debug("[layout-sync] $msg")
     }
 
-    private fun nextGeneration(lib: AgentDocLib?): Long =
-        lib?.agent_doc_sync_bump_generation() ?: fallbackGeneration.incrementAndGet()
+    private fun warn(msg: String) {
+        LOG.warn("[layout-sync] $msg")
+    }
 
-    private fun isCurrentGeneration(lib: AgentDocLib?, generation: Long): Boolean =
-        lib?.agent_doc_sync_check_generation(generation) ?: (fallbackGeneration.get() == generation)
+    private fun nextGeneration(): Long =
+        fallbackGeneration.incrementAndGet()
+
+    private fun currentGeneration(): Long =
+        fallbackGeneration.get()
+
+    private fun isCurrentGeneration(generation: Long): Boolean =
+        currentGeneration() == generation
 
     private fun requestAutomaticSync(
         project: com.intellij.openapi.project.Project,
@@ -221,41 +255,33 @@ class EditorTabSyncListener : FileEditorManagerListener {
         immediateFocus: Boolean = false,
     ) {
         latestSnapshot.set(snapshot)
-        val lib = AgentDocLib.get()
-        val generation = requestedGeneration ?: nextGeneration(lib)
+        val generation = requestedGeneration ?: nextGeneration()
         if (immediateFocus) {
-            focusExistingPaneImmediately(project, snapshot, generation, lib)
+            focusExistingPaneImmediately(project, snapshot, generation)
         }
-        Thread {
+        executor.schedule(sync@{
             try {
-                if (delayMs > 0) {
-                    Thread.sleep(delayMs)
-                }
-                if (!isCurrentGeneration(lib, generation)) {
+                if (!isCurrentGeneration(generation)) {
                     log("debounce: superseded gen=$generation")
-                    return@Thread
+                    return@sync
                 }
                 drainAutomaticSync(project, generation)
             } catch (e: Exception) {
                 log("error: ${e.message}")
             }
-        }.apply {
-            isDaemon = true
-            start()
-        }
+        }, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
     }
 
     private fun focusExistingPaneImmediately(
         project: com.intellij.openapi.project.Project,
         snapshot: AutomaticStateSnapshot,
         generation: Long,
-        lib: AgentDocLib?,
     ) {
-        Thread {
+        executor.execute focus@{
             try {
-                if (!isCurrentGeneration(lib, generation)) {
+                if (!isCurrentGeneration(generation)) {
                     log("focus: superseded gen=$generation")
-                    return@Thread
+                    return@focus
                 }
                 val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
                 val cmd = SyncLayoutAction.buildFocusCommand(
@@ -280,15 +306,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
             } catch (e: Exception) {
                 log("focus: skipped ${snapshot.focusedRelativePath}: ${e.message}")
             }
-        }.apply {
-            isDaemon = true
-            start()
         }
     }
 
     private fun captureSnapshot(
         project: com.intellij.openapi.project.Project,
         preferredFile: com.intellij.openapi.vfs.VirtualFile? = null,
+        forceReconcile: Boolean = false,
     ): AutomaticStateSnapshot? {
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
@@ -335,7 +359,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 visibleMdFiles,
                 absoluteEditorLayout,
             ),
-            forceReconcile = preferredMarkdownFile != null,
+            forceReconcile = forceReconcile,
         )
     }
 
@@ -383,6 +407,56 @@ class EditorTabSyncListener : FileEditorManagerListener {
         deferredRetryCount = 0
     }
 
+    private fun syncBackoffKey(snapshot: AutomaticStateSnapshot): String =
+        "${snapshot.visibleSignature}\u0000${snapshot.activeFile}"
+
+    private fun syncTimeoutBackoffRemainingMs(snapshot: AutomaticStateSnapshot): Long {
+        if (syncTimeoutBackoffKey != syncBackoffKey(snapshot)) return 0L
+        val remaining = syncTimeoutRetryAfterMs - System.currentTimeMillis()
+        return remaining.coerceAtLeast(0L)
+    }
+
+    private fun recordSyncTimeout(snapshot: AutomaticStateSnapshot): Long {
+        val retryKey = syncBackoffKey(snapshot)
+        if (syncTimeoutBackoffKey == retryKey) {
+            syncTimeoutBackoffCount += 1
+        } else {
+            syncTimeoutBackoffKey = retryKey
+            syncTimeoutBackoffCount = 1
+        }
+        val step = (syncTimeoutBackoffCount - 1).coerceAtLeast(0).coerceAtMost(4)
+        val delayMs = (SYNC_TIMEOUT_BACKOFF_BASE_MS * (1L shl step))
+            .coerceAtMost(SYNC_TIMEOUT_BACKOFF_MAX_MS)
+        syncTimeoutRetryAfterMs = System.currentTimeMillis() + delayMs
+        return delayMs
+    }
+
+    private fun resetSyncTimeoutBackoff() {
+        syncTimeoutBackoffKey = null
+        syncTimeoutBackoffCount = 0
+        syncTimeoutRetryAfterMs = 0L
+    }
+
+    private fun summarizeOutput(output: String, maxChars: Int = 1_200): String {
+        val trimmed = output.trim()
+        if (trimmed.length <= maxChars) return trimmed
+        val important = trimmed
+            .lineSequence()
+            .map { it.trim() }
+            .filter {
+                it.contains("timeout", ignoreCase = true) ||
+                    it.contains("latency budget exceeded") ||
+                    it.contains("preserved the current tmux layout") ||
+                    it.contains("safe_passive") ||
+                    it.contains("error", ignoreCase = true)
+            }
+            .distinct()
+            .joinToString("\n")
+            .take(maxChars)
+        val summary = important.ifBlank { trimmed.take(maxChars) }
+        return "$summary\n[truncated ${trimmed.length} chars]"
+    }
+
     private fun nextDeferredRetryDelayMs(retryCount: Int): Long {
         val step = (retryCount - 1).coerceAtLeast(0)
         val delay = DEFERRED_RETRY_BASE_MS * (1L shl step.coerceAtMost(3))
@@ -418,22 +492,53 @@ class EditorTabSyncListener : FileEditorManagerListener {
             return
         }
 
-        var startedGeneration = requestedGeneration
+        val startedGeneration = requestedGeneration
+        var commandTimedOut = false
         try {
             val snapshot = latestSnapshot.get()
             val execution = snapshot?.let { buildExecutionPlan(it) }
             if (execution == null) {
                 log("dedup: selection state already synchronized")
             } else {
+                if (execution.plan.kind == AutomaticCommandKind.Sync) {
+                    val backoffMs = syncTimeoutBackoffRemainingMs(snapshot)
+                    if (backoffMs > 0L) {
+                        log("backoff: automatic sync delayed ${backoffMs}ms after prior timeout for ${execution.activeFile}")
+                        requestAutomaticSync(project, snapshot, backoffMs, requestedGeneration)
+                        return
+                    }
+                }
                 val cmd = execution.command
                 log("exec: ${cmd.joinToString(" ")}")
                 TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
-                val processResult = SyncLayoutAction.runCommandWithTimeout(cmd, execution.projectRoot)
+                val timeoutMs = when (execution.plan.kind) {
+                    AutomaticCommandKind.Focus -> FOCUS_TIMEOUT_MS
+                    AutomaticCommandKind.Sync -> AUTOMATIC_SYNC_TIMEOUT_MS
+                }
+                val processResult = SyncLayoutAction.runCommandWithTimeout(
+                    cmd,
+                    execution.projectRoot,
+                    timeoutMs = timeoutMs,
+                )
                 val output = processResult.output
                 val exitCode = processResult.exitCode
-                log("result: exit=$exitCode output=${output.trim()}")
+                commandTimedOut = processResult.timedOut
+                log(
+                    "result: kind=${execution.plan.kind.name.lowercase()} exit=$exitCode timedOut=${processResult.timedOut} " +
+                        "timeoutMs=$timeoutMs output=${summarizeOutput(output)}"
+                )
                 if (processResult.timedOut) {
-                    log("timeout: sync command exceeded ${SyncLayoutAction.SYNC_PROCESS_TIMEOUT_MS}ms; released guard for latest retry")
+                    if (execution.plan.kind == AutomaticCommandKind.Sync) {
+                        val delayMs = recordSyncTimeout(snapshot)
+                        warn(
+                            "timeout: automatic sync exceeded ${timeoutMs}ms; backing off ${delayMs}ms before retry"
+                        )
+                        if (isCurrentGeneration(startedGeneration)) {
+                            requestAutomaticSync(project, snapshot, delayMs, startedGeneration)
+                        }
+                    } else {
+                        warn("timeout: focus command exceeded ${timeoutMs}ms; skipped automatic focus")
+                    }
                 }
                 val result = AutomaticCommandPlanner.analyzeCommandResult(
                     kind = execution.plan.kind,
@@ -444,8 +549,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     lastVisibleSignature = execution.plan.visibleSignature
                     lastFocusedFile = execution.activeFile
                     resetDeferredRetryState()
+                    resetSyncTimeoutBackoff()
                 } else if (result.shouldRetry) {
-                    if (isCurrentGeneration(lib, startedGeneration)) {
+                    if (isCurrentGeneration(startedGeneration)) {
                         val delayMs = registerDeferredRetry(snapshot)
                         if (delayMs != null) {
                             log(
@@ -462,15 +568,22 @@ class EditorTabSyncListener : FileEditorManagerListener {
                             "deferred: skipped superseded passive sync retry for ${execution.activeFile}; latest request will replay"
                         )
                     }
-                } else if (exitCode != 0) {
+                } else if (exitCode != 0 && !processResult.timedOut) {
                     resetDeferredRetryState()
+                    resetSyncTimeoutBackoff()
                 }
             }
         } finally {
             lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
-            if (!isCurrentGeneration(lib, startedGeneration)) {
-                log("queue: replaying latest automatic sync request")
-                latestSnapshot.get()?.let { requestAutomaticSync(project, it, 0) }
+            val replayDelayMs = AutomaticCommandPlanner.replayDelayAfterRun(
+                startedGeneration,
+                currentGeneration(),
+                commandTimedOut,
+            )
+            if (replayDelayMs != null) {
+                val replayKind = if (replayDelayMs > 0) "delayed" else "immediate"
+                log("queue: replaying latest automatic sync request ($replayKind, delayMs=$replayDelayMs)")
+                latestSnapshot.get()?.let { requestAutomaticSync(project, it, replayDelayMs) }
             }
         }
     }
@@ -484,7 +597,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        val snapshot = captureSnapshot(event.manager.project, file) ?: return
+        val snapshot = captureSnapshot(event.manager.project, file, forceReconcile = true) ?: return
         requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
     }
 
@@ -513,7 +626,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (visibleMdFiles.isEmpty()) return
         lastFocusRequestedFile = file.path
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
-        val snapshot = captureSnapshot(project, file) ?: return
+        val snapshot = captureSnapshot(project, file, forceReconcile = false) ?: return
         requestAutomaticSync(project, snapshot, immediateFocus = true)
     }
 

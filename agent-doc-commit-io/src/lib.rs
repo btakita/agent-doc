@@ -23,7 +23,10 @@ use agent_doc_git_io::{
     },
 };
 use agent_doc_queue_io::queue_consume;
-use anyhow::Result;
+use anyhow::{Context, Result};
+
+#[cfg(any(test, feature = "test-support"))]
+use agent_doc_crdt_relay_io::commit_barrier_for_file as test_support_commit_barrier_for_file;
 
 thread_local! {
     static FORCE_DISK_COMMIT_RESOLUTION: Cell<bool> = const { Cell::new(false) };
@@ -104,6 +107,10 @@ static TRANSIENT_CLEANUP_EFFECTS: RuntimeTransientCleanupEffects = RuntimeTransi
 
 #[doc(hidden)]
 pub struct RuntimePostCommitCleanupEffects;
+pub struct RuntimeForceDiskPipelineFrontmatterEffects;
+
+pub static FORCE_DISK_PIPELINE_FRONTMATTER_EFFECTS: RuntimeForceDiskPipelineFrontmatterEffects =
+    RuntimeForceDiskPipelineFrontmatterEffects;
 
 #[doc(hidden)]
 pub static POST_COMMIT_CLEANUP_EFFECTS: RuntimePostCommitCleanupEffects =
@@ -238,7 +245,26 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
 
 impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLiveBufferGuardEffects {
     fn commit_barrier_ready(&self, file: &Path) -> bool {
-        agent_doc_crdt_relay_io::commit_barrier_for_file(file)
+        if force_disk_commit_resolution_enabled() {
+            return true;
+        }
+        #[cfg(any(test, feature = "test-support"))]
+        if test_local_crdt_relay_enabled(file) {
+            return test_support_commit_barrier_for_file(file);
+        }
+        match agent_doc_controller_io::project_controller::commit_barrier_via_controller_model_for_doc(file) {
+            Ok(ready) => ready,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "commit_barrier_controller_error file={} error={err}",
+                        file.display()
+                    ),
+                );
+                false
+            }
+        }
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -253,6 +279,18 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
             agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
         );
     }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn test_local_crdt_relay_enabled(file: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+        .or_else(|| file.parent().map(Path::to_path_buf))
+    else {
+        return false;
+    };
+    project_root
+        .join(".agent-doc/test-local-crdt-relay")
+        .is_file()
 }
 
 impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
@@ -418,13 +456,23 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<()> {
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
-            file,
-            event,
-            snapshot_content,
-            file_content,
-        )?;
+        if force_disk_commit_resolution_enabled() {
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &FORCE_DISK_PIPELINE_FRONTMATTER_EFFECTS,
+                file,
+                event,
+                snapshot_content,
+                file_content,
+            )?;
+        } else {
+            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+                &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+                file,
+                event,
+                snapshot_content,
+                file_content,
+            )?;
+        }
         Ok(())
     }
 
@@ -458,7 +506,37 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
     }
 
     fn fire_doc_event(&self, file: &Path, event: &str) {
-        agent_doc_hooks_io::fire_doc_event(file, event);
+        agent_doc_hooks_io::fire_doc_event_with_authority(
+            file,
+            event,
+            force_disk_commit_resolution_enabled(),
+        );
+    }
+}
+
+impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
+    for RuntimeForceDiskPipelineFrontmatterEffects
+{
+    fn read_current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        std::fs::read_to_string(file)
+            .with_context(|| format!("{source}: failed to read {}", file.display()))
+    }
+
+    fn converge_or_disk_write(
+        &self,
+        file: &Path,
+        current_content: &str,
+        target_content: &str,
+        _reason: &str,
+    ) -> Result<()> {
+        if current_content != target_content {
+            agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+        }
+        Ok(())
+    }
+
+    fn log_op(&self, file: &Path, message: &str) {
+        agent_doc_ops_log_io::log_op(file, message);
     }
 }
 
@@ -515,7 +593,8 @@ fn force_disk_commit_resolution_enabled() -> bool {
 
 fn commit_current_document_content(file: &Path, source: &str) -> Result<String> {
     if force_disk_commit_resolution_enabled() {
-        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+        std::fs::read_to_string(file)
+            .with_context(|| format!("{source}: failed to read {}", file.display()))
     } else {
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
     }
@@ -597,16 +676,19 @@ where
             ),
         );
     }
-    let _commit_lock = CommitLock::acquire(&git_root);
-
     queue_consume::strike_answered_free_text_heads_at_commit_seam(file, ports.queue_consume_write);
 
     let timestamp = chrono_timestamp();
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
     let mut snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let mut file_content =
-        commit_current_document_content(file, "commit_initial_current").unwrap_or_default();
+    let mut file_content = commit_current_document_content(file, "commit_initial_current")
+        .with_context(|| {
+            format!(
+                "commit failed to resolve current document content for {}",
+                file.display()
+            )
+        })?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
@@ -686,15 +768,6 @@ where
         file_content = recovered;
         snapshot_content = agent_doc_snapshot_io::load(file)?;
     }
-    if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-        file,
-        snapshot_content.as_deref(),
-        &file_content,
-        "commit",
-    )? {
-        snapshot_content = agent_doc_snapshot_io::load(file)?;
-    }
-
     let repaired_committed_historical = if let Some(reason) =
         agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)?
     {
@@ -1194,54 +1267,57 @@ where
 
     let t_commit = std::time::Instant::now();
     let mut commit_attempts = 0u32;
-    let commit_output = loop {
-        let t_staging = std::time::Instant::now();
-        match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg) {
-            Ok(out) => {
-                let elapsed_staging = t_staging.elapsed().as_millis();
-                if elapsed_staging > 0 {
+    let commit_output = {
+        let _commit_lock = CommitLock::acquire(&git_root);
+        loop {
+            let t_staging = std::time::Instant::now();
+            match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg) {
+                Ok(out) => {
+                    let elapsed_staging = t_staging.elapsed().as_millis();
+                    if elapsed_staging > 0 {
+                        eprintln!(
+                            "[perf] commit.staging (hash_object+update-index): {}ms",
+                            elapsed_staging
+                        );
+                    }
+                    break Ok(out);
+                }
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
+                    if commit_attempts < 3 =>
+                {
+                    commit_attempts += 1;
+                    let elapsed_staging = t_staging.elapsed().as_millis();
+                    if elapsed_staging > 0 {
+                        eprintln!(
+                            "[perf] commit.staging (hash_object+update-index): {}ms",
+                            elapsed_staging
+                        );
+                    }
                     eprintln!(
-                        "[perf] commit.staging (hash_object+update-index): {}ms",
-                        elapsed_staging
+                        "[commit] index.lock contention during {} (retry {}/3): {}",
+                        phase, commit_attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(commit_attempts));
+                    continue;
+                }
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                    break Err(anyhow::anyhow!(
+                        "git {} failed after index.lock retries: {}",
+                        phase,
+                        detail
+                    ));
+                }
+                Err(CommitTransactionError::IgnoredPath { path }) => {
+                    break Err(
+                        agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
+                            ports.commit_result_reporting,
+                            file,
+                            &path,
+                        ),
                     );
                 }
-                break Ok(out);
+                Err(CommitTransactionError::Fatal(err)) => break Err(err),
             }
-            Err(CommitTransactionError::RetryableIndexLock { phase, detail })
-                if commit_attempts < 3 =>
-            {
-                commit_attempts += 1;
-                let elapsed_staging = t_staging.elapsed().as_millis();
-                if elapsed_staging > 0 {
-                    eprintln!(
-                        "[perf] commit.staging (hash_object+update-index): {}ms",
-                        elapsed_staging
-                    );
-                }
-                eprintln!(
-                    "[commit] index.lock contention during {} (retry {}/3): {}",
-                    phase, commit_attempts, detail
-                );
-                std::thread::sleep(commit_retry_backoff(commit_attempts));
-                continue;
-            }
-            Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
-                break Err(anyhow::anyhow!(
-                    "git {} failed after index.lock retries: {}",
-                    phase,
-                    detail
-                ));
-            }
-            Err(CommitTransactionError::IgnoredPath { path }) => {
-                break Err(
-                    agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(
-                        ports.commit_result_reporting,
-                        file,
-                        &path,
-                    ),
-                );
-            }
-            Err(CommitTransactionError::Fatal(err)) => break Err(err),
         }
     };
     let elapsed_commit = t_commit.elapsed().as_millis();

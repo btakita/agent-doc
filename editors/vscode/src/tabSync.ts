@@ -30,13 +30,33 @@ const SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
     '[sync] safe_passive_layout_preserved_reselected_focus';
 const SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER =
     '[sync] safe_passive_sync_lock_contention_retry';
+const TAB_SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000;
+const TAB_SYNC_TIMEOUT_BACKOFF_BASE_MS = 30_000;
+const TAB_SYNC_TIMEOUT_BACKOFF_MAX_MS = 300_000;
 
 export function shouldReplayQueuedTabChange(startedGeneration: number, latestGeneration: number): boolean {
     return latestGeneration > startedGeneration;
 }
 
+export function replayDelayAfterTabSyncRun(
+    startedGeneration: number,
+    latestGeneration: number,
+    commandTimedOut: boolean,
+): number | null {
+    if (!shouldReplayQueuedTabChange(startedGeneration, latestGeneration)) return null;
+    return commandTimedOut ? TAB_SYNC_TIMEOUT_REPLAY_DELAY_MS : 0;
+}
+
 export function shouldScheduleDeferredTabSyncRetry(startedGeneration: number, latestGeneration: number): boolean {
     return latestGeneration <= startedGeneration;
+}
+
+export function tabSyncTimeoutBackoffDelayMs(timeoutCount: number): number {
+    const step = Math.max(timeoutCount - 1, 0);
+    return Math.min(
+        TAB_SYNC_TIMEOUT_BACKOFF_BASE_MS * (2 ** Math.min(step, 4)),
+        TAB_SYNC_TIMEOUT_BACKOFF_MAX_MS,
+    );
 }
 
 export function isPreservedLayoutOutput(output: string): boolean {

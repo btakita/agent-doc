@@ -218,7 +218,13 @@ const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
 pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1";
 pub const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY: &str = "lazily_transport_receipts_v1";
 
-/// Latest editor-visible buffer digest for a document.
+/// Latest editor-visible buffer digest projection for a document.
+///
+/// Files under `.agent-doc/live-buffer/` are durable projections of what an
+/// editor last reported. They are not authoritative state: lazily transport
+/// receipts and the controller-owned CRDT document model own write/sync
+/// authority. Binary-side recovery may request that an editor refresh this
+/// projection, but must not promote the projection itself into a sync proof.
 ///
 /// `content` (#pcp6) is the editor's full buffer text when the plugin reports it
 /// (`agent_doc_document_changed_digest_content`); `None` for the len/hash-only

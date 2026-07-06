@@ -6,6 +6,7 @@
 //! helpers, and `supervisor_perform_reexec` directly through `use super::*`.
 
 use super::*;
+use agent_doc_controller_io::project_controller::consume_disk_change_reconcile_via_controller_model_for_doc;
 use agent_doc_queue::queue::{
     CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextClearInFlightDecision,
     IdleQueueContextClearInFlightFacts, IdleQueueContextClearInFlightSettleFacts,
@@ -138,64 +139,6 @@ fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
         return false;
     }
     agent_doc_debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
-}
-
-fn checkpoint_crdt_before_supervisor_recycle(
-    file: &std::path::Path,
-    shared: &SupervisorShared,
-    session_log: &mut Option<std::fs::File>,
-    source: &str,
-) -> bool {
-    match agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(file, source) {
-        Ok(outcome) => {
-            let detail = match &outcome {
-                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached => {
-                    "status=detached changed=false".to_string()
-                }
-                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Deferred { reason } => {
-                    format!("status=deferred reason={reason} recovery=background_yrs_repair")
-                }
-                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Checkpointed {
-                    bytes,
-                    changed,
-                    live_editors,
-                    text_len,
-                    text_hash,
-                } => format!(
-                    "status=checkpointed bytes={bytes} changed={changed} live_editors={live_editors} text_len={text_len} text_hash={text_hash}"
-                ),
-            };
-            log_event(
-                session_log,
-                &format!("supervisor_crdt_durable_checkpoint source={source} {detail}"),
-            );
-            true
-        }
-        Err(err) => {
-            let pane = shared.inject_pane.as_deref().unwrap_or("<pty>");
-            log_event(
-                session_log,
-                &format!(
-                    "supervisor_crdt_durable_checkpoint_blocked source={source} pane={pane} error={err:#}"
-                ),
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "supervisor_crdt_durable_checkpoint_blocked file={} pane={} source={} error={:?}",
-                    file.display(),
-                    pane,
-                    source,
-                    err.to_string(),
-                ),
-            );
-            eprintln!(
-                "[agent-doc] supervisor recycle deferred: CRDT durable checkpoint failed for {} before {source}: {err:#}",
-                file.display()
-            );
-            false
-        }
-    }
 }
 
 /// `#fbwire` / `#fullboundary` Phase 2 - the convergence gate could not be
@@ -669,6 +612,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // re-dispatches the genuinely-interrupted turn (see `boot_resume_action`).
             let mut cycle_open_defer_streak: u32 = 0;
             let mut cycle_open_defer_escalated_logged = false;
+            // `#suprecyclespin-falseabandon`: consecutive polls for which the
+            // sidecar-staleness stall predicate has held at a `turn_boundary`. The
+            // force-abandon only fires once this reaches
+            // `STALLED_CYCLE_RESOLVE_CONFIRM_TICKS`, so a transiently-misread
+            // boundary during a live harness generation can never abandon the
+            // turn from a merely-stale sidecar (a stale sidecar must not interfere
+            // with the live turn — the CRDT relay stays authoritative).
+            let mut stalled_resolve_streak: u32 = 0;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -1457,19 +1408,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 // C1b consumer (`plan-crdt-scramble-and-disk-propagation.md`): if the
                 // controller watch daemon dropped a disk-change-reconcile marker for
-                // this document, reconcile the out-of-band disk change into the
-                // canonical replica now (this supervisor owns the hub) and clear the
-                // marker. Best-effort — a reconcile hiccup must not block the idle
-                // recycle path below.
-                match agent_doc_crdt_relay_io::consume_disk_change_reconcile(&path) {
-                    Ok(Some(outcome)) => agent_doc_ops_log_io::log_op(
-                        &path,
-                        &format!(
-                            "crdt_disk_change_consumed file={} outcome={outcome:?}",
-                            path.display()
-                        ),
-                    ),
-                    Ok(None) => {}
+                // this document, ask CPC to reconcile the out-of-band disk change
+                // into the canonical replica and clear the marker. Best-effort — a
+                // reconcile hiccup must not block the idle recycle path below.
+                let disk_change_reconcile =
+                    consume_disk_change_reconcile_via_controller_model_for_doc(&path);
+                match disk_change_reconcile {
+                    Ok(Some(_)) | Ok(None) => {}
                     Err(err) => eprintln!(
                         "[agent-doc] disk-change reconcile consume failed for {}: {err}",
                         path.display()
@@ -1538,7 +1483,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 current_epoch_secs(),
                                 agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
                             );
+                        // `#suprecyclespin-falseabandon`: require the stall to
+                        // persist across `STALLED_CYCLE_RESOLVE_CONFIRM_TICKS`
+                        // consecutive polls before abandoning. A live generation
+                        // does not hold `turn_boundary && stalled` back-to-back for
+                        // the confirm window, so a transient boundary misread can no
+                        // longer abandon a live turn from a stale sidecar; a truly
+                        // orphaned cycle stays stalled every poll and still resolves.
                         if pre_response_cycle_stalled {
+                            stalled_resolve_streak = stalled_resolve_streak.saturating_add(1);
+                        } else {
+                            stalled_resolve_streak = 0;
+                        }
+                        let stall_confirmed = pre_response_cycle_stalled
+                            && stalled_resolve_streak
+                                >= agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_CONFIRM_TICKS;
+                        if stall_confirmed {
+                            stalled_resolve_streak = 0;
                             let stalled_secs =
                                 current_epoch_secs().saturating_sub(state.updated_at);
                             if let Err(err) = agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(&agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1559,13 +1520,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
-                                    "supervisor_cycle_stale_resolved file={} cycle={} turn={} phase={} stalled_secs={} inflight={} reason=abandoned_older_turn_superseded (#suprecyclespin)",
+                                    "supervisor_cycle_stale_resolved file={} cycle={} turn={} phase={} stalled_secs={} inflight={} confirm_ticks={} reason=abandoned_older_turn_superseded (#suprecyclespin)",
                                     path.display(),
                                     state.cycle_id,
                                     state.turn_id.as_deref().unwrap_or("<none>"),
                                     state.phase.as_str(),
                                     stalled_secs,
                                     inflight,
+                                    agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_CONFIRM_TICKS,
                                 ),
                             );
                             // Gate cleared — let the recycle proceed at this boundary.
@@ -1659,14 +1621,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor restart: draining complete, hot-reloading onto freshly-installed agent-doc binary; preserving the live agent child via execve"
                         );
-                        if !checkpoint_crdt_before_supervisor_recycle(
-                            &path,
-                            &shared,
-                            &mut session_log,
-                            "supervisor_restart_reexec",
-                        ) {
-                            continue;
-                        }
                         // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary.
@@ -2055,14 +2009,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
                         );
-                        if !checkpoint_crdt_before_supervisor_recycle(
-                            &path,
-                            &shared,
-                            &mut session_log,
-                            "supervisor_self_recycle_reexec",
-                        ) {
-                            continue;
-                        }
                         // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary (this is the path
@@ -2144,14 +2090,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor recycling onto freshly-installed agent-doc binary ({recycle_boundary}); the next launch uses the new build"
                         );
-                        if !checkpoint_crdt_before_supervisor_recycle(
-                            &path,
-                            &shared,
-                            &mut session_log,
-                            "supervisor_self_recycle_exit",
-                        ) {
-                            continue;
-                        }
                         std::process::exit(0);
                     }
                 }
@@ -3474,6 +3412,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
         std::fs::create_dir_all(repo.join(".agent-doc/live-buffer")).unwrap();
+        std::fs::write(repo.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
         for args in [
             vec!["init"],
             vec!["config", "user.email", "t@t.com"],
@@ -3500,12 +3439,11 @@ mod tests {
             .unwrap();
         assert!(editor_buffer_converged_to_head(&doc));
 
-        let canonical = doc.canonicalize().unwrap().to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content(
-            &canonical,
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "idle-watch-test-editor",
             "committed body\nunsaved editor queue head\n",
-        )
-        .unwrap();
+        );
 
         assert!(
             !editor_buffer_converged_to_head(&doc),

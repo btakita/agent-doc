@@ -884,13 +884,14 @@ fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
 }
 
 #[test]
-fn file_ipc_timeout_retains_patch_before_retry() {
+fn file_ipc_timeout_recovers_when_document_is_detached() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
     let initial_head = head_blob(root);
 
     agent_doc()
         .current_dir(root)
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args([
             "write",
             doc.to_str().unwrap(),
@@ -901,20 +902,20 @@ fn file_ipc_timeout_retains_patch_before_retry() {
         ])
         .write_stdin(response_text("stale patch replay"))
         .assert()
-        .failure()
+        .success()
         .stderr(predicates::str::contains(
-            "recovery=retry_without_disk_write",
+            "recovering through document authority (detached_disk_authority)",
         ));
 
     let head = head_blob(root);
-    assert_eq!(
+    assert_ne!(
         initial_head, head,
-        "IPC timeout must fail before committing a response"
+        "detached recovery should commit the response after IPC timeout"
     );
     let visible = fs::read_to_string(&doc).unwrap();
     assert!(
-        !visible.contains(&response_body("stale patch replay")),
-        "IPC timeout must not write the response directly to the document"
+        visible.contains(&response_body("stale patch replay")),
+        "detached recovery should write the response through document authority:\n{visible}"
     );
 
     let patch_jsons = fs::read_dir(root.join(".agent-doc/patches"))
@@ -923,8 +924,8 @@ fn file_ipc_timeout_retains_patch_before_retry() {
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
         .collect::<Vec<_>>();
     assert!(
-        !patch_jsons.is_empty(),
-        "IPC timeout should retain file IPC payloads for editor retry"
+        patch_jsons.is_empty(),
+        "document-authority recovery should cancel the stale file IPC payload"
     );
 
     let claimed_entries = fs::read_dir(root.join(".agent-doc/claimed-patches"))
@@ -932,12 +933,14 @@ fn file_ipc_timeout_retains_patch_before_retry() {
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
     assert!(
-        claimed_entries.is_empty(),
-        "IPC timeout should not claim an uncommitted payload"
+        !claimed_entries.is_empty(),
+        "cancelled file IPC payload should be claimed so it cannot apply later"
     );
     let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("recovery=retry_without_disk_write"),
-        "IPC timeout should request a retry without direct document write:\n{ops_log}"
+        ops_log.contains("run_stream_ipc_recover_via_document_authority")
+            && ops_log.contains("recovery=detached_disk_authority")
+            && ops_log.contains("ipc_patch_cancelled_for_document_authority"),
+        "IPC timeout should recover through document authority and cancel file IPC:\n{ops_log}"
     );
 }

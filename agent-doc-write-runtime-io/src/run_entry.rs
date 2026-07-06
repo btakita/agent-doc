@@ -143,6 +143,9 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     // an editor is active, the CRDT relay owns the current text and disk is not
     // used as a substitute.
     let force_disk_editor_attached = flags.force_disk && editor_crdt_authority_attached(file);
+    if force_disk_editor_attached {
+        ensure_force_disk_editor_authority_ready(file)?;
+    }
     let content_current = resolve_document_content_for_write_mode(
         file,
         flags.force_disk,
@@ -406,8 +409,10 @@ pub(crate) fn run_template(
     // Resolve the authoritative document to check for user edits since lock
     // acquisition. Active editors resolve through the CRDT relay; detached docs
     // use disk as the fallback replica. An explicit force-disk write against an
-    // attached editor is the deliberate recovery bypass and reads the visible file
-    // instead of asking the relay to prove the editor model first.
+    // attached editor must pass the relay barrier before disk is read or written.
+    if force_disk_editor_attached {
+        ensure_force_disk_editor_authority_ready(file)?;
+    }
     let content_current = resolve_document_content_for_write_mode(
         file,
         flags.force_disk,
@@ -621,9 +626,60 @@ pub(crate) fn run_template(
 /// `baseline` is the document content at the time the response was generated.
 ///
 /// When `force_disk` is false and `.agent-doc/patches/` exists (plugin installed),
-/// tries IPC first. On IPC timeout or missing proof, retains the pending response
-/// and fails closed for retry instead of writing the document behind the editor.
-/// When `force_disk` is true, always uses direct disk write.
+/// tries legacy editor IPC first for compatibility. On timeout or missing proof,
+/// cancels the queued file-IPC patch and continues through the CPC CRDT relay so
+/// there is no separate editor-authoritative write path. When `force_disk` is
+/// true, uses the explicit disk override path.
+fn cancel_queued_ipc_patch_for_document_authority_recovery(
+    file: &Path,
+    patch_id: &str,
+    reason: &str,
+) -> bool {
+    let Ok(canonical) = file.canonicalize() else {
+        return false;
+    };
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
+        return false;
+    };
+    let patch_file = project_root
+        .join(".agent-doc/patches")
+        .join(format!("{hash}.json"));
+    if !patch_file.exists() {
+        return false;
+    }
+    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(&project_root, patch_id);
+    match std::fs::remove_file(&patch_file) {
+        Ok(()) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_patch_cancelled_for_document_authority file={} patch_id={} cause={} patch_file={}",
+                    file.display(),
+                    patch_id,
+                    reason,
+                    patch_file.display(),
+                ),
+            );
+            true
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_patch_cancel_for_document_authority_failed file={} patch_id={} cause={} patch_file={} error={}",
+                    file.display(),
+                    patch_id,
+                    reason,
+                    patch_file.display(),
+                    err,
+                ),
+            );
+            false
+        }
+    }
+}
+
 pub(crate) fn run_stream(
     file: &Path,
     baseline: Option<&str>,
@@ -994,22 +1050,44 @@ pub(crate) fn run_stream(
                 agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
+            let recovery = if editor_crdt_authority_attached(file) {
+                "cpc_crdt_relay"
+            } else {
+                "detached_disk_authority"
+            };
+            let cancelled_queued_patch = cancel_queued_ipc_patch_for_document_authority_recovery(
+                file,
+                &ipc_result.patch_id,
+                recovery,
+            );
+            if !cancelled_queued_patch {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "run_stream_ipc_retry_required_no_disk_write file={} patch_id={} patches={} recovery=retry_without_disk_write detail=ipc_consumed_without_valid_proof",
+                        file.display(),
+                        ipc_result.patch_id,
+                        patches.len()
+                    ),
+                );
+                drop(doc_lock);
+                anyhow::bail!(
+                    "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
+                    file.display()
+                );
+            }
             eprintln!(
-                "[write] editor IPC did not prove the write — refusing direct document write; retry after the editor applies the queued patch"
+                "[write] editor IPC did not prove the write — recovering through document authority ({recovery})"
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "run_stream_ipc_retry_required_no_disk_write file={} patch_id={} patches={} recovery=retry_without_disk_write",
+                    "run_stream_ipc_recover_via_document_authority file={} patch_id={} patches={} recovery={}",
                     file.display(),
                     ipc_result.patch_id,
-                    patches.len()
+                    patches.len(),
+                    recovery,
                 ),
-            );
-            drop(doc_lock);
-            anyhow::bail!(
-                "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
-                file.display()
             );
         }
     }
@@ -1041,6 +1119,9 @@ pub(crate) fn run_stream(
     }
     let t_disk = std::time::Instant::now();
     let force_disk_editor_attached = force_disk && editor_crdt_authority_attached(file);
+    if force_disk_editor_attached {
+        ensure_force_disk_editor_authority_ready(file)?;
+    }
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -1119,8 +1200,7 @@ pub(crate) fn run_stream(
     // Resolve the authoritative document to check for user edits since lock
     // acquisition. Active editors resolve through the CRDT relay; detached docs
     // use disk as the fallback replica. An explicit force-disk write against an
-    // attached editor is the deliberate recovery bypass and reads the visible file
-    // instead of asking the relay to prove the editor model first.
+    // attached editor must pass the relay barrier before disk is read or written.
     let content_current = resolve_document_content_for_write_mode(
         file,
         force_disk,
@@ -1156,7 +1236,7 @@ pub(crate) fn run_stream(
             // No edits — build CRDT state from result
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours);
             (content_ours.clone(), doc.encode_state(), false)
-        } else if force_disk_editor_attached {
+        } else if force_disk {
             eprintln!(
                 "[write] File was modified during force-disk response generation. Applying patches to current document..."
             );
@@ -1187,7 +1267,11 @@ pub(crate) fn run_stream(
                 agent_doc_ops_log_io::log_op,
             )?;
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&patched_current);
-            (patched_current, doc.encode_state(), true)
+            (
+                patched_current,
+                doc.encode_state(),
+                force_disk_editor_attached,
+            )
         } else {
             eprintln!(
                 "[write] File was modified during response generation. Document-model merging..."
@@ -1342,6 +1426,28 @@ pub(crate) fn run_stream(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
+    if !force_disk
+        && editor_crdt_authority_attached(file)
+        && let Some(relay_write) =
+            agent_doc_document_realtime_io::apply_cpc_write_through_relay_authority(
+                file,
+                &content_current,
+                &final_content,
+                "run_stream",
+            )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "run_stream_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
+                file.display(),
+                relay_write.content_hash,
+                relay_write.update_bytes,
+                relay_write.targets,
+                relay_write.delivery_converged,
+            ),
+        );
+    }
     agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
     if force_disk_editor_attached {
         agent_doc_ops_log_io::log_op(
@@ -1874,6 +1980,7 @@ pub(crate) fn error_requests_retry_without_disk(err: &anyhow::Error) -> bool {
         let message = cause.to_string();
         message.contains("retry_without_disk_write")
             || message.contains("disk is not consulted until the editor is detached")
+            || message.contains("disk is not consulted as a fallback")
             || message.contains("disk remained non-authoritative")
     })
 }
@@ -2023,6 +2130,172 @@ fn editor_crdt_authority_attached(file: &Path) -> bool {
         .editor_attached()
 }
 
+fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
+    let current = match agent_doc_controller_io::project_controller::
+        current_text_via_controller_model_read_for_doc(file, "force_disk_pre_write_authority")
+    {
+        Ok(current) => current,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_unavailable file={} status=controller_read_unavailable timeout_ms=750 error={err}",
+                    file.display()
+                ),
+            );
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file) {
+                Ok(current) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "force_disk_editor_authority_local_probe file={} source=nonblocking_relay_after_controller_timeout state={}",
+                            file.display(),
+                            force_disk_current_text_status_label(&current),
+                        ),
+                    );
+                    Some(current)
+                }
+                Err(local_err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "force_disk_editor_authority_local_probe_failed file={} source=nonblocking_relay_after_controller_timeout error={local_err}",
+                            file.display()
+                        ),
+                    );
+                    None
+                }
+            }
+        }
+    };
+    match current {
+        Some(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_ready file={} status=detached_authority",
+                    file.display()
+                ),
+            );
+            return Ok(());
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors: 0,
+            delivery_converged: true,
+            ..
+        }) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_ready file={} status=no_live_editor_replicas",
+                    file.display()
+                ),
+            );
+            return Ok(());
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors,
+            delivery_converged,
+            ..
+        }) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_unavailable file={} status=live_editor_replicas live_editors={} delivery_converged={}",
+                    file.display(),
+                    live_editors,
+                    delivery_converged
+                ),
+            );
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+            if force_disk_missing_replica_can_use_stale_owner_disk_recovery(file) {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "force_disk_editor_authority_ready file={} status=stale_owner_missing_replica_recovery",
+                        file.display()
+                    ),
+                );
+                return Ok(());
+            }
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_unavailable file={} status=editor_attached_model_missing",
+                    file.display()
+                ),
+            );
+        }
+        Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_unavailable file={} status=editor_sync_pending",
+                    file.display()
+                ),
+            );
+        }
+        None => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_editor_authority_unavailable file={} status=no_project_root",
+                    file.display()
+                ),
+            );
+        }
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "force_disk_editor_authority_unavailable file={} status=relay_convergence_pending phase=pre_write",
+            file.display()
+        ),
+    );
+    anyhow::bail!(
+        "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as write authority",
+        file.display()
+    )
+}
+
+fn force_disk_missing_replica_can_use_stale_owner_disk_recovery(file: &Path) -> bool {
+    let file_arg = file.display().to_string();
+    let liveness = agent_doc_plugin_owner::ownership_liveness_for_file(&file_arg);
+    let allow = liveness.lease_present && liveness.pid_live && !liveness.heartbeat_fresh;
+    if allow {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "force_disk_editor_authority_stale_owner_missing_replica file={} lease_present={} pid_live={} heartbeat_fresh={} recovery=explicit_force_disk",
+                file.display(),
+                liveness.lease_present,
+                liveness.pid_live,
+                liveness.heartbeat_fresh
+            ),
+        );
+    }
+    allow
+}
+
+fn force_disk_current_text_status_label(
+    current: &agent_doc_crdt_relay_io::CurrentText,
+) -> &'static str {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            "editor_attached_model_missing"
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors: 0,
+            delivery_converged: true,
+            ..
+        } => "current_no_live_editors",
+        agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current_live_editors",
+    }
+}
+
 fn merge_recovery_content(
     file: &Path,
     base: &str,
@@ -2098,12 +2371,18 @@ fn apply_simple_exchange_patch_to_current(
             .find(|component| component.name == "exchange")
             .ok_or_else(|| anyhow::anyhow!("missing exchange component"))?;
         let exchange_content = exchange.content(current);
-        let exchange_without_boundaries = strip_exchange_boundary_lines(exchange_content);
+        let (exchange_before_boundary, exchange_after_boundary) =
+            split_exchange_content_at_boundary(exchange_content).unwrap_or_else(|| {
+                (
+                    strip_exchange_boundary_lines(exchange_content),
+                    String::new(),
+                )
+            });
         let summary = file.file_stem().and_then(|stem| stem.to_str());
         let boundary_id = agent_doc_element::id::new_boundary_id_with_summary(summary);
         let boundary_marker = agent_doc_element::id::format_boundary_marker(&boundary_id);
 
-        let mut new_exchange = exchange_without_boundaries.trim_end().to_string();
+        let mut new_exchange = exchange_before_boundary.trim_end().to_string();
         if !new_exchange.is_empty() {
             new_exchange.push_str("\n\n");
         }
@@ -2113,6 +2392,7 @@ fn apply_simple_exchange_patch_to_current(
         }
         new_exchange.push_str(&boundary_marker);
         new_exchange.push('\n');
+        new_exchange.push_str(&exchange_after_boundary);
 
         eprintln!(
             "[template] force-disk current exchange fast path inserted boundary {}",
@@ -2126,6 +2406,24 @@ fn apply_simple_exchange_patch_to_current(
         }
         Ok(result)
     })())
+}
+
+fn split_exchange_content_at_boundary(content: &str) -> Option<(String, String)> {
+    let mut before = String::with_capacity(content.len());
+    let mut after = String::new();
+    let mut found_boundary = false;
+    for segment in content.split_inclusive('\n') {
+        if segment.trim().starts_with("<!-- agent:boundary:") {
+            found_boundary = true;
+            continue;
+        }
+        if found_boundary {
+            after.push_str(segment);
+        } else {
+            before.push_str(segment);
+        }
+    }
+    found_boundary.then_some((before, after))
 }
 
 fn strip_exchange_boundary_lines(content: &str) -> String {

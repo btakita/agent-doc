@@ -31,8 +31,8 @@ use agent_doc_write_converge_io::{
     poll_visible_write_content_lazily_event_or_projection,
     prefer_visible_content_over_stale_visible_write_snapshot,
     reconcile_visible_write_snapshot_to_newer_operator_buffer, record_ipc_socket_ack_timeout,
-    save_ipc_snapshot_and_crdt_nonfatal, stale_supervisor_write_short_circuit,
-    visible_write_disk_proof, write_visible_write_through_to_disk,
+    save_ipc_snapshot_and_crdt_nonfatal, visible_write_disk_proof,
+    write_visible_write_through_to_disk,
 };
 use anyhow::Result;
 use std::path::Path;
@@ -57,10 +57,7 @@ fn ipc_response_materialized_or_fallback(
         source,
         response,
         content,
-        |file, source| {
-            let _ =
-                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
-        },
+        |_, _| {},
     )
 }
 
@@ -79,10 +76,7 @@ fn log_ipc_proof_failure(
         invariant,
         recovery,
         detail,
-        |file, source| {
-            let _ =
-                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
-        },
+        |_, _| {},
     );
 }
 
@@ -208,19 +202,6 @@ fn try_ipc_inner(
         "try_ipc_before_content_disk_fallback",
     )
     .ok();
-
-    // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit. Before any
-    // proof-retry work, if the hosting supervisor is running a stale binary, skip the
-    // doomed IPC write, schedule the recycle, and defer uniformly (returns a
-    // non-success result so the caller retains the response for the post-recycle
-    // retry — never a disk write). Fresh supervisor → `None`, proceed normally.
-    if stale_supervisor_write_short_circuit(file, "try_ipc").is_some() {
-        return Ok(IpcResult {
-            success: false,
-            patch_id,
-            skipped_committed_cycle: false,
-        });
-    }
 
     // Guard: if the cycle is already committed, reject the patch to prevent
     // a late fallback from re-dirtying the document.

@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
+import java.util.concurrent.TimeUnit
 
 /**
  * Consumes the CPC's turn-state projection (the `agent_doc_turn_projection` FFI
@@ -27,22 +28,23 @@ object TurnStateBridge {
 
     /** Raw turn-projection JSON for a document, or null when unavailable. */
     fun turnProjectionJsonForFile(filePath: String): String? {
+        val started = System.nanoTime()
         val lib = AgentDocLib.get() ?: return null
         val ptr = try {
             lib.agent_doc_turn_projection(filePath)
         } catch (e: Throwable) {
             LOG.debug("[turn-projection] unavailable: ${e.message}")
+            logProjectionTiming(filePath, started)
             return null
         }
         try {
             val raw = ptr?.getString(0) ?: return null
             val projection = raw.takeUnless { it == "null" }
-            // Observability for goal-1: prove the plugin actually calls the CPC's
-            // turn-state projection FFI and what phase the CPC reports back.
-            LOG.info("[turn-projection] $filePath => ${projection ?: "null"}")
+            LOG.debug("[turn-projection] $filePath => ${projection ?: "null"}")
             return projection
         } finally {
             lib.agent_doc_free_string(ptr)
+            logProjectionTiming(filePath, started)
         }
     }
 
@@ -79,5 +81,15 @@ object TurnStateBridge {
         "prompt_deleted" -> "prompt deleted"
         "prompt_reduced" -> "prompt reduced"
         else -> null
+    }
+
+    private fun logProjectionTiming(filePath: String, startedNanos: Long) {
+        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
+        val message = "[turn-perf] projection file=${java.io.File(filePath).name} elapsed_ms=$elapsedMs thread=${Thread.currentThread().name}"
+        if (elapsedMs >= 100) {
+            LOG.warn(message)
+        } else {
+            LOG.debug(message)
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManagerListener
@@ -16,18 +17,10 @@ import com.intellij.openapi.vfs.VirtualFileManager
  * This enables `require-restart="false"` (dynamic plugin install/update/unload).
  */
 class PluginLifecycleListener : ProjectManagerListener {
-    internal fun buildStartupResyncCommand(sessionName: String?): List<String> {
-        val cmd = mutableListOf("agent-doc", "resync")
-        if (sessionName != null) {
-            LOG.info("[resync] startup audit will inspect current tmux session: $sessionName")
-        }
-        return cmd
-    }
-
     override fun projectOpened(project: Project) {
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
-        // Attach markdown buffers as CRDT replicas when the supervisor supports it.
+        // Attach markdown buffers as CRDT replicas when the CPC endpoint is available.
         CrdtReplicaManager.getInstance(project)
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
@@ -50,8 +43,18 @@ class PluginLifecycleListener : ProjectManagerListener {
         project.messageBus.connect().subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    val file = event.newFile ?: return
+                    if (file.name.endsWith(".md")) {
+                        CrdtReplicaManager.requestRemoteDrain(project, file.path, "selection")
+                    }
+                }
+
                 override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
                     TypingTracker.scheduleOpenDocumentReport(file)
+                    if (file.name.endsWith(".md")) {
+                        CrdtReplicaManager.requestRemoteDrain(project, file.path, "file-opened")
+                    }
                 }
 
                 override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
@@ -65,47 +68,6 @@ class PluginLifecycleListener : ProjectManagerListener {
             VirtualFileManager.VFS_CHANGES,
             FileRenameListener(project)
         )
-        // Clean up wrong-session/stale panes left from previous IDE sessions
-        runResyncFix(project)
-    }
-
-    private fun runResyncFix(project: Project) {
-        val basePath = project.basePath ?: return
-        val agentDocDir = java.io.File(basePath, ".agent-doc")
-        if (!agentDocDir.isDirectory) return
-
-        Thread({
-            try {
-                // Determine the current tmux session so resync uses relocation
-                // instead of killing panes in a different session.
-                val sessionName = try {
-                    val tmuxProc = ProcessBuilder("tmux", "display-message", "-p", "#{session_name}")
-                        .redirectErrorStream(true)
-                        .start()
-                    val name = tmuxProc.inputStream.bufferedReader().readText().trim()
-                    if (tmuxProc.waitFor() == 0 && name.isNotEmpty()) name else null
-                } catch (_: Exception) { null }
-
-                val cmd = buildStartupResyncCommand(sessionName)
-                val process = ProcessBuilder(cmd)
-                    .directory(java.io.File(basePath))
-                    .redirectErrorStream(true)
-                    .start()
-                val exitCode = process.waitFor()
-                val output = process.inputStream.bufferedReader().readText().trim()
-                if (output.isNotEmpty()) {
-                    LOG.info("[resync] $output")
-                }
-                if (exitCode != 0) {
-                    LOG.warn("[resync] agent-doc resync exited with code $exitCode")
-                }
-            } catch (e: Exception) {
-                LOG.info("[resync] agent-doc not available: ${e.message}")
-            }
-        }, "agent-doc-resync-fix").apply {
-            isDaemon = true
-            start()
-        }
     }
 
     companion object {

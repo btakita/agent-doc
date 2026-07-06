@@ -8,24 +8,13 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 class CompactExchangeAction : AnAction() {
-    companion object {
-        private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(CompactExchangeAction::class.java)
-    }
-
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
-        Thread {
-            val idle = TypingTracker.awaitIdle(file.path)
-            if (!idle) {
-                LOG.warn("[compact-exchange] typing debounce timed out; compact deferred for ${file.name}")
-                return@Thread
-            }
-            ApplicationManager.getApplication().invokeLater {
-                FileDocumentManager.getInstance().saveAllDocuments()
-                TerminalUtil.compactExchange(project, file)
-            }
-        }.start()
+        ApplicationManager.getApplication().invokeLater {
+            FileDocumentManager.getInstance().saveAllDocuments()
+            TerminalUtil.compactExchange(project, file)
+        }
     }
 
     override fun update(e: AnActionEvent) {

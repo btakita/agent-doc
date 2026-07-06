@@ -30,7 +30,7 @@ pub fn prepare_route_document(
     file: &Path,
     effects: RouteDocumentPrepEffects,
 ) -> Result<RouteDocumentPreparation> {
-    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+    let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
         file,
         "route_document_prep",
     )?;

@@ -98,7 +98,7 @@ pub trait DirectRunEffects {
         force_disk: bool,
     ) -> Result<Option<queue_consume::QueueConsumptionOutcome>>;
 
-    fn complete_required_closeout(&self, file: &Path) -> Result<()>;
+    fn complete_required_closeout(&self, file: &Path, force_disk: bool) -> Result<()>;
 
     fn abandon_recursive_cycle(&self, file: &Path, event: &str, diagnostic: &str) -> Result<()>;
 }
@@ -587,6 +587,7 @@ pub fn run_once(
             file,
             "child_agent_wait",
             agent_name,
+            Some(&session_id),
             Some(agent_doc_agent_io::agent::run_agent_timeout()),
         );
         backend.send(
@@ -616,13 +617,20 @@ pub fn run_once(
 
     record_run_progress(file, "response_write", agent_name, None);
     match run_mode {
-        RunMode::Append => apply_append_response(effects, file, &content_original, &response_text)?,
-        RunMode::Template => apply_template_response(
+        RunMode::Append => apply_append_response_with_authority(
+            effects,
+            file,
+            &content_original,
+            &response_text,
+            force_disk,
+        )?,
+        RunMode::Template => apply_template_response_with_authority(
             effects,
             file,
             &content_original,
             &response_text,
             fm.resolve_mode().is_crdt(),
+            force_disk,
         )?,
     }
     mark_run_write_applied(file, "run_write_applied")?;
@@ -637,7 +645,8 @@ pub fn run_once(
 
     let mut queue_consumption = None;
     if !no_git {
-        let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
+        let _heartbeat =
+            RunHeartbeat::start(file, "commit_closeout", agent_name, Some(&session_id), None);
         let queue_guard_content =
             agent_doc_document_realtime_io::try_resolve_current_document_content(
                 file,
@@ -667,7 +676,7 @@ pub fn run_once(
                 )?
             );
         }
-        effects.complete_required_closeout(file)?;
+        effects.complete_required_closeout(file, force_disk)?;
     }
 
     eprintln!("Response written to {}", file.display());
@@ -698,6 +707,16 @@ pub fn apply_append_response(
     baseline: &str,
     response: &str,
 ) -> Result<()> {
+    apply_append_response_with_authority(effects, file, baseline, response, false)
+}
+
+pub fn apply_append_response_with_authority(
+    effects: &impl DirectRunEffects,
+    file: &Path,
+    baseline: &str,
+    response: &str,
+    force_disk: bool,
+) -> Result<()> {
     let doc_lock = acquire_doc_lock(file)?;
     agent_doc_snapshot_io::save_pre_response(file, baseline)?;
 
@@ -712,10 +731,8 @@ pub fn apply_append_response(
     }
     content_ours.push_str("\n## User\n\n");
 
-    let content_current = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "direct_run_append_current",
-    )?;
+    let content_current =
+        direct_run_current_document_content(file, force_disk, "direct_run_append_current")?;
     let final_content = if content_current == baseline {
         content_ours
     } else {
@@ -723,9 +740,11 @@ pub fn apply_append_response(
         agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?
     };
 
-    agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_append")?;
+    if !force_disk {
+        agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_append")?;
+    }
     agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
-    direct_run_atomic_write(effects, file, &final_content)?;
+    direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
     drop(doc_lock);
     Ok(())
 }
@@ -737,11 +756,20 @@ pub fn apply_template_response(
     response: &str,
     use_crdt: bool,
 ) -> Result<()> {
+    apply_template_response_with_authority(effects, file, baseline, response, use_crdt, false)
+}
+
+pub fn apply_template_response_with_authority(
+    effects: &impl DirectRunEffects,
+    file: &Path,
+    baseline: &str,
+    response: &str,
+    use_crdt: bool,
+    force_disk: bool,
+) -> Result<()> {
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
-    let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "direct_run_template_current",
-    )?;
+    let current_content =
+        direct_run_current_document_content(file, force_disk, "direct_run_template_current")?;
     let (mut patches, unmatched) =
         template::parse_patches(response).context("failed to parse patch blocks from response")?;
     agent_doc_template::sanitize::sanitize_patches(&mut patches);
@@ -778,10 +806,8 @@ pub fn apply_template_response(
         &content_ours,
     )?;
 
-    let content_current = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "direct_run_template_merge_current",
-    )?;
+    let content_current =
+        direct_run_current_document_content(file, force_disk, "direct_run_template_merge_current")?;
     let (final_content, crdt_state) = if content_current == baseline {
         let state = if use_crdt {
             Some(agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours).encode_state())
@@ -789,6 +815,25 @@ pub fn apply_template_response(
             None
         };
         (content_ours, state)
+    } else if force_disk {
+        eprintln!(
+            "File was modified during force-disk run. Applying patches to current document..."
+        );
+        let merged = match apply_simple_exchange_patch_to_current(
+            file,
+            &content_current,
+            &patches,
+            &unmatched,
+        ) {
+            Some(result) => result?,
+            None => agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?,
+        };
+        let state = if use_crdt {
+            Some(agent_doc_merge::crdt::CrdtDoc::from_text(&merged).encode_state())
+        } else {
+            None
+        };
+        (merged, state)
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
         let base_state = agent_doc_snapshot_io::crdt_merge_base_state_with(
@@ -798,8 +843,8 @@ pub fn apply_template_response(
             agent_doc_ops_log_io::log_op,
         )?
         .state;
-        if let Err(e) =
-            agent_doc_crdt_relay_io::reconcile_disk_projection_for_file(file, &base_state)
+        if let Err(e) = agent_doc_controller_io::project_controller::
+            reconcile_disk_projection_via_controller_model_for_doc(file, &base_state)
         {
             eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
         }
@@ -824,12 +869,14 @@ pub fn apply_template_response(
         &final_content,
     )?;
 
-    agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_template")?;
+    if !force_disk {
+        agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_template")?;
+    }
     agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
     if let Some(state) = crdt_state {
         agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
     }
-    direct_run_atomic_write(effects, file, &final_content)?;
+    direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
     drop(doc_lock);
     Ok(())
 }
@@ -926,7 +973,140 @@ pub fn direct_run_atomic_write(
     path: &Path,
     content: &str,
 ) -> Result<()> {
-    effects.atomic_write(path, content)
+    direct_run_atomic_write_with_authority(effects, path, content, false)
+}
+
+pub fn direct_run_atomic_write_with_authority(
+    effects: &impl DirectRunEffects,
+    path: &Path,
+    content: &str,
+    force_disk: bool,
+) -> Result<()> {
+    if force_disk {
+        agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
+    } else {
+        effects.atomic_write(path, content)
+    }
+}
+
+fn direct_run_current_document_content(
+    file: &Path,
+    force_disk: bool,
+    source: &str,
+) -> Result<String> {
+    if force_disk {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+}
+
+fn apply_simple_exchange_patch_to_current(
+    file: &Path,
+    current: &str,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> Option<Result<String>> {
+    if !unmatched.trim().is_empty() {
+        return None;
+    }
+
+    let mut exchange_patch: Option<&str> = None;
+    let mut frontmatter_patch: Option<&str> = None;
+    for patch in patches {
+        match patch.name.as_str() {
+            "exchange" => {
+                if exchange_patch.replace(patch.content.as_str()).is_some() {
+                    return None;
+                }
+            }
+            "frontmatter" => {
+                if frontmatter_patch.replace(patch.content.as_str()).is_some() {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    let exchange_patch = exchange_patch?;
+
+    Some((|| {
+        let components = element::parse(current).context("failed to parse components")?;
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .ok_or_else(|| anyhow::anyhow!("missing exchange component"))?;
+        let exchange_content = exchange.content(current);
+        let (exchange_before_boundary, exchange_after_boundary) =
+            split_exchange_content_at_boundary(exchange_content).unwrap_or_else(|| {
+                (
+                    strip_exchange_boundary_lines(exchange_content),
+                    String::new(),
+                )
+            });
+        let summary = file.file_stem().and_then(|stem| stem.to_str());
+        let boundary_id = agent_doc_element::id::new_boundary_id_with_summary(summary);
+        let boundary_marker = agent_doc_element::id::format_boundary_marker(&boundary_id);
+
+        let mut new_exchange = exchange_before_boundary.trim_end().to_string();
+        if !new_exchange.is_empty() {
+            new_exchange.push_str("\n\n");
+        }
+        new_exchange.push_str(exchange_patch.trim());
+        if !new_exchange.ends_with('\n') {
+            new_exchange.push('\n');
+        }
+        new_exchange.push_str(&boundary_marker);
+        new_exchange.push('\n');
+        new_exchange.push_str(&exchange_after_boundary);
+
+        eprintln!(
+            "[template] force-disk current exchange fast path inserted boundary {}",
+            boundary_id
+        );
+
+        let mut result = exchange.replace_content(current, &new_exchange);
+        if let Some(frontmatter_patch) = frontmatter_patch {
+            result = frontmatter::merge_fields(&result, frontmatter_patch)
+                .context("failed to merge frontmatter patch")?;
+        }
+        Ok(result)
+    })())
+}
+
+fn split_exchange_content_at_boundary(content: &str) -> Option<(String, String)> {
+    let mut before = String::with_capacity(content.len());
+    let mut after = String::new();
+    let mut found_boundary = false;
+    for segment in content.split_inclusive('\n') {
+        if segment.trim().starts_with("<!-- agent:boundary:") {
+            found_boundary = true;
+            continue;
+        }
+        if found_boundary {
+            after.push_str(segment);
+        } else {
+            before.push_str(segment);
+        }
+    }
+    found_boundary.then_some((before, after))
+}
+
+fn strip_exchange_boundary_lines(content: &str) -> String {
+    let mut stripped = String::with_capacity(content.len());
+    for segment in content.split_inclusive('\n') {
+        if !segment.trim().starts_with("<!-- agent:boundary:") {
+            stripped.push_str(segment);
+        }
+    }
+    if !content.ends_with('\n')
+        && let Some(tail) = content.rsplit('\n').next()
+        && !tail.trim().starts_with("<!-- agent:boundary:")
+        && !stripped.ends_with(tail)
+    {
+        stripped.push_str(tail);
+    }
+    stripped
 }
 
 #[cfg(unix)]
@@ -1058,10 +1238,12 @@ impl RunHeartbeat {
         file: &Path,
         phase: &'static str,
         agent_name: &str,
+        session_id: Option<&str>,
         timeout: Option<Duration>,
     ) -> Self {
         let file = file.to_path_buf();
         let agent_name = agent_name.to_string();
+        let session_id = session_id.map(ToString::to_string);
         let (stop, stop_rx) = mpsc::channel();
         let interval = run_heartbeat_interval();
         let handle = std::thread::spawn(move || {
@@ -1084,6 +1266,22 @@ impl RunHeartbeat {
                 let state = agent_doc_cycle_state_io::record_open_cycle_progress(&file, &event)
                     .ok()
                     .flatten();
+                if let (Some(session_id), Some(state)) = (session_id.as_deref(), state.as_ref()) {
+                    let mut session_event = format!(
+                        "document_cycle phase={} cycle={} event={}",
+                        state.phase.as_str(),
+                        state.cycle_id,
+                        state.last_event
+                    );
+                    if let Some(capture_id) = state.capture_id.as_deref() {
+                        session_event.push_str(&format!(" capture_id={capture_id}"));
+                    }
+                    let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
+                        &file,
+                        session_id,
+                        &session_event,
+                    );
+                }
                 let (cycle_id, cycle_phase, last_event_age) = state
                     .as_ref()
                     .map(|state| {
@@ -1157,8 +1355,11 @@ pub fn start_run_cycle(file: &Path) -> Result<()> {
     agent_doc_cycle_state_io::admit_with_current_resolver(
         file,
         |file| {
-            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
-                .map(|resolved| resolved.content)
+            agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
+                file,
+                "run_cycle_admit",
+            )
+            .map(|resolved| resolved.content)
         },
         agent_doc_snapshot_io::load,
         agent_doc_ops_log_io::log_op,

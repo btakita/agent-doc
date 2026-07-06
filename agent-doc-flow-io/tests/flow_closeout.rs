@@ -17,6 +17,99 @@ pub fn complete_required_closeout(file: &Path) -> Result<bool> {
     )
 }
 
+struct LocalCrdtBarrierCloseoutEffects;
+
+impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEffects {
+    fn commit(&self, file: &Path) -> Result<bool> {
+        agent_doc_closeout_runtime_io::closeout_effects().commit(file)
+    }
+
+    fn commit_for_authority(&self, file: &Path, force_disk: bool) -> Result<bool> {
+        agent_doc_closeout_runtime_io::closeout_effects().commit_for_authority(file, force_disk)
+    }
+
+    fn crdt_commit_barrier(&self, file: &Path) -> Result<bool> {
+        Ok(agent_doc_crdt_relay_io::commit_barrier_for_file(file))
+    }
+
+    fn run_pending_maintenance(
+        &self,
+        file: &Path,
+        force_disk: bool,
+    ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport> {
+        agent_doc_closeout_runtime_io::closeout_effects().run_pending_maintenance(file, force_disk)
+    }
+
+    fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
+        agent_doc_closeout_runtime_io::closeout_effects().enforce_clean_closeout(file)
+    }
+
+    fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
+        agent_doc_closeout_runtime_io::closeout_effects()
+            .enforce_clean_closeout_for_authority(file, force_disk)
+    }
+
+    fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {
+        agent_doc_closeout_runtime_io::closeout_effects().cancel_preflight_cycle(file)
+    }
+
+    fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool> {
+        agent_doc_closeout_runtime_io::closeout_effects()
+            .detect_jb_cache_conflict_cancel_recoverable(file)
+    }
+
+    fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>> {
+        agent_doc_closeout_runtime_io::closeout_effects().detect_bypassed_response_write(file)
+    }
+
+    fn resolve_current_document(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<agent_doc_document_realtime::CurrentDocument> {
+        agent_doc_closeout_runtime_io::closeout_effects().resolve_current_document(file, source)
+    }
+
+    fn resolve_current_document_for_authority(
+        &self,
+        file: &Path,
+        source: &str,
+        force_disk: bool,
+    ) -> Result<agent_doc_document_realtime::CurrentDocument> {
+        agent_doc_closeout_runtime_io::closeout_effects()
+            .resolve_current_document_for_authority(file, source, force_disk)
+    }
+
+    fn write_current_document(
+        &self,
+        doc: &agent_doc_document_realtime::CurrentDocument,
+        content: &str,
+        source: &str,
+    ) -> Result<()> {
+        agent_doc_closeout_runtime_io::closeout_effects()
+            .write_current_document(doc, content, source)
+    }
+
+    fn mark_committed_frontmatter(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_closeout_runtime_io::closeout_effects().mark_committed_frontmatter(
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
+}
+
+fn complete_required_closeout_with_local_crdt_barrier(file: &Path) -> Result<bool> {
+    agent_doc_flow_io::closeout::complete_required_closeout(file, &LocalCrdtBarrierCloseoutEffects)
+}
+
 pub fn apply_closeout_recovery(file: &Path) -> Result<RecoveryApplication> {
     agent_doc_flow_io::closeout::apply_closeout_recovery(
         file,
@@ -109,6 +202,7 @@ mod tests {
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, base).unwrap();
         agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
@@ -295,7 +389,7 @@ mod tests {
             .unwrap()
             .expect("replica A update should relay");
 
-        let err = complete_required_closeout(&doc).unwrap_err();
+        let err = complete_required_closeout_with_local_crdt_barrier(&doc).unwrap_err();
         assert!(
             err.to_string()
                 .contains("CRDT relay convergence is still pending"),
@@ -557,11 +651,17 @@ mod tests {
         let visible = format!("{base}\n{response}");
         std::fs::write(&doc, &visible).unwrap();
         let canonical = doc.canonicalize().unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content(
-            canonical.to_string_lossy().as_ref(),
-            &visible,
-        )
-        .unwrap();
+        let canonical_key = canonical.to_string_lossy();
+        seed_live_plugin_owner_lease(canonical_key.as_ref());
+        assert!(
+            agent_doc_crdt_relay_io::register_replica_for_file(
+                &canonical,
+                &format!("flow-test-editor:{canonical_key}"),
+            )
+            .unwrap()
+            .is_some(),
+            "fresh editor evidence must come from a live CRDT relay replica"
+        );
 
         let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
         assert_eq!(

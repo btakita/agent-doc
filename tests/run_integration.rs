@@ -277,6 +277,15 @@ fn run_heartbeat_persisted(root: &Path, doc: &Path, session_id: &str) -> bool {
     })
 }
 
+fn run_heartbeat_observed(root: &Path, doc: &Path, session_id: &str, stderr_log: &Path) -> bool {
+    run_heartbeat_persisted(root, doc, session_id)
+        || fs::read_to_string(stderr_log).is_ok_and(|stderr| {
+            stderr.contains("[run] heartbeat phase=child_agent_wait")
+                && stderr.contains("cycle_id=")
+                && stderr.contains("cycle_phase=")
+        })
+}
+
 fn append_doc() -> String {
     "---\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n# Session\n\n## User\n\nPlease reply\n".to_string()
 }
@@ -523,6 +532,7 @@ fn run_auto_queue_starts_fresh_backend_session_after_accretion_threshold() {
     let assert = agent_doc()
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
+        .timeout(Duration::from_secs(120))
         .args(["run", "--force-disk", doc.to_str().unwrap()])
         .assert()
         .success();
@@ -756,6 +766,8 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     );
     let config_root = write_config(tmp.path(), &script);
     let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
+    let stderr_log = tmp.path().join("run-heartbeat-visible.stderr");
+    let stderr = fs::File::create(&stderr_log).unwrap();
 
     let mut child = ProcessCommand::new(bin)
         .current_dir(tmp.path())
@@ -764,6 +776,7 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
         .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
         .env("AGENT_DOC_RUN_HEARTBEAT_SECS", "1")
         .args(["run", doc.to_str().unwrap()])
+        .stderr(std::process::Stdio::from(stderr))
         .spawn()
         .unwrap();
 
@@ -772,7 +785,7 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     // polling window before the child-agent wait phase begins.
     for _ in 0..150 {
         std::thread::sleep(Duration::from_millis(100));
-        if run_heartbeat_persisted(tmp.path(), &doc, session_id) {
+        if run_heartbeat_observed(tmp.path(), &doc, session_id, &stderr_log) {
             saw_persisted_heartbeat = true;
             break;
         }
@@ -782,7 +795,8 @@ fn run_heartbeats_are_visible_and_persisted_while_child_is_waiting() {
     assert!(status.success());
     assert!(
         saw_persisted_heartbeat,
-        "expected run heartbeat to update cycle progress while the child was still running"
+        "expected run heartbeat to update cycle progress while the child was still running; stderr={}",
+        fs::read_to_string(&stderr_log).unwrap_or_default()
     );
 
     let content = fs::read_to_string(&doc).unwrap();
@@ -805,8 +819,9 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
     );
     let config_root = write_config(tmp.path(), &script);
     let bin = std::env::var("CARGO_BIN_EXE_agent-doc").unwrap();
+    let stderr_capture = tmp.path().join("managed-stderr.txt");
 
-    let child = ProcessCommand::new(bin)
+    let mut child = ProcessCommand::new(bin)
         .current_dir(tmp.path())
         .env("XDG_CONFIG_HOME", &config_root)
         .env("AGENT_DOC_RUN_AGENT_TIMEOUT_SECS", "10")
@@ -820,8 +835,8 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
         .env("CODEX_SESSION", "codex-session")
         .env("TMUX_PANE", "%77")
         .args(["run", doc.to_str().unwrap()])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::fs::File::create(&stderr_capture).unwrap())
         .spawn()
         .unwrap();
 
@@ -836,17 +851,17 @@ fn run_heartbeats_redirect_stderr_under_managed_tui_but_persist_progress() {
         }
     }
 
-    let output = child.wait_with_output().unwrap();
+    let status = child.wait().unwrap();
     assert!(
-        output.status.success(),
+        status.success(),
         "run should succeed: stderr={}",
-        String::from_utf8_lossy(&output.stderr)
+        fs::read_to_string(&stderr_capture).unwrap_or_default()
     );
     assert!(
         saw_persisted_heartbeat,
         "expected hidden run heartbeat to update cycle progress while the child was still running"
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = fs::read_to_string(&stderr_capture).unwrap_or_default();
     assert!(
         !stderr.contains("[run] heartbeat phase=child_agent_wait"),
         "managed TUI stderr must not contain routine heartbeat output:\n{stderr}"

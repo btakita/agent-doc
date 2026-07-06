@@ -192,6 +192,49 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }
+
+    fn run_editor_route(
+        &self,
+        invocation: agent_doc_controller_io::project_controller::ControllerEditorRouteInvocation,
+    ) -> anyhow::Result<
+        agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult,
+    > {
+        let mode = if invocation.dispatch_only {
+            agent_doc_route_io::command::RouteMode::DispatchOnly
+        } else {
+            agent_doc_route_io::command::RouteMode::Managed
+        };
+        let wait_for_ready = invocation
+            .wait_for_ready_secs
+            .map(|secs| Duration::from_secs(secs.min(600)));
+        match agent_doc_route_io::invocation::run_with_force_disk(
+            &invocation.file,
+            None,
+            500,
+            &invocation.layout_args,
+            mode,
+            invocation.plain_trigger,
+            wait_for_ready,
+            invocation.force_disk,
+            agent_doc_route_io::runtime_effects::route_command_effects(route_repair_closeout),
+        ) {
+            Ok(()) => Ok(
+                agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
+                    exit_code: 0,
+                    output: format!(
+                        "[route] dispatched via controller editor_route for {}",
+                        invocation.relative_path
+                    ),
+                },
+            ),
+            Err(err) => Ok(
+                agent_doc_controller_io::project_controller::ControllerEditorRouteRuntimeResult {
+                    exit_code: 1,
+                    output: format!("{err:#}"),
+                },
+            ),
+        }
+    }
 }
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
@@ -335,9 +378,8 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         visible: &str,
         stage: &str,
     ) -> anyhow::Result<bool> {
-        agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-            file, projected, visible, stage,
-        )
+        let _ = (file, projected, visible, stage);
+        Ok(false)
     }
 }
 
@@ -522,6 +564,19 @@ impl agent_doc_gc_io::GcControllerEffects for CliGcControllerEffects {
         caller: &str,
     ) -> anyhow::Result<(usize, usize)> {
         agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers_all_projects(
+            stale_after,
+            dry_run,
+            caller,
+        )
+    }
+
+    fn reap_removed_project_root_controllers_all_projects(
+        &mut self,
+        stale_after: Duration,
+        dry_run: bool,
+        caller: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        agent_doc_controller_io::project_controller::reap_removed_project_root_controllers_all_projects(
             stale_after,
             dry_run,
             caller,
@@ -951,11 +1006,11 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
             )??;
         }
         // C1b (`plan-crdt-scramble-and-disk-propagation.md`): for an editor-attached
-        // document, drop a disk-change-reconcile marker so the owning supervisor's
-        // idle loop reconciles this out-of-band disk change into the canonical
-        // replica. Best-effort + authority-gated inside the helper (headless docs
-        // get no marker); a failure here must never wedge the watch loop.
-        if let Err(e) = agent_doc_crdt_relay_io::route_disk_change_signal(
+        // document, ask CPC to drop a disk-change-reconcile marker so the controller
+        // reconciles this out-of-band disk change into the canonical replica.
+        // Best-effort + authority-gated inside the helper (headless docs get no
+        // marker); a failure here must never wedge the watch loop.
+        if let Err(e) = agent_doc_controller_io::project_controller::route_disk_change_signal_via_controller_model_for_doc(
             Path::new(file),
             &observation.delivery,
         ) {

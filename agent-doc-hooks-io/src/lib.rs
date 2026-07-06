@@ -216,10 +216,25 @@ pub fn fire_doc_hooks(
 /// Best-effort: if frontmatter cannot be read or hooks are empty, silently
 /// returns.
 pub fn fire_doc_event(file: &Path, event: &str) {
-    let content = match agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "hooks_fire_doc_event",
-    ) {
+    fire_doc_event_with_authority(file, event, false);
+}
+
+/// Read frontmatter from `file` and fire document-level hooks for `event`,
+/// using disk as the explicit authority when the caller is already in a
+/// force-disk closeout path.
+pub fn fire_doc_event_with_authority(file: &Path, event: &str, force_disk: bool) {
+    let content_result = if force_disk {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "hooks_fire_doc_event_force_disk",
+        )
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "hooks_fire_doc_event",
+        )
+    };
+    let content = match content_result {
         Ok(c) => c,
         Err(_) => return,
     };

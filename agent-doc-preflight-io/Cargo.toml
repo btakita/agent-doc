@@ -12,6 +12,7 @@ name = "agent_doc_preflight_io"
 [dependencies]
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
@@ -60,5 +61,7 @@ tracing = "0.1"
 ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.67" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
 tempfile = "3"

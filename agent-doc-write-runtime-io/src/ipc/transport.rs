@@ -36,6 +36,21 @@ pub(crate) fn record_test_visible_write_receipt(
         );
 }
 
+#[cfg(test)]
+pub(crate) fn record_test_visible_write_receipt_with_relay(
+    file: &Path,
+    patch_id: &str,
+    content: &str,
+    source: &str,
+) {
+    agent_doc_test_support::publish_editor_text_via_crdt_relay(
+        file,
+        "visible-write-test-editor",
+        content,
+    );
+    record_test_visible_write_receipt(file, patch_id, content, source);
+}
+
 /// Attempt to write via IPC (socket-first, file-based fallback).
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
@@ -280,7 +295,7 @@ mod submodule_patch_routing_tests {
                     .unwrap_or("unknown");
                 if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
                     let _ = std::fs::write(file_path, &visible_write_content);
-                    crate::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt_with_relay(
                         Path::new(file_path),
                         patch_id,
                         &visible_write_content,
@@ -309,7 +324,7 @@ mod submodule_patch_routing_tests {
                     .and_then(|p| p.as_str())
                     .unwrap_or("unknown");
                 if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
-                    crate::ipc::transport::record_test_visible_write_receipt(
+                    crate::ipc::transport::record_test_visible_write_receipt_with_relay(
                         Path::new(file_path),
                         patch_id,
                         &visible_write_content,
@@ -627,7 +642,7 @@ mod submodule_patch_routing_tests {
         );
 
         let patch_id = "already-applied-visible-write";
-        crate::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt_with_relay(
             &doc,
             patch_id,
             editor_visible_write_content,
@@ -679,7 +694,8 @@ mod submodule_patch_routing_tests {
             log.contains("ipc_socket_already_applied_skip_file_fallback")
                 && log.contains("ipc_socket_already_applied_snapshot")
                 && log.contains("snap_source=lazily_visible_write_event")
-                && log.contains("visible_write_live_buffer_synced")
+                && log.contains("visible_write_live_buffer_sync_skipped")
+                && log.contains("reason=sidecar_removed")
                 && log.contains("visible_write_disk_write_through"),
             "already_applied visible-write adoption should be auditable:\n{log}"
         );
@@ -774,7 +790,8 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("already_applied_visible_write_snapshot_stale_visible_adopted"),
+            log.contains("ipc_socket_already_applied_live_buffer_diverged")
+                && log.contains("snap_source=file_read"),
             "stale visible-write adoption should be auditable:\n{log}"
         );
     }
@@ -840,15 +857,11 @@ mod submodule_patch_routing_tests {
             stale_visible_write_content,
             "test_already_applied",
         );
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc.to_string_lossy(),
-            unsaved_live_editor,
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
             editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
+            unsaved_live_editor,
+        );
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
@@ -877,10 +890,10 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_disk_write_through_blocked")
-                && log.contains("reason=stale_source_buffer")
+            log.contains("visible_write_crdt_current_drift")
+                && log.contains("visible_write_deferred_current_changed")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
-            "stale live-editor visible-write write-through should fail closed:\n{log}"
+            "stale live-editor visible-write receipt should fail closed before snapshot adoption:\n{log}"
         );
     }
 
@@ -935,17 +948,6 @@ mod submodule_patch_routing_tests {
         fs::write(&doc, baseline).unwrap();
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        let editor_id = "jetbrains-test-editor";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            editor_visible_write_content,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
 
         let patch_id = "socket-visible-write-disk-lags";
         let _listener =
@@ -979,23 +981,16 @@ mod submodule_patch_routing_tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            editor_visible_write_content,
-            "socket visible-write receipt must update stale disk after lazily proves editor-visible content"
-        );
-        assert!(
-            agent_doc_debounce::editor_sync_statuses(&doc_str)
-                .iter()
-                .all(|status| !status.in_flight),
-            "socket visible-write receipt should mark the targeted live-buffer epoch synced"
+            baseline,
+            "socket visible-write receipt proves editor-visible content; disk remains a non-authoritative projection until a later flush"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_visible_write")
                 && log.contains("snap_source=lazily_visible_write_event")
-                && log.contains("visible_write_live_buffer_synced")
-                && log.contains("visible_write_disk_write_through"),
-            "socket visible-write disk write-through should be auditable:\n{log}"
+                && log.contains("visible_write_disk_write_through_blocked"),
+            "socket visible-write CRDT adoption should not require disk write-through:\n{log}"
         );
     }
 
@@ -1202,6 +1197,13 @@ mod submodule_patch_routing_tests {
             "❯ buffer keystroke B\n",
             "<!-- /agent:exchange -->\n"
         );
+        let newer_relay_current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "❯ buffer keystroke B\n",
+            "❯ operator typed after ack\n",
+            "<!-- /agent:exchange -->\n"
+        );
         let content_ours = concat!(
             "<!-- agent:exchange patch=append -->\n",
             "❯ Please reply\n",
@@ -1213,11 +1215,16 @@ mod submodule_patch_routing_tests {
         agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
-        crate::ipc::transport::record_test_visible_write_receipt(
+        crate::ipc::transport::record_test_visible_write_receipt_with_relay(
             &doc,
             patch_id,
             ack_current,
             "test_already_applied",
+        );
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "visible-write-test-editor",
+            newer_relay_current,
         );
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -1241,7 +1248,8 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("ipc_socket_already_applied_visible_not_idle_file_fallback"),
+            log.contains("visible_write_crdt_current_drift")
+                && log.contains("ipc_socket_already_applied_visible_not_idle_file_fallback"),
             "deferred visible repair must be recorded as a file-IPC fallback:\n{log}"
         );
         // The scrambling / partial write must NOT have landed: disk is untouched.

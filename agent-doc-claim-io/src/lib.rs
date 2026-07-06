@@ -99,7 +99,7 @@ use std::io::Write;
 use std::path::Path;
 
 use agent_doc_controller::claim::{
-    CrossSessionDecision, cross_session_decision_with_lease, cross_session_reject_marker,
+    CrossSessionDecision, cross_session_decision_with_current, cross_session_reject_marker,
 };
 use agent_doc_document::claim_scaffold::{
     default_format_and_write_content, merge_default_template_component_config,
@@ -274,10 +274,11 @@ pub fn run(
                 &pane_id,
                 &pane_tmux_session,
                 &configured,
-                cross_session_decision_with_lease(
+                cross_session_decision_with_current(
                     &pane_tmux_session,
                     &configured,
                     configured_alive,
+                    tmux.current_session().as_deref(),
                     force,
                     fresh_foreign_lease,
                 ),

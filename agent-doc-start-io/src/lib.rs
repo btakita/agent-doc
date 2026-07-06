@@ -138,7 +138,117 @@ fn current_text_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'stati
     }
 }
 
+fn start_admission_current_text_for_fallback(
+    file: &Path,
+) -> Option<agent_doc_crdt_relay_io::CurrentText> {
+    start_admission_local_current_text_for_fallback(file).or_else(|| {
+        match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+            file,
+            "prepare_start_runtime",
+        ) {
+            Ok(Some(current)) => Some(current),
+            Ok(None) => Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
+            Err(controller_err) => match agent_doc_crdt_relay_io::current_text_for_file(file) {
+                Ok(current) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "start_admission_current_text_controller_unavailable file={} fallback=local_relay current_state={} controller_error={}",
+                            file.display(),
+                            current_text_label(&current),
+                            format!("{controller_err:#}").replace('\n', "\\n"),
+                        ),
+                    );
+                    Some(current)
+                }
+                Err(local_err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "start_admission_current_text_unavailable file={} controller_error={} local_relay_error={}",
+                            file.display(),
+                            format!("{controller_err:#}").replace('\n', "\\n"),
+                            format!("{local_err:#}").replace('\n', "\\n"),
+                        ),
+                    );
+                    None
+                }
+            },
+        }
+    })
+}
+
+fn start_admission_local_current_text_for_fallback(
+    file: &Path,
+) -> Option<agent_doc_crdt_relay_io::CurrentText> {
+    match agent_doc_crdt_relay_io::current_text_for_file(file) {
+        Ok(current) if start_admission_fallback_for_current_text(&current).is_some() => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "start_admission_current_text_local_relay file={} current_state={}",
+                    file.display(),
+                    current_text_label(&current),
+                ),
+            );
+            return Some(current);
+        }
+        Ok(_) => {}
+        Err(local_err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "start_admission_current_text_local_relay_error file={} error={}",
+                    file.display(),
+                    format!("{local_err:#}").replace('\n', "\\n"),
+                ),
+            );
+        }
+    }
+    None
+}
+
+fn resolve_start_admission_disk_metadata_bootstrap(
+    file: &Path,
+    current: agent_doc_crdt_relay_io::CurrentText,
+    original_error: &str,
+) -> Result<StartAdmissionDocument> {
+    let Some(authority) = start_admission_fallback_for_current_text(&current) else {
+        anyhow::bail!(
+            "start admission disk metadata bootstrap requires missing editor model state"
+        );
+    };
+    let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "prepare_start_runtime_metadata_bootstrap",
+    )
+    .with_context(|| {
+        format!(
+            "prepare_start_runtime: failed to read disk metadata bootstrap {}",
+            file.display()
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "start_admission_disk_metadata_bootstrap file={} current_state={} original_error={}",
+            file.display(),
+            current_text_label(&current),
+            original_error.replace('\n', "\\n")
+        ),
+    );
+    Ok(StartAdmissionDocument { content, authority })
+}
+
 fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocument> {
+    if let Some(current) = start_admission_local_current_text_for_fallback(file) {
+        return resolve_start_admission_disk_metadata_bootstrap(
+            file,
+            current,
+            "local relay reported editor model unavailable before controller-backed current document resolve",
+        );
+    }
+
     match agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "prepare_start_runtime",
@@ -148,34 +258,14 @@ fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocumen
             authority: StartAdmissionReadAuthority::CurrentDocument,
         }),
         Err(resolve_err) => {
-            let current = agent_doc_crdt_relay_io::current_text_for_file(file);
-            let Ok(current) = current else {
+            let Some(current) = start_admission_current_text_for_fallback(file) else {
                 return Err(resolve_err);
             };
-            let Some(authority) = start_admission_fallback_for_current_text(&current) else {
+            if start_admission_fallback_for_current_text(&current).is_none() {
                 return Err(resolve_err);
-            };
+            }
             let original_error = format!("{resolve_err:#}");
-            let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-                file,
-                "prepare_start_runtime_metadata_bootstrap",
-            )
-            .with_context(|| {
-                format!(
-                    "prepare_start_runtime: failed to read disk metadata bootstrap {}",
-                    file.display()
-                )
-            })?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "start_admission_disk_metadata_bootstrap file={} current_state={} original_error={}",
-                    file.display(),
-                    current_text_label(&current),
-                    original_error.replace('\n', "\\n")
-                ),
-            );
-            Ok(StartAdmissionDocument { content, authority })
+            resolve_start_admission_disk_metadata_bootstrap(file, current, &original_error)
         }
     }
 }

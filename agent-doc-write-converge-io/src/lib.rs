@@ -13,14 +13,13 @@ use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
     classify_socket_receipt_mismatch_recovery, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, exchange_change_is_safe_historical_reduction,
-    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
-    live_prompt_drift_recovery_target, new_agent_response_headings,
-    normalize_visible_recovery_compare, operator_reconcile_step, response_already_in_current,
-    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
-    should_refuse_disk_fallback, snapshot_contains_dropped_prompt, stale_snapshot_reset_drift,
+    dropped_prompt_lines_after_content_ours, first_response_heading,
+    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
+    new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
+    response_already_in_current, response_converged_in_visible_target,
+    response_target_disjoint_from_user_edit, should_refuse_disk_fallback,
+    snapshot_contains_dropped_prompt,
 };
-use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_exchange::{
     duplicate_prompt_line_count, normalization_prefix_observation_counts,
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
@@ -50,6 +49,31 @@ fn log_flow_event(file: &Path, event: agent_doc_flow::types::FlowEvent) {
     let message =
         agent_doc_flow::types::flow_event_log_message(&file.display().to_string(), &event);
     agent_doc_ops_log_io::log_op(file, &message);
+}
+
+fn current_text_via_recovery_authority(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    #[cfg(any(test, feature = "test-support"))]
+    if test_local_crdt_relay_enabled(file) {
+        return Ok(Some(agent_doc_crdt_relay_io::current_text_for_file(file)?));
+    }
+    agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
+        file, source,
+    )
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn test_local_crdt_relay_enabled(file: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+        .or_else(|| file.parent().map(Path::to_path_buf))
+    else {
+        return false;
+    };
+    project_root
+        .join(".agent-doc/test-local-crdt-relay")
+        .is_file()
 }
 
 pub fn save_document_snapshot_and_crdt(file: &Path, snapshot_content: &str) -> Result<()> {
@@ -707,10 +731,6 @@ pub fn dedupe_ipc_snapshot_content(
     Ok((deduped, changed))
 }
 
-fn stale_supervisor_content_ours_adoption_warning(file: &Path) -> Option<String> {
-    agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
-}
-
 pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     file: &Path,
     source: &str,
@@ -718,27 +738,6 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     baseline: Option<&str>,
     content_ours: Option<&str>,
     decision: &mut IpcRepairDecision,
-) -> bool {
-    guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
-        file,
-        source,
-        patch_id,
-        baseline,
-        content_ours,
-        decision,
-        stale_supervisor_content_ours_adoption_warning,
-    )
-}
-
-#[doc(hidden)]
-pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    baseline: Option<&str>,
-    content_ours: Option<&str>,
-    decision: &mut IpcRepairDecision,
-    stale_supervisor_warning: impl Fn(&Path) -> Option<String>,
 ) -> bool {
     if decision.snap_source == IpcSnapshotSource::ContentOurs {
         return false;
@@ -766,18 +765,6 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
         &decision.snapshot_content,
         ours,
     ) {
-        return false;
-    }
-    if let Some(stale_message) = stale_supervisor_warning(file) {
-        log_content_ours_adoption_refused_stale_supervisor(
-            file,
-            source,
-            patch_id,
-            "live_prompt_drift",
-            ours,
-            &stale_message,
-        );
-        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
         return false;
     }
 
@@ -870,6 +857,26 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift_with_warning(
                 decision.normalize_prefix_lines.clear();
                 decision.redeliver_editor = false;
             }
+            return true;
+        }
+        if decision.snap_source.is_visible_write_proven() {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "live_prompt_drift_visible_write_authority_preserved file={} source={} patch_id={} candidate_len={} candidate_hash={} agent_target_len={} agent_target_hash={} reason=visible_write_contains_response",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    candidate.len(),
+                    agent_doc_hash::content_hash(&candidate),
+                    queue_reconciled_ours.len(),
+                    agent_doc_hash::content_hash(&queue_reconciled_ours),
+                ),
+            );
+            decision.disk_repair_reason = None;
+            decision.editor_bad_state = None;
+            decision.normalize_prefix_lines.clear();
+            decision.redeliver_editor = false;
             return true;
         }
         let dropped_visible_prompts =
@@ -1112,25 +1119,6 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication(
     content_ours: Option<&str>,
     decision: &mut IpcRepairDecision,
 ) -> bool {
-    guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
-        file,
-        source,
-        patch_id,
-        content_ours,
-        decision,
-        stale_supervisor_content_ours_adoption_warning,
-    )
-}
-
-#[doc(hidden)]
-pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    content_ours: Option<&str>,
-    decision: &mut IpcRepairDecision,
-    stale_supervisor_warning: impl Fn(&Path) -> Option<String>,
-) -> bool {
     if decision.snap_source == IpcSnapshotSource::ContentOurs {
         return false;
     }
@@ -1154,18 +1142,6 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
     }
     let duplicate_count = user_prompt_count_growth(ours, &decision.snapshot_content);
     if duplicate_count == 0 {
-        return false;
-    }
-    if let Some(stale_message) = stale_supervisor_warning(file) {
-        log_content_ours_adoption_refused_stale_supervisor(
-            file,
-            source,
-            patch_id,
-            "prompt_duplication",
-            ours,
-            &stale_message,
-        );
-        let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
         return false;
     }
 
@@ -1214,43 +1190,6 @@ pub fn guard_ipc_snapshot_adoption_against_prompt_duplication_with_warning(
     let _ = agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(file);
     decision.replace_snapshot_with_content_ours_for_prompt_duplication(ours, bad_state);
     true
-}
-
-fn log_content_ours_adoption_refused_stale_supervisor(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    guard: &str,
-    content_ours: &str,
-    stale_message: &str,
-) {
-    let stale_message = stale_message.replace('\n', " ");
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "content_ours_adoption_refused_stale_supervisor file={} source={} patch_id={} guard={} reason=supervisor_binary_stale content_ours_len={} content_ours_hash={} warning={:?}",
-            file.display(),
-            source,
-            patch_id.unwrap_or("-"),
-            guard,
-            content_ours.len(),
-            agent_doc_hash::content_hash(content_ours),
-            stale_message
-        ),
-    );
-    log_ipc_proof_failure_with_recycle(
-        file,
-        source,
-        patch_id,
-        "supervisor_binary_stale",
-        "candidate_snapshot_kept",
-        &format!(
-            "guard={} content_ours_len={} content_ours_hash={}",
-            guard,
-            content_ours.len(),
-            agent_doc_hash::content_hash(content_ours)
-        ),
-    );
 }
 
 /// #ipcfullprompt-recur2 — default-on forensic capture for live editor
@@ -1427,16 +1366,38 @@ fn visible_write_content_from_lazily_event(
     else {
         return Ok(None);
     };
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let canonical_str = canonical.to_string_lossy().to_string();
-    for snapshot in agent_doc_debounce::live_buffer_snapshots(&canonical_str) {
-        let Some(content) = snapshot.content.as_deref() else {
-            continue;
-        };
-        if visible_write_content_hash(content).eq_ignore_ascii_case(&proof.commit_candidate_hash) {
-            return Ok(Some((content.to_string(), proof)));
+    match current_text_via_recovery_authority(file, "visible_write_lazily_event_content") {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }))
+            if visible_write_content_hash(&text)
+                .eq_ignore_ascii_case(&proof.commit_candidate_hash) =>
+        {
+            return Ok(Some((text, proof)));
         }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_lazily_event_cpc_current_hash_mismatch file={} patch_id={} candidate_hash={} current_len={} current_hash={}",
+                    file.display(),
+                    patch_id,
+                    proof.commit_candidate_hash,
+                    text.len(),
+                    visible_write_content_hash(&text)
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "visible_write_lazily_event_cpc_current_unavailable file={} patch_id={} error={}",
+                file.display(),
+                patch_id,
+                err
+            ),
+        ),
     }
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     if let Ok(content) = std::fs::read_to_string(&canonical)
         && visible_write_content_hash(&content).eq_ignore_ascii_case(&proof.commit_candidate_hash)
     {
@@ -1602,7 +1563,6 @@ pub fn visible_write_disk_proof(
     let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
         return VisibleWriteDiskProof::unproven();
     };
-    let content_len = content.len();
     let content_hash = agent_doc_hash::content_hash(content);
 
     if let Some(typing_key) = live_buffer_file_keys(file).into_iter().find(|file_key| {
@@ -1629,54 +1589,64 @@ pub fn visible_write_disk_proof(
         }
     }
 
-    let Some(snapshot) = live_buffer_file_keys(file)
-        .into_iter()
-        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
-        .filter(|snapshot| {
-            snapshot
-                .editor_id
-                .as_deref()
-                .is_some_and(|candidate| candidate == editor_id)
-        })
-        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
-        .max_by_key(|snapshot| snapshot.timestamp_ms)
-    else {
-        return VisibleWriteDiskProof::unproven();
-    };
-
-    let source_buffer_matches =
-        snapshot.len == content_len && snapshot.hash.eq_ignore_ascii_case(&content_hash);
-    let authority =
-        if snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
-            WholeBufferAuthority::OperatorTextAuthority
-        } else {
-            WholeBufferAuthority::None
-        };
-
-    VisibleWriteDiskProof {
-        authority,
-        source_buffer_matches,
+    match current_text_via_recovery_authority(file, "visible_write_disk_proof") {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+            let current_hash = agent_doc_hash::content_hash(&text);
+            let source_buffer_matches = current_hash.eq_ignore_ascii_case(&content_hash);
+            if !source_buffer_matches {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_cpc_proof_hash_mismatch file={} editor_id={} expected_len={} expected_hash={} current_len={} current_hash={}",
+                        file.display(),
+                        editor_id,
+                        content.len(),
+                        content_hash,
+                        text.len(),
+                        current_hash
+                    ),
+                );
+            }
+            VisibleWriteDiskProof {
+                authority: WholeBufferAuthority::OperatorTextAuthority,
+                source_buffer_matches,
+            }
+        }
+        Ok(_) => VisibleWriteDiskProof::unproven(),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_cpc_proof_unavailable file={} editor_id={} error={}",
+                    file.display(),
+                    editor_id,
+                    err
+                ),
+            );
+            VisibleWriteDiskProof::unproven()
+        }
     }
 }
 
-/// Newest operator-authoritative live-buffer content for `editor_id`, or `None`
-/// when no live operator buffer is present.
+/// CPC relay current text, or `None` when no editor-attached CRDT current is
+/// available.
 fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<String> {
-    live_buffer_file_keys(file)
-        .into_iter()
-        .flat_map(|file_key| agent_doc_debounce::live_buffer_snapshots(&file_key))
-        .filter(|snapshot| {
-            snapshot
-                .editor_id
-                .as_deref()
-                .is_some_and(|candidate| candidate == editor_id)
-        })
-        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
-        .filter(|snapshot| {
-            snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
-        })
-        .max_by_key(|snapshot| snapshot.timestamp_ms)
-        .and_then(|snapshot| snapshot.content)
+    match current_text_via_recovery_authority(file, "visible_write_reconcile_operator_buffer") {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => Some(text),
+        Ok(_) => None,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "visible_write_reconcile_cpc_current_unavailable file={} editor_id={} error={}",
+                    file.display(),
+                    editor_id,
+                    err
+                ),
+            );
+            None
+        }
+    }
 }
 
 /// Settle the editor (wait out active typing) so the next live-buffer read is
@@ -1777,55 +1747,19 @@ pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
 pub fn mark_visible_write_live_buffer_synced(
     file: &Path,
     patch_id: &str,
-    editor_id: Option<&str>,
+    _editor_id: Option<&str>,
     content: &str,
 ) {
-    let Some(editor_id) = editor_id.map(str::trim).filter(|id| !id.is_empty()) else {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "visible_write_live_buffer_sync_skipped file={} patch_id={} reason=no_editor_id",
-                file.display(),
-                patch_id
-            ),
-        );
-        return;
-    };
-    let path = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    match agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-        &path,
-        content,
-        editor_id,
-        "ipc",
-        "unknown",
-        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-    ) {
-        Ok(()) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "visible_write_live_buffer_synced file={} patch_id={} editor_id={} len={} hash={}",
-                file.display(),
-                patch_id,
-                editor_id,
-                content.len(),
-                agent_doc_hash::content_hash(content)
-            ),
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "visible_write_live_buffer_sync_skipped file={} patch_id={} reason=sidecar_removed len={} hash={}",
+            file.display(),
+            patch_id,
+            content.len(),
+            agent_doc_hash::content_hash(content)
         ),
-        Err(err) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "visible_write_live_buffer_sync_failed file={} patch_id={} editor_id={} error={}",
-                file.display(),
-                patch_id,
-                editor_id,
-                err
-            ),
-        ),
-    }
+    );
 }
 
 pub fn write_visible_write_through_to_disk(
@@ -2242,12 +2176,6 @@ pub fn try_ipc_full_content_with_mode(
 ) -> Result<bool> {
     let _canonical = file.canonicalize()?;
     let before_content = std::fs::read_to_string(file).ok();
-    // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit (same
-    // guard as `try_ipc`): a stale hosting supervisor makes this full-content IPC
-    // write doomed. Skip it, schedule the recycle, and defer uniformly.
-    if stale_supervisor_write_short_circuit(file, mode.source_label()).is_some() {
-        return Ok(false);
-    }
     let effective_source_content = match (mode, source_content) {
         (FullContentIpcMode::ResponseFallback, None) => Some(content),
         _ => source_content,
@@ -2365,7 +2293,6 @@ pub fn try_auto_recover_live_prompt_drift(
     if !cycle.ipc_snapshot_adoption_blocked {
         return Ok(None);
     }
-    schedule_stale_supervisor_pcp_recycle(file, "live_prompt_drift_after_preflight");
 
     let dropped_missing_from_snapshot = cycle
         .dropped_exchange_prompts
@@ -2681,7 +2608,7 @@ fn refuse_unproven_editor_delivery(
     reason: &str,
     patch_id: Option<&str>,
 ) -> Result<bool> {
-    let sidecar_live = live_editor_sidecar_present(file);
+    let sidecar_live = live_editor_attached(file);
     let owner_holds =
         !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
     let editor_endpoint =
@@ -2718,15 +2645,13 @@ fn refuse_unproven_editor_delivery(
     );
 }
 
-fn live_editor_sidecar_present(file: &Path) -> bool {
+fn live_editor_attached(file: &Path) -> bool {
     let indicator_path = file
         .canonicalize()
         .unwrap_or_else(|_| file.to_path_buf())
         .to_string_lossy()
         .to_string();
-    agent_doc_debounce::live_buffer_snapshots(&indicator_path)
-        .iter()
-        .any(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+    agent_doc_plugin_owner::live_plugin_owner_consumer_id(&indicator_path).is_some()
 }
 
 fn editor_ipc_listener_active(file: &Path) -> bool {
@@ -2745,10 +2670,14 @@ fn try_detached_disk_write(
     source: &str,
     reason: &str,
 ) -> Result<bool> {
-    let sidecar_live = live_editor_sidecar_present(file);
+    let editor_attached = live_editor_attached(file);
     let owner_holds =
         !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
-    if should_refuse_disk_fallback(sidecar_live, owner_holds, editor_ipc_listener_active(file)) {
+    if should_refuse_disk_fallback(
+        editor_attached,
+        owner_holds,
+        editor_ipc_listener_active(file),
+    ) {
         return Ok(false);
     }
 
@@ -3519,32 +3448,40 @@ pub fn redeliver_full_content_repair_to_editor(
         return false;
     }
 
-    let indicator_path = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    if let Some(live) =
-        agent_doc_debounce::live_buffer_diverges_from_content(&indicator_path, expected_bad_state)
-    {
-        eprintln!(
-            "[write] {} editor repair skipped: live editor buffer has unsaved edits ahead of the bad state",
-            kind.label()
-        );
-        agent_doc_ops_log_io::log_op(
+    match current_text_via_recovery_authority(file, "editor_redelivery_guard") {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }))
+            if text != expected_bad_state =>
+        {
+            eprintln!(
+                "[write] {} editor repair skipped: CPC document model has advanced past the bad state",
+                kind.label()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=cpc_model_diverges expected_len={} expected_hash={} cpc_len={} cpc_hash={}",
+                    kind.label(),
+                    file.display(),
+                    source_patch_id.unwrap_or("-"),
+                    expected_bad_state.len(),
+                    agent_doc_hash::content_hash(expected_bad_state),
+                    text.len(),
+                    agent_doc_hash::content_hash(&text)
+                ),
+            );
+            return false;
+        }
+        Ok(_) => {}
+        Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{}_editor_redelivery_skipped file={} patch_id={} skip=live_buffer_diverges expected_len={} expected_hash={} live_len={} live_hash={}",
+                "{}_editor_redelivery_cpc_guard_unavailable file={} patch_id={} error={}",
                 kind.label(),
                 file.display(),
                 source_patch_id.unwrap_or("-"),
-                expected_bad_state.len(),
-                agent_doc_hash::content_hash(expected_bad_state),
-                live.len,
-                live.hash
+                err
             ),
-        );
-        return false;
+        ),
     }
 
     match try_full_content_response_fallback(file, repaired_content, expected_bad_state) {
@@ -3626,9 +3563,6 @@ fn log_ipc_proof_failure_with_recycle(
             detail
         ),
     );
-    if recovery.contains("retry_without_disk_write") {
-        let _ = schedule_stale_supervisor_pcp_recycle(file, source);
-    }
 }
 
 pub fn repair_ipc_decision_visible_state(
@@ -4611,384 +4545,33 @@ pub fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
 /// `#supselfheal` Phase 2 — log that a wedged editor-IPC write is now requesting
 /// a supervisor recycle through the policy owner.
 pub fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner reason=repeated_ack_timeout_active_listener",
-            file.display(),
-            source
-        ),
-    );
-}
-
-/// `#turnsaferecycle` Goal 2 — pure: given stale-supervisor evidence at a proven
-/// IPC drift, does the workflow kernel say to schedule an immediate forced PCP
-/// recycle (`RecycleNow`) rather than only surface advisory guidance?
-pub fn stale_ipc_drift_forces_pcp_recycle(stale: bool, auto_recycle: bool) -> bool {
-    matches!(
-        agent_doc_workflow::decide_stale_supervisor(agent_doc_workflow::StaleSupervisorEvidence {
-            stale,
-            auto_recycle,
-            turn_boundary: true,
-            queue_head_pending: true,
-        })
-        .decision,
-        agent_doc_workflow::WorkflowDecision::Supervisor(
-            agent_doc_workflow::SupervisorWorkflowDecision::RecycleNow
-        )
-    )
-}
-
-/// `#turnsaferecycle` Goal 2 — schedule a forced PCP recycle for a proven stale
-/// supervisor IPC drift. Fail-open: missing root, fresh supervisor, opted-out
-/// auto-recycle, or scheduling failure leaves existing retry/advisory behavior.
-pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return false;
+    let request_status = if !agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file)
+    {
+        "request_skipped reason=auto_recycle_disabled".to_string()
+    } else if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
+        match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+            file,
+            "repeated_ack_timeout_active_listener",
+        ) {
+            Ok(()) => format!("requested project_root={}", project_root.display()),
+            Err(err) => format!(
+                "request_failed project_root={} error={}",
+                project_root.display(),
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        }
+    } else {
+        "request_skipped reason=no_project_root".to_string()
     };
-    if agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file).is_none()
-    {
-        return false;
-    }
-    let auto_recycle = agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file);
-    if !stale_ipc_drift_forces_pcp_recycle(true, auto_recycle) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "stale_supervisor_ipc_drift_surfaced file={} source={} action=advisory_only reason=auto_recycle_opted_out",
-                file.display(),
-                source
-            ),
-        );
-        return false;
-    }
-    match agent_doc_controller_io::project_controller::recycle_controller_force(&project_root, true)
-    {
-        Ok(scheduled) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "stale_supervisor_ipc_drift_forced_recycle file={} source={} scheduled={} action=recycle_controller_force reason=stale_supervisor_ipc",
-                    file.display(),
-                    source,
-                    scheduled
-                ),
-            );
-            eprintln!(
-                "[write] stale-supervisor IPC drift for {} ({source}); scheduling an immediate forced PCP recycle instead of thrashing the doomed write",
-                file.display()
-            );
-            scheduled
-        }
-        Err(err) => {
-            eprintln!(
-                "[write] warning: failed to schedule forced PCP recycle on stale-supervisor IPC drift for {}: {err:#}",
-                file.display()
-            );
-            false
-        }
-    }
-}
-
-/// `#turnsaferecycle` Goal 3 — the shared stale-supervisor write-entry
-/// short-circuit for IPC write entry points.
-pub fn stale_supervisor_write_short_circuit(
-    file: &Path,
-    source: &str,
-) -> Option<agent_doc_flow::outcome::UserFacingOutcome> {
-    let base = file
-        .canonicalize()
-        .ok()
-        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))?;
-    if !agent_doc_turn_status_io::supervisor_stale(&base) {
-        return None;
-    }
-    if !stale_supervisor_marker_should_defer(
-        true,
-        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
-            .is_some(),
-    ) {
-        if let Err(err) = agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false) {
-            eprintln!(
-                "[write] warning: failed to clear stale-supervisor marker for {}: {err:#}",
-                file.display()
-            );
-        }
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "stale_supervisor_marker_ignored file={} source={} reason=live_supervisor_not_stale",
-                file.display(),
-                source,
-            ),
-        );
-        return None;
-    }
-    schedule_stale_supervisor_pcp_recycle(file, source);
-    if let Err(err) = agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
-        file,
-        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_INSTALL_FANOUT,
-    ) {
-        eprintln!(
-            "[write] warning: failed to mark supervisor recycle-request for {}: {err:#}",
-            file.display()
-        );
-    }
-    let binary = agent_doc_flow::outcome::supervisor_stale_self_recycled_outcome();
-    let ui = agent_doc_flow::outcome::deferred_for_recycle_outcome();
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "stale_supervisor_write_short_circuit file={} source={} {} {}",
+            "write_wedged_supervisor_recycle_requested file={} source={} action=request_recycle_through_owner request_status={} reason=repeated_ack_timeout_active_listener",
             file.display(),
             source,
-            binary.log_fields(),
-            ui.log_fields()
+            request_status
         ),
     );
-    eprintln!(
-        "[write] stale supervisor hosting {} ({source}); deferring the IPC write for a recycle instead of thrashing the doomed buffer (deferred_for_recycle)",
-        file.display()
-    );
-    Some(ui)
-}
-
-fn stale_supervisor_marker_should_defer(marker_present: bool, live_supervisor_stale: bool) -> bool {
-    marker_present && live_supervisor_stale
-}
-
-pub fn guard_no_stale_snapshot_reset_drift(
-    file: &Path,
-    snapshot_doc: Option<&str>,
-    current_doc: &str,
-    phase: &str,
-) -> Result<bool> {
-    let Some(snapshot_doc) = snapshot_doc else {
-        return Ok(false);
-    };
-    if let Ok(Some(cleaned)) =
-        agent_doc_template::deleted_conversation_tail_cleanup(snapshot_doc, current_doc)
-        && cleaned == current_doc
-    {
-        return Ok(false);
-    }
-    let Some(drift) = stale_snapshot_reset_drift(snapshot_doc, current_doc) else {
-        return Ok(false);
-    };
-    let snapshot_len = drift.snapshot_len;
-    let current_len = drift.current_len;
-    if active_capture_response_removed(file, snapshot_doc, current_doc) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "stale_snapshot_rebase_skipped_active_capture file={} phase={} old_snap_len={} new_snap_len={}",
-                file.display(),
-                phase,
-                snapshot_len,
-                current_len
-            ),
-        );
-        return Ok(false);
-    }
-    if let Some(reason) = classify_stale_snapshot_visible_rebase(file, snapshot_doc, current_doc) {
-        agent_doc_snapshot_io::save(file, current_doc, agent_doc_ops_log_io::log_op)?;
-        let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(current_doc).encode_state();
-        agent_doc_merge_io::save_document_crdt(file, &crdt, current_doc)?;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "stale_snapshot_visible_rebased file={} phase={} reason={} old_snap_len={} new_snap_len={}",
-                file.display(),
-                phase,
-                reason,
-                snapshot_len,
-                current_len
-            ),
-        );
-        return Ok(true);
-    }
-
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "stale_snapshot_reset_drift_blocked file={} phase={} snap_len={} file_len={}",
-            file.display(),
-            phase,
-            snapshot_len,
-            current_len
-        ),
-    );
-    anyhow::bail!(
-        "refusing {phase} for {}: snapshot is {} bytes but the visible file is {} bytes, which looks like a manual cleanup with stale snapshot/CRDT state. Reset the sidecars from the current file before writing: `agent-doc reset --from-current {}`",
-        file.display(),
-        snapshot_len,
-        current_len,
-        file.display()
-    );
-}
-
-fn classify_stale_snapshot_visible_rebase(
-    file: &Path,
-    snapshot_doc: &str,
-    current_doc: &str,
-) -> Option<&'static str> {
-    let scope = agent_doc_turn_scope_io::load(file);
-    let recent_binary_compaction =
-        agent_doc_session_accretion_io::recent_exchange_compaction_timestamp(file)
-            .ok()
-            .flatten()
-            .is_some();
-    if active_capture_response_removed(file, snapshot_doc, current_doc) {
-        return None;
-    }
-
-    let (snapshot_frontmatter, snapshot_body) =
-        agent_doc_frontmatter::frontmatter::parse(snapshot_doc).ok()?;
-    let (current_frontmatter, current_body) =
-        agent_doc_frontmatter::frontmatter::parse(current_doc).ok()?;
-    if !agent_doc_frontmatter::frontmatter::frontmatter_agent_only_equivalent(
-        &snapshot_frontmatter,
-        &current_frontmatter,
-    ) {
-        return None;
-    }
-
-    let snap_components = agent_doc_element::element::parse(snapshot_body).ok()?;
-    let current_components = agent_doc_element::element::parse(current_body).ok()?;
-    if snap_components.is_empty() || snap_components.len() != current_components.len() {
-        return None;
-    }
-
-    let mut saw_exchange_trim = false;
-    let mut saw_independent_component = false;
-    for (snap_comp, current_comp) in snap_components.iter().zip(current_components.iter()) {
-        if snap_comp.name != current_comp.name {
-            return None;
-        }
-        if !is_backlog_component(&snap_comp.name)
-            && snap_comp.patch_mode() != current_comp.patch_mode()
-        {
-            return None;
-        }
-
-        let snap_content =
-            agent_doc_document::commit_normalization::normalize_component_content_for_absorb(
-                snap_comp.content(snapshot_body),
-            );
-        let current_content =
-            agent_doc_document::commit_normalization::normalize_component_content_for_absorb(
-                current_comp.content(current_body),
-            );
-        if snap_content == current_content {
-            continue;
-        }
-
-        if snap_comp.name == "exchange" {
-            if exchange_change_is_safe_historical_reduction(
-                snap_comp.content(snapshot_body),
-                current_comp.content(current_body),
-            ) {
-                saw_exchange_trim = true;
-                continue;
-            }
-            return None;
-        }
-
-        match scope.as_ref() {
-            Some(scope)
-                if component_change_is_turn_independent(
-                    snapshot_body,
-                    current_body,
-                    &snap_comp.name,
-                    scope,
-                ) =>
-            {
-                saw_independent_component = true;
-                continue;
-            }
-            _ => return None,
-        }
-    }
-
-    match (saw_exchange_trim, saw_independent_component) {
-        (true, true) => Some("historical_exchange_trim_unrelated_drift"),
-        (true, false) => {
-            if scope.is_some() || recent_binary_compaction {
-                Some("historical_exchange_trim")
-            } else {
-                None
-            }
-        }
-        (false, true) => Some("unrelated_component_drift"),
-        (false, false) => None,
-    }
-}
-
-fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc: &str) -> bool {
-    let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file) else {
-        return false;
-    };
-    if !state.is_open() {
-        return false;
-    }
-    let Some(response_body) = active_capture_response_body_for_converge(file, &state) else {
-        return false;
-    };
-    !response_body.trim().is_empty()
-        && response_materialized_in_content(&response_body, snapshot_doc)
-        && !response_materialized_in_content(&response_body, current_doc)
-}
-
-fn active_capture_response_body_for_converge(
-    file: &Path,
-    state: &agent_doc_cycle_state_io::CycleState,
-) -> Option<String> {
-    if let Some(capture_id) = state.capture_id.as_deref()
-        && let Ok(Some(projected)) =
-            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
-        && projected.cycle_id == state.cycle_id
-        && state
-            .response_sha256
-            .as_deref()
-            .is_none_or(|sha| sha == projected.response_sha256)
-    {
-        return Some(projected.response_body);
-    }
-    agent_doc_capture_io::load_active(file)
-        .ok()
-        .flatten()
-        .map(|capture| capture.response_body)
-}
-
-fn component_change_is_turn_independent(
-    snap_body: &str,
-    current_body: &str,
-    component_name: &str,
-    scope: &agent_doc_turn::turn_scope::TurnScope,
-) -> bool {
-    use agent_doc_turn::op_log::OpActor;
-    use agent_doc_turn::turn_scope::{Address, classify_op};
-
-    let events: Vec<_> = agent_doc_markdown_ast::events::diff_node_events(snap_body, current_body)
-        .into_iter()
-        .filter(|event| event.component == component_name)
-        .collect();
-    if events.is_empty() {
-        return false;
-    }
-
-    events.iter().all(|event| {
-        let address = Address::from_component_node_key(&event.component, &event.node_key);
-        let node_index = event.after_index.or(event.before_index);
-        !classify_op(
-            OpActor::User,
-            event.kind.as_str(),
-            &address,
-            node_index,
-            scope,
-        )
-        .affects_turn()
-    })
 }
 
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
@@ -5118,82 +4701,6 @@ mod tests {
     }
 
     #[test]
-    fn stale_supervisor_write_short_circuit_passes_through_when_fresh() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("plan.md");
-        std::fs::write(&file, "body").unwrap();
-        assert!(stale_supervisor_write_short_circuit(&file, "unit_test").is_none());
-    }
-
-    #[test]
-    fn active_capture_response_removed_uses_projection_without_capture_sidecar() {
-        let dir = TempDir::new().unwrap();
-        let file = dir.path().join("plan.md");
-        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
-        let response = "### Re: hello — gpt-5\n\nDone.\n";
-        std::fs::write(&file, base).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&file, Some(base), Some(base)).unwrap();
-        let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&file, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
-
-        assert!(active_capture_response_removed(
-            &file,
-            &format!("{base}\n{response}"),
-            base
-        ));
-    }
-
-    #[test]
-    fn stale_supervisor_marker_policy_requires_live_stale_proof() {
-        assert!(!stale_supervisor_marker_should_defer(false, false));
-        assert!(!stale_supervisor_marker_should_defer(true, false));
-        assert!(!stale_supervisor_marker_should_defer(false, true));
-        assert!(stale_supervisor_marker_should_defer(true, true));
-    }
-
-    #[test]
-    fn stale_supervisor_write_short_circuit_ignores_uncorroborated_marker() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let file = dir.path().join("plan.md");
-        std::fs::write(&file, "body").unwrap();
-        let canonical = file.canonicalize().unwrap();
-        let base = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, true).unwrap();
-
-        assert!(
-            stale_supervisor_write_short_circuit(&file, "unit_test").is_none(),
-            "a stale marker without live stale-supervisor proof is display/recovery residue, not a hot-path write blocker"
-        );
-        assert!(
-            !agent_doc_turn_status_io::supervisor_stale(&base),
-            "uncorroborated stale marker should be cleared"
-        );
-
-        agent_doc_turn_status_io::set_supervisor_stale_marker(&base, false).unwrap();
-    }
-
-    #[test]
-    fn stale_ipc_drift_forces_pcp_recycle_only_when_stale_and_auto_recycle_on() {
-        assert!(
-            stale_ipc_drift_forces_pcp_recycle(true, true),
-            "stale + auto-recycle must force RecycleNow"
-        );
-        assert!(
-            !stale_ipc_drift_forces_pcp_recycle(true, false),
-            "auto-recycle opted out must stay advisory"
-        );
-        assert!(
-            !stale_ipc_drift_forces_pcp_recycle(false, true),
-            "a fresh supervisor is never a recycle candidate"
-        );
-    }
-
-    #[test]
     fn editor_ipc_write_wedged_reads_latched_degraded_marker() {
         let dir = TempDir::new().unwrap();
         let project_root = dir.path();
@@ -5206,66 +4713,6 @@ mod tests {
         assert!(
             editor_ipc_write_wedged(project_root, &file),
             "a latched degraded marker should read as a write wedge"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_blocks_large_snapshot_only_content() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let stale_exchange = "duplicated response\n".repeat(20);
-        let snapshot = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n",
-            stale_exchange
-        );
-        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\nclean\n<!-- /agent:exchange -->\n";
-
-        let result =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write");
-
-        let message = result
-            .expect_err("stale larger snapshot must fail closed")
-            .to_string();
-        assert!(
-            message.contains("agent-doc reset --from-current"),
-            "recovery guidance should name deterministic sidecar reset: {message}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_rebases_compact_summary_after_clear_via_binary_origin_marker() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
-        );
-        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
-        fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
-
-        let rebased =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
-                .expect("binary-origin compaction marker should rebase the stale snapshot");
-
-        assert!(rebased, "guard should report a snapshot refresh");
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap(),
-            Some(current.to_string())
         );
     }
 }

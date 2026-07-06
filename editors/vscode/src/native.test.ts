@@ -14,7 +14,6 @@ import {
   projectionSummary,
   writePidLock,
   removePidLock,
-  parseReconnectDecision,
   utf16RangeToUtf8Bytes,
 } from './native';
 
@@ -27,36 +26,6 @@ async function importLazilyStateProjection(): Promise<any> {
   ) => Promise<any>;
   return dynamicImport(moduleUrl);
 }
-
-describe('parseReconnectDecision (#yzer reconnect-reread, VS Code/JB parity)', () => {
-    it('parses a reread_disk decision with content', () => {
-        const json = JSON.stringify({ decision: 'reread_disk', content: 'disk text\n' });
-        assert.deepStrictEqual(parseReconnectDecision(json), {
-            decision: 'reread_disk',
-            content: 'disk text\n',
-        });
-    });
-
-    it('parses a keep_buffer decision without content', () => {
-        assert.deepStrictEqual(parseReconnectDecision(JSON.stringify({ decision: 'keep_buffer' })), {
-            decision: 'keep_buffer',
-        });
-    });
-
-    it('returns null on malformed JSON (fail safe — keep buffer)', () => {
-        assert.strictEqual(parseReconnectDecision('{not json'), null);
-    });
-
-    it('returns null when the decision field is missing or non-string', () => {
-        assert.strictEqual(parseReconnectDecision(JSON.stringify({ content: 'x' })), null);
-        assert.strictEqual(parseReconnectDecision(JSON.stringify({ decision: 5 })), null);
-    });
-
-    it('ignores a non-string content field', () => {
-        const out = parseReconnectDecision(JSON.stringify({ decision: 'reread_disk', content: 42 }));
-        assert.deepStrictEqual(out, { decision: 'reread_disk' });
-    });
-});
 
 describe('utf16RangeToUtf8Bytes (#qnodemerge4wire non-ASCII offset semantics)', () => {
     it('ASCII: byte units equal UTF-16 units', () => {

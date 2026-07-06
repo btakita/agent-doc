@@ -297,9 +297,9 @@ object TerminalUtil {
     }
 
     /**
-     * Routes a document trigger command via `agent-doc route --dispatch-only --plain-trigger`.
+     * Routes a document trigger command via the CPC `editor_route` RPC.
      *
-     * This calls `agent-doc route --dispatch-only --plain-trigger <path>` which:
+     * The project controller executes the existing route implementation, which:
      * 1. Reads the session UUID from the file's frontmatter
      * 2. Looks up the tmux pane for that session
      * 3. Resolves the active harness trigger and sends the bare reopen through the
@@ -354,11 +354,10 @@ object TerminalUtil {
         commandPreAcquired: Boolean = false,
     ) {
         val (cwd, relativePath) = resolveProject(project, file)
-        val agentDoc = resolveAgentDoc(cwd)
         val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
         val documentPath = java.io.File(cwd, relativePath).absolutePath
 
-        LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
+        LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath transport=cpc")
         attempt?.recordIfCurrent("route_prepare")
 
         var replaceActiveRun = false
@@ -408,8 +407,8 @@ object TerminalUtil {
         // so the guard only produced false positives (blocked every route attempt)
 
         try {
-            // Build route command with optional layout args
-            val cmd = buildRunRouteCommand(agentDoc, relativePath)
+            // Build a diagnostic command shape matching the CPC editor_route request.
+            val cmd = buildEditorRouteRequestCommand(relativePath)
 
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
             val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
@@ -421,18 +420,17 @@ object TerminalUtil {
                     LayoutDetector.detectEditorLayout(project),
                 ),
             )
-            cmd.addAll(
-                buildRouteLayoutArgs(
-                    visibleMdFiles = visibleMdFiles,
-                    editorLayout = editorLayout,
-                    focusedFile = manager.selectedTextEditor?.virtualFile
-                        ?.takeIf { it.name.endsWith(".md") }
-                        ?.path,
-                )
+            val layoutArgs = buildRouteLayoutArgs(
+                visibleMdFiles = visibleMdFiles,
+                editorLayout = editorLayout,
+                focusedFile = manager.selectedTextEditor?.virtualFile
+                    ?.takeIf { it.name.endsWith(".md") }
+                    ?.path,
             )
+            cmd.addAll(layoutArgs)
 
             // Pass focused file
-            LOG.warn("[route] executing: ${cmd.joinToString(" ")}")
+            LOG.warn("[route] sending CPC request: ${cmd.joinToString(" ")}")
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
@@ -466,19 +464,17 @@ object TerminalUtil {
                         if (routeGeneration == null) {
                             routeGeneration = StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
                         }
-                        val process = ProcessBuilder(cmd)
-                            .directory(java.io.File(cwd))
-                            .redirectErrorStream(true)
-                            .apply {
-                                attempt?.let {
-                                    environment()["AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID"] = it.id
-                                    environment()["AGENT_DOC_EDITOR_ROUTE_KEY"] = it.routeKey
-                                }
-                            }
-                            .start()
-                        handle.bind(process)
-                        val output = process.inputStream.bufferedReader().readText()
-                        val exitCode = process.waitFor()
+                        val routeResult = CpcRouteClient.runEditorRoute(
+                            projectRoot = cwd,
+                            filePath = documentPath,
+                            relativePath = relativePath,
+                            layoutArgs = layoutArgs,
+                            waitForReadySeconds = RUN_ROUTE_WAIT_FOR_READY_SECONDS,
+                            attemptId = attempt?.id,
+                            routeKey = attempt?.routeKey,
+                        )
+                        val output = routeResult.output
+                        val exitCode = routeResult.exitCode
                         val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
                         val failureKind = classifyRunAgentDocRouteFailure(output)
                         if (handle.wasCanceled()) {
@@ -616,7 +612,7 @@ object TerminalUtil {
                 e.message ?: e.javaClass.simpleName,
             )
             onComplete?.invoke()
-            notifyError(project, "Failed to run agent-doc: ${e.message}\nLooked for: $agentDoc")
+            notifyError(project, "Failed to send Run Agent Doc through CPC: ${e.message}")
         }
     }
 
@@ -629,19 +625,11 @@ object TerminalUtil {
         return "exit=$exitCode failure=$failureKind output=$compact"
     }
 
-    internal fun buildRunRouteCommand(agentDoc: String, relativePath: String): MutableList<String> =
+    internal fun buildEditorRouteRequestCommand(relativePath: String): MutableList<String> =
         mutableListOf(
-            agentDoc,
-            "route",
+            "cpc:editor_route",
             "--dispatch-only",
             "--plain-trigger",
-            // #run-agent-doc-latency: the plugin already awaited typing idle via the
-            // FFI typing tracker (TypingTracker.awaitIdle) before saving and routing,
-            // so route's own mtime debounce is pure redundant latency on the editor
-            // path. Pass --debounce 0 to skip it; the binary still treats the
-            // cross-process typing indicator as authoritative for non-editor callers.
-            "--debounce",
-            "0",
             "--wait-for-ready",
             RUN_ROUTE_WAIT_FOR_READY_SECONDS.toString(),
             relativePath,

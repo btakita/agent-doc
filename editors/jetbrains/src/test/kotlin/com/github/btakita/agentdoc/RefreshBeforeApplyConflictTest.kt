@@ -90,6 +90,61 @@ class RefreshBeforeApplyConflictTest {
         assertFalse(lifecycle.contains("prompt poller"))
     }
 
+    @Test
+    fun `jetbrains plugin uses event loops instead of hot polling`() {
+        fun read(path: String): String = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$path"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$path"),
+            ).first { Files.exists(it) },
+        )
+
+        val turnWidget = read("TurnStateStatusBarWidget.kt")
+        val turnRefresher = read("TurnStateBannerRefresher.kt")
+        val turnBridge = read("TurnStateBridge.kt")
+        val turnProvider = read("TurnStateBannerProvider.kt")
+        val typingTracker = read("TypingTracker.kt")
+        val crdtReplica = read("CrdtReplicaManager.kt")
+        val patchWatcher = read("PatchWatcher.kt")
+        val layoutDetector = read("LayoutChangeDetector.kt")
+        val visualHighlighter = read("VisualHighlighterManager.kt")
+
+        assertFalse("status widget must not own a Swing timer", turnWidget.contains("Alarm("))
+        assertFalse("status widget must not call native projection while painting", turnWidget.contains("presentationForFile("))
+        assertFalse("banner refresher must not use a timer", turnRefresher.contains("Alarm("))
+        assertFalse("banner refresher must not define a polling interval", turnRefresher.contains("POLL_MS"))
+        assertTrue("banner refresher must cap each event-drain slice", turnRefresher.contains("TURN_STATE_MAX_PATHS_PER_DRAIN"))
+        assertTrue("banner refresher must yield between backlog slices", turnRefresher.contains("TURN_STATE_DRAIN_YIELD_MS"))
+        assertTrue("turn projection must log slow native projection calls", turnBridge.contains("[turn-perf] projection"))
+        assertFalse("banner collection must read cached state", turnProvider.contains("TurnStateBridge.presentationForFile"))
+        assertFalse("typing debounce report must not probe turn-state just for logging", typingTracker.contains("TurnStateBridge.presentationForFile"))
+        assertFalse("CRDT replica manager must not schedule fixed-delay pulls", crdtReplica.contains("scheduleWithFixedDelay"))
+        assertFalse("CRDT replica manager must not keep a poller thread", crdtReplica.contains("crdt-replica-poller"))
+        assertFalse("PatchWatcher must block on WatchService events", patchWatcher.contains("watchService.poll("))
+        assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
+        assertTrue("PatchWatcher must watch CPC CRDT event signals", patchWatcher.contains(".agent-doc/crdt-replica-events"))
+        assertTrue("PatchWatcher must wake CRDT drains from event signals", patchWatcher.contains("processCrdtReplicaEventFile"))
+        assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
+        assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))
+        assertFalse("visual highlighter must not use a Swing timer", visualHighlighter.contains("Alarm("))
+        assertFalse("visual highlighter must not tokenize the editor text on the UI apply path", visualHighlighter.contains("NativePatching.visualTokens(editor.document.text)"))
+        assertTrue("visual highlighter tokenization must run on its event worker", visualHighlighter.contains("agent-doc-visual-highlighter-events"))
+    }
+
+    @Test
+    fun `jetbrains crdt replica transport talks to cpc not supervisor`() {
+        val forwarder = Files.readString(
+            listOf(
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"),
+            ).first { Files.exists(it) },
+        )
+
+        assertTrue("CRDT transport must target the CPC controller socket", forwarder.contains(".agent-doc/controller.sock"))
+        assertTrue("CRDT transport must use the controller crdt_replica envelope", forwarder.contains("\"crdt_replica\""))
+        assertFalse("CRDT transport must not connect to per-session supervisor sockets", forwarder.contains(".agent-doc/supervisor"))
+    }
+
     private fun assertEveryRefreshGated(source: String, refreshToken: String, gateToken: String) {
         var idx = source.indexOf(refreshToken)
         while (idx >= 0) {

@@ -594,15 +594,7 @@ mod tests {
                 }
                 IpcMethod::Restart { .. }
                 | IpcMethod::Stop { .. }
-                | IpcMethod::StopAgent { .. }
-                | IpcMethod::ReplicaRegister { .. }
-                | IpcMethod::ReplicaDeregister { .. }
-                | IpcMethod::ReplicaUpdate { .. }
-                | IpcMethod::ReplicaPull { .. }
-                | IpcMethod::ReplicaAck { .. }
-                | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. }
-                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -652,15 +644,7 @@ mod tests {
                 }
                 IpcMethod::Restart { .. }
                 | IpcMethod::Stop { .. }
-                | IpcMethod::StopAgent { .. }
-                | IpcMethod::ReplicaRegister { .. }
-                | IpcMethod::ReplicaDeregister { .. }
-                | IpcMethod::ReplicaUpdate { .. }
-                | IpcMethod::ReplicaPull { .. }
-                | IpcMethod::ReplicaAck { .. }
-                | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. }
-                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();

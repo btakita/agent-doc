@@ -1249,6 +1249,15 @@ fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
     tmux.current_session()
 }
 
+fn current_agent_doc_session_name(tmux: &Tmux) -> Option<String> {
+    let current = current_tmux_session_name(tmux)?;
+    if agent_doc_tmux_io::has_window_named(tmux, &current, "agent-doc") {
+        Some(current)
+    } else {
+        None
+    }
+}
+
 fn resolve_preferred_session(
     tmux: &Tmux,
     context_session: Option<&str>,
@@ -1256,6 +1265,10 @@ fn resolve_preferred_session(
 ) -> Option<String> {
     if let Some(ctx) = normalize_context_session(context_session) {
         return Some(ctx.to_string());
+    }
+
+    if let Some(current) = current_agent_doc_session_name(tmux) {
+        return Some(current);
     }
 
     let configured = agent_doc_project_config_io::project_tmux_session();
@@ -1356,6 +1369,10 @@ fn resolve_sync_target_session(
     let context_session = window.and_then(|target| session_name_for_target_window(tmux, target));
     if context_session.is_some() {
         return resolve_preferred_session(tmux, context_session.as_deref(), "[sync]");
+    }
+
+    if let Some(current) = current_agent_doc_session_name(tmux) {
+        return Some(current);
     }
 
     if let Some(scope_root) = agent_doc_sync::shared_sync_scope_root(col_args, focus) {
@@ -6705,7 +6722,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn windowless_sync_prefers_live_project_session_pin_over_current_session() {
+    fn windowless_sync_uses_project_session_pin_when_current_has_no_agent_doc_window() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd = ScopedCurrentDir::set(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
@@ -6729,11 +6746,40 @@ mod tests {
         assert_eq!(
             resolve_sync_target_session(&iso, None, &[], None).as_deref(),
             Some("0"),
-            "windowless sync should honor a live project tmux_session pin before the current session"
+            "windowless sync should keep a live project tmux_session pin when the current session has no agent-doc window"
         );
         assert_eq!(
             resolve_agent_doc_window_id(&iso, "0", "agent-doc").as_deref(),
             Some("@0")
+        );
+    }
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn windowless_sync_prefers_current_agent_doc_session_over_live_project_pin() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _cwd = ScopedCurrentDir::set(tmp.path());
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("sync-windowless-current-agent-doc");
+        let _pane0 = iso.new_session("0", tmp.path()).unwrap();
+        let _pane1 = iso.new_session("1", tmp.path()).unwrap();
+        iso.raw_cmd(&["rename-window", "-t", "1:0", "agent-doc"])
+            .unwrap();
+
+        assert_eq!(
+            current_tmux_session_name(&iso).as_deref(),
+            Some("1"),
+            "the current client session should be the most recently created one"
+        );
+        assert_eq!(
+            resolve_sync_target_session(&iso, None, &[], None).as_deref(),
+            Some("1"),
+            "windowless sync should follow the current live agent-doc window before the configured pin"
         );
     }
     #[test]

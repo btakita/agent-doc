@@ -1955,6 +1955,16 @@ pub fn dispatch_start_busy_probe_timeout(test_mode: bool) -> Duration {
     }
 }
 
+/// Short proof window before checking whether an accepted direct-pane dispatch
+/// actually left the routed trigger drafted and only needs the harness submit key.
+pub fn dispatch_start_early_resubmit_probe_timeout(test_mode: bool) -> Duration {
+    if test_mode {
+        Duration::from_millis(50)
+    } else {
+        Duration::from_millis(600)
+    }
+}
+
 pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
     if test_mode {
         Duration::from_secs(2)
@@ -4716,6 +4726,25 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(
             probe * 4 < full,
             "probe {probe:?} should be far below the full proof budget {full:?}"
+        );
+    }
+
+    #[test]
+    fn early_resubmit_probe_timeout_stays_below_full_budget() {
+        assert_eq!(
+            dispatch_start_early_resubmit_probe_timeout(true),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            dispatch_start_early_resubmit_probe_timeout(false),
+            Duration::from_millis(600)
+        );
+
+        let probe = dispatch_start_early_resubmit_probe_timeout(false);
+        let full = routed_dispatch_start_timeout_for_binary(Some("codex"), false);
+        assert!(
+            probe * 4 < full,
+            "early resubmit probe {probe:?} should be far below the full proof budget {full:?}"
         );
     }
 

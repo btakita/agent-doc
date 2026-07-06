@@ -24,22 +24,15 @@
 //!   document's frontmatter additively (never removes keys).
 //! - `agent_doc_reposition_boundary_to_end(doc)`: removes all existing boundary markers and inserts
 //!   a single fresh one at the end of the `exchange` component.
-//! - `agent_doc_document_changed(file_path)`: records a change event for debounce tracking.
-//! - `agent_doc_document_changed_digest(file_path, len, hash)`: records typing plus the latest
-//!   editor-visible buffer digest so CLI direct-disk writes can detect idle unsaved drift.
+//! - `agent_doc_document_changed(file_path)`: records a file-backed typing projection.
+//! - `agent_doc_document_changed_digest(file_path, len, hash)`: records typing telemetry. Current
+//!   editor content is resolved through the CRDT relay, not a file-backed live-buffer sidecar.
 //! - `agent_doc_report_editor_state(file_path, version, dirty, last_edit_ts, save_ts, hash, len, session_id)`:
 //!   records editor-authoritative buffer state for debounce/stability. When present,
 //!   `wait_for_stable_content` uses version/hash stability instead of the truncation heuristic.
 //! - `agent_doc_get_editor_state(file_path)`: returns the current editor buffer state as JSON.
 //! - `agent_doc_is_editor_stable(file_path, debounce_ms)`: returns whether the editor buffer is
 //!   stable (not dirty or debounce elapsed).
-//! - `agent_doc_is_tracked(file_path)`: returns whether at least one change event has been recorded
-//!   for the file.
-//! - `agent_doc_is_idle(file_path, debounce_ms)`: non-blocking check — returns `true` if no
-//!   `document_changed` event within `debounce_ms`.  Used by the IDE plugin to defer IPC writes
-//!   (e.g. boundary repositioning) while the user is actively typing.
-//! - `agent_doc_await_idle(file_path, debounce_ms, timeout_ms)`: blocks until the document has been
-//!   idle for `debounce_ms`, or `timeout_ms` expires.  Returns `true` on idle, `false` on timeout.
 //! - `agent_doc_is_typing_via_file(file_path, debounce_ms)`: cross-process check — reads the
 //!   file-based typing indicator written by `document_changed`; `true` if updated within
 //!   `debounce_ms`.  For CLI tools running in a separate process from the editor plugin.
@@ -57,8 +50,8 @@
 //!   `agent_doc_free_string`; CRDT `state` pointers must be freed with `agent_doc_free_state`.
 //! - On parse/apply errors, `text` (or `json`) is null and `error` holds a message; callers must
 //!   check nullability before use.
-//! - `agent_doc_await_idle` returning `false` means the timeout expired — the caller must not
-//!   proceed with the agent run.
+//! - `agent_doc_await_idle_via_file` returning `false` means the timeout expired — the caller must
+//!   not proceed with the agent run.
 //!
 //! ## Evals
 //! - parse_components_roundtrip: single `agent:status` component → JSON count=1, content="hello\n"
@@ -264,10 +257,10 @@ fn resolve_admin_root(
         .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
 }
 
-/// Record a document change event for debounce tracking.
+/// Record a file-backed typing projection.
 ///
-/// Plugins call this on every document modification (typing, paste, undo).
-/// Used by [`agent_doc_await_idle`] to determine if the user is still editing.
+/// Plugins call this on document modifications as telemetry for CPC-owned
+/// recovery paths. It is not authoritative editor state.
 ///
 /// # Safety
 ///
@@ -279,12 +272,11 @@ pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
     }
 }
 
-/// Record a document change event plus the current editor-visible buffer digest.
+/// Record a document change event plus legacy digest arguments.
 ///
-/// Plugins call this on every document modification when they can compute a
-/// SHA-256 content hash. This avoids sending full document content through FFI
-/// while still letting CLI direct-disk writes detect an idle unsaved editor
-/// buffer before writing the file on disk.
+/// Modern editor integrations publish current content through the CRDT replica
+/// relay. The legacy digest arguments are accepted for ABI compatibility, but no
+/// `.agent-doc/live-buffer` sidecar is written from this path.
 ///
 /// # Safety
 ///
@@ -299,14 +291,14 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest(
         Ok(path) => path,
         Err(_) => return,
     };
-    let hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
+    let _hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
         Ok(hash) => hash,
         Err(_) => return,
     };
-    let Ok(len) = usize::try_from(content_len) else {
+    let Ok(_len) = usize::try_from(content_len) else {
         return;
     };
-    agent_doc_debounce::document_changed_with_digest(path, len, hash);
+    agent_doc_debounce::document_changed(path);
 }
 
 /// Record a document change plus digest for one editor instance.
@@ -326,28 +318,25 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_for_editor(
         Ok(path) => path,
         Err(_) => return,
     };
-    let hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
+    let _hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
         Ok(hash) => hash,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let Ok(len) = usize::try_from(content_len) else {
+    let Ok(_len) = usize::try_from(content_len) else {
         return;
     };
-    agent_doc_debounce::document_changed_with_digest_for_editor(path, len, hash, Some(editor));
+    agent_doc_debounce::document_changed(path);
 }
 
-/// Record a document change plus the editor's FULL visible buffer content (#pcp6).
+/// Record a document change plus legacy full-buffer content.
 ///
-/// Unlike [`agent_doc_document_changed_digest`], this sends the buffer text so the
-/// CLI visible-write reconcile guard can positively confirm the editor buffer
-/// equals on-disk content (no unsaved edit ahead of disk) instead of inferring
-/// from a len/hash digest plus the mtime/provenance heuristics. Plugins use this
-/// for `.md` session documents where scope-classifying a genuine unsaved editor
-/// edit matters; the text stays local to the project `.agent-doc/` state dir.
+/// The buffer text is consumed only for compatibility with older editor flows.
+/// Current editor authority is the CRDT relay, so this path records typing
+/// telemetry and does not persist the content to `.agent-doc/live-buffer`.
 ///
 /// # Safety
 ///
@@ -361,15 +350,20 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    agent_doc_debounce::document_changed_with_content(path, text);
+    agent_doc_debounce::document_changed(path);
 }
 
-/// Record a document change plus full visible buffer content for one editor
-/// instance, then enqueue CRDT broadcast patches for peer editors.
+/// Record a document change plus legacy full visible buffer content for one
+/// editor instance.
+///
+/// Modern editor integrations publish content by applying local edits to their
+/// CRDT replica and sending `replica_update` through the CPC relay. This ABI
+/// remains as a wake/telemetry compatibility hook only; it must not write a
+/// separate editor-content channel.
 ///
 /// # Safety
 ///
@@ -385,26 +379,15 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    agent_doc_debounce::document_changed_with_content_for_editor(path, text, Some(editor));
-    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
-        Ok(deliveries) if !deliveries.is_empty() => {
-            eprintln!(
-                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
-                deliveries.len(),
-                editor
-            );
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("[ffi] realtime broadcast failed for {path}: {e}"),
-    }
+    agent_doc_debounce::document_changed(path);
 }
 
 /// Record a document change plus full visible buffer content for one editor
@@ -432,55 +415,27 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return,
     };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return,
     };
-    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
         Ok(capabilities) => capabilities,
         Err(_) => return,
     };
-    let capabilities: Vec<&str> = capabilities_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|capability| !capability.is_empty())
-        .collect();
     agent_doc_debounce::document_changed(path);
-    if let Err(err) =
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            path,
-            text,
-            editor,
-            kind,
-            version,
-            &capabilities,
-        )
-    {
-        eprintln!("[ffi] live-buffer v2 write failed for {path}: {err}");
-    }
-    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
-        Ok(deliveries) if !deliveries.is_empty() => {
-            eprintln!(
-                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
-                deliveries.len(),
-                editor
-            );
-        }
-        Ok(_) => {}
-        Err(err) => eprintln!("[ffi] realtime broadcast failed for {path}: {err}"),
-    }
 }
 
 /// Record a document change plus full visible buffer content for one editor
@@ -507,69 +462,40 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
     editor_kind: *const c_char,
     editor_version: *const c_char,
     capabilities_csv: *const c_char,
-    no_unsaved_operator_edits: i32,
+    _no_unsaved_operator_edits: i32,
 ) {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return,
     };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return,
     };
-    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
         Ok(capabilities) => capabilities,
         Err(_) => return,
     };
-    let capabilities: Vec<&str> = capabilities_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|capability| !capability.is_empty())
-        .collect();
     agent_doc_debounce::document_changed(path);
-    if let Err(err) =
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
-            path,
-            text,
-            editor,
-            kind,
-            version,
-            &capabilities,
-            no_unsaved_operator_edits != 0,
-        )
-    {
-        eprintln!("[ffi] live-buffer v3 write failed for {path}: {err}");
-    }
-    match agent_doc_document_realtime_io::broadcast_editor_change(Path::new(path), editor, text) {
-        Ok(deliveries) if !deliveries.is_empty() => {
-            eprintln!(
-                "[ffi] realtime broadcast queued {} peer patch(es) for editor_id {}",
-                deliveries.len(),
-                editor
-            );
-        }
-        Ok(_) => {}
-        Err(err) => eprintln!("[ffi] realtime broadcast failed for {path}: {err}"),
-    }
 }
 
-/// Record a supervisor-origin editor buffer proof as already synced.
+/// Legacy supervisor-origin synced-buffer proof hook.
 ///
-/// Used by editor content-projection paths after the Document API has proven
-/// the buffer content that the binary is about to snapshot. This intentionally
-/// does not call `document_changed` or broadcast a realtime editor edit.
+/// Current editor state is proven through lazily visible-write receipts and the
+/// CRDT relay. This ABI remains for older plugins but no longer writes a
+/// file-backed live-buffer sidecar.
 ///
 /// # Safety
 ///
@@ -588,43 +514,29 @@ pub unsafe extern "C" fn agent_doc_document_synced_digest_content_for_editor_v2(
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return,
     };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return,
     };
-    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
         Ok(capabilities) => capabilities,
         Err(_) => return,
     };
-    let capabilities: Vec<&str> = capabilities_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|capability| !capability.is_empty())
-        .collect();
-    if let Err(err) =
-        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            path,
-            text,
-            editor,
-            kind,
-            version,
-            &capabilities,
-        )
-    {
-        eprintln!("[ffi] synced live-buffer v2 write failed for {path}: {err}");
-    }
+    eprintln!(
+        "[ffi] synced live-buffer sidecar ABI ignored for {path}: current editor state is resolved through the CRDT relay"
+    );
 }
 
 /// Clear one editor instance's live-buffer sidecar when the editor closes the
@@ -649,32 +561,6 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     if let Err(e) = agent_doc_debounce::clear_live_buffer_for_editor(path, Some(editor)) {
         eprintln!("[ffi] clear live buffer for editor failed for {path}: {e}");
     }
-}
-
-/// Check if the document has been tracked (at least one `document_changed` call recorded).
-///
-/// Returns `true` if the file has been tracked, `false` if never seen.
-/// Plugins use this to decide whether `await_idle` results are trustworthy:
-/// an untracked file returns idle=true from `await_idle`, but that's because
-/// no changes were recorded, not because the user isn't typing.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_tracked(file_path: *const c_char) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    agent_doc_debounce::is_tracked(path) as i32
-}
-
-/// Return the number of files tracked in the debounce state.
-/// Used by IDE plugins for state diagnostics.
-#[unsafe(no_mangle)]
-pub extern "C" fn agent_doc_tracked_count() -> u32 {
-    agent_doc_debounce::tracked_count() as u32
 }
 
 /// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim seam.
@@ -710,73 +596,13 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
     }
 }
 
-/// Non-blocking idle check — returns `true` if no `document_changed` event
-/// within `debounce_ms`.
-///
-/// Used by IDE plugins to defer IPC operations (boundary repositioning, patch
-/// application) while the user is actively typing.  Unlike `await_idle`, this
-/// returns immediately.
-///
-/// For untracked files (no `document_changed` ever called), returns `true`.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_idle(file_path: *const c_char, debounce_ms: i64) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 1, // Invalid path — don't block callers
-    };
-    let in_process_idle = agent_doc_debounce::is_idle(path, debounce_ms as u64);
-    if !in_process_idle {
-        return 0;
-    }
-    // In-process says idle. If the file was never tracked in this process (e.g., after
-    // plugin restart), also check the file-based indicator so cross-process typing state
-    // from another plugin instance isn't silently lost.
-    if !agent_doc_debounce::is_tracked(path) {
-        return (!agent_doc_debounce::is_typing_via_file(path, debounce_ms as u64)) as i32;
-    }
-    1
-}
-
-/// Block until the document has been idle for `debounce_ms`, or `timeout_ms` expires.
-///
-/// Returns `true` if idle was reached (safe to run), `false` if timed out.
-/// If no changes have been recorded for this file, returns `true` immediately.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_await_idle(
-    file_path: *const c_char,
-    debounce_ms: i64,
-    timeout_ms: i64,
-) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 1, // Invalid path — don't block
-    };
-    // When the file is untracked in-process (e.g., after plugin restart), bridge to
-    // file-based indicator so cross-process typing state isn't silently ignored.
-    if !agent_doc_debounce::is_tracked(path) {
-        return agent_doc_debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64)
-            as i32;
-    }
-    agent_doc_debounce::await_idle(path, debounce_ms as u64, timeout_ms as u64) as i32
-}
-
 /// Check if a plugin in another process has typed recently (cross-process).
 ///
 /// Reads the file-based typing indicator written by `agent_doc_document_changed`.
 /// Returns `true` if the indicator exists and was updated within `debounce_ms`.
 /// Returns `false` if no indicator file exists (plugin not active or no edits).
 ///
-/// This is the cross-process complement to `agent_doc_is_idle`, which only
-/// works within the same process. Use this from CLI tools that run separately
-/// from the editor plugin.
+/// Use this from CLI/CPC tools that run separately from the editor plugin.
 ///
 /// # Safety
 ///
@@ -1573,12 +1399,12 @@ pub unsafe extern "C" fn agent_doc_editor_patch_rejected(
     record_editor_patch_receipt(path, patch, actor_generation, Some(rejection))
 }
 
-/// Record editor-applied content and the matching editor-visible synced
-/// live-buffer proof through one lazily receipt capability-bearing ABI call.
+/// Record editor-applied content through one lazily receipt capability-bearing
+/// ABI call.
 ///
 /// This is the preferred editor endpoint when the content came from the live
-/// editor buffer: the projection sidecar and synced live-buffer epoch represent the same
-/// proof contract and must not be emitted as independently ordered facts.
+/// editor buffer. The lazily/controller receipt is authoritative; file-backed
+/// live-buffer sidecars are not written from this path.
 ///
 /// # Safety
 ///
@@ -1610,15 +1436,15 @@ pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
         Ok(text) => text,
         Err(_) => return 0,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return 0,
     };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return 0,
     };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return 0,
     };
@@ -1639,21 +1465,6 @@ pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
         return 0;
     }
 
-    if let Err(err) =
-        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            path,
-            text,
-            editor,
-            kind,
-            version,
-            &capabilities,
-        )
-    {
-        eprintln!(
-            "[ffi] consolidated content-projection live-buffer proof failed for {path}: {err}"
-        );
-        return 0;
-    }
     if let Err(err) = record_lazily_visible_write_receipt(
         Path::new(path),
         patch_id_str,
@@ -1664,7 +1475,7 @@ pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
         return 0;
     }
     eprintln!(
-        "[ffi] lazily content/projection proof recorded: {} bytes for patch_id {}",
+        "[ffi] lazily content proof recorded via CRDT/controller authority: {} bytes for patch_id {}",
         text.len(),
         &patch_id_str[..patch_id_str.len().min(8)]
     );
@@ -4015,24 +3826,6 @@ operator note
     }
 
     #[test]
-    fn is_idle_untracked_returns_true() {
-        let path = CString::new("/tmp/ffi-test-untracked-file.md").unwrap();
-        let result = unsafe { agent_doc_is_idle(path.as_ptr(), 500) };
-        assert_eq!(result, 1, "untracked file should report idle");
-    }
-
-    #[test]
-    fn is_idle_after_change_returns_false() {
-        let path = CString::new("/tmp/ffi-test-just-changed.md").unwrap();
-        unsafe { agent_doc_document_changed(path.as_ptr()) };
-        let result = unsafe { agent_doc_is_idle(path.as_ptr(), 2000) };
-        assert_eq!(
-            result, 0,
-            "file changed <2s ago should not be idle with 2000ms window"
-        );
-    }
-
-    #[test]
     fn resolve_project_path_finds_nested_submodule() {
         use tempfile::TempDir;
         let outer = TempDir::new().unwrap();
@@ -4172,7 +3965,7 @@ mod ack_content_tests {
     }
 
     #[test]
-    fn test_editor_content_applied_for_editor_v1_consolidates_receipt_and_live_buffer_proof() {
+    fn test_editor_content_applied_for_editor_v1_records_receipt_without_live_buffer_sidecar() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
@@ -4230,12 +4023,10 @@ mod ack_content_tests {
             "visible-write projection should record the editor ABI source"
         );
 
-        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
-            .expect("consolidated receipt should record live-buffer proof");
-        assert_eq!(snapshot.content.as_deref(), Some("before\n### Re: done\n"));
-        assert_eq!(snapshot.edit_epoch, snapshot.last_synced_epoch);
-        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
-        assert!(snapshot.has_capability(agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY));
+        assert!(
+            agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy()).is_none(),
+            "editor-applied receipt must not record a live-buffer sidecar proof"
+        );
     }
 
     #[test]

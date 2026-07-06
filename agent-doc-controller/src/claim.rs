@@ -64,6 +64,33 @@ pub fn cross_session_decision_with_lease(
     CrossSessionDecision::Reject
 }
 
+/// Cross-session claim gate that treats the operator's current tmux session as
+/// authoritative for manual pane claiming. This lets `Claim for Tmux Pane`
+/// follow the live `agent-doc` window without rewriting the configured project
+/// `tmux_session`.
+pub fn cross_session_decision_with_current(
+    pane_session: &str,
+    configured: &str,
+    configured_alive: bool,
+    current_session: Option<&str>,
+    force: bool,
+    fresh_foreign_lease: bool,
+) -> CrossSessionDecision {
+    if current_session
+        .map(str::trim)
+        .is_some_and(|current| !current.is_empty() && current == pane_session)
+    {
+        return CrossSessionDecision::Accept;
+    }
+    cross_session_decision_with_lease(
+        pane_session,
+        configured,
+        configured_alive,
+        force,
+        fresh_foreign_lease,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +167,18 @@ mod tests {
             cross_session_decision("claude", "0", false, false),
             CrossSessionDecision::AcceptStale
         );
+    }
+
+    #[test]
+    fn cross_session_accepts_current_session_over_live_configured_pin() {
+        let d = cross_session_decision_with_current("2", "0", true, Some("2"), false, false);
+        assert_eq!(d, CrossSessionDecision::Accept);
+    }
+
+    #[test]
+    fn cross_session_blank_current_session_does_not_bypass_configured_pin() {
+        let d = cross_session_decision_with_current("2", "0", true, Some("   "), false, false);
+        assert_eq!(d, CrossSessionDecision::Reject);
     }
 
     #[test]

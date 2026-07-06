@@ -121,9 +121,9 @@ impl CrdtMergeBaseEvent {
 /// Resolve the CRDT merge base from optional overlay-state bytes and the cycle
 /// baseline.
 ///
-/// The structured overlay sidecar is authoritative when it decodes and its
-/// markdown projection matches the explicit cycle baseline. Divergence has two
-/// opposite meanings:
+/// The structured overlay sidecar is a projection that may be used as a CRDT
+/// merge-base cache only when it decodes and its markdown projection matches the
+/// explicit cycle baseline. Divergence has two opposite meanings:
 ///
 /// - **overlay-behind / stale**: the overlay holds older content than the
 ///   baseline. Baseline wins, and the caller should rebuild the overlay sidecar

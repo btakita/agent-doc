@@ -70,15 +70,18 @@ describe('patchGuard', () => {
         }
     });
 
-    it('keeps active-typing patch timeouts as retry states', () => {
+    it('leaves patch typing debounce to CPC', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        const guardIdx = source.indexOf("awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)");
         const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
+        const repositionIdx = source.indexOf('this.repositionBoundaryNow(');
 
-        assert.ok(guardIdx >= 0, 'patch watcher should guard visible writes with typing idle');
-        assert.ok(applyIdx > guardIdx, 'patch watcher should guard before applyPatch');
+        assert.ok(applyIdx >= 0, 'patch watcher should still apply queued patches');
+        assert.ok(repositionIdx >= 0, 'patch watcher should still handle reposition-only patches');
+        assert.strictEqual(source.includes('awaitIdleBeforeDocumentMutation'), false);
+        assert.strictEqual(source.includes('native.awaitIdle'), false);
+        assert.strictEqual(source.includes('native.isIdle'), false);
+        assert.strictEqual(source.includes('repositionBoundaryWithDebounce'), false);
         assert.ok(source.includes('this.schedulePatchRetry(patchFilePath)'));
-        assert.ok(source.includes('typing debounce timed out before reposition'));
     });
 
     it('does not replay stale-generation patch refusals through delayed retry', () => {
@@ -170,19 +173,25 @@ describe('patchGuard', () => {
         assert.strictEqual(source.slice(interruptClearStart, interruptClearEnd).includes('document.save()'), false);
     });
 
-    it('keeps full-content and reconnect repair paths disabled while allowing typed save signal', () => {
+    it('keeps full-content disabled and reconnect repair hooks absent while allowing immediate save signal', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
         const saveSignalStart = source.indexOf('private async processSaveDocumentSignal(');
         const saveSignalEnd = source.indexOf('/**', saveSignalStart + 1);
         const saveSignalBody = source.slice(saveSignalStart, saveSignalEnd);
 
-        assert.ok(source.includes('reread_disk repair is disabled'));
-        assert.ok(saveSignalBody.includes("this.awaitIdleBeforeDocumentMutation(signal.file, 'save_document')"));
+        assert.strictEqual(saveSignalBody.includes('awaitIdleBeforeDocumentMutation'), false);
         assert.ok(saveSignalBody.includes('await document.save()'));
         assert.ok(saveSignalBody.includes('this.writeEditorContentProjection(signal.patchId, signal.file, content, patchesDir)'));
         assert.strictEqual(source.includes('saveDocumentToDisk'), false);
+        assert.strictEqual(source.includes('reconcileStaleBuffersOnReconnect'), false);
+        assert.strictEqual(source.includes('reconnectBufferDecision'), false);
+        assert.strictEqual(source.includes('agent_doc_reconnect_buffer_decision'), false);
         assert.strictEqual(source.includes('applyReconnectReread'), false);
         assert.strictEqual(source.includes('reread disk into stale buffer'), false);
+        assert.strictEqual(source.includes('reread_disk repair is disabled'), false);
+        assert.strictEqual(nativeSource.includes('reconnectBufferDecision'), false);
+        assert.strictEqual(nativeSource.includes('agent_doc_reconnect_buffer_decision'), false);
     });
 
     it('does not ship prompt polling in the VS Code extension', () => {

@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod baseline_comparison;
-pub mod broadcast;
 pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod crdt_merge_base;
@@ -151,58 +150,6 @@ pub enum DocumentRealtimeEvent {
     HandoffCompleteToDisk,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LiveEditorDeliveryCandidate {
-    pub editor_id: Option<String>,
-    pub timestamp_ms: u128,
-    pub is_live: bool,
-    pub has_operator_text_authority: bool,
-}
-
-/// Select the live editor that should receive an agent-doc delivery.
-///
-/// Realtime document delivery is editor-targeted when a live editor sidecar
-/// exists. Prefer an editor that proved operator-text authority, then the
-/// newest live sidecar. The caller owns sidecar IO and liveness probing; this
-/// crate only owns the deterministic selection rule.
-pub fn select_live_editor_delivery_target(
-    candidates: impl IntoIterator<Item = LiveEditorDeliveryCandidate>,
-) -> Option<String> {
-    let mut selected: Option<(bool, u128, String)> = None;
-
-    for candidate in candidates {
-        if !candidate.is_live {
-            continue;
-        }
-        let Some(editor_id) = candidate
-            .editor_id
-            .map(|editor_id| editor_id.trim().to_string())
-            .filter(|editor_id| !editor_id.is_empty())
-        else {
-            continue;
-        };
-
-        let key = (
-            candidate.has_operator_text_authority,
-            candidate.timestamp_ms,
-        );
-        if selected
-            .as_ref()
-            .is_none_or(|(selected_authority, selected_timestamp, _)| {
-                key > (*selected_authority, *selected_timestamp)
-            })
-        {
-            selected = Some((
-                candidate.has_operator_text_authority,
-                candidate.timestamp_ms,
-                editor_id,
-            ));
-        }
-    }
-
-    selected.map(|(_, _, editor_id)| editor_id)
-}
-
 pub fn transition_document_realtime(
     current: &DocumentRealtimeState,
     event: &DocumentRealtimeEvent,
@@ -305,52 +252,6 @@ mod tests {
             ),
             None
         );
-    }
-
-    #[test]
-    fn delivery_target_prefers_live_operator_authority() {
-        let target = select_live_editor_delivery_target([
-            LiveEditorDeliveryCandidate {
-                editor_id: Some("jetbrains-newer-without-authority".to_string()),
-                timestamp_ms: 30,
-                is_live: true,
-                has_operator_text_authority: false,
-            },
-            LiveEditorDeliveryCandidate {
-                editor_id: Some("jetbrains-authoritative".to_string()),
-                timestamp_ms: 20,
-                is_live: true,
-                has_operator_text_authority: true,
-            },
-        ]);
-
-        assert_eq!(target.as_deref(), Some("jetbrains-authoritative"));
-    }
-
-    #[test]
-    fn delivery_target_ignores_dead_and_empty_editor_ids() {
-        let target = select_live_editor_delivery_target([
-            LiveEditorDeliveryCandidate {
-                editor_id: Some("jetbrains-dead".to_string()),
-                timestamp_ms: 100,
-                is_live: false,
-                has_operator_text_authority: true,
-            },
-            LiveEditorDeliveryCandidate {
-                editor_id: Some("  ".to_string()),
-                timestamp_ms: 101,
-                is_live: true,
-                has_operator_text_authority: true,
-            },
-            LiveEditorDeliveryCandidate {
-                editor_id: Some("vscode-live".to_string()),
-                timestamp_ms: 90,
-                is_live: true,
-                has_operator_text_authority: false,
-            },
-        ]);
-
-        assert_eq!(target.as_deref(), Some("vscode-live"));
     }
 
     #[test]

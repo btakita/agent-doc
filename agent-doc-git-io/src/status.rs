@@ -111,6 +111,29 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
     ))
 }
 
+pub fn focused_tracked_file_modified(file: &Path) -> Result<bool> {
+    if !is_in_git_repo(file) {
+        return Ok(false);
+    }
+    let (super_root, resolved) = resolve_to_git_root(file)?;
+    let (git_root, _) = narrow_to_submodule(&super_root, &resolved);
+    let output = Command::new("git")
+        .current_dir(git_root.as_path())
+        .args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+            "--ignored=no",
+            "--",
+        ])
+        .arg(resolved.as_path())
+        .output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
 pub fn tracked_side_effect_paths(file: &Path) -> Result<Vec<String>> {
     Ok(filter_tracked_side_effect_paths(
         file,

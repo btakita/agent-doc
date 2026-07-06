@@ -41,99 +41,10 @@ pub enum IpcMethod {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
-
-    // --- CRDT live multi-editor delta fan-out (`#crdtauth5`, plan phase 5) ----
-    //
-    // These variants are ADDITIVE: they extend the control-plane enum with an
-    // editor-replica lifecycle/delta family without touching the existing
-    // variants or their handlers. All of them are routed through the per-document
-    // `crdt_relay_host` hub registry and are authority-gated - on a document with
-    // no live editor (`CrdtAuthority::GitAuthoritative` / Detached) the handler
-    // refuses them and allocates no hub, so the headless control-plane path is
-    // byte-for-byte unchanged.
-    //
-    // The wire carries `file` (the canonical document path, the per-document hub
-    // key), an `identity` string (a stable editor-process identity that mints a
-    // deterministic yrs client-id), and yrs update / state-vector bytes
-    // base64-encoded (NDJSON is text; raw yrs bytes are not UTF-8).
-    /// Register an editor replica with the document's relay hub. The supervisor
-    /// creates/attaches the editor replica in the per-document hub and replies
-    /// with the minted `client_id` plus the canonical replica's encoded state
-    /// (base64) so the editor's FFI node bootstraps converged on first contact.
-    ReplicaRegister {
-        /// Canonical document path (the per-document hub key).
-        file: String,
-        /// Stable editor-process identity (mints a deterministic client-id).
-        identity: String,
-    },
-    /// Deregister an editor replica (editor/IDE closed the document). Drops the
-    /// hub-side mirror and expires the ephemeral awareness entry.
-    ReplicaDeregister {
-        file: String,
-        identity: String,
-    },
-    /// Broadcast a yrs update from one editor replica: the supervisor applies it
-    /// to that replica's hub-side mirror, integrates the new op(s) into the
-    /// canonical replica, and fans the missing delta out to every OTHER live
-    /// replica. The reply carries the per-target fan-out updates (base64) so a
-    /// caller relaying for peers can deliver them, plus the canonical text length
-    /// for diagnostics.
-    ReplicaUpdate {
-        file: String,
-        identity: String,
-        /// Base64-encoded yrs update bytes produced by the editor's FFI node.
-        update_b64: String,
-    },
-    /// Pull pending supervisor-to-editor updates for this replica. Updates are
-    /// retained until the editor applies and ACKs them via `replica_ack`.
-    ReplicaPull {
-        file: String,
-        identity: String,
-    },
-    /// ACK one pending update after the editor has applied it locally.
-    ReplicaAck {
-        file: String,
-        identity: String,
-        patch_id: String,
-        generation: u64,
-    },
-    /// Push an ephemeral awareness/presence update (cursor/selection). NOT part
-    /// of the document CRDT, never persisted, never committed. Replies with the
-    /// current presence snapshot (base64 JSON) for the other live replicas.
-    ReplicaAwareness {
-        file: String,
-        identity: String,
-        /// Base64-encoded JSON `agent_doc_document_realtime::crdt_relay::AwarenessState`.
-        awareness_b64: String,
-    },
-    /// Flush the supervisor-owned live relay hub for `file` to the durable CRDT
-    /// recovery projection before a recycle/reload boundary tears this process
-    /// down. The sidecar is recovery state, not closeout authority.
-    CrdtCheckpoint {
-        file: String,
-        #[serde(default = "default_checkpoint_source")]
-        source: String,
-    },
-    /// Resolve the supervisor-owned current CRDT text for `file`, performing the
-    /// bounded publish-live-buffer startup path inside the process that owns the
-    /// relay hub. This is the read-side counterpart to `crdt_checkpoint`.
-    CrdtCurrentText {
-        file: String,
-        #[serde(default = "default_current_text_source")]
-        source: String,
-    },
 }
 
 fn default_restart_mode() -> String {
     "continue".to_string()
-}
-
-fn default_checkpoint_source() -> String {
-    "supervisor_ipc".to_string()
-}
-
-fn default_current_text_source() -> String {
-    "supervisor_ipc".to_string()
 }
 
 /// Return true when an IPC method is a real prompt dispatch that must pass the
@@ -233,88 +144,22 @@ mod tests {
     }
 
     #[test]
-    fn crdt_replica_variants_serde_roundtrip_and_are_additive() {
-        let reg = IpcMethod::ReplicaRegister {
-            file: "plan.md".into(),
-            identity: "intellij:1234".into(),
-        };
-        let json = serde_json::to_string(&reg).unwrap();
-        assert_eq!(
-            json,
-            r#"{"method":"replica_register","file":"plan.md","identity":"intellij:1234"}"#
-        );
-        assert_eq!(serde_json::from_str::<IpcMethod>(&json).unwrap(), reg);
-
-        let upd = IpcMethod::ReplicaUpdate {
-            file: "plan.md".into(),
-            identity: "vscode:99".into(),
-            update_b64: "AAEC".into(),
-        };
-        assert_eq!(
-            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&upd).unwrap()).unwrap(),
-            upd
-        );
-
-        let pull = IpcMethod::ReplicaPull {
-            file: "plan.md".into(),
-            identity: "vscode:99".into(),
-        };
-        assert_eq!(
-            serde_json::to_string(&pull).unwrap(),
-            r#"{"method":"replica_pull","file":"plan.md","identity":"vscode:99"}"#
-        );
-        assert_eq!(
-            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&pull).unwrap()).unwrap(),
-            pull
-        );
-
-        let ack = IpcMethod::ReplicaAck {
-            file: "plan.md".into(),
-            identity: "vscode:99".into(),
-            patch_id: "crdt:1:2:3".into(),
-            generation: 3,
-        };
-        assert_eq!(
-            serde_json::to_string(&ack).unwrap(),
-            r#"{"method":"replica_ack","file":"plan.md","identity":"vscode:99","patch_id":"crdt:1:2:3","generation":3}"#
-        );
-        assert_eq!(
-            serde_json::from_str::<IpcMethod>(&serde_json::to_string(&ack).unwrap()).unwrap(),
-            ack
-        );
-
-        let checkpoint = IpcMethod::CrdtCheckpoint {
-            file: "plan.md".into(),
-            source: "admin_reload_lib".into(),
-        };
-        assert_eq!(
-            serde_json::to_string(&checkpoint).unwrap(),
-            r#"{"method":"crdt_checkpoint","file":"plan.md","source":"admin_reload_lib"}"#
-        );
-        assert_eq!(
-            serde_json::from_str::<IpcMethod>(r#"{"method":"crdt_checkpoint","file":"plan.md"}"#)
-                .unwrap(),
-            IpcMethod::CrdtCheckpoint {
-                file: "plan.md".into(),
-                source: "supervisor_ipc".into(),
-            }
-        );
-        let current_text = IpcMethod::CrdtCurrentText {
-            file: "plan.md".into(),
-            source: "resolve_current_doc".into(),
-        };
-        assert_eq!(
-            serde_json::to_string(&current_text).unwrap(),
-            r#"{"method":"crdt_current_text","file":"plan.md","source":"resolve_current_doc"}"#
-        );
-        assert_eq!(
-            serde_json::from_str::<IpcMethod>(r#"{"method":"crdt_current_text","file":"plan.md"}"#)
-                .unwrap(),
-            IpcMethod::CrdtCurrentText {
-                file: "plan.md".into(),
-                source: "supervisor_ipc".into(),
-            }
-        );
+    fn crdt_replica_variants_are_not_supervisor_ipc() {
+        for json in [
+            r#"{"method":"replica_register","file":"plan.md","identity":"intellij:1234"}"#,
+            r#"{"method":"replica_deregister","file":"plan.md","identity":"intellij:1234"}"#,
+            r#"{"method":"replica_update","file":"plan.md","identity":"vscode:99","update_b64":"AAEC"}"#,
+            r#"{"method":"replica_pull","file":"plan.md","identity":"vscode:99"}"#,
+            r#"{"method":"replica_ack","file":"plan.md","identity":"vscode:99","patch_id":"crdt:1:2:3","generation":3}"#,
+            r#"{"method":"replica_awareness","file":"plan.md","identity":"vscode:99","awareness_b64":"e30="}"#,
+            r#"{"method":"crdt_current_text","file":"plan.md","source":"resolve_current_doc"}"#,
+            r#"{"method":"crdt_checkpoint","file":"plan.md","source":"admin_reload_lib"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<IpcMethod>(json).is_err(),
+                "supervisor IPC must not accept editor CRDT method: {json}"
+            );
+        }
 
         assert_eq!(
             serde_json::to_string(&IpcMethod::State).unwrap(),
@@ -366,24 +211,6 @@ mod tests {
         }));
         assert!(!ipc_method_requires_capability_gate(&IpcMethod::State));
         assert!(!ipc_method_requires_capability_gate(&IpcMethod::Pid));
-        assert!(!ipc_method_requires_capability_gate(
-            &IpcMethod::ReplicaRegister {
-                file: "doc.md".to_string(),
-                identity: "editor".to_string(),
-            },
-        ));
-        assert!(!ipc_method_requires_capability_gate(
-            &IpcMethod::CrdtCheckpoint {
-                file: "doc.md".to_string(),
-                source: "test".to_string(),
-            },
-        ));
-        assert!(!ipc_method_requires_capability_gate(
-            &IpcMethod::CrdtCurrentText {
-                file: "doc.md".to_string(),
-                source: "test".to_string(),
-            },
-        ));
     }
 
     #[test]

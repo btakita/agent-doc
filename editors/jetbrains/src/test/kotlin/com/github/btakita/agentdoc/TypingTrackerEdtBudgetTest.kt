@@ -16,15 +16,15 @@ class TypingTrackerEdtBudgetTest {
         ).first { Files.exists(it) }
         val source = Files.readString(trackerPath)
         val listenerBody = source.substringAfter("override fun documentChanged")
-            .substringBefore("private fun scheduleFullContentReport")
+            .substringBefore("private fun requestNativeDocumentChanged")
 
         assertTrue(
-            "documentChanged should record only the cheap native change marker on the listener path",
-            listenerBody.contains("agent_doc_document_changed(filePath)"),
+            "documentChanged should enqueue the lightweight native change marker off the listener path",
+            listenerBody.contains("requestNativeDocumentChanged(filePath)"),
         )
         assertTrue(
             "documentChanged should enqueue the full editor buffer report for a coalesced worker",
-            listenerBody.contains("scheduleFullContentReport(lib, filePath, event.document)"),
+            listenerBody.contains("scheduleFullContentReport(filePath, event.document)"),
         )
         assertTrue(
             "documentChanged should capture the small editor op payload for async native reporting",
@@ -41,6 +41,14 @@ class TypingTrackerEdtBudgetTest {
         assertFalse(
             "documentChanged must not synchronously write full buffer content through JNA",
             listenerBody.contains("agent_doc_document_changed_digest_content"),
+        )
+        assertFalse(
+            "documentChanged must not resolve the native library on the UI thread",
+            listenerBody.contains("AgentDocLib.get()"),
+        )
+        assertFalse(
+            "documentChanged must not call the native change marker on the UI thread",
+            listenerBody.contains("agent_doc_document_changed(filePath)"),
         )
         assertFalse(
             "documentChanged must not synchronously record editor ops through JNA",
@@ -103,12 +111,22 @@ class TypingTrackerEdtBudgetTest {
             lifecycle.contains("override fun fileClosed(source: FileEditorManager, file: VirtualFile)") &&
                 lifecycle.contains("TypingTracker.clearOpenDocumentReport(file)"),
         )
+        val clearBody = tracker.substringAfter("fun clearOpenDocumentReport")
+            .substringBefore("fun publishLiveBufferNow")
+        assertTrue(
+            "file-close cleanup must queue native release/close work off the file listener path",
+            clearBody.contains("contentReportExecutor.execute"),
+        )
+        assertFalse(
+            "file-close cleanup must not resolve the native library before queueing worker cleanup",
+            clearBody.substringBefore("contentReportExecutor.execute").contains("AgentDocLib.get()"),
+        )
         assertTrue(
             "open-document reporting should reuse the coalesced v2 full-content reporter",
             tracker.contains("fun reportOpenMarkdownDocuments(project: Project)") &&
                 tracker.contains("FileEditorManager.getInstance(project).openFiles") &&
                 tracker.contains("fun scheduleOpenDocumentReport(file: VirtualFile)") &&
-                tracker.contains("scheduleFullContentReport(lib, file.path, document)") &&
+                tracker.contains("scheduleFullContentReport(file.path, document)") &&
                 tracker.contains("agent_doc_document_changed_digest_content_for_editor_v2"),
         )
     }
@@ -150,9 +168,10 @@ class TypingTrackerEdtBudgetTest {
             reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
                 reporterBody.contains("if (requireAuthority) false else") &&
                 reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
+                reporterBody.contains("await = true") &&
                 reporterBody.contains("await = false") &&
-                reporterBody.contains("forceRefresh = requireAuthority") &&
-                reporterBody.contains("if (requireAuthority && !replicaRefreshAccepted) return false") &&
+                reporterBody.contains("forceRefresh = true") &&
+                reporterBody.contains("if (!replicaRefreshAccepted) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
         )
     }
@@ -213,19 +232,44 @@ class TypingTrackerEdtBudgetTest {
             listenerBody.contains("forwardLocalDelta("),
         )
         assertTrue(
-            "publish/open document repair must attach the CRDT replica through the worker without blocking IPC receipts",
-            source.contains("fun ensureOpenDocumentReplica(") &&
+            "authority-bearing publish/open document repair must wait for the CRDT replica while ordinary open reports stay asynchronous",
+                source.contains("fun ensureOpenDocumentReplica(") &&
                 source.contains("forceRefresh: Boolean = false") &&
-                source.contains("refreshForwarderFor(filePath, text)") &&
+                source.contains("bypassRegisterBackoff = forceRefresh") &&
+                source.contains("executor.submit<Boolean> { attach() }") &&
+                source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
+                source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
                 source.contains("executor.execute { attach() }") &&
-                source.contains("forwarderFor(filePath, text)") &&
-                !source.contains("future.get(150, TimeUnit.MILLISECONDS)"),
+                source.contains("it.ensureEditorText(initialEditorText)"),
+        )
+        assertFalse(
+            "authority-bearing publish must not reregister an existing CRDT replica; the editor buffer is republished through the cached replica",
+            source.contains("private fun refreshForwarderFor(") ||
+                source.contains("refreshed ${'$'}{File(filePath).name} registration"),
+        )
+        val remoteDrainBody = source.substringAfter("private fun drainRemoteUpdatesFor")
+            .substringBefore("/**\n     * D2")
+        assertTrue(
+            "remote CRDT update bursts should be merged before one editor apply instead of one invokeAndWait per update",
+            remoteDrainBody.contains("appliedRemoteUpdates") &&
+                remoteDrainBody.contains("applyRemoteText(filePath, expectedText, targetText)"),
+        )
+        val remoteApplyBody = source.substringAfter("private fun applyRemoteText")
+            .substringBefore("private fun normalizeRemoteText")
+        assertFalse(
+            "remote CRDT editor apply must not call native template normalization inside invokeAndWait",
+            remoteApplyBody.contains("NativePatching.normalizeTemplateStructure"),
         )
         assertTrue(
-            "authority-bearing publish must be able to recreate a stale cached forwarder after supervisor recycle",
-            source.contains("private fun refreshForwarderFor(") &&
-                source.contains("forwarders.remove(filePath)?.deregister()") &&
-                source.contains("refreshed ${'$'}{File(filePath).name} registration"),
+            "remote CRDT template normalization should run on the replica worker before the EDT apply",
+            source.contains("private fun normalizeRemoteText(") &&
+                source.substringAfter("private fun normalizeRemoteText(").contains("NativePatching.normalizeTemplateStructure(converged)"),
+        )
+        assertTrue(
+            "CRDT timing logs should identify slow native/socket/EDT operations",
+            source.contains("[crdt-perf]") &&
+                source.contains("remote-apply-edt") &&
+                source.contains("remote-normalize-worker"),
         )
     }
 }

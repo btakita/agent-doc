@@ -453,14 +453,14 @@ object LayoutDetector {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val windows = managerEx.windows
             if (windows.size < 2) {
-                LOG.info("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
+                LOG.debug("[layout-detect] single editor window (count=${windows.size}); no split layout to mirror")
                 return null
             }
 
             val splitters = managerEx.splitters
             val splittersComponent = splitters as? java.awt.Component
             if (splittersComponent == null) {
-                LOG.info("[layout-detect] ${windows.size} editor windows but splitters component unavailable; cannot resolve columns")
+                LOG.debug("[layout-detect] ${windows.size} editor windows but splitters component unavailable; cannot resolve columns")
                 return null
             }
 
@@ -478,17 +478,17 @@ object LayoutDetector {
                     file = file,
                 )
             }
-            LOG.info(
+            LOG.debug(
                 "[layout-detect] ${windows.size} editor window(s): " +
                     snapshots.joinToString(", ") { "x=${it.x} y=${it.y} file=${it.file ?: "<none>"}" }
             )
             if (snapshots.none { it.file != null }) {
-                LOG.info("[layout-detect] no .md file selected in any editor window; no layout to mirror")
+                LOG.debug("[layout-detect] no .md file selected in any editor window; no layout to mirror")
                 return null
             }
 
             val columns = buildColumnsFromSnapshots(snapshots)
-            LOG.info(
+            LOG.debug(
                 "[layout-detect] grouped into ${columns.size} column(s): " +
                     columns.joinToString(" | ") { col ->
                         "[" + col.files.joinToString(", ").ifEmpty { "<empty>" } + "]"
@@ -500,7 +500,7 @@ object LayoutDetector {
             return if (columns.size >= 2) {
                 EditorLayout(columns)
             } else {
-                LOG.info("[layout-detect] fewer than 2 columns after grouping; treating as single-column layout")
+                LOG.debug("[layout-detect] fewer than 2 columns after grouping; treating as single-column layout")
                 null
             }
         } catch (e: Exception) {

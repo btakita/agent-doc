@@ -19,6 +19,7 @@ agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
@@ -36,11 +37,13 @@ agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.67" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
 agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.67" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.67" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.67" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.67" }
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.67" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"
+base64 = "0.22"
 fs2 = "0.4"
 interprocess = { version = "2", default-features = false }
 lazily = { version = "0.21", features = ["thread-safe"] }

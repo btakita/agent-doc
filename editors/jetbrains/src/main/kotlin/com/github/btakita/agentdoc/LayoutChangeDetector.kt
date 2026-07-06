@@ -7,50 +7,48 @@ import com.intellij.openapi.project.Project
 import java.awt.Container
 import java.awt.event.ContainerEvent
 import java.awt.event.ContainerListener
+import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Detects editor layout changes (tab drags between splits, new splits, closed splits)
- * using a hybrid approach:
- *
- * 1. ContainerListener on EditorsSplitters — catches Swing tree changes immediately
- * 2. Fallback poll (5s) — safety net for edge cases events miss
- *
- * Both paths compute a layout hash and only sync when it changes.
+ * using a ContainerListener on EditorsSplitters. The listener is attached
+ * recursively with a weak de-dup set, so new split subtrees are covered by
+ * Swing container events instead of a fallback polling thread.
  */
 class LayoutChangeDetector(private val project: Project) {
 
     private val lastLayoutHash = AtomicReference<String?>(null)
     private val disposed = AtomicBoolean(false)
     private val fallbackSyncing = AtomicBoolean(false)
-    private val fallbackGeneration = java.util.concurrent.atomic.AtomicLong(0)
-    private var pollThread: Thread? = null
+    private val fallbackGeneration = AtomicLong(0)
     private val listenerCount = java.util.concurrent.atomic.AtomicInteger(0)
     private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
+    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "agent-doc-layout-events").apply { isDaemon = true }
+    }
     // WeakHashMap so GC'd containers don't accumulate; synchronized for EDT access
     private val listenedContainers: MutableSet<Container> =
         Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
 
     fun start() {
         // Attach ContainerListener to the splitters root (delayed — splitters may not exist yet)
-        Thread({
-            Thread.sleep(2000) // Wait for editor to initialize
-            if (disposed.get()) return@Thread
+        executor.schedule(init@{
+            if (disposed.get()) return@init
             attachContainerListener()
-            startFallbackPoll()
-        }, "agent-doc-layout-detector-init").apply {
-            isDaemon = true
-            start()
-        }
+        }, 2_000L, TimeUnit.MILLISECONDS)
     }
 
     fun dispose() {
         disposed.set(true)
-        pollThread?.interrupt()
+        executor.shutdownNow()
         instances.remove(project)
     }
 
@@ -73,12 +71,7 @@ class LayoutChangeDetector(private val project: Project) {
     private val containerListener = object : ContainerListener {
         override fun componentAdded(e: ContainerEvent) {
             val count = containerEventCount.incrementAndGet()
-            // Do NOT recurse into the new child's sub-tree here. The initial
-            // one-shot walk from attachContainerListener covers the tree that
-            // exists at plugin start; the 5s fallback poll (checkAndSync)
-            // picks up any structural change afterwards. Recursive re-attach
-            // on every add was the source of the listener-count blow-up
-            // (listeners climbing past 1500 in minutes on heavy Swing churn).
+            (e.child as? Container)?.let { addRecursiveContainerListener(it) }
             if (count % 100 == 0L) LOG.info("[state] containerEvents=$count listeners=${listenerCount.get()}")
             scheduleSync("containerAdd")
         }
@@ -99,50 +92,21 @@ class LayoutChangeDetector(private val project: Project) {
         }
     }
 
-    private fun startFallbackPoll() {
-        pollThread = Thread({
-            var pollCount = 0L
-            while (!disposed.get()) {
-                try {
-                    Thread.sleep(POLL_INTERVAL_MS)
-                    if (!disposed.get()) {
-                        scheduleSync("poll", 0)
-                        pollCount++
-                        if (pollCount % 12 == 0L) { // ~every 60s at 5s interval
-                            LOG.info("[state] layout-detector: listeners=${listenerCount.get()} containerEvents=${containerEventCount.get()}")
-                        }
-                    }
-                } catch (_: InterruptedException) {
-                    break
-                }
-            }
-        }, "agent-doc-layout-poll").apply {
-            isDaemon = true
-            start()
-        }
-    }
+    private fun nextGeneration(): Long =
+        fallbackGeneration.incrementAndGet()
 
-    private fun isCurrentGeneration(lib: AgentDocLib?, generation: Long): Boolean =
-        lib?.agent_doc_sync_check_generation(generation)
-            ?: (fallbackGeneration.get() == generation)
+    private fun isCurrentGeneration(generation: Long): Boolean =
+        fallbackGeneration.get() == generation
 
     private fun scheduleSync(source: String, delayMs: Long = 500L) {
         if (disposed.get()) return
-        // Debounce via FFI (shared across editors), fallback to local counter
-        val lib = AgentDocLib.get()
-        val myGen = lib?.agent_doc_sync_bump_generation() ?: fallbackGeneration.incrementAndGet()
-        Thread({
-            if (delayMs > 0) {
-                Thread.sleep(delayMs)
-            }
-            if (disposed.get()) return@Thread
-            val isCurrent = isCurrentGeneration(lib, myGen)
-            if (!isCurrent) return@Thread // superseded by newer event
+        val myGen = nextGeneration()
+        executor.schedule(sync@{
+            if (disposed.get()) return@sync
+            val isCurrent = isCurrentGeneration(myGen)
+            if (!isCurrent) return@sync // superseded by newer event
             checkAndSync(source, myGen)
-        }, "agent-doc-layout-sync-$source").apply {
-            isDaemon = true
-            start()
-        }
+        }, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
     }
 
     private fun checkAndSync(source: String, requestedGeneration: Long) {
@@ -171,62 +135,26 @@ class LayoutChangeDetector(private val project: Project) {
 
                 LOG.info("[layout] change detected via $source: $prev → $hash")
 
-                val lib = AgentDocLib.get()
-                val locked = lib?.agent_doc_sync_try_lock()
-                    ?: fallbackSyncing.compareAndSet(false, true)
-                if (!locked) return@invokeLater
                 val selectedFiles = manager.selectedFiles
                 val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(selectedFiles)
                 val focusedVFile = manager.selectedTextEditor?.virtualFile
                     ?.takeIf { it.name.endsWith(".md") }
                     ?: selectedFiles.firstOrNull { it.name.endsWith(".md") }
                 if (visibleMdFiles.isEmpty() || focusedVFile == null) {
-                    lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
                     return@invokeLater
                 }
                 val focusedFile = focusedVFile.path
-                val (focusedProjectRoot, _) = TerminalUtil.resolveProject(project, focusedVFile)
-                val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(
-                    project.basePath,
-                    focusedProjectRoot,
-                    visibleMdFiles,
-                )
-                val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
-                val syncLayout = SyncLayoutAction.absolutizeEditorLayout(
-                    projectRoot,
-                    SyncLayoutAction.normalizeEditorLayout(
-                        project.basePath,
-                        projectRoot,
-                        layout,
-                    ),
-                )
-                val cmd = SyncLayoutAction.buildSyncCommand(
-                    agentDoc = agentDoc,
-                    visibleMdFiles = visibleMdFiles,
-                    editorLayout = syncLayout,
-                    focusedFile = focusedFile,
-                    noAutostart = true,
-                    exactVisible = true,
-                )
-                // CLI call on background thread to avoid blocking EDT
-                Thread({
-                    try {
-                        val result = SyncLayoutAction.runCommandWithTimeout(
-                            cmd,
-                            projectRoot,
-                        )
-                        LOG.info(
-                            "[layout] sync exit=${result.exitCode} timedOut=${result.timedOut} cmd=${cmd.joinToString(" ")} output=${result.output.take(500)}"
-                        )
-                    } finally {
-                        lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
-                        if (!isCurrentGeneration(lib, requestedGeneration)) {
-                            scheduleSync("replay", 0)
-                        }
-                    }
-                }, "agent-doc-layout-sync-$source").apply {
-                    isDaemon = true
-                    start()
+                val basePath = project.basePath
+                val layoutSnapshot = layout
+                executor.execute {
+                    syncDetectedLayout(
+                        source = source,
+                        requestedGeneration = requestedGeneration,
+                        basePath = basePath,
+                        visibleMdFiles = visibleMdFiles,
+                        focusedFile = focusedFile,
+                        layout = layoutSnapshot,
+                    )
                 }
             } catch (e: Exception) {
                 LOG.debug("[layout] check failed: ${e.message}")
@@ -234,8 +162,83 @@ class LayoutChangeDetector(private val project: Project) {
         }
     }
 
+    private fun syncDetectedLayout(
+        source: String,
+        requestedGeneration: Long,
+        basePath: String?,
+        visibleMdFiles: List<String>,
+        focusedFile: String,
+        layout: EditorLayout?,
+    ) {
+        if (disposed.get() || project.isDisposed || !isCurrentGeneration(requestedGeneration)) return
+
+        val focusedProjectRoot = resolveProjectRoot(basePath, focusedFile)
+        val projectRoot = SyncLayoutAction.chooseSyncProjectRoot(
+            basePath,
+            focusedProjectRoot,
+            visibleMdFiles,
+        )
+        val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
+        val syncLayout = SyncLayoutAction.absolutizeEditorLayout(
+            projectRoot,
+            SyncLayoutAction.normalizeEditorLayout(
+                basePath,
+                projectRoot,
+                layout,
+            ),
+        )
+        val cmd = SyncLayoutAction.buildSyncCommand(
+            agentDoc = agentDoc,
+            visibleMdFiles = visibleMdFiles,
+            editorLayout = syncLayout,
+            focusedFile = focusedFile,
+            noAutostart = true,
+            exactVisible = true,
+        )
+
+        val lib = AgentDocLib.get()
+        val locked = lib?.agent_doc_sync_try_lock()
+            ?: fallbackSyncing.compareAndSet(false, true)
+        if (!locked) return
+
+        var timedOut = false
+        try {
+            val result = SyncLayoutAction.runCommandWithTimeout(
+                cmd,
+                projectRoot,
+            )
+            timedOut = result.timedOut
+            LOG.info(
+                "[layout] sync exit=${result.exitCode} timedOut=${result.timedOut} cmd=${cmd.joinToString(" ")} output=${result.output.take(500)}"
+            )
+        } finally {
+            lib?.agent_doc_sync_unlock() ?: fallbackSyncing.set(false)
+            if (!isCurrentGeneration(requestedGeneration)) {
+                val delayMs = if (timedOut) SYNC_TIMEOUT_REPLAY_DELAY_MS else 0L
+                LOG.info("[layout] replaying latest structural sync request delayMs=$delayMs")
+                scheduleSync("replay-$source", delayMs)
+            }
+        }
+    }
+
+    private fun resolveProjectRoot(basePath: String?, focusedFile: String): String {
+        val ffi = NativePatching.resolveProjectPath(focusedFile)
+        if (ffi != null) {
+            if (basePath != null && ffi.first != basePath) {
+                try {
+                    PatchWatcher.getInstance(project).registerRoot(ffi.first)
+                } catch (_: Exception) {
+                    // Best-effort parity with TerminalUtil.resolveProject.
+                }
+            }
+            return ffi.first
+        }
+        if (basePath != null) return basePath
+        return File(focusedFile).parent ?: "/"
+    }
+
     companion object {
-        private const val POLL_INTERVAL_MS = 5000L
+        private const val SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000L
         private val LOG = Logger.getInstance(LayoutChangeDetector::class.java)
         private val instances = ConcurrentHashMap<Project, LayoutChangeDetector>()
 

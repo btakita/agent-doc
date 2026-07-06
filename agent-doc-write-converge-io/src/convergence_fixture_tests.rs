@@ -158,7 +158,6 @@ fn live_prompt_drift_response_patches(
 #[cfg(test)]
 mod core_tests {
     #![allow(unused_imports)]
-    use super::super::guard_no_stale_snapshot_reset_drift;
     use super::*;
     use fs2::FileExt;
     use std::fs;
@@ -170,14 +169,6 @@ mod core_tests {
         format!(
             "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
         )
-    }
-
-    fn queue_node_key_for_id(doc: &str, id: &str) -> String {
-        agent_doc_markdown_ast::mutations::all_item_nodes(doc)
-            .into_iter()
-            .find(|node| node.component == "queue" && node.item.id == id)
-            .map(|node| node.node_key)
-            .unwrap_or_else(|| panic!("missing queue node id {id}"))
     }
 
     fn start_ack_mismatch_then_refresh_listener(
@@ -1083,7 +1074,7 @@ mod core_tests {
     }
 
     #[test]
-    fn converge_document_or_disk_blocks_detached_disk_with_capable_live_buffer() {
+    fn converge_document_or_disk_ignores_projection_only_live_buffer_for_detached_disk() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -1104,17 +1095,15 @@ mod core_tests {
         )
         .unwrap();
 
-        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("no_listener"),
-            "capable sidecar without listener should fail closed instead of detached disk: {err}"
+        assert_eq!(
+            converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap(),
+            (),
+            "projection-only live-buffer sidecars must not block detached disk authority"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            source,
-            "live editor sidecar must leave the on-disk document unchanged"
+            target,
+            "sidecar projection must not be treated as live editor authority"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -1122,8 +1111,8 @@ mod core_tests {
             "capable sidecar must not trip the capability guard:\n{log}"
         );
         assert!(
-            !log.contains("transport=disk_detached"),
-            "live editor sidecar must block detached disk write:\n{log}"
+            log.contains("transport=disk_detached"),
+            "projection-only sidecar should allow detached disk write:\n{log}"
         );
     }
 
@@ -1863,363 +1852,6 @@ mod core_tests {
         assert!(
             !ops_log.contains("[jbstalecache]"),
             "the stale-cache-risk marker must stay silent without an active listener:\n{ops_log}"
-        );
-    }
-    #[test]
-    fn stale_snapshot_reset_drift_blocks_large_snapshot_only_content() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let stale_exchange = "duplicated response\n".repeat(20);
-        let snapshot = format!(
-            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{}<!-- /agent:exchange -->\n",
-            stale_exchange
-        );
-        let current = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\nclean\n<!-- /agent:exchange -->\n";
-
-        let result =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write");
-
-        let message = result
-            .expect_err("stale larger snapshot must fail closed")
-            .to_string();
-        assert!(
-            message.contains("agent-doc reset --from-current"),
-            "recovery guidance should name deterministic sidecar reset: {message}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_rebases_historical_exchange_trim_and_sibling_queue_add() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let kept_block = "### Re: kept - gpt-5\n\nKept response.\n";
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: opencode\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n"
-        );
-        let current = format!(
-            "---\nagent_doc_session: test\nagent: claude\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n- do [#sibling]\n<!-- /agent:queue -->\n"
-        );
-        fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        let active_node_key = queue_node_key_for_id(&snapshot, "active");
-        let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
-            Some(agent_doc_turn::turn_scope::Address::node(
-                "queue",
-                0,
-                &active_node_key,
-            )),
-            Some(0),
-        );
-        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
-
-        let rebased =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "preflight")
-                .expect("historical trim plus sibling queue add should rebase");
-
-        assert!(rebased, "guard should report a snapshot refresh");
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(current));
-        let ops_log =
-            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops_log.contains("stale_snapshot_visible_rebased")
-                && ops_log.contains("historical_exchange_trim_unrelated_drift"),
-            "rebase marker should explain the scoped drift:\n{ops_log}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_rebases_compact_summary_replacement_on_stream_write() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
-        );
-        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
-        fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        let scope =
-            agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
-        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
-
-        let rebased =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
-                .expect("compact summary replacement should rebase stale pre-compact snapshot");
-
-        assert!(rebased, "guard should report a snapshot refresh");
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap(),
-            Some(current.to_string())
-        );
-        let ops_log =
-            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops_log.contains("stale_snapshot_visible_rebased")
-                && ops_log.contains("phase=stream write")
-                && ops_log.contains("historical_exchange_trim"),
-            "stream-write rebase marker should explain compact-summary drift:\n{ops_log}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_rebases_compact_summary_after_clear_via_binary_origin_marker() {
-        // `#provauth3`: a session resumed after `/clear` has NO turn scope, but the
-        // binary-authored compaction marker survives on disk. The guard must treat
-        // the pre-compact snapshot vs compacted file shrink as authoritative
-        // binary-origin state and rebase, instead of tripping "looks like a manual
-        // cleanup" (the bug hit at the start of this dogfood session).
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
-        );
-        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n- Prior summary/context: compacted prior responses\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
-        fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        // No turn_scope saved (post-`/clear`). The binary-origin signal is the
-        // recorded compaction marker.
-        agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
-
-        let rebased =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
-                .expect("binary-origin compaction marker should rebase the stale snapshot");
-
-        assert!(rebased, "guard should report a snapshot refresh");
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap(),
-            Some(current.to_string())
-        );
-        let ops_log =
-            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops_log.contains("stale_snapshot_visible_rebased")
-                && ops_log.contains("historical_exchange_trim"),
-            "post-clear compaction rebase marker should explain the drift:\n{ops_log}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_skips_rebase_when_active_capture_response_missing_from_visible() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n\
-❯ Please reply\n\
-<!-- agent:boundary:old -->\n\
-<!-- /agent:exchange -->\n";
-        let response_body = format!(
-            "### Re: Please reply — gpt-5\n\n{}\n",
-            "Captured response paragraph.\n".repeat(20)
-        );
-        let response_patch =
-            format!("<!-- patch:exchange -->\n{response_body}<!-- /patch:exchange -->\n");
-        let snapshot = current.replace(
-            "<!-- agent:boundary:old -->",
-            &format!("{response_body}<!-- agent:boundary:new -->"),
-        );
-        fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
-        agent_doc_capture_io::capture_response(&doc, &response_patch).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-
-        let rebased = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "commit")
-            .expect("active captured response must not trip stale-snapshot reset repair");
-
-        assert!(
-            !rebased,
-            "active capture should leave the response-bearing snapshot in place"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap(),
-            Some(snapshot),
-            "prompt-only visible text must not overwrite the response snapshot"
-        );
-        let ops_log =
-            fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            ops_log.contains("stale_snapshot_rebase_skipped_active_capture"),
-            "skip marker should explain why the stale rebase was suppressed:\n{ops_log}"
-        );
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_blocks_compact_summary_without_scope_or_marker() {
-        // `#provauth3` safety rail: an exchange shrink to a compaction-shaped block
-        // with NEITHER a live turn scope NOR a recorded binary compaction has no
-        // provenance, so it must still fail closed (a genuine accidental cleanup
-        // that happens to look like a summary must not be auto-adopted).
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
-        );
-        let current = "---\nagent_doc_session: test\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 12 response topic(s): archived 0; archived 1; archived 2; 9 more\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
-        fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        // No turn_scope and no compaction marker → no provenance signal.
-
-        let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "preflight")
-            .expect_err("compaction-shaped shrink without provenance must fail closed");
-        assert!(
-            err.to_string().contains("agent-doc reset --from-current"),
-            "unproven shrink should keep deterministic reset guidance: {err}"
-        );
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_blocks_fake_session_summary_without_compact_marker() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}<!-- /agent:exchange -->\n"
-        );
-        let current = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nOperator-authored replacement without compact archive proof.\n<!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        let scope =
-            agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(None, Some(0));
-        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
-
-        let err =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), current, "stream write")
-                .expect_err("non-compact exchange rewrite must still fail closed");
-
-        assert!(
-            err.to_string().contains("agent-doc reset --from-current"),
-            "unsafe exchange rewrite should keep deterministic reset guidance: {err}"
-        );
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_blocks_when_active_queue_driver_changes() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "seed").unwrap();
-        let old_blocks = (0..12)
-            .map(|idx| {
-                format!(
-                    "### Re: archived {idx} - gpt-5\n\n{}\n",
-                    "Archived response body.\n".repeat(12)
-                )
-            })
-            .collect::<String>();
-        let kept_block = "### Re: kept - gpt-5\n\nKept response.\n";
-        let snapshot = format!(
-            "---\nagent_doc_session: test\nagent: opencode\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n- do [#active]\n<!-- /agent:queue -->\n"
-        );
-        let current = format!(
-            "---\nagent_doc_session: test\nagent: claude\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
-## Exchange\n\n<!-- agent:exchange patch=append -->\n{kept_block}<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n\n\
-## Queue\n\n<!-- agent:queue auto -->\n- do [#sibling]\n<!-- /agent:queue -->\n"
-        );
-        fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        let active_node_key = queue_node_key_for_id(&snapshot, "active");
-        let scope = agent_doc_turn::turn_scope::TurnScope::for_driver_with_exchange_tail(
-            Some(agent_doc_turn::turn_scope::Address::node(
-                "queue",
-                0,
-                &active_node_key,
-            )),
-            Some(0),
-        );
-        agent_doc_turn_scope_io::save(&doc, &scope).unwrap();
-        let err = guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "preflight")
-            .expect_err("active queue driver edit must stay structural");
-
-        assert!(
-            err.to_string().contains("agent-doc reset --from-current"),
-            "unsafe drift should keep deterministic reset guidance: {err}"
-        );
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), Some(snapshot));
-    }
-
-    #[test]
-    fn stale_snapshot_reset_drift_allows_small_size_delta() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        let snapshot = "a".repeat(1000);
-        let current = "b".repeat(940);
-
-        let result =
-            guard_no_stale_snapshot_reset_drift(&doc, Some(&snapshot), &current, "stream write");
-
-        assert!(
-            result.is_ok(),
-            "minor snapshot/file size drift should not block writes"
         );
     }
 }

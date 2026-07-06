@@ -19,6 +19,8 @@ class FakeNode implements ReplicaNode {
     state = Buffer.from([1, 2, 3]);
     remoteText = 'remote text';
 
+    constructor(private current = 'remote text') {}
+
     open(clientId: number): boolean {
         this.opened = clientId;
         return true;
@@ -26,11 +28,14 @@ class FakeNode implements ReplicaNode {
 
     applyLocal(clientId: number, offset: number, deleteLen: number, insert: string): boolean {
         this.locals.push({ clientId, offset, deleteLen, insert });
+        const chars = Array.from(this.current);
+        this.current = `${chars.slice(0, offset).join('')}${insert}${chars.slice(offset + deleteLen).join('')}`;
         return true;
     }
 
     applyUpdate(_clientId: number, update: Uint8Array): boolean {
         this.updates.push(Buffer.from(update));
+        this.current = this.remoteText;
         return true;
     }
 
@@ -39,7 +44,7 @@ class FakeNode implements ReplicaNode {
     }
 
     text(): string | null {
-        return this.remoteText;
+        return this.current;
     }
 
     close(clientId?: number): void {
@@ -53,9 +58,11 @@ class FakeTransport implements ReplicaTransport {
     acked: Array<{ patchId: string; generation: number }> = [];
     deregistered: string[] = [];
     broadcastGate: Promise<void> | undefined;
+    registerCount = 0;
 
     async register(): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
-        return { clientId: 42, bootstrap: Buffer.from([9]) };
+        this.registerCount += 1;
+        return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
     }
 
     async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
@@ -74,6 +81,7 @@ class FakeTransport implements ReplicaTransport {
         generation: number,
     ): Promise<boolean> {
         this.acked.push({ patchId, generation });
+        this.pending = this.pending.filter((update) => update.patchId !== patchId);
         return true;
     }
 
@@ -115,20 +123,23 @@ describe('crdt replica manager', () => {
     });
 
     it('forwards a local editor delta through the registered replica', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('a😀b');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
+        let editorText = 'a😀b';
         const manager = new CrdtReplicaManager({
             projectRoot: '/work',
             identity: 'vscode-test',
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => editorText,
             applyText: async () => true,
         });
 
         manager.seedDocument(filePath, 'a😀b');
         assert.strictEqual(await manager.attachDocument(filePath), true);
+        editorText = 'ab';
         await manager.handleLocalChange(filePath, 'ab', [
             { rangeOffset: 1, rangeLength: 2, text: '' },
         ]);
@@ -141,9 +152,10 @@ describe('crdt replica manager', () => {
     });
 
     it('ACKs a pulled remote update only after the converged text is applied', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
+        let editorText = 'base';
         const applied: Array<{ text: string; expectedText: string | undefined }> = [];
         transport.pending = [{
             patchId: 'crdt:1:2:3',
@@ -158,21 +170,23 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => editorText,
             applyText: async (_file, text, expectedText) => {
                 applied.push({ text, expectedText });
+                editorText = text;
                 return true;
             },
         });
 
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, [{ text: 'remote text', expectedText: 'base' }]);
         assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:2:3', generation: 3 }]);
     });
 
     it('passes expected editor text so stale CRDT remote targets are not ACKed over typing', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
         let editorText = 'base';
@@ -189,6 +203,7 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => editorText,
             applyText: async (_file, targetText, expectedText) => {
                 assert.strictEqual(expectedText, 'base');
                 editorText = 'base typed';
@@ -199,14 +214,15 @@ describe('crdt replica manager', () => {
         });
 
         assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
 
         assert.strictEqual(editorText, 'base typed');
         assert.deepStrictEqual(transport.acked, []);
+        manager.dispose();
     });
 
     it('ACKs self-echo remote updates without applying text', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
         const applied: string[] = [];
         transport.pending = [{
@@ -222,6 +238,7 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => 'base',
             applyText: async (_file, text) => {
                 applied.push(text);
                 return true;
@@ -229,7 +246,7 @@ describe('crdt replica manager', () => {
         });
 
         assert.strictEqual(await manager.attachDocument('/work/plan.md', 'base'), true);
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, []);
         assert.deepStrictEqual(node.updates, []);
@@ -237,9 +254,10 @@ describe('crdt replica manager', () => {
     });
 
     it('forwards undo of an applied remote update as a local delta', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
+        let editorText = 'base';
         transport.pending = [{
             patchId: 'crdt:1:42:6',
             origin: 1,
@@ -253,11 +271,16 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
-            applyText: async () => true,
+            currentText: () => editorText,
+            applyText: async (_file, text) => {
+                editorText = text;
+                return true;
+            },
         });
 
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
+        editorText = 'base';
         await manager.handleLocalChange(filePath, 'base', [
             { rangeOffset: 0, rangeLength: 'remote text'.length, text: 'base' },
         ]);
@@ -269,8 +292,9 @@ describe('crdt replica manager', () => {
     });
 
     it('does not ACK a pulled remote update when editor application fails', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
+        let editorText = 'base';
         transport.pending = [{
             patchId: 'crdt:1:2:4',
             origin: 1,
@@ -284,20 +308,23 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => editorText,
             applyText: async () => false,
         });
 
         assert.strictEqual(await manager.attachDocument('/work/plan.md', 'base'), true);
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(transport.acked, []);
+        manager.dispose();
     });
 
     it('defers remote apply while a local delta is still forwarding', async () => {
-        const node = new FakeNode();
+        const node = new FakeNode('base');
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
         const applied: string[] = [];
+        let editorText = 'base';
         let releaseBroadcast!: () => void;
         transport.broadcastGate = new Promise<void>((resolve) => {
             releaseBroadcast = resolve;
@@ -315,27 +342,58 @@ describe('crdt replica manager', () => {
             transport,
             nodeFactory: () => node,
             listDocuments: () => [],
+            currentText: () => editorText,
             applyText: async (_file, text) => {
                 applied.push(text);
+                editorText = text;
                 return true;
             },
         });
 
         assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        editorText = 'base typed';
         const localForward = manager.handleLocalChangeDelta(filePath, [
             { rangeOffset: 4, rangeLength: 0, text: ' typed' },
         ]);
 
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
         assert.deepStrictEqual(applied, []);
         assert.deepStrictEqual(transport.acked, []);
 
         releaseBroadcast();
         await localForward;
-        await manager.pollRemoteUpdates();
+        await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, ['remote text']);
         assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:42:7', generation: 7 }]);
+    });
+
+    it('force-refresh republishes editor text through the cached replica', async () => {
+        const nodes: FakeNode[] = [];
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => {
+                const node = new FakeNode();
+                nodes.push(node);
+                return node;
+            },
+            listDocuments: () => [],
+            currentText: () => 'base updated',
+            applyText: async () => true,
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        assert.strictEqual(await manager.attachDocument(filePath, 'base updated', true), true);
+
+        assert.strictEqual(transport.registerCount, 1);
+        assert.deepStrictEqual(transport.deregistered, []);
+        assert.deepStrictEqual(nodes.map((node) => node.opened), [42]);
+        assert.deepStrictEqual(nodes[0].locals.map((local) => local.insert), ['base', 'base updated']);
+        assert.strictEqual(transport.broadcasts.length, 2);
     });
 });
 

@@ -55,6 +55,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
@@ -67,15 +68,19 @@ use agent_doc_document_realtime::watch_authority::{
 use agent_doc_plugin_owner::crdt_authority::authority_for_file;
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
-/// supervisor's canonical replica is the hub authority; editor replicas mint
-/// their own ids via [`mint_client_id`] and can never collide with this reserved
-/// id (`RelayHub::register` rejects it).
+/// CPC/controller-owned canonical replica is the hub authority; editor replicas
+/// mint their own ids via [`mint_client_id`] and can never collide with this
+/// reserved id (`RelayHub::register` rejects it).
 const CANONICAL_CLIENT_ID: u64 = 1;
+#[cfg(test)]
 const EDITOR_SYNC_SETTLE_MS: u64 = 75;
+#[cfg(test)]
 const EDITOR_SYNC_TIMEOUT_MS: u64 = 150;
 const DOCUMENT_MODEL_ENSURE_POLL_MS: u64 = 25;
+#[cfg(test)]
 const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 150;
-const DOCUMENT_MODEL_ENSURE_COOLDOWN_MS: u64 = 10_000;
+#[cfg(not(test))]
+const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 5_000;
 // `send_publish_live_buffer` can spend 3s connecting and 6s waiting for a
 // receipt. Keep the cross-process lock fresh across that whole window so a slow
 // or wedged editor listener cannot cause competing recovery attempts.
@@ -183,11 +188,53 @@ pub fn current_text_for_file(file: &Path) -> Result<CurrentText> {
     current_text_for_file_with_authority(file, authority)
 }
 
+/// [`current_text_for_file`] without flushing live editor ops into the canonical
+/// replica.
+pub fn current_text_for_file_nonblocking(file: &Path) -> Result<CurrentText> {
+    let authority = authority_for_file(&file.display().to_string());
+    current_text_for_file_with_authority_nonblocking(file, authority)
+}
+
 /// [`current_text_for_file`] with an explicitly-resolved authority for tests and
 /// callers that already hold the authority lease state.
 pub fn current_text_for_file_with_authority(
     file: &Path,
     authority: CrdtAuthority,
+) -> Result<CurrentText> {
+    current_text_for_file_with_authority_inner(file, authority, false, true)
+}
+
+/// [`current_text_for_file_with_authority`] without flushing live editor ops.
+///
+/// This is for latency-sensitive observation paths that need a cheap CPC state
+/// proof. If a hub exists but is not already a consistent cut, it reports
+/// [`CurrentText::EditorSyncPending`] instead of driving the commit barrier.
+pub fn current_text_for_file_with_authority_nonblocking(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> Result<CurrentText> {
+    current_text_for_file_with_authority_inner(file, authority, false, false)
+}
+
+/// Resolve current text after a publish-live-buffer request has already had a
+/// bounded chance to restore the live relay model.
+///
+/// This keeps the first read strict: while an editor owns the document, the
+/// binary must ask the editor/controller to republish before it uses the durable
+/// `.yrs` recovery projection. The projection remains restart recovery input,
+/// not markdown/disk authority.
+pub fn current_text_for_file_with_authority_recovering_projection(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> Result<CurrentText> {
+    current_text_for_file_with_authority_inner(file, authority, true, true)
+}
+
+fn current_text_for_file_with_authority_inner(
+    file: &Path,
+    authority: CrdtAuthority,
+    recover_missing_from_projection: bool,
+    flush_barrier: bool,
 ) -> Result<CurrentText> {
     if !authority.editor_attached() {
         return Ok(CurrentText::Detached);
@@ -197,6 +244,13 @@ pub fn current_text_for_file_with_authority(
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    if !registry.contains_key(&hash) && recover_missing_from_projection {
+        drop(registry);
+        recover_missing_hub_from_durable_projection(file, &hash)?;
+        registry = hub_registry()
+            .lock()
+            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    }
     let Some(hub) = registry.get_mut(&hash) else {
         agent_doc_ops_log_io::log_op(
             file,
@@ -210,7 +264,11 @@ pub fn current_text_for_file_with_authority(
         return Ok(CurrentText::EditorAttachedMissingReplica);
     };
 
-    let ready = hub.commit_barrier_under_authority(authority)?;
+    let ready = if flush_barrier {
+        hub.commit_barrier_under_authority(authority)?
+    } else {
+        hub.commit_barrier_ready()?
+    };
     let delivery_converged = hub.delivery_converged();
     if !ready {
         agent_doc_ops_log_io::log_op(
@@ -245,25 +303,165 @@ pub fn current_text_for_file_with_authority(
     })
 }
 
+fn recover_missing_hub_from_durable_projection(file: &Path, hash: &str) -> Result<bool> {
+    let projection = match agent_doc_snapshot_io::load_crdt(file) {
+        Ok(Some(projection)) => projection,
+        Ok(None) => return Ok(false),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_current_text_projection_recovery_failed file={} authority=multi_replica doc_hash={} reason=load_crdt_error error={} recovery=continue_missing_replica",
+                    file.display(),
+                    hash,
+                    format!("{err:#}").replace('\n', "\\n"),
+                ),
+            );
+            return Ok(false);
+        }
+    };
+    match recover_hub_from_disk(file, &projection)
+        .or_else(|err| recover_hub_from_legacy_markdown_projection(file, hash, &projection, err))
+    {
+        Ok(()) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_current_text_projection_recovered file={} authority=multi_replica doc_hash={} bytes={} process_pid={}",
+                    file.display(),
+                    hash,
+                    projection.len(),
+                    std::process::id(),
+                ),
+            );
+            Ok(true)
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_current_text_projection_recovery_failed file={} authority=multi_replica doc_hash={} reason=recover_projection_error error={} recovery=continue_missing_replica",
+                    file.display(),
+                    hash,
+                    format!("{err:#}").replace('\n', "\\n"),
+                ),
+            );
+            Ok(false)
+        }
+    }
+}
+
+fn recover_hub_from_legacy_markdown_projection(
+    file: &Path,
+    hash: &str,
+    projection: &[u8],
+    original_err: anyhow::Error,
+) -> Result<()> {
+    let text = match std::str::from_utf8(projection) {
+        Ok(text) if looks_like_legacy_markdown_projection(text) => text,
+        _ => return Err(original_err),
+    };
+    let mut hub = RelayHub::new(CANONICAL_CLIENT_ID);
+    let editor = mint_client_id("agent-doc:legacy-markdown-projection");
+    hub.register(editor)?;
+    hub.apply_local(editor, 0, 0, text)?;
+    let repaired_projection = hub.projection_bytes();
+    agent_doc_snapshot_io::save_crdt(file, &repaired_projection)?;
+    let mut registry = hub_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    registry.entry(hash.to_string()).or_insert(hub);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_current_text_legacy_markdown_projection_repaired file={} authority=multi_replica doc_hash={} text_len={} repaired_bytes={} recovery=rewrote_legacy_text_projection",
+            file.display(),
+            hash,
+            text.len(),
+            repaired_projection.len(),
+        ),
+    );
+    Ok(())
+}
+
+fn looks_like_legacy_markdown_projection(text: &str) -> bool {
+    text.starts_with("---\n")
+        || text.starts_with("# ")
+        || text.contains("<!-- agent:")
+        || text.contains("<!-- patch:exchange -->")
+}
+
 /// Ensure the live document model is usable before a hot-path read gives up on
 /// editor authority.
 ///
 /// This is intentionally narrower than the commit barrier: it does not treat
-/// disk as authoritative and it does not seed a relay hub from disk just to make
-/// the read succeed. When the editor owns the document but the relay is missing
-/// or not converged, it asks the editor to republish/register its live buffer via
-/// the read-only `publish_live_buffer` IPC path, waits for a bounded interval,
-/// and returns the refreshed relay state. Callers should surface this failure
-/// instead of the raw "missing replica" state so startup/reconcile is the final
-/// contract, not the pre-recovery observation.
+/// markdown or live-buffer sidecars as authoritative. When the editor owns the
+/// document but the relay is missing or not converged, it asks the editor to
+/// republish/register its live buffer via the read-only `publish_live_buffer` IPC
+/// path, waits for a bounded interval, and only then may restore the in-memory
+/// relay hub from the durable `.yrs` restart projection. Callers should surface
+/// this failure instead of the raw "missing replica" state so startup/reconcile
+/// is the final contract, not the pre-recovery observation.
 pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     let authority = authority_for_file(&file.display().to_string());
-    if authority.editor_attached()
-        && let Some(suppression) = existing_document_model_ensure_suppression(file, source)?
-    {
-        return suppressed_document_model_ensure_result(file, source, suppression);
-    }
     let first = current_text_for_file_with_authority(file, authority)?;
+    ensure_document_model_with_current_text_recovery_observer(
+        file,
+        source,
+        first,
+        || current_text_for_file_with_authority(file, authority),
+        || current_text_for_file_with_authority_recovering_projection(file, authority),
+    )
+}
+
+/// Ensure the live document model using a caller-supplied current-text observer.
+///
+/// This keeps the single bounded publish/retry guard in the relay crate while
+/// allowing controller clients to request an editor publish outside the
+/// controller RPC handler and then poll CPC-owned relay state through the
+/// controller. The observer must read relay state only; it must not treat disk or
+/// live-buffer sidecars as fallback authority while an editor is attached.
+pub fn ensure_document_model_with_current_text_observer(
+    file: &Path,
+    source: &str,
+    first: CurrentText,
+    observe_current_text: impl FnMut() -> Result<CurrentText>,
+) -> Result<CurrentText> {
+    ensure_document_model_with_current_text_observer_inner(
+        file,
+        source,
+        first,
+        observe_current_text,
+        None,
+    )
+}
+
+/// [`ensure_document_model_with_current_text_observer`] plus a final recovery
+/// observer that may use the durable CRDT projection after publish/retry timed
+/// out.
+pub fn ensure_document_model_with_current_text_recovery_observer(
+    file: &Path,
+    source: &str,
+    first: CurrentText,
+    observe_current_text: impl FnMut() -> Result<CurrentText>,
+    mut observe_recovery_current_text: impl FnMut() -> Result<CurrentText>,
+) -> Result<CurrentText> {
+    ensure_document_model_with_current_text_observer_inner(
+        file,
+        source,
+        first,
+        observe_current_text,
+        Some(&mut observe_recovery_current_text),
+    )
+}
+
+fn ensure_document_model_with_current_text_observer_inner(
+    file: &Path,
+    source: &str,
+    first: CurrentText,
+    mut observe_current_text: impl FnMut() -> Result<CurrentText>,
+    mut observe_recovery_current_text: Option<&mut dyn FnMut() -> Result<CurrentText>>,
+) -> Result<CurrentText> {
     if matches!(first, CurrentText::Detached | CurrentText::Current { .. }) {
         return Ok(first);
     }
@@ -292,29 +490,107 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
     let mut last_label = first_label;
+    let mut last_observer_error: Option<String> = None;
     loop {
         if std::time::Instant::now() >= deadline {
+            if let Some(observer) = observe_recovery_current_text.as_mut() {
+                match observer() {
+                    Ok(current @ (CurrentText::Detached | CurrentText::Current { .. })) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "document_model_ensure_ready file={} source={} initial_state={} final_state={} recovery=durable_projection_after_publish_timeout",
+                                file.display(),
+                                source,
+                                first_label,
+                                current_text_label(&current),
+                            ),
+                        );
+                        ensure_guard.record_success();
+                        return Ok(current);
+                    }
+                    Ok(
+                        current @ (CurrentText::EditorAttachedMissingReplica
+                        | CurrentText::EditorSyncPending),
+                    ) => {
+                        last_label = current_text_label(&current);
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "document_model_ensure_projection_recovery_not_ready file={} source={} initial_state={} final_state={} recovery=retry_without_disk_write",
+                                file.display(),
+                                source,
+                                first_label,
+                                last_label,
+                            ),
+                        );
+                    }
+                    Err(err) => {
+                        let detail = format!("{err:#}")
+                            .replace('\n', " | ")
+                            .chars()
+                            .take(240)
+                            .collect::<String>();
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "document_model_ensure_projection_recovery_error file={} source={} initial_state={} last_state={} error={} recovery=retry_without_disk_write",
+                                file.display(),
+                                source,
+                                first_label,
+                                last_label,
+                                detail,
+                            ),
+                        );
+                        last_observer_error = Some(detail);
+                    }
+                }
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} recovery=retry_without_disk_write",
+                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} last_observer_error={} recovery=retry_without_disk_write",
                     file.display(),
                     source,
                     first_label,
                     last_label,
                     DOCUMENT_MODEL_ENSURE_TIMEOUT_MS,
+                    last_observer_error.as_deref().unwrap_or("none"),
                 ),
             );
             ensure_guard.record_failure(last_label);
             anyhow::bail!(
-                "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; reload or save the editor buffer, then retry",
-                file.display()
+                "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; last_observer_error={}; recovery=retry_without_disk_write; reload or save the editor buffer, then retry",
+                file.display(),
+                last_observer_error.as_deref().unwrap_or("none")
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(
             DOCUMENT_MODEL_ENSURE_POLL_MS,
         ));
-        let current = current_text_for_file_with_authority(file, authority)?;
+        let current = match observe_current_text() {
+            Ok(current) => current,
+            Err(err) => {
+                let detail = format!("{err:#}")
+                    .replace('\n', " | ")
+                    .chars()
+                    .take(240)
+                    .collect::<String>();
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_observer_error file={} source={} initial_state={} last_state={} error={} recovery=retry_until_deadline",
+                        file.display(),
+                        source,
+                        first_label,
+                        last_label,
+                        detail,
+                    ),
+                );
+                last_observer_error = Some(detail);
+                continue;
+            }
+        };
         match current {
             CurrentText::Detached | CurrentText::Current { .. } => {
                 agent_doc_ops_log_io::log_op(
@@ -337,15 +613,15 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     }
 }
 
-/// Fail fast when another process recently attempted, or is actively attempting,
-/// document-model recovery for the same editor-attached document.
+/// Fail fast when another process is actively attempting document-model recovery
+/// for the same editor-attached document.
 ///
 /// This is intentionally public for resolver entry points that would otherwise
 /// perform a noisy current-text probe before reaching [`ensure_document_model`].
 pub fn defer_if_document_model_ensure_suppressed(file: &Path, source: &str) -> Result<()> {
     let authority = authority_for_file(&file.display().to_string());
     if authority.editor_attached()
-        && let Some(suppression) = existing_document_model_ensure_suppression(file, source)?
+        && let Some(suppression) = existing_document_model_ensure_in_progress(file, source)?
     {
         suppressed_document_model_ensure_result(file, source, suppression)?;
     }
@@ -364,12 +640,10 @@ fn current_text_label(current: &CurrentText) -> &'static str {
 #[derive(Debug, Clone)]
 struct DocumentModelEnsurePaths {
     lock_path: PathBuf,
-    cooldown_path: PathBuf,
 }
 
 struct DocumentModelEnsureGuard {
     lock_path: PathBuf,
-    cooldown_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -379,13 +653,9 @@ struct DocumentModelEnsureSuppression {
 }
 
 impl DocumentModelEnsureGuard {
-    fn record_failure(&mut self, state: &str) {
-        let _ = std::fs::write(&self.cooldown_path, state);
-    }
+    fn record_failure(&mut self, _state: &str) {}
 
-    fn record_success(&mut self) {
-        let _ = std::fs::remove_file(&self.cooldown_path);
-    }
+    fn record_success(&mut self) {}
 }
 
 impl Drop for DocumentModelEnsureGuard {
@@ -409,25 +679,14 @@ fn document_model_ensure_paths(file: &Path) -> Result<DocumentModelEnsurePaths> 
     std::fs::create_dir_all(&dir)?;
     Ok(DocumentModelEnsurePaths {
         lock_path: dir.join(format!("{hash}.lock")),
-        cooldown_path: dir.join(format!("{hash}.cooldown")),
     })
 }
 
-fn existing_document_model_ensure_suppression(
+fn existing_document_model_ensure_in_progress(
     file: &Path,
     source: &str,
 ) -> Result<Option<DocumentModelEnsureSuppression>> {
     let paths = document_model_ensure_paths(file)?;
-    if let Some(state) =
-        fresh_document_model_ensure_marker(&paths.cooldown_path, DOCUMENT_MODEL_ENSURE_COOLDOWN_MS)
-    {
-        let suppression = DocumentModelEnsureSuppression {
-            reason: "recent_failure",
-            state,
-        };
-        log_document_model_ensure_suppressed(file, source, suppression);
-        return Ok(Some(suppression));
-    }
     if let Some(state) =
         fresh_document_model_ensure_marker(&paths.lock_path, DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS)
     {
@@ -447,16 +706,6 @@ fn acquire_document_model_ensure_attempt(
     initial_state: &'static str,
 ) -> Result<DocumentModelEnsureAdmission> {
     let paths = document_model_ensure_paths(file)?;
-    if let Some(state) =
-        fresh_document_model_ensure_marker(&paths.cooldown_path, DOCUMENT_MODEL_ENSURE_COOLDOWN_MS)
-    {
-        let suppression = DocumentModelEnsureSuppression {
-            reason: "recent_failure",
-            state,
-        };
-        log_document_model_ensure_suppressed(file, source, suppression);
-        return Ok(DocumentModelEnsureAdmission::Suppressed(suppression));
-    }
     for _ in 0..2 {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -468,7 +717,6 @@ fn acquire_document_model_ensure_attempt(
                 return Ok(DocumentModelEnsureAdmission::Run(
                     DocumentModelEnsureGuard {
                         lock_path: paths.lock_path,
-                        cooldown_path: paths.cooldown_path,
                     },
                 ));
             }
@@ -524,12 +772,11 @@ fn log_document_model_ensure_suppressed(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "document_model_ensure_suppressed file={} source={} reason={} state={} cooldown_ms={} lock_stale_ms={} recovery=retry_without_disk_write",
+            "document_model_ensure_suppressed file={} source={} reason={} state={} lock_stale_ms={} recovery=retry_without_disk_write",
             file.display(),
             source,
             suppression.reason,
             suppression.state,
-            DOCUMENT_MODEL_ENSURE_COOLDOWN_MS,
             DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS,
         ),
     );
@@ -556,10 +803,54 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
         agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|e| format!("hash_error:{e}"));
     let listener_active = agent_doc_ipc_io::is_listener_active(&project_root);
     let (transport, publish_result) = if listener_active {
-        (
-            "editor_ipc",
-            agent_doc_ipc_io::send_publish_live_buffer(&project_root, &path_str),
-        )
+        match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &path_str) {
+            Ok(true) => ("editor_ipc", Ok(true)),
+            Ok(false) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_publish_socket_unavailable file={} canonical={} source={} transport=editor_ipc project_root={} listener_active={} doc_hash={} action=file_signal_fallback process_pid={}",
+                        file.display(),
+                        canonical.display(),
+                        source,
+                        project_root.display(),
+                        listener_active,
+                        doc_hash,
+                        std::process::id(),
+                    ),
+                );
+                (
+                    "file_signal_after_socket_unavailable",
+                    agent_doc_ipc_io::send_publish_live_buffer_file_signal(
+                        &project_root,
+                        &path_str,
+                    ),
+                )
+            }
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_model_ensure_publish_socket_error file={} canonical={} source={} transport=editor_ipc project_root={} listener_active={} doc_hash={} action=file_signal_fallback process_pid={} error={}",
+                        file.display(),
+                        canonical.display(),
+                        source,
+                        project_root.display(),
+                        listener_active,
+                        doc_hash,
+                        std::process::id(),
+                        err.to_string().replace(char::is_whitespace, "_"),
+                    ),
+                );
+                (
+                    "file_signal_after_socket_error",
+                    agent_doc_ipc_io::send_publish_live_buffer_file_signal(
+                        &project_root,
+                        &path_str,
+                    ),
+                )
+            }
+        }
     } else {
         (
             "file_signal",
@@ -588,7 +879,7 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_unavailable file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={}",
+                    "document_model_ensure_publish_unavailable file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} recovery=continue_to_projection_recovery",
                     file.display(),
                     canonical.display(),
                     source,
@@ -599,16 +890,13 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
                     std::process::id(),
                 ),
             );
-            anyhow::bail!(
-                "document model startup/reconciliation failed for {}: publish-live-buffer request was not accepted over {transport}; disk remained non-authoritative and was not read as a fallback",
-                file.display()
-            )
+            Ok(())
         }
         Err(e) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_error file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} error={}",
+                    "document_model_ensure_publish_error file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} error={} recovery=continue_to_projection_recovery",
                     file.display(),
                     canonical.display(),
                     source,
@@ -620,10 +908,7 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
                     e,
                 ),
             );
-            anyhow::bail!(
-                "document model startup/reconciliation failed for {}: publish-live-buffer request over {transport} failed: {e}; disk remained non-authoritative and was not read as a fallback",
-                file.display()
-            )
+            Ok(())
         }
     }
 }
@@ -641,6 +926,20 @@ pub struct FanOut {
     /// The canonical converged text length (chars) after integrating — for
     /// diagnostics / ops.log only.
     pub canonical_len: usize,
+}
+
+/// Result of a CPC-authored CRDT write into the controller-owned canonical
+/// replica. Disk materialization may use this result as proof that the document
+/// file is a projection of the relay, not a separate editor-authoritative path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpcRelayWrite {
+    pub applied: bool,
+    pub content_len: usize,
+    pub content_hash: String,
+    pub update_bytes: usize,
+    pub targets: usize,
+    pub live_editors: usize,
+    pub delivery_converged: bool,
 }
 
 /// Pending updates plus delivery state for one editor replica.
@@ -746,6 +1045,18 @@ pub fn relay_replica_update_for_file(
     let packet = with_hub_seeded_from_file(file, |hub| hub.relay_update(client_id, update))??;
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
+    if !packet.targets.is_empty()
+        && !packet.update.is_empty()
+        && let Err(err) = signal_crdt_replica_event(file, "fanout", packet.targets.len())
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=fanout error={err}",
+                file.display(),
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -763,6 +1074,100 @@ pub fn relay_replica_update_for_file(
         targets: packet.targets,
         canonical_len,
     }))
+}
+
+/// Apply a CPC-authored full-document update through the CRDT relay.
+///
+/// This is the controller→editor direction for recovered/finalized writes. It
+/// refuses to create a relay hub from disk while an editor is attached, and it
+/// only mutates the canonical replica when the caller's `expected_current`
+/// byte-matches the current CPC canonical text after the live-editor commit
+/// barrier has flushed inbound editor ops. That baseline check is the guard that
+/// keeps unsaved editor-buffer changes from being overwritten by a stale binary
+/// recovery response.
+pub fn apply_cpc_write_for_file(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<CpcRelayWrite>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let Some(result) = with_existing_hub(file, |hub| {
+        let ready = hub.commit_barrier_under_authority(authority)?;
+        if !ready {
+            anyhow::bail!(
+                "CPC relay write refused for {}: editor_sync_pending; disk is a non-authoritative projection",
+                file.display()
+            );
+        }
+        let canonical = hub.canonical_text();
+        if canonical != expected_current {
+            anyhow::bail!(
+                "CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+                file.display(),
+                agent_doc_hash::content_hash(expected_current),
+                agent_doc_hash::content_hash(&canonical)
+            );
+        }
+        let before_hash = agent_doc_hash::content_hash(&canonical);
+        let packet = hub.apply_canonical_replace(expected_current, content)?;
+        let write = CpcRelayWrite {
+            applied: before_hash != agent_doc_hash::content_hash(content),
+            content_len: content.len(),
+            content_hash: agent_doc_hash::content_hash(content),
+            update_bytes: packet.update.len(),
+            targets: packet.targets.len(),
+            live_editors: hub.live_count(),
+            delivery_converged: hub.delivery_converged(),
+        };
+        Ok(write)
+    })?
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_cpc_write_deferred file={} source={} authority=multi_replica reason=missing_relay_model recovery=publish_live_buffer_register_crdt",
+                file.display(),
+                source,
+            ),
+        );
+        anyhow::bail!(
+            "CPC relay write unavailable for {}; editor is attached but the CRDT relay has no registered replica yet",
+            file.display()
+        );
+    };
+    let result = result?;
+    if result.targets > 0
+        && result.update_bytes > 0
+        && let Err(err) = signal_crdt_replica_event(file, "cpc_write", result.targets)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=cpc_write error={err}",
+                file.display(),
+            ),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_cpc_write file={} source={} authority=multi_replica applied={} content_len={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            file.display(),
+            source,
+            result.applied,
+            result.content_len,
+            result.content_hash,
+            result.update_bytes,
+            result.targets,
+            result.live_editors,
+            result.delivery_converged,
+        ),
+    );
+    Ok(Some(result))
 }
 
 /// Pull supervisor-to-editor updates queued for this replica. The returned
@@ -808,10 +1213,11 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
 
 /// D2 delivery: if the editor `identity` was flagged for a **replace-capable
 /// re-bootstrap** (an out-of-band deletion the additive CRDT delta cannot
-/// express), return the corrected canonical text the editor must REPLACE its
-/// buffer with, and clear the flag. `Ok(None)` when nothing is pending or the doc
-/// is not editor-attached. The editor applies the returned text by *replacing* its
-/// buffer, never CRDT-merging — that is the whole point of D2.
+/// express), return the corrected canonical text and clear the flag. `Ok(None)`
+/// when nothing is pending or the doc is not editor-attached. The editor may
+/// replace its buffer only after proving the visible editor buffer and local
+/// native replica still match the expected baseline; otherwise it republishes the
+/// editor buffer through the relay and lets operator text win.
 pub fn pull_rebootstrap_for_file(file: &Path, identity: &str) -> Result<Option<String>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -1319,52 +1725,36 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
         // unchanged.
         return true;
     }
-    if !settle_or_flush_editor_sync_barrier(file, "commit_barrier") {
-        return false;
-    }
-    // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live editors
-    // into the canonical for the commit cut. If the document was corrected out of
-    // band on disk since this hub's last commit (a `git checkout HEAD` /
-    // `reset --from-current` recovery), the additive in-memory-wins reconcile can
-    // never displace the stale canonical ops, so the stale canonical otherwise
-    // re-commits the discarded content every cycle until a supervisor restart
-    // clears the process-global hub. Rebuilding the canonical from the corrected
-    // disk baseline makes the correction stick without a restart.
-    if let Ok(on_disk) = std::fs::read_to_string(file) {
-        match with_hub_seeded_from_file(file, |hub| {
-            hub.reconcile_canonical_against_baseline(&on_disk)
-        }) {
-            Ok(Ok(true)) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
-                    file.display(),
-                    on_disk.len()
+    match with_existing_hub(file, |hub| {
+        // `#staleinmem` — out-of-band baseline reconcile, BEFORE flushing live
+        // editors into the canonical for the commit cut. This compares the real
+        // document file to the relay's last committed baseline; it never creates
+        // a relay hub from disk and never consults live-buffer sidecars.
+        if let Ok(on_disk) = std::fs::read_to_string(file) {
+            match hub.reconcile_canonical_against_baseline(&on_disk) {
+                Ok(true) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_canonical_rebuilt_from_baseline file={} authority=multi_replica disk_len={}",
+                        file.display(),
+                        on_disk.len()
+                    ),
                 ),
-            ),
-            Ok(Ok(false)) => {}
-            Ok(Err(e)) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_canonical_baseline_reconcile_error file={} error={}",
-                    file.display(),
-                    e
+                Ok(false) => {}
+                Err(e) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_canonical_baseline_reconcile_error file={} error={}",
+                        file.display(),
+                        e
+                    ),
                 ),
-            ),
-            Err(e) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "crdt_canonical_baseline_reconcile_registry_error file={} error={}",
-                    file.display(),
-                    e
-                ),
-            ),
+            }
         }
-    }
-    match with_hub_seeded_from_file(file, |hub| hub.commit_barrier_under_authority(authority)) {
-        Ok(Ok(ready)) => {
-            let delivery_converged =
-                with_hub_seeded_from_file(file, |hub| hub.delivery_converged()).unwrap_or(false);
+        hub.commit_barrier_under_authority(authority)
+            .map(|ready| (ready, hub.delivery_converged(), hub.live_count()))
+    }) {
+        Ok(Some(Ok((ready, delivery_converged, live_editors)))) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1372,18 +1762,28 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
                     file.display(),
                     ready,
                     delivery_converged,
-                    with_hub_seeded_from_file(file, |hub| hub.live_count()).unwrap_or(0),
+                    live_editors,
                 ),
             );
             ready && delivery_converged
         }
-        Ok(Err(e)) => {
+        Ok(Some(Err(e))) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
                     "crdt_commit_barrier_error file={} authority=multi_replica error={}",
                     file.display(),
                     e
+                ),
+            );
+            false
+        }
+        Ok(None) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_commit_barrier_deferred file={} authority=multi_replica reason=missing_relay_model recovery=publish_live_buffer_register_crdt",
+                    file.display(),
                 ),
             );
             false
@@ -1489,9 +1889,18 @@ pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Res
         // baseline-wins load path in snapshot.rs already handles stale disk.
         return Ok(None);
     }
-    let _ = settle_or_flush_editor_sync_barrier(file, "disk_projection_reconcile");
-    let changed =
-        with_hub_seeded_from_file(file, |hub| hub.reconcile_disk_projection(projection))??;
+    let Some(changed) = with_existing_hub(file, |hub| hub.reconcile_disk_projection(projection))?
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_disk_demotion_reconcile_deferred file={} authority=multi_replica reason=missing_relay_model",
+                file.display(),
+            ),
+        );
+        return Ok(None);
+    };
+    let changed = changed?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1526,10 +1935,28 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
         // stale disk. Nothing to reconcile here.
         return Ok(None);
     }
-    // Bounded, fail-open: never block a reconcile forever on an editor that will
-    // not settle (the no_ack wedge). Same primitive the projection reconcile uses.
-    let _ = settle_or_flush_editor_sync_barrier(file, "disk_change_reconcile");
-    let outcome = with_hub_seeded_from_file(file, |hub| hub.apply_disk_change(on_disk))??;
+    let Some(outcome) = with_existing_hub(file, |hub| hub.apply_disk_change(on_disk))? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_disk_change_reconcile_deferred file={} authority=multi_replica reason=missing_relay_model",
+                file.display(),
+            ),
+        );
+        return Ok(None);
+    };
+    let outcome = outcome?;
+    if matches!(outcome, DiskChangeOutcome::RebuiltFromDisk { live_members } if live_members > 0)
+        && let Err(err) = signal_crdt_replica_event(file, "rebootstrap", 0)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=rebootstrap error={err}",
+                file.display(),
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1540,13 +1967,44 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
     Ok(Some(outcome))
 }
 
-/// Producer (C1b, controller watch daemon side): drop a disk-change-reconcile
-/// marker for `file` so the owning supervisor's idle loop reconciles the change
-/// into the canonical replica at its next idle boundary. This is the robust
-/// cross-process signal (a file marker polled by the supervisor, mirroring
-/// `recycle_request`) — it needs no live socket or session resolution and
-/// survives degraded IPC. The marker is a signal only; the consumer re-reads the
-/// current disk text so a change that lands after this call is still picked up.
+/// Wake editor replicas that watch `.agent-doc/crdt-replica-events/` so they can
+/// drain queued CRDT deliveries from the controller without a fixed pull loop.
+pub fn signal_crdt_replica_event(file: &Path, reason: &str, targets: usize) -> Result<()> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let path = agent_doc_fs::crdt_replica_event_path_for(&canonical)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create CRDT replica event dir {}",
+                parent.display()
+            )
+        })?;
+    }
+    let doc_hash = agent_doc_fs::document_state_hash(&canonical)?;
+    let signaled_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let body = serde_json::json!({
+        "file": canonical.to_string_lossy(),
+        "doc_hash": doc_hash,
+        "reason": reason,
+        "targets": targets,
+        "signaled_at_ms": signaled_at_ms,
+        "process_pid": std::process::id(),
+    });
+    std::fs::write(&path, serde_json::to_vec(&body)?)
+        .with_context(|| format!("failed to write CRDT replica event {}", path.display()))?;
+    Ok(())
+}
+
+/// Producer (C1b, controller watch side): drop a disk-change-reconcile marker
+/// for `file` so the CPC/controller consumer reconciles the change into the
+/// canonical replica at its next safe boundary. This is a robust cross-process
+/// signal (a file marker, mirroring `recycle_request`) — it needs no supervisor
+/// socket or session resolution and survives degraded IPC. The marker is a
+/// signal only; the consumer re-reads the current disk text so a change that
+/// lands after this call is still picked up.
 pub fn request_disk_change_reconcile(file: &Path) -> Result<()> {
     let path = agent_doc_fs::disk_change_request_path_for(file)?;
     if let Some(parent) = path.parent() {
@@ -1623,6 +2081,7 @@ pub fn route_disk_change_signal(file: &Path, delivery: &WatchDelivery) -> Result
     Ok(action)
 }
 
+#[cfg(test)]
 fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
     let file_str = file.display().to_string();
     let outcome = agent_doc_debounce::await_editor_sync_barrier(
@@ -1731,99 +2190,40 @@ fn settle_or_flush_editor_sync_barrier(file: &Path, reason: &str) -> bool {
         }
     }
 
-    mark_published_live_buffer_snapshots_synced(file, &file_str, reason);
-
-    let after_flush = agent_doc_debounce::await_editor_sync_barrier(
-        &file_str,
-        EDITOR_SYNC_SETTLE_MS,
-        EDITOR_SYNC_TIMEOUT_MS,
+    let current = match current_text_for_file(file) {
+        Ok(current) => current,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "editor_sync_barrier_after_publish_current_unavailable file={} reason={} error={}",
+                    file.display(),
+                    reason,
+                    err
+                ),
+            );
+            return false;
+        }
+    };
+    let ready = matches!(
+        current,
+        CurrentText::Detached
+            | CurrentText::Current {
+                delivery_converged: true,
+                ..
+            }
     );
-    let in_flight = after_flush
-        .statuses
-        .iter()
-        .filter(|status| status.in_flight)
-        .count();
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "editor_sync_barrier_after_flush file={} reason={} outcome={:?} statuses={} in_flight={} typing_recent={}",
+            "editor_sync_barrier_after_publish_current file={} reason={} state={} ready={}",
             file.display(),
             reason,
-            after_flush.kind,
-            after_flush.statuses.len(),
-            in_flight,
-            after_flush.typing_recent
+            current_text_label(&current),
+            ready
         ),
     );
-    after_flush.kind != agent_doc_debounce::EditorSyncBarrierKind::TimedOut
-}
-
-fn mark_published_live_buffer_snapshots_synced(file: &Path, file_key: &str, reason: &str) {
-    for snapshot in agent_doc_debounce::live_buffer_snapshots(file_key) {
-        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
-            continue;
-        }
-        let Some(editor_id) = snapshot.editor_id.as_deref() else {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} cause=missing_editor_id len={} hash={}",
-                    file.display(),
-                    reason,
-                    snapshot.len,
-                    snapshot.hash
-                ),
-            );
-            continue;
-        };
-        let Some(content) = snapshot.content.as_deref() else {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "editor_sync_barrier_live_buffer_publish_sync_skipped file={} reason={} editor_id={} cause=missing_content len={} hash={}",
-                    file.display(),
-                    reason,
-                    editor_id,
-                    snapshot.len,
-                    snapshot.hash
-                ),
-            );
-            continue;
-        };
-        let capabilities: Vec<&str> = snapshot.capabilities.iter().map(String::as_str).collect();
-        match agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            file_key,
-            content,
-            editor_id,
-            snapshot.editor_kind.as_deref().unwrap_or("unknown"),
-            snapshot.editor_version.as_deref().unwrap_or("unknown"),
-            &capabilities,
-        ) {
-            Ok(()) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "editor_sync_barrier_live_buffer_publish_synced file={} reason={} editor_id={} len={} hash={}",
-                    file.display(),
-                    reason,
-                    editor_id,
-                    snapshot.len,
-                    snapshot.hash
-                ),
-            ),
-            Err(e) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "editor_sync_barrier_live_buffer_publish_sync_error file={} reason={} editor_id={} len={} hash={} error={}",
-                    file.display(),
-                    reason,
-                    editor_id,
-                    snapshot.len,
-                    snapshot.hash,
-                    e
-                ),
-            ),
-        }
-    }
+    ready
 }
 
 #[cfg(test)]
@@ -1878,6 +2278,69 @@ mod tests {
         with_hub(&doc, |hub| {
             assert_eq!(hub.canonical_text(), on_disk);
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn cpc_relay_write_requires_current_canonical_baseline() {
+        let (_dir, doc) = temp_doc("cpc-baseline.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        register_replica_for_file(&doc, "intellij:cpc-baseline")
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let err = apply_cpc_write_for_file(
+            &doc,
+            "stale baseline\n",
+            "stale baseline\n### Re: no — gpt-5\n\nNo.\n",
+            "test_cpc_relay",
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("recovery=retry_crdt_merge"),
+            "stale baseline must fail closed before relay mutation: {err:#}"
+        );
+        with_hub(&doc, |hub| {
+            assert!(hub.canonical_text().contains("body"));
+            assert_eq!(
+                hub.pending_updates(mint_client_id("intellij:cpc-baseline"))
+                    .unwrap()
+                    .len(),
+                0
+            );
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn cpc_relay_write_queues_editor_pull_without_file_ipc_sidecar() {
+        let (_dir, doc) = temp_doc("cpc-write.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        register_replica_for_file(&doc, "intellij:cpc-write")
+            .unwrap()
+            .expect("editor replica should attach");
+        let current = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let next = format!("{current}\n### Re: relay — gpt-5\n\nRecovered via relay.\n");
+
+        let result = apply_cpc_write_for_file(&doc, &current, &next, "test_cpc_relay")
+            .unwrap()
+            .expect("attached CPC relay write should apply");
+        assert!(result.applied);
+        assert_eq!(result.targets, 1);
+        assert!(!result.delivery_converged);
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), next);
+            let pending = hub
+                .pending_updates(mint_client_id("intellij:cpc-write"))
+                .unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
         })
         .unwrap();
     }
@@ -1966,6 +2429,253 @@ mod tests {
     }
 
     #[test]
+    fn editor_attached_projection_recovery_requires_explicit_recovery_read() {
+        let (_dir, doc) = temp_doc("attached-projection-recovery.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
+        let editor = mint_client_id("intellij:projection-recovery");
+        prior.register(editor).unwrap();
+        prior.apply_local(editor, 0, 0, "durable recovery").unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, &prior.projection_bytes()).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let strict = current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica)
+            .expect("strict read should not fail");
+        assert_eq!(strict, CurrentText::EditorAttachedMissingReplica);
+        assert!(
+            !hub_is_allocated_for_test(&hash),
+            "strict current-text reads must not restore from the recovery projection"
+        );
+
+        let recovered = current_text_for_file_with_authority_recovering_projection(
+            &doc,
+            CrdtAuthority::MultiReplica,
+        )
+        .expect("explicit recovery read should restore the relay hub");
+        match recovered {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert_eq!(text, "durable recovery");
+                assert_eq!(live_editors, 0, "editors re-register after recovery");
+            }
+            other => panic!("expected recovered relay current text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nonblocking_current_text_does_not_flush_pending_editor_ops() {
+        let (_dir, doc) = temp_doc("attached-nonblocking-current.md");
+        let editor = mint_client_id("intellij:nonblocking-current");
+        with_hub_seeded_from_file(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.local_edit(editor, 0, 0, "LIVE ").unwrap();
+            assert!(
+                !hub.canonical_text().starts_with("LIVE "),
+                "test setup should leave pending editor ops outside the canonical cut"
+            );
+        })
+        .unwrap();
+
+        let observed =
+            current_text_for_file_with_authority_nonblocking(&doc, CrdtAuthority::MultiReplica)
+                .expect("nonblocking read should not fail");
+        assert_eq!(observed, CurrentText::EditorSyncPending);
+        with_existing_hub(&doc, |hub| {
+            assert!(
+                !hub.canonical_text().starts_with("LIVE "),
+                "nonblocking current-text read must not flush editor ops"
+            );
+        })
+        .unwrap()
+        .expect("hub should still exist");
+
+        let flushed = current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica)
+            .expect("strict read should still flush the barrier");
+        match flushed {
+            CurrentText::Current { text, .. } => assert!(text.starts_with("LIVE ")),
+            other => panic!("expected strict read to return current text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn projection_recovery_repairs_legacy_markdown_sidecar() {
+        let legacy_markdown = "---\ntitle: legacy\n---\n\n<!-- agent:exchange -->\nBody\n";
+        let (_dir, doc) = temp_doc("attached-legacy-markdown-projection.md");
+        agent_doc_snapshot_io::save_crdt(&doc, legacy_markdown.as_bytes()).unwrap();
+
+        let recovered = current_text_for_file_with_authority_recovering_projection(
+            &doc,
+            CrdtAuthority::MultiReplica,
+        )
+        .expect("explicit recovery read should repair legacy markdown sidecar");
+
+        match recovered {
+            CurrentText::Current { text, .. } => assert_eq!(text, legacy_markdown),
+            other => panic!("expected markdown projection recovery, got {other:?}"),
+        }
+        let repaired = agent_doc_snapshot_io::load_crdt(&doc)
+            .unwrap()
+            .expect("repaired projection should be persisted");
+        assert_ne!(repaired, legacy_markdown.as_bytes());
+        let rebuilt = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &repaired).unwrap();
+        assert_eq!(rebuilt.canonical_text(), legacy_markdown);
+    }
+
+    #[test]
+    fn ensure_document_model_recovers_projection_after_publish_timeout() {
+        let (_dir, doc) = temp_doc("ensure-model-projection-recovery.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
+        let editor = mint_client_id("intellij:ensure-projection-recovery");
+        prior.register(editor).unwrap();
+        prior
+            .apply_local(editor, 0, 0, "projection after publish")
+            .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, &prior.projection_bytes()).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let poll_count = Arc::new(Mutex::new(0usize));
+        let poll_count_for_observer = Arc::clone(&poll_count);
+        let current = ensure_document_model_with_current_text_recovery_observer(
+            &doc,
+            "test_projection_recovery",
+            CurrentText::EditorAttachedMissingReplica,
+            || {
+                *poll_count_for_observer.lock().unwrap() += 1;
+                Ok(CurrentText::EditorAttachedMissingReplica)
+            },
+            || {
+                current_text_for_file_with_authority_recovering_projection(
+                    &doc,
+                    CrdtAuthority::MultiReplica,
+                )
+            },
+        )
+        .expect("ensure should fall back to durable projection after publish timeout");
+
+        assert!(
+            *poll_count.lock().unwrap() > 0,
+            "ensure should poll the strict observer before recovery"
+        );
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert_eq!(text, "projection after publish");
+                assert_eq!(live_editors, 0);
+            }
+            other => panic!("expected projection-backed current text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout() {
+        let (_dir, doc) = temp_doc("ensure-model-compact-exchange-recovery.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let old_blocks = (0..8)
+            .map(|idx| {
+                format!(
+                    "### Re: archived {idx} - gpt-5\n\n{}\n",
+                    "Archived response body.\n".repeat(4)
+                )
+            })
+            .collect::<String>();
+        let kept_block = "### Re: kept - gpt-5\n\nKept response.\n";
+        let pre_compact = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n{old_blocks}{kept_block}<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        let compacted = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\n*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\nCompacted content:\n- Archived 8 response topic(s): archived 0; archived 1; archived 2; 5 more\n- Prior summary/context: compacted prior responses\n{kept_block}<!-- agent:boundary:new -->\n<!-- /agent:exchange -->\n\n\
+## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &pre_compact).unwrap();
+
+        let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
+        let editor = mint_client_id("intellij:compact-exchange-recovery");
+        prior.register(editor).unwrap();
+        prior.apply_local(editor, 0, 0, &compacted).unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, &prior.projection_bytes()).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let current = ensure_document_model_with_current_text_recovery_observer(
+            &doc,
+            "test_compact_exchange_projection_recovery",
+            CurrentText::EditorAttachedMissingReplica,
+            || Ok(CurrentText::EditorAttachedMissingReplica),
+            || {
+                current_text_for_file_with_authority_recovering_projection(
+                    &doc,
+                    CrdtAuthority::MultiReplica,
+                )
+            },
+        )
+        .expect("ensure should recover compacted exchange from durable projection");
+
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert_eq!(text, compacted);
+                assert_eq!(live_editors, 0, "editors re-register after recovery");
+                assert!(text.contains("### Session Summary"));
+                assert!(text.contains(kept_block));
+                assert!(
+                    !text.contains("Archived response body."),
+                    "archived response bodies must not be re-expanded from stale disk"
+                );
+            }
+            other => panic!("expected compacted projection current text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_document_model_recovers_projection_after_publish_transport_failure() {
+        let (dir, doc) = temp_doc("ensure-model-publish-transport-failure.md");
+        let canonical = doc.canonicalize().unwrap();
+        let file_str = canonical.to_string_lossy().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
+        let compacted = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
+## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nCompacted exchange body.\n<!-- /agent:exchange -->\n";
+
+        let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
+        let editor = mint_client_id("intellij:publish-transport-failure");
+        prior.register(editor).unwrap();
+        prior.apply_local(editor, 0, 0, compacted).unwrap();
+        agent_doc_snapshot_io::save_crdt(&canonical, &prior.projection_bytes()).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        std::fs::write(dir.path().join(".agent-doc").join("patches"), "not a dir").unwrap();
+
+        let current = ensure_document_model(&canonical, "test_publish_transport_failure")
+            .expect("publish transport failure should continue to durable projection recovery");
+
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert_eq!(text, compacted);
+                assert_eq!(live_editors, 0);
+                assert!(text.contains("### Session Summary"));
+            }
+            other => panic!("expected projection-backed current text, got {other:?}"),
+        }
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_publish_error")
+                && log.contains("recovery=continue_to_projection_recovery")
+                && log.contains("document_model_ensure_ready")
+                && log.contains("recovery=durable_projection_after_publish_timeout"),
+            "failed publish transport should be audited and then recovered from projection:\n{log}"
+        );
+    }
+
+    #[test]
     fn ensure_document_model_recovers_after_delayed_replica_registration() {
         let (_dir, doc) = temp_doc("ensure-model-register.md");
         let file_str = doc.display().to_string();
@@ -1998,6 +2708,133 @@ mod tests {
     }
 
     #[test]
+    fn ensure_document_model_falls_back_to_file_signal_after_socket_rejects_publish() {
+        let (dir, doc) = temp_doc("ensure-model-socket-reject.md");
+        let canonical = doc.canonicalize().unwrap();
+        let file_str = canonical.to_string_lossy().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+
+        let root = dir.path().to_path_buf();
+        let root_for_listener = root.clone();
+        let server = thread::spawn(move || {
+            agent_doc_ipc_io::start_listener(&root_for_listener, |_msg| {
+                Some(serde_json::json!({"type": "receipt", "status": "rejected"}).to_string())
+            })
+            .ok();
+        });
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            agent_doc_ipc_io::is_listener_active(&root),
+            "test socket listener should be active before model ensure"
+        );
+
+        let signal_file = root
+            .join(".agent-doc")
+            .join("patches")
+            .join("publish-live-buffer.signal");
+        let watcher_doc = canonical.clone();
+        let watcher = thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                if let Ok(raw) = std::fs::read_to_string(&signal_file) {
+                    let msg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    if msg.get("type").and_then(|value| value.as_str())
+                        == Some("publish_live_buffer")
+                    {
+                        register_replica_for_file(&watcher_doc, "file-signal:ensure-model")
+                            .expect("file-signal publish should register the model")
+                            .expect("editor-attached register should allocate model");
+                        let _ = std::fs::remove_file(&signal_file);
+                        return true;
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+
+        let current = ensure_document_model(&canonical, "test_socket_reject_file_signal_fallback")
+            .expect("socket rejection should fall back to file-signal model recovery");
+        assert!(
+            watcher.join().unwrap(),
+            "file-signal watcher should observe publish-live-buffer fallback"
+        );
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert!(text.contains("ensure-model-socket-reject.md"));
+                assert_eq!(live_editors, 1);
+            }
+            other => panic!("expected current model after file-signal fallback, got {other:?}"),
+        }
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_publish_socket_error")
+                && log.contains("action=file_signal_fallback")
+                && log.contains("document_model_ensure_publish_requested")
+                && log.contains("transport=file_signal_after_socket_error"),
+            "socket rejection should be audited and then retried through file signal:\n{log}"
+        );
+
+        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn ensure_document_model_retries_transient_observer_timeout_until_ready() {
+        let (_dir, doc) = temp_doc("ensure-model-observer-timeout.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let mut attempts = 0usize;
+
+        let current = ensure_document_model_with_current_text_observer(
+            &doc,
+            "test_observer_timeout_retry",
+            CurrentText::EditorAttachedMissingReplica,
+            || {
+                attempts += 1;
+                if attempts == 1 {
+                    return Err(anyhow::anyhow!(
+                        "timed out after 1.0s waiting for project controller response"
+                    ));
+                }
+                if attempts == 2 {
+                    register_replica_for_file(&doc, "intellij:observer-timeout-retry")
+                        .expect("retry should be able to register the model")
+                        .expect("editor-attached register should allocate model");
+                }
+                current_text_for_file(&doc)
+            },
+        )
+        .expect("transient observer timeout should retry until the model is ready");
+
+        assert!(
+            attempts >= 2,
+            "ensure should poll again after the first observer timeout"
+        );
+        match current {
+            CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert!(text.contains("ensure-model-observer-timeout.md"));
+                assert_eq!(live_editors, 1);
+            }
+            other => panic!("expected current model after observer retry, got {other:?}"),
+        }
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_observer_error")
+                && log.contains("recovery=retry_until_deadline")
+                && log.contains("document_model_ensure_ready"),
+            "transient observer errors should be retried inside model ensure:\n{log}"
+        );
+    }
+
+    #[test]
     fn ensure_document_model_failure_is_bounded_and_names_reconciliation() {
         let (_dir, doc) = temp_doc("ensure-model-missing.md");
         let file_str = doc.display().to_string();
@@ -2019,22 +2856,21 @@ mod tests {
             "raw missing-replica text should not be the final contract: {err}"
         );
         let repeat_err = ensure_document_model(&doc, "test_ensure_model_missing_repeat")
-            .expect_err("recent failed ensure should suppress duplicate publish/poll attempts")
+            .expect_err("a later retry should make a fresh publish/poll attempt")
             .to_string();
         assert!(
             repeat_err.contains("recovery=retry_without_disk_write"),
-            "suppressed retry should preserve retry-class error: {repeat_err}"
+            "retry should preserve retry-class error: {repeat_err}"
         );
         let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("document_model_ensure_suppressed")
-                && log.contains("reason=recent_failure"),
-            "immediate repeat should be cooldown-suppressed:\n{log}"
+            !log.contains("reason=recent_failure"),
+            "failed ensures must not leave a retry-blocking cooldown:\n{log}"
         );
         assert_eq!(
             log.matches("document_model_ensure_start").count(),
-            1,
-            "cooldown suppression must not start another ensure loop:\n{log}"
+            2,
+            "a fresh retry should start another bounded ensure loop:\n{log}"
         );
     }
 
@@ -2096,24 +2932,20 @@ mod tests {
     }
 
     #[test]
-    fn editor_attached_commit_barrier_defers_in_flight_editor_epoch() {
+    fn editor_attached_commit_barrier_defers_when_relay_model_missing() {
         let (_dir, doc) = temp_doc("epoch-defers.md");
         let file_str = doc.display().to_string();
-        let disk = std::fs::read_to_string(&doc).unwrap();
-        agent_doc_debounce::document_changed_with_content_for_editor(
-            &file_str,
-            &format!("{disk}\nunsaved editor text"),
-            Some("jetbrains:epoch-defers"),
-        );
+        seed_live_plugin_owner_lease(&file_str);
 
-        let start = std::time::Instant::now();
         assert!(!commit_barrier_for_file_with_authority(
             &doc,
             CrdtAuthority::MultiReplica
         ));
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            start.elapsed() >= std::time::Duration::from_millis(100),
-            "multi-replica commit barrier must defer briefly before failing closed on an in-flight editor epoch"
+            log.contains("crdt_commit_barrier_deferred")
+                && log.contains("reason=missing_relay_model"),
+            "multi-replica commit barrier must fail closed on missing CPC relay model:\n{log}"
         );
     }
 
@@ -2125,6 +2957,7 @@ mod tests {
         let disk = std::fs::read_to_string(&canonical).unwrap();
         let visible = format!("{disk}\nvisible editor buffer\n");
 
+        seed_live_plugin_owner_lease(&file_str);
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &file_str,
             &visible,
@@ -2174,8 +3007,8 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         assert!(
-            settle_or_flush_editor_sync_barrier(&canonical, "test_publish_live_buffer"),
-            "barrier timeout recovery should request a live-buffer publish and observe the synced proof"
+            !settle_or_flush_editor_sync_barrier(&canonical, "test_publish_live_buffer"),
+            "read-only publish refreshes the live-buffer projection but must not make that projection authoritative"
         );
 
         let msg = captured
@@ -2190,8 +3023,11 @@ mod tests {
             "live-buffer publish is read-only and must not use save_document patch ids: {msg}"
         );
         assert!(
-            !agent_doc_debounce::editor_sync_statuses(&file_str)[0].in_flight,
-            "barrier should mark a successfully published authority live buffer as synced"
+            matches!(
+                current_text_for_file(&canonical).unwrap(),
+                CurrentText::EditorAttachedMissingReplica
+            ),
+            "read-only live-buffer publish must not create the authoritative CRDT model"
         );
 
         let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(&root));
@@ -2213,6 +3049,7 @@ mod tests {
         let disk = std::fs::read_to_string(&canonical).unwrap();
         let visible = format!("{disk}\nvisible editor buffer\n");
 
+        seed_live_plugin_owner_lease(&file_str);
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &file_str,
             &visible,
@@ -2236,8 +3073,11 @@ mod tests {
         );
 
         assert!(
-            settle_or_flush_editor_sync_barrier(&canonical, "test_publish_live_buffer_file_signal"),
-            "barrier timeout recovery should write the file signal and mark the authority buffer synced"
+            !settle_or_flush_editor_sync_barrier(
+                &canonical,
+                "test_publish_live_buffer_file_signal"
+            ),
+            "file-signal publish refreshes the projection but must not mark it synced"
         );
 
         let signal_file = root

@@ -10,8 +10,9 @@ use agent_doc_git::{
     render_git_process_output,
 };
 
-/// RAII guard for an exclusive advisory lock serializing commit transactions
-/// per git repo / submodule.
+/// Best-effort RAII guard for serializing commit transactions per git repo /
+/// submodule. Contention is deliberately nonblocking; git index-lock retries
+/// remain the hard safety net.
 pub struct CommitLock {
     _file: File,
 }
@@ -45,18 +46,11 @@ impl CommitLock {
         };
         if let Err(e) = file.try_lock_exclusive() {
             eprintln!(
-                "[commit] repo commit-lock contended for {}: {} (waiting)",
+                "[commit] repo commit-lock contended for {}: {} (proceeding unlocked)",
                 scope.display(),
                 e
             );
-            if let Err(e) = file.lock_exclusive() {
-                eprintln!(
-                    "[commit] commit-lock wait failed for {}: {} (proceeding unlocked)",
-                    scope.display(),
-                    e
-                );
-                return None;
-            }
+            return None;
         }
         Some(Self { _file: file })
     }

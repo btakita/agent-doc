@@ -19,7 +19,6 @@ import java.lang.reflect.Method
 import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
-import java.nio.file.WatchService
 import java.security.MessageDigest
 
 /**
@@ -55,6 +54,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         val root: String,
         val patchesDir: File,
         @Volatile var watchThread: Thread? = null,
+        @Volatile var crdtEventThread: Thread? = null,
         @Volatile var ipcCallback: AgentDocLib.IpcMessageCallback? = null,
         @Volatile var ipcCallbackV2: AgentDocLib.IpcMessageCallbackV2? = null,
     )
@@ -65,7 +65,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     /** Dedup cache keyed by patch_id (globally unique). Shared across all roots. */
     private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    /** Patch files delayed because the target document is still being edited. */
+    /** Patch files delayed after a failed proof/apply attempt. */
     private val scheduledPatchRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /**
@@ -75,7 +75,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      */
     private val ownedDocs = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    /** Boundary reposition requests delayed because the target document is still being edited. */
+    /** Boundary reposition requests delayed after a stale proof/apply attempt. */
     private val scheduledRepositionRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     @Volatile private var memoryDiskConflictReflectionWarned = false
@@ -181,9 +181,9 @@ class PatchWatcher(private val project: Project) : Disposable {
     fun start() {
         if (running) return
         running = true
-        // #cdylib-reload-broadcast: begin polling the global reload-broadcast file
+        // #cdylib-reload-broadcast: watch the global reload-broadcast file
         // regardless of project layout so cdylib upgrades reload proactively.
-        scheduleLibReloadBroadcastPoll()
+        startLibReloadBroadcastWatcher()
         val basePath = project.basePath ?: return
         registerRoot(basePath)
         // Scan for nested .agent-doc/ dirs under basePath (submodules, nested repos).
@@ -225,69 +225,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             isDaemon = true
             start()
         }
+        startCrdtReplicaEventWatcher(state)
 
         startSocketListenerViaFfi(state)
         processPendingPatches(patchesDir)
-        // #yzer / #evmhplugin: a (re)connect may reveal editor buffers the
-        // binary advanced past while this plugin was disconnected. Realtime
-        // cutover keeps those visible buffers editor-owned here; stale
-        // reconnect repair writes are disabled and logged.
-        Thread({
-            try {
-                reconcileStaleBuffersOnReconnect(state)
-            } catch (e: Exception) {
-                LOG.warn("[reconnect] reconcile failed for $root: ${e.message}")
-            }
-        }, "agent-doc-reconnect-reconcile-${File(root).name}").apply {
-            isDaemon = true
-            start()
-        }
         LOG.info("[patch-watcher] registered root: $root")
-    }
-
-    /**
-     * #yzer / #evmhplugin: on IPC (re)connect, reconcile every open session
-     * document under [state].root whose editor buffer may be stale committed
-     * content (the binary advanced disk/HEAD while the plugin was disconnected).
-     * Realtime cutover disables editor-open reconnect repair writes; `reread_disk`
-     * decisions are logged and the buffer is kept editor-owned.
-     */
-    private fun reconcileStaleBuffersOnReconnect(state: RootState) {
-        val lib = AgentDocLib.get() ?: return
-        val app = ApplicationManager.getApplication()
-        // Snapshot the open .md buffers that belong to this exact root.
-        val candidates = mutableListOf<Pair<String, String>>()
-        app.invokeAndWait {
-            val fem = FileEditorManager.getInstance(project)
-            for (vf in fem.openFiles) {
-                val path = vf.path
-                if (!path.endsWith(".md")) continue
-                if (resolveRootFor(path) != state.root) continue
-                val document = FileDocumentManager.getInstance().getDocument(vf) ?: continue
-                candidates.add(path to document.text)
-            }
-        }
-        for ((path, buffer) in candidates) {
-            val ptr = try {
-                lib.agent_doc_reconnect_buffer_decision(state.root, path, buffer)
-            } catch (e: Throwable) {
-                LOG.warn("[reconnect] decision FFI failed for $path: ${e.message}")
-                null
-            } ?: continue
-            val json = try {
-                ptr.getString(0)
-            } finally {
-                lib.agent_doc_free_string(ptr)
-            }
-            val decision = extractStringField(json, "decision")
-            if (decision != "reread_disk") {
-                if (decision != null && decision != "in_sync") {
-                    LOG.info("[reconnect] $path decision=$decision (buffer kept) #yzer")
-                }
-                continue
-            }
-            LOG.warn("[reconnect] reread_disk repair is disabled for $path; buffer kept #yzer")
-        }
     }
 
     /**
@@ -401,45 +343,104 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun watchLoop(dir: Path) {
-        val watchService: WatchService = FileSystems.getDefault().newWatchService()
-        dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
+        FileSystems.getDefault().newWatchService().use { watchService ->
+            dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
 
-        while (running) {
-            val key = watchService.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
-            val loopStart = System.nanoTime()
-            var overflow = false
-            for (event in key.pollEvents()) {
-                if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
-                    overflow = true
-                    continue
-                }
-                val filename = event.context() as? Path ?: continue
-                if (filename.toString() == "vcs-refresh.signal") {
-                    val signalFile = dir.resolve(filename).toFile()
-                    if (signalFile.exists()) {
-                        signalFile.delete()
-                        refreshVcs()
+            while (running) {
+                val key = watchService.take()
+                val loopStart = System.nanoTime()
+                var overflow = false
+                for (event in key.pollEvents()) {
+                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                        overflow = true
+                        continue
                     }
-                } else if (filename.toString().endsWith(".json")) {
-                    val patchFile = dir.resolve(filename).toFile()
-                    if (patchFile.exists()) {
-                        processPatchFile(patchFile)
+                    val filename = event.context() as? Path ?: continue
+                    if (filename.toString() == "vcs-refresh.signal") {
+                        val signalFile = dir.resolve(filename).toFile()
+                        if (signalFile.exists()) {
+                            signalFile.delete()
+                            refreshVcs()
+                        }
+                    } else if (filename.toString().endsWith(".json")) {
+                        val patchFile = dir.resolve(filename).toFile()
+                        if (patchFile.exists()) {
+                            processPatchFile(patchFile)
+                        }
                     }
                 }
+                // On inotify overflow, scan the directory for any missed files.
+                // This handles the case where heavy I/O (e.g. cargo build) fills
+                // the kernel's inotify buffer and events are silently dropped.
+                if (overflow) {
+                    LOG.info("[patch-watcher] inotify overflow detected, scanning for missed files")
+                    processPendingPatches(dir.toFile())
+                }
+                val loopMs = (System.nanoTime() - loopStart) / 1_000_000
+                if (loopMs > 50) LOG.info("[perf] watchLoop iteration: ${loopMs}ms")
+                if (!key.reset()) break
             }
-            // On inotify overflow, scan the directory for any missed files.
-            // This handles the case where heavy I/O (e.g. cargo build) fills
-            // the kernel's inotify buffer and events are silently dropped.
-            if (overflow) {
-                LOG.info("[patch-watcher] inotify overflow detected, scanning for missed files")
-                processPendingPatches(dir.toFile())
-            }
-            val loopMs = (System.nanoTime() - loopStart) / 1_000_000
-            if (loopMs > 50) LOG.info("[perf] watchLoop iteration: ${loopMs}ms")
-            if (!key.reset()) break
         }
+    }
 
-        watchService.close()
+    private fun startCrdtReplicaEventWatcher(state: RootState) {
+        val dir = File(state.root, ".agent-doc/crdt-replica-events")
+        if (!dir.exists()) dir.mkdirs()
+        state.crdtEventThread = Thread({
+            try {
+                watchCrdtReplicaEvents(dir.toPath())
+            } catch (_: InterruptedException) {
+                // Normal shutdown.
+            } catch (e: Exception) {
+                if (running) LOG.warn("[crdt-replica] event watcher failed for ${state.root}", e)
+            }
+        }, "agent-doc-crdt-event-watcher-${File(state.root).name}").apply {
+            isDaemon = true
+            start()
+        }
+        processPendingCrdtReplicaEvents(dir)
+    }
+
+    private fun watchCrdtReplicaEvents(dir: Path) {
+        FileSystems.getDefault().newWatchService().use { watchService ->
+            dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
+            while (running) {
+                val key = watchService.take()
+                var overflow = false
+                for (event in key.pollEvents()) {
+                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                        overflow = true
+                        continue
+                    }
+                    val filename = event.context() as? Path ?: continue
+                    if (filename.toString().endsWith(".json")) {
+                        processCrdtReplicaEventFile(dir.resolve(filename).toFile())
+                    }
+                }
+                if (overflow) {
+                    LOG.info("[crdt-replica] event watcher overflow; scanning pending events")
+                    processPendingCrdtReplicaEvents(dir.toFile())
+                }
+                if (!key.reset()) break
+            }
+        }
+    }
+
+    private fun processPendingCrdtReplicaEvents(dir: File) {
+        val files = dir.listFiles { f -> f.extension == "json" } ?: return
+        for (file in files) processCrdtReplicaEventFile(file)
+    }
+
+    private fun processCrdtReplicaEventFile(file: File) {
+        if (!file.exists()) return
+        val filePath = try {
+            val root = com.google.gson.JsonParser.parseString(file.readText()).asJsonObject
+            root.get("file")?.asString?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            LOG.debug("[crdt-replica] failed to parse event ${file.name}: ${e.message}")
+            null
+        }
+        CrdtReplicaManager.requestRemoteDrain(project, filePath, "crdt-event")
     }
 
     private fun processPendingPatches(dir: File) {
@@ -454,6 +455,11 @@ class PatchWatcher(private val project: Project) : Disposable {
         for (file in files) {
             processPatchFile(file)
         }
+    }
+
+    private fun recordDocumentActivity(filePath: String, reason: String) {
+        TurnStateBannerRefresher.getInstance(project).requestRefresh(filePath, reason)
+        CrdtReplicaManager.requestRemoteDrain(project, filePath, reason)
     }
 
     /**
@@ -512,15 +518,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                     )
                     return APPLY_FAILED
                 }
-                if (!awaitIdleBeforeDocumentMutation(patch.file, "socket patch")) {
-                    StateProjectionBridge.recordEditorRetryRequested(
-                        patch.file,
-                        patch.patchId,
-                        stateGeneration,
-                        "typing_active",
-                    )
-                    return APPLY_FAILED
-                }
                 var applied = false
                 var wasNoOp = false
                 ApplicationManager.getApplication().invokeAndWait {
@@ -572,6 +569,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                             patchFile.delete()
                         }
                     }
+                    recordDocumentActivity(patch.file, "socket-patch")
                 }
                 when {
                     !applied && !wasNoOp -> APPLY_FAILED
@@ -589,6 +587,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val boundaryId = extractStringField(json, "boundary_id")
                 val preserveHead = extractBooleanField(json, "preserve_head")
                 repositionBoundaryViaDocument(file, boundaryId, preserveHead)
+                recordDocumentActivity(file, "socket-reposition")
                 APPLY_APPLIED
             }
             "refresh_content" -> {
@@ -597,6 +596,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val expectedHash = extractStringField(json, "expected_content_hash")
                 val expectedLen = extractIntField(json, "expected_content_len")
                 if (refreshContentViaDocument(file, content, expectedHash, expectedLen)) {
+                    recordDocumentActivity(file, "socket-refresh-content")
                     APPLY_APPLIED
                 } else {
                     APPLY_FAILED
@@ -605,6 +605,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             "publish_live_buffer" -> {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 if (TypingTracker.publishLiveBufferNow(file)) {
+                    recordDocumentActivity(file, "socket-publish-live-buffer")
                     APPLY_APPLIED
                 } else {
                     APPLY_FAILED
@@ -622,8 +623,8 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"
                 LOG.info("[socket] reload_lib received (lib_version=$libVersion); forcing cdylib reload")
                 AgentDocLib.forceReload()
-                // Keep the broadcast poller baseline in sync so the file poll does
-                // not redundantly force a second reload for the same install.
+                // Keep the broadcast watcher baseline in sync so the file event
+                // does not redundantly force a second reload for the same install.
                 AgentDocLib.reloadBroadcastFile()?.let { f ->
                     if (f.exists()) lastLibReloadBroadcastMtime = f.lastModified()
                 }
@@ -633,6 +634,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 val patchId = extractStringField(json, "patch_id")
                 if (saveDocumentViaDocument(file, patchId)) {
+                    recordDocumentActivity(file, "socket-save-document")
                     APPLY_APPLIED
                 } else {
                     APPLY_FAILED
@@ -652,10 +654,6 @@ class PatchWatcher(private val project: Project) : Disposable {
      * save the open document that already owns the user's visible text.
      */
     private fun saveDocumentViaDocument(filePath: String, patchId: String?): Boolean {
-        if (!awaitIdleBeforeDocumentMutation(filePath, "save_document")) {
-            return false
-        }
-
         var savedContent: String? = null
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
@@ -700,10 +698,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         expectedHash: String?,
         expectedLen: Int?,
     ): Boolean {
-        if (!awaitIdleBeforeDocumentMutation(filePath, "postcommit editor refresh")) {
-            return false
-        }
-
         var applied = false
         ApplicationManager.getApplication().invokeAndWait {
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
@@ -774,75 +768,63 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Reposition boundary marker in a document via Document API.
      * Used by socket IPC "reposition" messages.
      *
-     * Waits for typing to settle via FFI `await_idle` (blocking, runs on
-     * background thread) before applying the reposition on the EDT.
-     * This prevents keystroke loss from Document API writes racing with
-     * user input.
+     * Applies immediately on the EDT. The CPC/binary owns debounce and retry
+     * scheduling before it sends editor IPC.
      */
     private fun repositionBoundaryViaDocument(filePath: String, boundaryId: String? = null, preserveHead: Boolean = false) {
-        com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
-            val lib = AgentDocLib.get()
-            val idle = lib?.agent_doc_await_idle(filePath, TypingTracker.DEBOUNCE_MS, 5_000) ?: true
-            if (!idle) {
-                LOG.warn("[patch-watcher] typing debounce timed out before reposition for $filePath; retrying")
-                scheduleRepositionRetry(filePath, boundaryId, preserveHead)
-                return@submit
+        ApplicationManager.getApplication().invokeLater {
+            val reposStart = System.nanoTime()
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(targetFile) ?: return@invokeLater
+            // #p2j4 / #jbcfdiag — only refresh the VFS when the buffer is clean;
+            // a content-bearing refresh against an unsaved buffer arms the platform
+            // File Cache Conflict dialog. See shouldRefreshVfsBeforeApplyUtil.
+            if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
+                targetFile.refresh(false, false)
             }
-            ApplicationManager.getApplication().invokeLater {
-                val reposStart = System.nanoTime()
-                val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
-                val fdm = FileDocumentManager.getInstance()
-                val document = fdm.getDocument(targetFile) ?: return@invokeLater
-                // #p2j4 / #jbcfdiag — only refresh the VFS when the buffer is clean;
-                // a content-bearing refresh against an unsaved buffer arms the platform
-                // File Cache Conflict dialog. See shouldRefreshVfsBeforeApplyUtil.
-                if (shouldRefreshVfsBeforeApplyUtil(fdm.isDocumentUnsaved(document))) {
-                    targetFile.refresh(false, false)
-                }
-                val diskContent = String(targetFile.contentsToByteArray(), targetFile.charset)
-                if (!fdm.isDocumentUnsaved(document)) {
-                    fdm.reloadFromDisk(document)
-                }
+            val diskContent = String(targetFile.contentsToByteArray(), targetFile.charset)
+            if (!fdm.isDocumentUnsaved(document)) {
+                fdm.reloadFromDisk(document)
+            }
 
-                WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
-                    val content = document.text
-                    val proof = EditorApplyProof(content, document.modificationStamp)
-                    val sourceContent =
-                        if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
-                            diskContent
-                        } else {
-                            content
-                        }
-                    val result = if (preserveHead) {
-                        NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
-                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId, preserveHead = true)
+            WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
+                val content = document.text
+                val proof = EditorApplyProof(content, document.modificationStamp)
+                val sourceContent =
+                    if (preserveHead && shouldPreferCommittedDiskContentForRepositionUtil(content, diskContent)) {
+                        diskContent
                     } else {
-                        NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
-                            ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
-                    } ?: return@runWriteCommandAction
-                    if (result != content && editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
-                        LOG.info(
-                            documentMutationDiagnosticUtil(
-                                "repositionBoundary", filePath, boundaryId, "document_api",
-                                content, result, document.modificationStamp, true,
-                            )
-                        )
-                        // Capture the exact target payload at debug level for
-                        // IPC-corruption forensics.
-                        if (LOG.isDebugEnabled) {
-                            LOG.debug(
-                                "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
-                            )
-                        }
-                        applyMinimalDocumentEditUtil(document, content, result)
-                    } else if (result != content) {
-                        LOG.warn("[patch-watcher] stale editor generation before reposition for $filePath; retrying")
-                        scheduleRepositionRetry(filePath, boundaryId, preserveHead)
+                        content
                     }
-                })
-                val reposMs = (System.nanoTime() - reposStart) / 1_000_000
-                if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
-            }
+                val result = if (preserveHead) {
+                    NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
+                        ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId, preserveHead = true)
+                } else {
+                    NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
+                        ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
+                } ?: return@runWriteCommandAction
+                if (result != content && editorApplyProofStillCurrentUtil(proof, document.text, document.modificationStamp)) {
+                    LOG.info(
+                        documentMutationDiagnosticUtil(
+                            "repositionBoundary", filePath, boundaryId, "document_api",
+                            content, result, document.modificationStamp, true,
+                        )
+                    )
+                    // Capture the exact target payload at debug level for
+                    // IPC-corruption forensics.
+                    if (LOG.isDebugEnabled) {
+                        LOG.debug(
+                            "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
+                        )
+                    }
+                    applyMinimalDocumentEditUtil(document, content, result)
+                } else if (result != content) {
+                    LOG.warn("[patch-watcher] stale editor generation during reposition for $filePath")
+                }
+            })
+            val reposMs = (System.nanoTime() - reposStart) / 1_000_000
+            if (reposMs > 50) LOG.info("[perf] repositionBoundary: ${reposMs}ms $filePath")
         }
     }
 
@@ -920,7 +902,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                 patchFile.delete()
                 return
             }
-
             // Read-only demotion (#dsqa / #pcp7): the autonomous WatchService
             // must not apply patches it observes on disk. The socket IPC path
             // (controller's writer arm) applies + deletes this patch file. Leave
@@ -943,16 +924,6 @@ class PatchWatcher(private val project: Project) : Disposable {
                 return
             }
             val stateGeneration = StateProjectionBridge.recordEditorPatchQueued(patch.file, patch.patchId)
-            if (!awaitIdleBeforeDocumentMutation(patch.file, "file patch")) {
-                StateProjectionBridge.recordEditorRetryRequested(
-                    patch.file,
-                    patch.patchId,
-                    stateGeneration,
-                    "typing_active",
-                )
-                schedulePatchRetry(patchFile, "typing active")
-                return
-            }
             ApplicationManager.getApplication().invokeLater {
                 if (isClaimedByForceDisk(patch.patchId, patch.file) || isPatchAlreadyApplied(patch, patchFile)) {
                     LOG.info("[patch-watcher] dedup (inner): skipping apply for ${patchFile.name}")
@@ -993,6 +964,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                         patch.patchId,
                         stateGeneration,
                     )
+                    recordDocumentActivity(patch.file, "file-patch")
                     patchFile.delete()
                 } else if (lastApplyBlockedForFileCacheConflict) {
                     StateProjectionBridge.recordEditorRetryRequested(
@@ -1069,15 +1041,6 @@ class PatchWatcher(private val project: Project) : Disposable {
         return false
     }
 
-    private fun awaitIdleBeforeDocumentMutation(filePath: String, operation: String): Boolean {
-        val lib = AgentDocLib.get() ?: return true
-        val idle = lib.agent_doc_await_idle(filePath, TypingTracker.DEBOUNCE_MS, 5_000)
-        if (!idle) {
-            LOG.warn("[patch-watcher] typing debounce timed out before $operation for $filePath")
-        }
-        return idle
-    }
-
     private fun schedulePatchRetry(patchFile: File, reason: String) {
         val key = try {
             patchFile.canonicalPath
@@ -1088,7 +1051,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         LOG.info("[patch-watcher] deferring ${patchFile.name}: $reason")
         com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
             try {
-                Thread.sleep(TypingTracker.DEBOUNCE_MS)
+                Thread.sleep(PATCH_RETRY_DELAY_MS)
                 if (running && patchFile.exists()) {
                     processPatchFile(patchFile)
                 }
@@ -1105,7 +1068,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (!scheduledRepositionRetries.add(key)) return
         com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
             try {
-                Thread.sleep(TypingTracker.DEBOUNCE_MS)
+                Thread.sleep(PATCH_RETRY_DELAY_MS)
                 if (running) {
                     repositionBoundaryViaDocument(filePath, boundaryId, preserveHead)
                 }
@@ -1906,48 +1869,61 @@ class PatchWatcher(private val project: Project) : Disposable {
         }, VCS_REFRESH_DEBOUNCE_MS)
     }
 
-    /**
-     * `#cdylib-reload-broadcast`: poll the global reload-broadcast file written by
-     * `agent-doc lib-install` / `agent-doc admin reload-lib`. This is the
-     * proactive complement to the lazy mtime reload in [AgentDocLib.get]: when the
-     * broadcast mtime advances, force the existing native-reload path so a freshly
-     * installed cdylib goes live immediately without waiting for the next FFI call
-     * or a `reload_lib` socket message. Runs on a POOLED thread (file IO off EDT).
-     */
-    private val libReloadBroadcastAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
-    private val LIB_RELOAD_BROADCAST_POLL_MS = 2000
+    /** Event-driven watcher for the global reload-broadcast file. */
+    @Volatile private var libReloadBroadcastThread: Thread? = null
     @Volatile private var lastLibReloadBroadcastMtime = 0L
 
-    private fun scheduleLibReloadBroadcastPoll() {
+    private fun startLibReloadBroadcastWatcher() {
         if (!running) return
-        libReloadBroadcastAlarm.cancelAllRequests()
-        libReloadBroadcastAlarm.addRequest({
+        if (libReloadBroadcastThread != null) return
+        val file = AgentDocLib.reloadBroadcastFile() ?: return
+        val dir = file.parentFile ?: return
+        lastLibReloadBroadcastMtime = if (file.exists()) file.lastModified() else 0L
+        libReloadBroadcastThread = Thread({
             try {
-                pollLibReloadBroadcastOnce()
+                watchLibReloadBroadcast(dir.toPath(), file.name)
+            } catch (_: InterruptedException) {
+                // Normal shutdown.
             } catch (e: Exception) {
-                LOG.debug("[lib-reload] broadcast poll failed: ${e.message}")
-            } finally {
-                if (running) scheduleLibReloadBroadcastPoll()
+                if (running) LOG.debug("[lib-reload] broadcast watch failed: ${e.message}")
             }
-        }, LIB_RELOAD_BROADCAST_POLL_MS)
+        }, "agent-doc-lib-reload-watch").apply {
+            isDaemon = true
+            start()
+        }
     }
 
-    private fun pollLibReloadBroadcastOnce() {
+    private fun watchLibReloadBroadcast(dir: Path, fileName: String) {
+        FileSystems.getDefault().newWatchService().use { watchService ->
+            dir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY)
+            while (running) {
+                val key = watchService.take()
+                var overflow = false
+                for (event in key.pollEvents()) {
+                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                        overflow = true
+                        continue
+                    }
+                    val filename = event.context() as? Path ?: continue
+                    if (overflow || filename.toString() == fileName) {
+                        handleLibReloadBroadcastChanged()
+                    }
+                }
+                if (overflow) handleLibReloadBroadcastChanged()
+                if (!key.reset()) break
+            }
+        }
+    }
+
+    private fun handleLibReloadBroadcastChanged() {
         val file = AgentDocLib.reloadBroadcastFile() ?: return
         if (!file.exists()) return
         val mtime = file.lastModified()
         if (mtime == 0L) return
-        // First observation records the baseline without forcing a reload, so a
-        // stale broadcast from a prior install does not reload on every IDE start.
-        if (lastLibReloadBroadcastMtime == 0L) {
-            lastLibReloadBroadcastMtime = mtime
-            return
-        }
-        if (mtime != lastLibReloadBroadcastMtime) {
-            lastLibReloadBroadcastMtime = mtime
-            LOG.info("[lib-reload] broadcast changed (mtime=$mtime); forcing cdylib reload")
-            AgentDocLib.forceReload()
-        }
+        if (mtime == lastLibReloadBroadcastMtime) return
+        lastLibReloadBroadcastMtime = mtime
+        LOG.info("[lib-reload] broadcast changed (mtime=$mtime); forcing cdylib reload")
+        AgentDocLib.forceReload()
     }
 
     private fun repositionBoundaryToEnd(
@@ -1959,7 +1935,8 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     override fun dispose() {
         running = false
-        libReloadBroadcastAlarm.cancelAllRequests()
+        libReloadBroadcastThread?.interrupt()
+        libReloadBroadcastThread = null
         val lib = AgentDocLib.get()
         // #8bfz / #fcconeowner: hand single-owner leases to a live sibling now
         // instead of waiting out the TTL.
@@ -1970,6 +1947,8 @@ class PatchWatcher(private val project: Project) : Disposable {
         for (state in rootStates.values) {
             state.watchThread?.interrupt()
             state.watchThread = null
+            state.crdtEventThread?.interrupt()
+            state.crdtEventThread = null
             try { lib?.agent_doc_stop_ipc_listener(state.root) } catch (_: Exception) {}
             state.ipcCallback = null
         }
@@ -1979,6 +1958,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(PatchWatcher::class.java)
         private val instances = mutableMapOf<Project, PatchWatcher>()
+        private const val PATCH_RETRY_DELAY_MS = 500L
         private const val UI_OUTCOME_REAL_COMPONENT_CONFLICT =
             "ui_outcome_contract=ui-outcome-v1 ui_outcome=real_component_conflict ui_outcome_class=blocked next_action=resolve_component_conflict"
 

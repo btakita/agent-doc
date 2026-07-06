@@ -39,8 +39,10 @@ import {
     flattenVisibleColumns,
     isPreservedLayoutOutput,
     normalizeVisibleColumns,
+    replayDelayAfterTabSyncRun,
     shouldReplayQueuedTabChange,
     shouldScheduleDeferredTabSyncRetry,
+    tabSyncTimeoutBackoffDelayMs,
     type TabSyncState,
 } from './tabSync';
 import {
@@ -57,6 +59,7 @@ import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
 
 let resolvedAgentDoc: string | null = null;
 const SYNC_CLI_TIMEOUT_MS = 30_000;
+const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
 const FOCUS_CLI_TIMEOUT_MS = 750;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
@@ -249,6 +252,10 @@ function isCliCancelled(err: unknown): boolean {
     return err instanceof CliCancelledError;
 }
 
+function isCliTimeout(err: unknown): boolean {
+    return err instanceof Error && err.message.startsWith('timed out after ');
+}
+
 /** Run an agent-doc CLI command. Returns stdout on success. */
 function runCli(args: string[], cwd: string, options?: RunCliOptions): Promise<string> {
     const bin = resolveAgentDoc();
@@ -367,16 +374,100 @@ function showError(message: string): void {
 // turn phase in a status-bar indicator by calling the native
 // `agent_doc_turn_projection` FFI. Parity with the JetBrains frontend.
 const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+const TURN_STATUS_MIN_REFRESH_INTERVAL_MS = 1_500;
+const TURN_STATUS_SLOW_PROJECTION_MS = 1_000;
+const TURN_STATUS_SLOW_BACKOFF_MS = 5_000;
+const TURN_STATUS_SLOW_BACKOFF_MAX_MS = 60_000;
+let turnStatusWatcher: vscode.FileSystemWatcher | undefined;
+let turnStatusWatcherRoot: string | undefined;
+let turnStatusWatcherDisposables: vscode.Disposable[] = [];
+let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let turnStatusLastRefreshMs = 0;
+let turnStatusBackoffUntilMs = 0;
+let turnStatusSlowRefreshCount = 0;
 
-function refreshTurnStatus(): void {
+function activeAgentDocProjectRoot(): string | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !editor.document.fileName.endsWith('.md')) return undefined;
+    const workspaceRoot = getWorkspaceRoot(editor.document.uri);
+    if (!workspaceRoot) return undefined;
+    return resolveProject(workspaceRoot, editor.document.uri.fsPath).cwd;
+}
+
+function disposeTurnStatusWatcher(): void {
+    for (const disposable of turnStatusWatcherDisposables) disposable.dispose();
+    turnStatusWatcherDisposables = [];
+    turnStatusWatcher?.dispose();
+    turnStatusWatcher = undefined;
+    turnStatusWatcherRoot = undefined;
+    if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
+    turnStatusRefreshTimer = undefined;
+}
+
+function configureTurnStatusWatcher(): void {
+    const root = activeAgentDocProjectRoot();
+    if (root === turnStatusWatcherRoot) return;
+    disposeTurnStatusWatcher();
+    if (!root) return;
+    const turnScopeDir = path.join(root, '.agent-doc', 'turn-scope');
+    const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(turnScopeDir, '*.json'),
+        false,
+        false,
+        true,
+    );
+    turnStatusWatcher = watcher;
+    turnStatusWatcherRoot = root;
+    turnStatusWatcherDisposables = [
+        watcher.onDidCreate(() => refreshTurnStatus('turn-scope-create')),
+        watcher.onDidChange(() => refreshTurnStatus('turn-scope-change')),
+        watcher.onDidDelete(() => refreshTurnStatus('turn-scope-delete')),
+    ];
+}
+
+function turnStatusRefreshDelayMs(): number {
+    const now = Date.now();
+    const minIntervalUntil = turnStatusLastRefreshMs + TURN_STATUS_MIN_REFRESH_INTERVAL_MS;
+    return Math.max(0, Math.max(minIntervalUntil, turnStatusBackoffUntilMs) - now);
+}
+
+function refreshTurnStatus(reason = 'event', force = false): void {
+    if (force) {
+        if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
+        turnStatusRefreshTimer = undefined;
+        refreshTurnStatusNow(reason);
+        return;
+    }
+    if (turnStatusRefreshTimer) return;
+    const delayMs = turnStatusRefreshDelayMs();
+    turnStatusRefreshTimer = setTimeout(() => {
+        turnStatusRefreshTimer = undefined;
+        refreshTurnStatusNow(reason);
+    }, delayMs);
+}
+
+function refreshTurnStatusNow(reason: string): void {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !editor.document.fileName.endsWith('.md')) {
         turnStatusBarItem.hide();
         return;
     }
+    const started = Date.now();
     const projection = native.turnProjectionForFile(editor.document.fileName) as
         | import('./sessionUi').TurnProjection
         | null;
+    const elapsedMs = Date.now() - started;
+    turnStatusLastRefreshMs = Date.now();
+    if (elapsedMs >= TURN_STATUS_SLOW_PROJECTION_MS) {
+        turnStatusSlowRefreshCount = Math.min(turnStatusSlowRefreshCount + 1, 16);
+        const step = Math.min(Math.max(turnStatusSlowRefreshCount - 1, 0), 6);
+        const backoffMs = Math.min(TURN_STATUS_SLOW_BACKOFF_MS * (1 << step), TURN_STATUS_SLOW_BACKOFF_MAX_MS);
+        turnStatusBackoffUntilMs = Date.now() + backoffMs;
+        console.warn(`[agent-doc/turn-state] backing off projection after slow refresh elapsed_ms=${elapsedMs} reason=${reason} backoff_ms=${backoffMs}`);
+    } else {
+        turnStatusSlowRefreshCount = 0;
+        turnStatusBackoffUntilMs = 0;
+    }
     const presentation = buildTurnStatePresentation(projection);
     if (presentation.label) {
         // Prominence parity with the JetBrains editor banner: tooltip + an
@@ -392,6 +483,11 @@ function refreshTurnStatus(): void {
         turnStatusBarItem.backgroundColor = undefined;
         turnStatusBarItem.hide();
     }
+}
+
+function refreshActiveTurnStatus(): void {
+    configureTurnStatusWatcher();
+    refreshTurnStatus('active-editor', true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,6 +1613,9 @@ const TAB_SYNC_MAX_DEFERRED_RETRIES = 8;
 let latestTabSyncGeneration = 0;
 let tabSyncDeferredRetryKey: string | undefined;
 let tabSyncDeferredRetryCount = 0;
+let tabSyncTimeoutBackoffKey: string | undefined;
+let tabSyncTimeoutBackoffCount = 0;
+let tabSyncTimeoutRetryAfterMs = 0;
 
 interface PlannedTabSyncExecution {
     root: string;
@@ -1559,6 +1658,34 @@ function resetTabSyncDeferredRetry(): void {
     tabSyncDeferredRetryCount = 0;
 }
 
+function tabSyncRetryKey(execution: PlannedTabSyncExecution): string {
+    return `${execution.planned.nextState.visibleSignature}\u0000${execution.planned.nextState.activeFile}`;
+}
+
+function resetTabSyncTimeoutBackoff(): void {
+    tabSyncTimeoutBackoffKey = undefined;
+    tabSyncTimeoutBackoffCount = 0;
+    tabSyncTimeoutRetryAfterMs = 0;
+}
+
+function remainingTabSyncTimeoutBackoffMs(execution: PlannedTabSyncExecution): number {
+    if (tabSyncTimeoutBackoffKey !== tabSyncRetryKey(execution)) return 0;
+    return Math.max(tabSyncTimeoutRetryAfterMs - Date.now(), 0);
+}
+
+function registerTabSyncTimeoutBackoff(execution: PlannedTabSyncExecution): number {
+    const retryKey = tabSyncRetryKey(execution);
+    if (tabSyncTimeoutBackoffKey === retryKey) {
+        tabSyncTimeoutBackoffCount += 1;
+    } else {
+        tabSyncTimeoutBackoffKey = retryKey;
+        tabSyncTimeoutBackoffCount = 1;
+    }
+    const delayMs = tabSyncTimeoutBackoffDelayMs(tabSyncTimeoutBackoffCount);
+    tabSyncTimeoutRetryAfterMs = Date.now() + delayMs;
+    return delayMs;
+}
+
 function nextTabSyncDeferredRetryDelay(retryCount: number): number {
     const step = Math.max(retryCount - 1, 0);
     const delay = TAB_SYNC_DEFERRED_RETRY_BASE_MS * (2 ** Math.min(step, 3));
@@ -1566,7 +1693,7 @@ function nextTabSyncDeferredRetryDelay(retryCount: number): number {
 }
 
 function registerTabSyncDeferredRetry(execution: PlannedTabSyncExecution): number | null {
-    const retryKey = `${execution.planned.nextState.visibleSignature}\u0000${execution.planned.nextState.activeFile}`;
+    const retryKey = tabSyncRetryKey(execution);
     if (tabSyncDeferredRetryKey === retryKey) {
         tabSyncDeferredRetryCount += 1;
     } else {
@@ -1586,9 +1713,11 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
 
     let startedGeneration = requestedGeneration;
     let retryAlreadyScheduled = false;
+    let commandTimedOut = false;
     try {
         while (true) {
             startedGeneration = latestTabSyncGeneration;
+            commandTimedOut = false;
             const execution = planCurrentTabChange();
             if (execution === null) {
                 if (!shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) break;
@@ -1601,7 +1730,17 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                     const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
                     output = await runCli(buildImmediateFocusCommandArgs(rel), cwd, { timeoutMs: FOCUS_CLI_TIMEOUT_MS });
                 } else {
-                    output = await runCli(execution.planned.command.args, execution.root, { timeoutMs: SYNC_CLI_TIMEOUT_MS });
+                    const backoffMs = remainingTabSyncTimeoutBackoffMs(execution);
+                    if (backoffMs > 0) {
+                        requestTabSync(backoffMs);
+                        retryAlreadyScheduled = true;
+                        break;
+                    }
+                    output = await runCli(
+                        execution.planned.command.args,
+                        execution.root,
+                        { timeoutMs: AUTOMATIC_SYNC_CLI_TIMEOUT_MS },
+                    );
                 }
                 const result = analyzeTabSyncCommandResult(
                     execution.planned.command,
@@ -1611,6 +1750,7 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                 if (result.applied) {
                     lastTabSyncState = execution.planned.nextState;
                     resetTabSyncDeferredRetry();
+                    resetTabSyncTimeoutBackoff();
                 } else if (result.shouldRetry) {
                     if (shouldScheduleDeferredTabSyncRetry(startedGeneration, latestTabSyncGeneration)) {
                         const delayMs = registerTabSyncDeferredRetry(execution);
@@ -1621,17 +1761,48 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                     }
                     break;
                 }
-            } catch {
+            } catch (err) {
+                commandTimedOut = isCliTimeout(err);
+                if (
+                    commandTimedOut &&
+                    execution.planned.command.kind === 'sync' &&
+                    shouldScheduleDeferredTabSyncRetry(startedGeneration, latestTabSyncGeneration)
+                ) {
+                    const delayMs = registerTabSyncTimeoutBackoff(execution);
+                    requestTabSync(delayMs);
+                    retryAlreadyScheduled = true;
+                    break;
+                }
                 resetTabSyncDeferredRetry();
+                if (!commandTimedOut) {
+                    resetTabSyncTimeoutBackoff();
+                }
                 // Silently ignore tab sync errors
             }
 
-            if (!shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) break;
+            const replayDelayMs = replayDelayAfterTabSyncRun(
+                startedGeneration,
+                latestTabSyncGeneration,
+                commandTimedOut,
+            );
+            if (replayDelayMs === null) break;
+            if (replayDelayMs > 0) {
+                requestTabSync(replayDelayMs);
+                retryAlreadyScheduled = true;
+                break;
+            }
         }
     } finally {
         tabSyncRunning = false;
-        if (!retryAlreadyScheduled && shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) {
-            requestTabSync(0);
+        if (!retryAlreadyScheduled) {
+            const replayDelayMs = replayDelayAfterTabSyncRun(
+                startedGeneration,
+                latestTabSyncGeneration,
+                commandTimedOut,
+            );
+            if (replayDelayMs !== null) {
+                requestTabSync(replayDelayMs);
+            }
         }
     }
 }
@@ -1806,6 +1977,8 @@ class PatchWatcher implements vscode.Disposable {
     private signalWatcher: vscode.FileSystemWatcher | undefined;
     private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
     private liveBufferSignalWatcher: vscode.FileSystemWatcher | undefined;
+    private crdtReplicaEventWatcher: vscode.FileSystemWatcher | undefined;
+    private libReloadBroadcastWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
     private openListener: vscode.Disposable | undefined;
     private saveListener: vscode.Disposable | undefined;
@@ -1837,14 +2010,8 @@ class PatchWatcher implements vscode.Disposable {
     /** Native editor-op writes are queued off the text-change listener path. */
     private pendingEditorOpReports: PendingEditorOpReport[] = [];
     private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
-    /**
-     * #cdylib-reload-broadcast: poll timer + last-seen mtime for the global cdylib
-     * reload-broadcast file. When the broadcast mtime advances, force the native
-     * reload immediately instead of waiting for the next lazy mtime-checked FFI call.
-     */
-    private libReloadBroadcastTimer: ReturnType<typeof setInterval> | undefined;
+    /** Last observed global cdylib reload-broadcast mtime. */
     private lastLibReloadBroadcastMtime = 0;
-    private static readonly LIB_RELOAD_BROADCAST_POLL_MS = 2000;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
@@ -1896,13 +2063,13 @@ class PatchWatcher implements vscode.Disposable {
         this.liveBufferSignalWatcher.onDidChange(() => this.onPublishLiveBufferSignal(patchesDir));
 
         const projectRoot = path.dirname(path.dirname(patchesDir));
-        // #cdylib-reload-broadcast: poll the global reload-broadcast file so a
-        // cdylib upgrade reloads proactively (parity with the JetBrains poller).
-        this.startLibReloadBroadcastPoll(projectRoot);
+        this.startCrdtReplicaEventWatcher(projectRoot);
+        this.startLibReloadBroadcastWatcher(projectRoot);
         this.crdtReplicas = new CrdtReplicaManager({
             projectRoot,
             identity: EDITOR_ID,
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
+            currentText: (filePath) => this.currentOpenDocumentText(filePath),
             applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
@@ -1967,43 +2134,6 @@ class PatchWatcher implements vscode.Disposable {
         void this.processPublishLiveBufferSignal(patchesDir);
         this.processPendingPatches(patchesDir);
 
-        // #yzer / #evmhplugin: activation is the VS Code analog of the JB plugin's
-        // IPC (re)connect — the editor just opened a buffer the binary may have
-        // advanced past (committed content the buffer never saw) while VS Code was
-        // closed. Realtime cutover keeps visible buffers editor-owned here: the
-        // binary FFI may report stale state, but this extension no longer mutates
-        // open buffers as a reconnect repair.
-        void this.reconcileStaleBuffersOnReconnect(patchesDir);
-    }
-
-    /**
-     * #yzer / #evmhplugin: reconcile every open markdown buffer under this
-     * patches-dir root whose editor buffer is PROVABLY stale committed content
-     * (the binary advanced disk/HEAD while VS Code was closed). Realtime cutover
-     * disables editor-open reconnect repair writes; `reread_disk` decisions are
-     * logged and the buffer is kept editor-owned.
-     */
-    private async reconcileStaleBuffersOnReconnect(patchesDir: string): Promise<void> {
-        const root = path.dirname(path.dirname(patchesDir));
-        for (const doc of vscode.workspace.textDocuments) {
-            if (doc.languageId !== 'markdown') continue;
-            const filePath = doc.uri.fsPath;
-            if (!filePath.startsWith(root + path.sep)) continue;
-            let decision;
-            try {
-                decision = native.reconnectBufferDecision(root, filePath, doc.getText());
-            } catch (e: any) {
-                this.outputChannel.appendLine(`reconnect: decision FFI failed for ${filePath}: ${e.message}`);
-                continue;
-            }
-            if (!decision || decision.decision !== 'reread_disk' || typeof decision.content !== 'string') {
-                if (decision && decision.decision !== 'in_sync' && decision.decision !== 'keep_buffer') {
-                    this.outputChannel.appendLine(`reconnect: ${filePath} decision=${decision.decision} (buffer kept) #yzer`);
-                }
-                continue;
-            }
-            this.outputChannel.appendLine(`reconnect: reread_disk repair is disabled for ${filePath}; buffer kept #yzer`);
-        }
     }
 
     private findPatchesDir(): string | undefined {
@@ -2083,9 +2213,6 @@ class PatchWatcher implements vscode.Disposable {
         const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === signal.file);
         if (!document || !this.targetsProjectMarkdown(document, projectRoot)) {
             this.outputChannel.appendLine(`save_document: no open markdown document for ${signal.file}`);
-            return;
-        }
-        if (!this.awaitIdleBeforeDocumentMutation(signal.file, 'save_document')) {
             return;
         }
         const saved = await document.save();
@@ -2249,14 +2376,12 @@ class PatchWatcher implements vscode.Disposable {
                 try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
                 return;
             }
-
-            // Handle reposition-only signals with typing debounce
+            // Handle reposition-only signals immediately; CPC/binary owns debounce.
             if (isPureRepositionSignal(patch)) {
-                this.repositionBoundaryWithDebounce(
+                this.repositionBoundaryNow(
                     patch.file,
                     uri.fsPath,
                     patch.reposition_boundary_id,
-                    0,
                     patch.preserve_head ?? false,
                 );
                 return;
@@ -2268,17 +2393,6 @@ class PatchWatcher implements vscode.Disposable {
                 return;
             }
             const stateGeneration = native.recordEditorPatchQueued(patch.file, patch.patch_id, projectRoot);
-            if (!this.awaitIdleBeforeDocumentMutation(patch.file, 'file patch', uri.fsPath)) {
-                native.recordEditorRetryRequested(
-                    patch.file,
-                    patch.patch_id,
-                    stateGeneration,
-                    'typing_active',
-                    projectRoot,
-                );
-                return;
-            }
-
             const applied = await this.applyPatch(patch, uri.fsPath);
 
             if (applied) {
@@ -2312,45 +2426,18 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     /**
-     * Reposition boundary marker with typing debounce.
-     * Waits until the user stops typing (500ms idle) before applying,
-     * up to a 5s timeout. Deletes the patch file after applying.
+     * Reposition boundary marker immediately. Deletes the patch file after applying.
      *
      * Uses FFI `agent_doc_reposition_boundary_to_end` when available,
      * falls back to TS implementation.
      */
-    private repositionBoundaryWithDebounce(
+    private repositionBoundaryNow(
         filePath: string,
         patchFilePath: string,
         boundaryId?: string,
-        elapsed = 0,
         preserveHead = false,
     ): void {
-        const debounceMs = 500;
-        const timeoutMs = 5000;
         const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
-
-        // Check typing idle — prefer FFI, fall back to TS timestamp
-        const ffiIdle = native.isAvailable(projectRoot)
-            ? native.isIdle(filePath, debounceMs, projectRoot)
-            : null;
-        const tsIdle = (Date.now() - (this.lastTypingTime.get(filePath) ?? 0)) >= debounceMs;
-        const idle = ffiIdle ?? tsIdle;
-
-        if (!idle && elapsed < timeoutMs) {
-            setTimeout(() => {
-                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, elapsed + 500, preserveHead);
-            }, 500);
-            return;
-        }
-
-        if (!idle) {
-            this.outputChannel.appendLine(`PatchWatcher: typing debounce timed out before reposition for ${filePath}; retrying`);
-            setTimeout(() => {
-                this.repositionBoundaryWithDebounce(filePath, patchFilePath, boundaryId, 0, preserveHead);
-            }, debounceMs);
-            return;
-        }
 
         // Apply reposition via WorkspaceEdit (cursor-safe)
         const fileUri = vscode.Uri.file(filePath);
@@ -2385,23 +2472,6 @@ class PatchWatcher implements vscode.Disposable {
 
     private repositionBoundaryToEndPreserveHeadTs(doc: string, component: string, boundaryId?: string): string | null {
         return repositionBoundaryToEndPreserveHead(doc, component, boundaryId);
-    }
-
-    private awaitIdleBeforeDocumentMutation(filePath: string, operation: string, patchFilePath?: string): boolean {
-        const debounceMs = 500;
-        const timeoutMs = 5000;
-        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
-        const nativeIdle = native.awaitIdle(filePath, debounceMs, timeoutMs, projectRoot);
-        const tsIdle = (Date.now() - (this.lastTypingTime.get(filePath) ?? 0)) >= debounceMs;
-        if (nativeIdle && tsIdle) {
-            return true;
-        }
-
-        this.outputChannel.appendLine(`PatchWatcher: typing debounce timed out before ${operation} for ${filePath}`);
-        if (patchFilePath) {
-            this.schedulePatchRetry(patchFilePath);
-        }
-        return false;
     }
 
     private schedulePatchRetry(patchFilePath: string): void {
@@ -2560,6 +2630,10 @@ class PatchWatcher implements vscode.Disposable {
         return this.applyMinimalTextEdit(document, targetContent);
     }
 
+    private currentOpenDocumentText(filePath: string): string | null {
+        return vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath)?.getText() ?? null;
+    }
+
     private currentProjectMarkdownSnapshots(projectRoot: string): Array<{ filePath: string; text: string }> {
         return vscode.workspace.textDocuments
             .filter((document) => this.targetsProjectMarkdown(document, projectRoot))
@@ -2610,6 +2684,7 @@ class PatchWatcher implements vscode.Disposable {
         }
         const noUnsavedOperatorEdits = !document.isDirty || !this.unsyncedLocalEditDocs.has(fsPath);
         native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);
+        void this.crdtReplicas?.attachDocument(fsPath, text, true);
     }
 
     private scheduleEditorOpReport(
@@ -2953,24 +3028,62 @@ class PatchWatcher implements vscode.Disposable {
         return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    /**
-     * #cdylib-reload-broadcast: start polling the global reload-broadcast file
-     * (a sibling of the installed cdylib). When its mtime advances, force the
-     * native reload immediately. Thin event -> reload, matching the JetBrains
-     * poller for shared-foundation parity.
-     */
-    private startLibReloadBroadcastPoll(projectRoot: string): void {
-        if (this.libReloadBroadcastTimer) return;
-        this.libReloadBroadcastTimer = setInterval(() => {
-            try {
-                this.pollLibReloadBroadcastOnce(projectRoot);
-            } catch (e: any) {
-                this.outputChannel.appendLine(`[lib-reload] broadcast poll failed: ${e?.message ?? e}`);
-            }
-        }, PatchWatcher.LIB_RELOAD_BROADCAST_POLL_MS);
+    private startCrdtReplicaEventWatcher(projectRoot: string): void {
+        if (this.crdtReplicaEventWatcher) return;
+        const eventsDir = path.join(projectRoot, '.agent-doc', 'crdt-replica-events');
+        try {
+            fs.mkdirSync(eventsDir, { recursive: true });
+        } catch {
+            // Watcher creation below is still best-effort.
+        }
+        const pattern = new vscode.RelativePattern(eventsDir, '*.json');
+        this.crdtReplicaEventWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, true);
+        this.crdtReplicaEventWatcher.onDidCreate((uri) => this.onCrdtReplicaEvent(uri));
+        this.crdtReplicaEventWatcher.onDidChange((uri) => this.onCrdtReplicaEvent(uri));
     }
 
-    private pollLibReloadBroadcastOnce(projectRoot: string): void {
+    private onCrdtReplicaEvent(uri: vscode.Uri): void {
+        try {
+            const raw = fs.readFileSync(uri.fsPath, 'utf-8');
+            const event = JSON.parse(raw) as { file?: unknown };
+            if (typeof event.file === 'string' && event.file.length > 0) {
+                this.crdtReplicas?.requestRemoteDrain(event.file);
+            } else {
+                this.crdtReplicas?.requestRemoteDrain();
+            }
+        } catch (e: any) {
+            this.outputChannel.appendLine(`[crdt-replica] event drain failed: ${e?.message ?? e}`);
+            this.crdtReplicas?.requestRemoteDrain();
+        }
+    }
+
+    /**
+     * #cdylib-reload-broadcast: watch the global reload-broadcast file (a sibling
+     * of the installed cdylib). When its mtime advances, force the native reload
+     * immediately instead of using a fixed polling interval.
+     */
+    private startLibReloadBroadcastWatcher(projectRoot: string): void {
+        if (this.libReloadBroadcastWatcher) return;
+        const file = native.reloadBroadcastFile(projectRoot);
+        if (!file) return;
+        const parent = path.dirname(file);
+        const name = path.basename(file);
+        try {
+            this.lastLibReloadBroadcastMtime = fs.statSync(file).mtimeMs;
+        } catch {
+            this.lastLibReloadBroadcastMtime = 0;
+        }
+        this.libReloadBroadcastWatcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(parent, name),
+            false,
+            false,
+            true,
+        );
+        this.libReloadBroadcastWatcher.onDidCreate(() => this.onLibReloadBroadcastEvent(projectRoot));
+        this.libReloadBroadcastWatcher.onDidChange(() => this.onLibReloadBroadcastEvent(projectRoot));
+    }
+
+    private onLibReloadBroadcastEvent(projectRoot: string): void {
         const file = native.reloadBroadcastFile(projectRoot);
         if (!file) return;
         let mtime = 0;
@@ -2994,12 +3107,14 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     dispose(): void {
-        if (this.libReloadBroadcastTimer) clearInterval(this.libReloadBroadcastTimer);
-        this.libReloadBroadcastTimer = undefined;
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
         this.saveSignalWatcher?.dispose();
         this.liveBufferSignalWatcher?.dispose();
+        this.crdtReplicaEventWatcher?.dispose();
+        this.libReloadBroadcastWatcher?.dispose();
+        this.crdtReplicaEventWatcher = undefined;
+        this.libReloadBroadcastWatcher = undefined;
         this.typingListener?.dispose();
         this.openListener?.dispose();
         this.saveListener?.dispose();
@@ -3037,15 +3152,14 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
     // Goal 1: coordinate the CPC turn state into the status bar. Refresh on active
-    // editor change + a light interval so the plugin reflects the CPC's
-    // authoritative turn phase (agent_doc_turn_projection). Parity with JetBrains.
+    // editor changes and turn-scope file events so the plugin reflects the CPC's
+    // authoritative turn phase without a fixed polling interval.
     context.subscriptions.push(
         turnStatusBarItem,
-        vscode.window.onDidChangeActiveTextEditor(() => refreshTurnStatus()),
+        vscode.window.onDidChangeActiveTextEditor(() => refreshActiveTurnStatus()),
+        { dispose: () => disposeTurnStatusWatcher() },
     );
-    const turnStatusInterval = setInterval(refreshTurnStatus, 1500);
-    context.subscriptions.push({ dispose: () => clearInterval(turnStatusInterval) });
-    refreshTurnStatus();
+    refreshActiveTurnStatus();
 
     // Feature 1: Run (Submit)
     context.subscriptions.push(

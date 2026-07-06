@@ -15,13 +15,12 @@ use agent_doc_controller::supervisor_replacement::{
     SupervisorReplacementRequestFields, parse_supervisor_replacement_request,
 };
 use agent_doc_controller::timeout::is_timeout_error;
+use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 
-#[cfg(not(any(test, feature = "test-support")))]
-const CRDT_REPLICA_SUPERVISOR_START_WAIT: Duration = Duration::from_secs(3);
-#[cfg(any(test, feature = "test-support"))]
-const CRDT_REPLICA_SUPERVISOR_START_WAIT: Duration = Duration::from_millis(250);
-const CRDT_REPLICA_SUPERVISOR_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
+const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_millis(750);
+const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -60,12 +59,20 @@ pub(crate) fn read_controller_response_line<R: BufRead>(
     reader: &mut R,
     response: &mut String,
 ) -> Result<()> {
+    read_controller_response_line_with_timeout(reader, response, CONTROLLER_RPC_TIMEOUT)
+}
+
+fn read_controller_response_line_with_timeout<R: BufRead>(
+    reader: &mut R,
+    response: &mut String,
+    timeout: Duration,
+) -> Result<()> {
     match reader.read_line(response) {
         Ok(0) => anyhow::bail!("project controller closed connection without a response"),
         Ok(_) => Ok(()),
         Err(err) if is_timeout_error(&err) => anyhow::bail!(
             "timed out after {:.1}s waiting for project controller response",
-            CONTROLLER_RPC_TIMEOUT.as_secs_f32()
+            timeout.as_secs_f32()
         ),
         Err(err) => Err(err).context("failed to read project controller response"),
     }
@@ -121,9 +128,35 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,
 ) -> Result<T> {
+    request_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
+}
+
+fn request_controller_with_timeout<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    timeout: Duration,
+) -> Result<T> {
     let stream = connect_or_launch(project_root, LaunchMode::Lazy)?;
+    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+}
+
+fn request_existing_controller_with_timeout<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    timeout: Duration,
+) -> Result<T> {
+    let stream = connect(project_root)?;
+    request_controller_on_stream_with_timeout(project_root, request, timeout, stream)
+}
+
+fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
+    project_root: &Path,
+    request: ControllerRequest,
+    timeout: Duration,
+    stream: interprocess::local_socket::Stream,
+) -> Result<T> {
     stream
-        .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
+        .set_recv_timeout(Some(timeout))
         .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
     // #af88 B enforcement: stamp the caller's own binary version onto the wire as a
@@ -145,7 +178,7 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
 
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
-    read_controller_response_line(&mut reader, &mut response)?;
+    read_controller_response_line_with_timeout(&mut reader, &mut response, timeout)?;
     decode_controller_response(project_root, &request, response.trim())
 }
 
@@ -2349,20 +2382,35 @@ fn visible_write_commit_candidate_hash(candidate_content: &str) -> String {
     )
 }
 
-fn visible_write_live_buffer_revision(canonical: &Path, live_buffer_hash: &str) -> u64 {
-    let canonical_str = canonical.to_string_lossy().to_string();
-    agent_doc_debounce::live_buffer_snapshots(&canonical_str)
-        .into_iter()
-        .filter(|snapshot| {
-            snapshot.hash.eq_ignore_ascii_case(live_buffer_hash)
-                || snapshot.content.as_ref().is_some_and(|content| {
-                    visible_write_commit_candidate_hash(content)
-                        .eq_ignore_ascii_case(live_buffer_hash)
-                })
+static VISIBLE_WRITE_MODEL_REVISION: AtomicU64 = AtomicU64::new(1);
+
+fn next_visible_write_model_revision(project_root: &Path, canonical: &Path) -> u64 {
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let latest_projected = load_state_backbone_projection(project_root)
+        .ok()
+        .and_then(|projection| {
+            projection
+                .document(&document_hash)
+                .and_then(|document| document.visible_write.latest_model_revision)
         })
-        .map(|snapshot| snapshot.edit_epoch)
-        .max()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let wall_revision = timestamp_secs().saturating_mul(1_000_000);
+    loop {
+        let current = VISIBLE_WRITE_MODEL_REVISION.load(Ordering::Relaxed);
+        let next = current
+            .saturating_add(1)
+            .max(latest_projected.saturating_add(1))
+            .max(wall_revision);
+        match VISIBLE_WRITE_MODEL_REVISION.compare_exchange(
+            current,
+            next,
+            Ordering::SeqCst,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return next,
+            Err(_) => continue,
+        }
+    }
 }
 
 pub fn record_visible_write_commit_candidate_for_file(
@@ -2374,22 +2422,9 @@ pub fn record_visible_write_commit_candidate_for_file(
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let canonical_str = canonical.to_string_lossy().to_string();
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let commit_candidate_hash = visible_write_commit_candidate_hash(candidate_content);
-    let model_revision = agent_doc_debounce::live_buffer_snapshots(&canonical_str)
-        .into_iter()
-        .filter(|snapshot| {
-            snapshot.hash.eq_ignore_ascii_case(&commit_candidate_hash)
-                || snapshot.content.as_ref().is_some_and(|content| {
-                    visible_write_commit_candidate_hash(content)
-                        .eq_ignore_ascii_case(&commit_candidate_hash)
-                })
-        })
-        .filter(|snapshot| snapshot.edit_epoch <= snapshot.last_synced_epoch)
-        .map(|snapshot| snapshot.edit_epoch)
-        .max()
-        .unwrap_or_default();
+    let model_revision = next_visible_write_model_revision(&project_root, &canonical);
     let payload = VisibleWriteCommitCandidatePayload {
         patch_id: patch_id.to_string(),
         model_revision,
@@ -2418,7 +2453,7 @@ pub fn visible_write_commit_candidate_applied_for_file(
         });
         let request = ControllerRequest {
             command: "visible_write_commit_candidate_status".to_string(),
-            file: Some(canonical.clone()),
+            file: Some(canonical.to_path_buf()),
             session_id: None,
             pane_id: None,
             window_id: None,
@@ -2457,7 +2492,7 @@ pub fn visible_write_commit_candidate_for_patch_file(
         });
         let request = ControllerRequest {
             command: "visible_write_commit_candidate_patch_status".to_string(),
-            file: Some(canonical.clone()),
+            file: Some(canonical.to_path_buf()),
             session_id: None,
             pane_id: None,
             window_id: None,
@@ -2497,7 +2532,7 @@ pub fn record_visible_write_materialized_carry_forward_for_file(
     let live_buffer_hash = visible_write_commit_candidate_hash(live_buffer_content);
     let file_content_hash = visible_write_commit_candidate_hash(file_content);
     let commit_candidate_hash = visible_write_commit_candidate_hash(commit_candidate_content);
-    let model_revision = visible_write_live_buffer_revision(&canonical, &live_buffer_hash);
+    let model_revision = next_visible_write_model_revision(&project_root, &canonical);
     let payload = VisibleWriteMaterializedCarryForwardPayload {
         model_revision,
         live_buffer_hash,
@@ -2585,7 +2620,7 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 /// --force`). `force == false` is byte-for-byte the prior defer-at-idle behavior.
 pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
     let checkpoint =
-        checkpoint_supervisors_for_project(project_root, "controller_recycle_request")?;
+        checkpoint_route_owned_documents_for_project(project_root, "controller_recycle_request")?;
     warn_controller_recycle_checkpoint_failures(&project_root.display().to_string(), checkpoint);
     // The `recycle` RPC re-execs only the *authoritative* controller reachable over
     // the project socket. Capture its result but DON'T early-return — the orphan
@@ -2625,8 +2660,6 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
 /// --all-projects --force`). `force == false` is the prior defer-at-idle behavior.
 pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let roots = crate::process::controller_project_roots(std::process::id());
-    let checkpoint = checkpoint_supervisors_all_projects("controller_recycle_request")?;
-    warn_controller_recycle_checkpoint_failures("all projects", checkpoint);
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
@@ -2657,50 +2690,41 @@ pub fn recycle_supervisors_all_projects() -> Result<(usize, usize)> {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SupervisorCrdtCheckpointSummary {
+pub struct CrdtCheckpointSummary {
     pub checkpointed: usize,
     pub detached: usize,
     pub skipped: usize,
     pub failed: usize,
 }
 
-impl SupervisorCrdtCheckpointSummary {
+impl CrdtCheckpointSummary {
     pub fn all_clear(self) -> bool {
         self.failed == 0
     }
-
-    pub fn total(self) -> usize {
-        self.checkpointed + self.detached + self.skipped + self.failed
-    }
 }
 
-fn warn_controller_recycle_checkpoint_failures(
-    scope: &str,
-    checkpoint: SupervisorCrdtCheckpointSummary,
-) {
+fn warn_controller_recycle_checkpoint_failures(scope: &str, checkpoint: CrdtCheckpointSummary) {
     if checkpoint.all_clear() {
         return;
     }
     eprintln!(
-        "[agent-doc] warning: continuing controller recycle for {scope} after CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped); supervisor recycle fan-out still skips any uncheckpointed supervisor",
+        "[agent-doc] warning: continuing controller recycle for {scope} after CRDT durable checkpoint failed for {} document(s) ({} checkpointed, {} detached, {} skipped); supervisor recycle fan-out still skips any uncheckpointed document",
         checkpoint.failed, checkpoint.checkpointed, checkpoint.detached, checkpoint.skipped,
     );
 }
 
-fn checkpoint_crdt_via_local_document_model(
+fn checkpoint_crdt_via_controller_document_model(
     canonical: &Path,
     source: &str,
-    fallback_reason: &str,
 ) -> Result<Option<String>> {
     match agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(canonical, source) {
         Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached) => {
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "supervisor_crdt_checkpoint_fallback file={} source={} status=detached fallback_reason={} transport=local_document_model",
+                    "controller_crdt_checkpoint file={} source={} status=detached authority=cpc_model transport=local_document_model",
                     canonical.display(),
                     source,
-                    fallback_reason,
                 ),
             );
             Ok(Some("detached".to_string()))
@@ -2715,10 +2739,9 @@ fn checkpoint_crdt_via_local_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "supervisor_crdt_checkpoint_fallback file={} source={} status=checkpointed fallback_reason={} transport=local_document_model bytes={} changed={} live_editors={} text_len={} text_hash={}",
+                    "controller_crdt_checkpoint file={} source={} status=checkpointed authority=cpc_model transport=local_document_model bytes={} changed={} live_editors={} text_len={} text_hash={}",
                     canonical.display(),
                     source,
-                    fallback_reason,
                     bytes,
                     changed,
                     live_editors,
@@ -2732,10 +2755,9 @@ fn checkpoint_crdt_via_local_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "supervisor_crdt_checkpoint_fallback file={} source={} status=deferred fallback_reason={} transport=local_document_model reason={} recovery=background_yrs_repair",
+                    "controller_crdt_checkpoint file={} source={} status=deferred authority=cpc_model transport=local_document_model reason={} recovery=background_yrs_repair",
                     canonical.display(),
                     source,
-                    fallback_reason,
                     reason,
                 ),
             );
@@ -2745,16 +2767,15 @@ fn checkpoint_crdt_via_local_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "supervisor_crdt_checkpoint_fallback_failed file={} source={} fallback_reason={} transport=local_document_model error={:?}",
+                    "controller_crdt_checkpoint_failed file={} source={} authority=cpc_model transport=local_document_model error={:?}",
                     canonical.display(),
                     source,
-                    fallback_reason,
                     err.to_string(),
                 ),
             );
             Err(err).with_context(|| {
                 format!(
-                    "local document-model CRDT durable checkpoint fallback failed for {} after {fallback_reason}",
+                    "controller document-model CRDT durable checkpoint failed for {}",
                     canonical.display()
                 )
             })
@@ -2762,7 +2783,7 @@ fn checkpoint_crdt_via_local_document_model(
     }
 }
 
-fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option<String>> {
+fn checkpoint_route_owned_document_crdt(doc: &Path, source: &str) -> Result<Option<String>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
@@ -2770,150 +2791,163 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "supervisor_crdt_checkpoint_skipped file={} source={} authority=git reason=detached_authority",
+                "controller_crdt_checkpoint_skipped file={} source={} authority=git reason=detached_authority",
                 canonical.display(),
                 source,
             ),
         );
         return Ok(Some("detached".to_string()));
     }
+    if agent_doc_project_root_io::project_root_containing(&canonical).is_none() {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_checkpoint_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    }
+    checkpoint_crdt_via_controller_document_model(&canonical, source)
+}
+
+fn controller_current_text_error_allows_projection_recovery(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}");
+    controller_transport_drop_is_retryable(err)
+        || message.contains("timed out after")
+        || (message.contains("document model startup/reconciliation failed")
+            && message.contains("publish-live-buffer request over editor_ipc failed"))
+}
+
+fn recover_current_text_from_local_projection_after_controller_error(
+    canonical: &Path,
+    source: &str,
+    authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+    err: &anyhow::Error,
+    phase: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_current_text_projection_recovery file={} source={} phase={} error={} recovery=local_durable_projection_after_publish_timeout",
+            canonical.display(),
+            source,
+            phase,
+            compact_controller_error(err),
+        ),
+    );
+    agent_doc_crdt_relay_io::ensure_document_model_with_current_text_recovery_observer(
+        canonical,
+        source,
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+        || agent_doc_crdt_relay_io::current_text_for_file_with_authority(canonical, authority),
+        || {
+            agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
+                canonical, authority,
+            )
+        },
+    )
+}
+
+struct ControllerCurrentTextRead {
+    canonical: PathBuf,
+    project_root: PathBuf,
+    authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+    current: agent_doc_crdt_relay_io::CurrentText,
+}
+
+fn current_text_controller_initial_read_for_doc(
+    doc: &Path,
+    source: &str,
+    recover_after_controller_error: bool,
+    flush_barrier: bool,
+) -> Result<Option<ControllerCurrentTextRead>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
+                canonical.display(),
+                source,
+            ),
+        );
+        return Ok(Some(ControllerCurrentTextRead {
+            canonical,
+            project_root: PathBuf::new(),
+            authority,
+            current: agent_doc_crdt_relay_io::CurrentText::Detached,
+        }));
+    }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         agent_doc_ops_log_io::log_op(
             doc,
             &format!(
-                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_project_root",
+                "controller_crdt_current_text_skipped file={} source={} reason=no_project_root",
                 doc.display(),
                 source,
             ),
         );
         return Ok(None);
     };
-    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+    let controller_socket = socket_path(&project_root);
+    if let Err(err) = connect_path(&controller_socket) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_current_text_controller_unavailable file={} source={} socket={} error={} recovery=ensure_controller_running",
+                canonical.display(),
+                source,
+                controller_socket.display(),
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        );
+        ensure_controller_running(&project_root, LaunchMode::Lazy).with_context(|| {
+            format!(
+                "failed to start project controller for CRDT current-text relay at {}",
+                controller_socket.display()
+            )
+        })?;
+    }
+    let first = match request_controller_crdt_current_text_with_flush_barrier(
         &project_root,
-        &canonical.to_string_lossy(),
-    );
-    let Some(record) = load_actor_record(&project_root, &document_id)? else {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_checkpoint_skipped file={} source={} reason=no_actor_record",
-                canonical.display(),
-                source,
-            ),
-        );
-        return Ok(None);
-    };
-    let conn = open_state_db(&project_root)?;
-    let lease = load_supervisor_lease_from_db(&conn, &document_id, record.generation)?;
-    let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) else {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=no_supervisor_socket generation={} action=local_document_model_checkpoint",
-                canonical.display(),
-                source,
-                record.generation,
-            ),
-        );
-        return checkpoint_crdt_via_local_document_model(
-            &canonical,
-            source,
-            "no_supervisor_socket",
-        );
-    };
-    let socket_path = Path::new(&socket);
-    if matches!(
-        agent_doc_supervisor_io::ipc::probe_socket(socket_path),
-        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
-    ) {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={} action=local_document_model_checkpoint",
-                canonical.display(),
-                source,
-                record.generation,
-                socket,
-            ),
-        );
-        return checkpoint_crdt_via_local_document_model(
-            &canonical,
-            source,
-            "dead_supervisor_socket",
-        );
-    }
-    let response = agent_doc_supervisor_io::ipc::send_command(
-        socket_path,
-        &agent_doc_supervisor::ipc_protocol::IpcMethod::CrdtCheckpoint {
-            file: file_arg,
-            source: source.to_string(),
-        },
-    )
-    .with_context(|| {
-        format!("failed to request CRDT durable checkpoint from supervisor socket {socket}")
-    })?;
-    if !response.ok {
-        let error = response
-            .error
-            .unwrap_or_else(|| "unknown error".to_string());
-        if error.contains("unknown variant `crdt_checkpoint`")
-            || error.contains("unknown variant crdt_checkpoint")
-        {
-            agent_doc_ops_log_io::log_op(
-                &canonical,
-                &format!(
-                    "supervisor_crdt_checkpoint_reconcile file={} source={} authority=multi_replica reason=unsupported_supervisor_checkpoint_rpc generation={} socket={} error={:?} action=local_document_model_checkpoint",
-                    canonical.display(),
-                    source,
-                    record.generation,
-                    socket,
-                    error,
-                ),
-            );
-            return checkpoint_crdt_via_local_document_model(
-                &canonical,
-                source,
-                "unsupported_supervisor_checkpoint_rpc",
-            );
-        }
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_checkpoint_rejected file={} source={} authority=multi_replica generation={} socket={} error={:?}",
-                canonical.display(),
-                source,
-                record.generation,
-                socket,
-                error,
-            ),
-        );
-        anyhow::bail!(
-            "supervisor CRDT durable checkpoint rejected for {}: {}",
-            canonical.display(),
-            error,
-        );
-    }
-    let status = response
-        .data
-        .as_ref()
-        .and_then(|data| data.get("status"))
-        .and_then(|status| status.as_str())
-        .unwrap_or("unknown")
-        .to_string();
-    agent_doc_ops_log_io::log_op(
         &canonical,
-        &format!(
-            "supervisor_crdt_checkpoint file={} source={} status={} socket={}",
-            canonical.display(),
-            source,
-            status,
-            socket,
-        ),
-    );
-    Ok(Some(status))
+        source,
+        flush_barrier,
+    ) {
+        Ok(first) => first,
+        Err(err)
+            if recover_after_controller_error
+                && controller_current_text_error_allows_projection_recovery(&err) =>
+        {
+            let current = recover_current_text_from_local_projection_after_controller_error(
+                &canonical,
+                source,
+                authority,
+                &err,
+                "initial_request",
+            )?;
+            return Ok(Some(ControllerCurrentTextRead {
+                canonical,
+                project_root,
+                authority,
+                current,
+            }));
+        }
+        Err(err) => return Err(err),
+    };
+    Ok(Some(ControllerCurrentTextRead {
+        canonical,
+        project_root,
+        authority,
+        current: first,
+    }))
 }
 
-pub fn current_text_via_supervisor_for_doc(
+pub fn current_text_via_controller_model_read_for_doc(
     doc: &Path,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
@@ -2924,7 +2958,7 @@ pub fn current_text_via_supervisor_for_doc(
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "supervisor_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
+                "controller_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
                 canonical.display(),
                 source,
             ),
@@ -2935,118 +2969,642 @@ pub fn current_text_via_supervisor_for_doc(
         agent_doc_ops_log_io::log_op(
             doc,
             &format!(
-                "supervisor_crdt_current_text_skipped file={} source={} reason=no_project_root",
+                "controller_crdt_current_text_skipped file={} source={} reason=no_project_root",
                 doc.display(),
                 source,
             ),
         );
         return Ok(None);
     };
-    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-        &project_root,
-        &canonical.to_string_lossy(),
-    );
-    let Some(record) = load_actor_record(&project_root, &document_id)? else {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_current_text_skipped file={} source={} reason=no_actor_record document_id={}",
-                canonical.display(),
-                source,
-                document_id,
-            ),
-        );
-        return Ok(None);
-    };
-    let conn = open_state_db(&project_root)?;
-    let lease = load_supervisor_lease_from_db(&conn, &document_id, record.generation)?;
-    let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) else {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=no_supervisor_socket generation={}",
-                canonical.display(),
-                source,
-                record.generation,
-            ),
-        );
-        return Ok(None);
-    };
-    let socket_path = Path::new(&socket);
-    if matches!(
-        agent_doc_supervisor_io::ipc::probe_socket(socket_path),
-        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
-    ) {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={}",
-                canonical.display(),
-                source,
-                record.generation,
-                socket,
-            ),
-        );
-        return Ok(None);
-    }
-
-    let response = agent_doc_supervisor_io::ipc::send_command(
-        socket_path,
-        &agent_doc_supervisor::ipc_protocol::IpcMethod::CrdtCurrentText {
-            file: file_arg,
-            source: source.to_string(),
-        },
-    )
-    .with_context(|| {
-        format!("failed to request current CRDT text from supervisor socket {socket}")
-    })?;
-    if !response.ok {
-        let error = response
-            .error
-            .unwrap_or_else(|| "unknown error".to_string());
-        if error.contains("unknown variant `crdt_current_text`")
-            || error.contains("unknown variant crdt_current_text")
-        {
+    match request_existing_controller_crdt_current_text_read(&project_root, &canonical, source) {
+        Ok(current) => Ok(Some(current)),
+        Err(err) => {
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
-                    "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=unsupported_supervisor_current_text_rpc generation={} socket={} error={:?}",
+                    "controller_crdt_current_text_read_unavailable file={} source={} socket={} timeout_ms={} error={} recovery=idle_disk_fallback",
                     canonical.display(),
                     source,
-                    record.generation,
-                    socket,
-                    error,
+                    socket_path(&project_root).display(),
+                    CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT.as_millis(),
+                    format!("{err:#}").replace('\n', "\\n"),
                 ),
             );
-            return Ok(None);
+            Err(err)
         }
+    }
+}
+
+pub fn current_text_via_controller_model_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let Some(read) = current_text_controller_initial_read_for_doc(doc, source, true, true)? else {
+        return Ok(None);
+    };
+    let ControllerCurrentTextRead {
+        canonical,
+        project_root,
+        authority,
+        current: first,
+    } = read;
+    if matches!(
+        first,
+        agent_doc_crdt_relay_io::CurrentText::Detached
+            | agent_doc_crdt_relay_io::CurrentText::Current { .. }
+    ) {
+        return Ok(Some(first));
+    }
+    let ensured =
+        agent_doc_crdt_relay_io::ensure_document_model_with_current_text_recovery_observer(
+            &canonical,
+            source,
+            first,
+            || {
+                request_controller_crdt_current_text_with_timeout(
+                    &project_root,
+                    &canonical,
+                    source,
+                    CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT,
+                    true,
+                )
+            },
+            || {
+                match agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
+                    &canonical, authority,
+                ) {
+                    Ok(
+                        current
+                        @ (agent_doc_crdt_relay_io::CurrentText::Detached
+                        | agent_doc_crdt_relay_io::CurrentText::Current { .. }),
+                    ) => Ok(current),
+                    Ok(_) => match request_controller_crdt_current_text_with_timeout_recovering_projection(
+                        &project_root,
+                        &canonical,
+                        source,
+                        CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT,
+                    ) {
+                        Ok(current) => Ok(current),
+                        Err(err) if controller_current_text_error_allows_projection_recovery(&err) => {
+                            recover_current_text_from_local_projection_after_controller_error(
+                                &canonical,
+                                source,
+                                authority,
+                                &err,
+                                "recovery_observer",
+                            )
+                        }
+                        Err(err) => Err(err),
+                    },
+                    Err(err) => Err(err),
+                }
+            },
+        )?;
+    Ok(Some(ensured))
+}
+
+fn request_controller_crdt_current_text_with_flush_barrier(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    flush_barrier: bool,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_controller_crdt_current_text_with_timeout(
+        project_root,
+        canonical,
+        source,
+        CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT,
+        flush_barrier,
+    )
+}
+
+fn request_controller_crdt_current_text_with_timeout(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    timeout: Duration,
+    flush_barrier: bool,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_controller_crdt_current_text_with_options(
+        project_root,
+        canonical,
+        source,
+        timeout,
+        false,
+        flush_barrier,
+    )
+}
+
+fn request_controller_crdt_current_text_with_timeout_recovering_projection(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    timeout: Duration,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    request_controller_crdt_current_text_with_options(
+        project_root,
+        canonical,
+        source,
+        timeout,
+        true,
+        true,
+    )
+}
+
+fn request_controller_crdt_current_text_with_options(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+    timeout: Duration,
+    recover_projection: bool,
+    flush_barrier: bool,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let data: serde_json::Value = request_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_current_text".to_string(),
+            file: Some(canonical.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({
+                    "source": source,
+                    "recover_projection": recover_projection,
+                    "flush_barrier": flush_barrier,
+                })
+                .to_string(),
+            ),
+        },
+        timeout,
+    )?;
+    let current = controller_current_text_from_data(&data)?;
+    log_controller_current_text_result(canonical, source, &current);
+    Ok(current)
+}
+
+fn request_existing_controller_crdt_current_text_read(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let data: serde_json::Value = request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_current_text".to_string(),
+            file: Some(canonical.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({
+                    "source": source,
+                    "recover_projection": false,
+                    "flush_barrier": false,
+                })
+                .to_string(),
+            ),
+        },
+        CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+    )?;
+    let current = controller_current_text_from_data(&data)?;
+    log_controller_current_text_result(canonical, source, &current);
+    Ok(current)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerCrdtCpcWriteResult {
+    pub write: Option<agent_doc_crdt_relay_io::CpcRelayWrite>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerCrdtCpcWritePayload {
+    expected_current: String,
+    content: String,
+    source: Option<String>,
+}
+
+pub fn apply_cpc_write_via_controller_model_for_doc(
+    doc: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "supervisor_crdt_current_text_rejected file={} source={} authority=multi_replica generation={} socket={} error={:?}",
+                "controller_crdt_cpc_write_skipped file={} source={} authority=git reason=detached_authority",
                 canonical.display(),
                 source,
-                record.generation,
-                socket,
-                error,
             ),
         );
-        anyhow::bail!(
-            "supervisor CRDT current text rejected for {}: {}",
-            canonical.display(),
-            error,
-        );
+        return Ok(None);
     }
-    let data = response
-        .data
-        .as_ref()
-        .context("supervisor CRDT current text response missing data")?;
-    let current = supervisor_current_text_from_data(data)?;
-    log_supervisor_current_text_result(&canonical, source, record.generation, &socket, &current);
-    Ok(Some(current))
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_cpc_write_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = ControllerCrdtCpcWritePayload {
+        expected_current: expected_current.to_string(),
+        content: content.to_string(),
+        source: Some(source.to_string()),
+    };
+    let result: ControllerCrdtCpcWriteResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_cpc_write".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("crdt_relay".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )?;
+    Ok(result.write)
 }
 
-fn supervisor_current_text_from_data(
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerDiskChangeReconcileResult {
+    pub outcome: Option<agent_doc_document_realtime::crdt_relay::DiskChangeOutcome>,
+}
+
+pub fn consume_disk_change_reconcile_via_controller_model_for_doc(
+    doc: &Path,
+) -> Result<Option<agent_doc_document_realtime::crdt_relay::DiskChangeOutcome>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_disk_change_reconcile_skipped file={} reason=no_project_root",
+                doc.display(),
+            ),
+        );
+        return Ok(None);
+    };
+    let result: ControllerDiskChangeReconcileResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_disk_change_reconcile".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )?;
+    Ok(result.outcome)
+}
+
+pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_commit_barrier_skipped file={} authority=git reason=detached_authority",
+                canonical.display(),
+            ),
+        );
+        return Ok(true);
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_commit_barrier_skipped file={} reason=no_project_root",
+                doc.display(),
+            ),
+        );
+        return Ok(true);
+    };
+    let controller_socket = socket_path(&project_root);
+    if let Err(err) = connect_path(&controller_socket) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_commit_barrier_controller_unavailable file={} socket={} error={} recovery=ensure_controller_running",
+                canonical.display(),
+                controller_socket.display(),
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        );
+        ensure_controller_running(&project_root, LaunchMode::Lazy).with_context(|| {
+            format!(
+                "failed to start project controller for CRDT commit barrier at {}",
+                controller_socket.display()
+            )
+        })?;
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_commit_barrier".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_record_committed_baseline_skipped file={} authority=git reason=detached_authority",
+                canonical.display(),
+            ),
+        );
+        return Ok(false);
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_record_committed_baseline_skipped file={} reason=no_project_root",
+                doc.display(),
+            ),
+        );
+        return Ok(false);
+    };
+    let controller_socket = socket_path(&project_root);
+    if let Err(err) = connect_path(&controller_socket) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_record_committed_baseline_controller_unavailable file={} socket={} error={} recovery=ensure_controller_running",
+                canonical.display(),
+                controller_socket.display(),
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        );
+        ensure_controller_running(&project_root, LaunchMode::Lazy).with_context(|| {
+            format!(
+                "failed to start project controller for CRDT committed-baseline record at {}",
+                controller_socket.display()
+            )
+        })?;
+    }
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_record_committed_baseline".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerDiskProjectionPayload {
+    projection_b64: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerDiskProjectionReconcileResult {
+    pub changed: Option<bool>,
+}
+
+pub fn reconcile_disk_projection_via_controller_model_for_doc(
+    doc: &Path,
+    projection: &[u8],
+) -> Result<Option<bool>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_disk_projection_reconcile_skipped file={} reason=no_project_root",
+                doc.display(),
+            ),
+        );
+        return Ok(None);
+    };
+    let result: ControllerDiskProjectionReconcileResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_disk_projection_reconcile".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&ControllerDiskProjectionPayload {
+                    projection_b64: base64_standard_encode(projection),
+                })
+                .context("failed to encode disk projection reconcile payload")?,
+            ),
+        },
+    )?;
+    Ok(result.changed)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerWatchSignalResult {
+    action: String,
+}
+
+pub fn route_disk_change_signal_via_controller_model_for_doc(
+    doc: &Path,
+    delivery: &WatchDelivery,
+) -> Result<WatchAction> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_route_disk_change_signal_skipped file={} reason=no_project_root",
+                doc.display(),
+            ),
+        );
+        return Ok(WatchAction::None);
+    };
+    let result: ControllerWatchSignalResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_route_disk_change_signal".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&DiskChangeSignal::from_delivery(delivery))
+                    .context("failed to encode disk-change route signal payload")?,
+            ),
+        },
+    )?;
+    watch_action_from_payload(&result.action)
+}
+
+fn handle_crdt_disk_change_reconcile_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerDiskChangeReconcileResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let outcome = agent_doc_crdt_relay_io::consume_disk_change_reconcile(&canonical)?;
+    if let Some(outcome) = outcome {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_disk_change_consumed file={} outcome={outcome:?}",
+                canonical.display(),
+            ),
+        );
+    }
+    Ok(ControllerDiskChangeReconcileResult { outcome })
+}
+
+fn handle_crdt_commit_barrier_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    Ok(agent_doc_crdt_relay_io::commit_barrier_for_file(&canonical))
+}
+
+fn handle_crdt_record_committed_baseline_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    agent_doc_crdt_relay_io::record_committed_baseline_for_file(&canonical);
+    Ok(true)
+}
+
+fn handle_crdt_disk_projection_reconcile_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerDiskProjectionReconcileResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerDiskProjectionPayload =
+        serde_json::from_str(&payload_json).context("failed to parse disk projection payload")?;
+    let projection = base64_standard_decode(&payload.projection_b64)
+        .context("disk projection reconcile payload has invalid base64")?;
+    let changed =
+        agent_doc_crdt_relay_io::reconcile_disk_projection_for_file(&canonical, &projection)?;
+    Ok(ControllerDiskProjectionReconcileResult { changed })
+}
+
+fn handle_crdt_route_disk_change_signal_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerWatchSignalResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let signal: DiskChangeSignal = serde_json::from_str(&payload_json)
+        .context("failed to parse disk-change signal payload")?;
+    let delivery = signal.into_delivery();
+    let action = agent_doc_crdt_relay_io::route_disk_change_signal(&canonical, &delivery)?;
+    Ok(ControllerWatchSignalResult {
+        action: watch_action_payload(action).to_string(),
+    })
+}
+
+fn watch_action_payload(action: WatchAction) -> &'static str {
+    match action {
+        WatchAction::None => "none",
+        WatchAction::DeferForEditSettle => "defer_for_edit_settle",
+        WatchAction::ReconcileIntoCanonical => "reconcile_into_canonical",
+        WatchAction::ApplyAsDiskAuthority => "apply_as_disk_authority",
+    }
+}
+
+fn watch_action_from_payload(action: &str) -> Result<WatchAction> {
+    match action {
+        "none" => Ok(WatchAction::None),
+        "defer_for_edit_settle" => Ok(WatchAction::DeferForEditSettle),
+        "reconcile_into_canonical" => Ok(WatchAction::ReconcileIntoCanonical),
+        "apply_as_disk_authority" => Ok(WatchAction::ApplyAsDiskAuthority),
+        other => anyhow::bail!("unknown disk-change signal action `{other}`"),
+    }
+}
+
+fn controller_current_text_from_data(
     data: &serde_json::Value,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     match data.get("status").and_then(|status| status.as_str()) {
@@ -3059,7 +3617,7 @@ fn supervisor_current_text_from_data(
             let text = data
                 .get("text")
                 .and_then(|text| text.as_str())
-                .context("supervisor current text response missing text")?
+                .context("controller current text response missing text")?
                 .to_string();
             let live_editors = data
                 .get("live_editors")
@@ -3076,49 +3634,69 @@ fn supervisor_current_text_from_data(
                 delivery_converged,
             })
         }
-        Some(status) => anyhow::bail!("unknown supervisor current text status `{status}`"),
-        None => anyhow::bail!("supervisor current text response missing status"),
+        Some(status) => anyhow::bail!("unknown controller current text status `{status}`"),
+        None => anyhow::bail!("controller current text response missing status"),
     }
 }
 
-fn log_supervisor_current_text_result(
+fn controller_current_text_response(
+    current: agent_doc_crdt_relay_io::CurrentText,
+) -> serde_json::Value {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => {
+            serde_json::json!({ "status": "detached" })
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            serde_json::json!({ "status": "editor_attached_model_missing" })
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            serde_json::json!({ "status": "editor_sync_pending" })
+        }
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+        } => serde_json::json!({
+            "status": "current",
+            "text_len": text.len(),
+            "text_hash": agent_doc_hash::content_hash(&text),
+            "text": text,
+            "live_editors": live_editors,
+            "delivery_converged": delivery_converged,
+        }),
+    }
+}
+
+fn log_controller_current_text_result(
     canonical: &Path,
     source: &str,
-    generation: u64,
-    socket: &str,
     current: &agent_doc_crdt_relay_io::CurrentText,
 ) {
     match current {
         agent_doc_crdt_relay_io::CurrentText::Detached => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "supervisor_crdt_current_text file={} source={} status=detached generation={} socket={}",
+                "controller_crdt_current_text file={} source={} status=detached authority=cpc_model",
                 canonical.display(),
                 source,
-                generation,
-                socket,
             ),
         ),
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "supervisor_crdt_current_text file={} source={} status=editor_attached_model_missing generation={} socket={}",
+                    "controller_crdt_current_text file={} source={} status=editor_attached_model_missing authority=cpc_model",
                     canonical.display(),
                     source,
-                    generation,
-                    socket,
                 ),
             )
         }
         agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "supervisor_crdt_current_text file={} source={} status=editor_sync_pending generation={} socket={}",
+                "controller_crdt_current_text file={} source={} status=editor_sync_pending authority=cpc_model",
                 canonical.display(),
                 source,
-                generation,
-                socket,
             ),
         ),
         agent_doc_crdt_relay_io::CurrentText::Current {
@@ -3128,11 +3706,9 @@ fn log_supervisor_current_text_result(
         } => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "supervisor_crdt_current_text file={} source={} status=current generation={} socket={} text_len={} text_hash={} live_editors={} delivery_converged={}",
+                "controller_crdt_current_text file={} source={} status=current authority=cpc_model text_len={} text_hash={} live_editors={} delivery_converged={}",
                 canonical.display(),
                 source,
-                generation,
-                socket,
                 text.len(),
                 agent_doc_hash::content_hash(text),
                 live_editors,
@@ -3153,9 +3729,134 @@ struct ControllerCrdtReplicaPayload {
     source: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ControllerCrdtCurrentTextPayload {
+    source: Option<String>,
+    #[serde(default)]
+    recover_projection: bool,
+    #[serde(default = "default_crdt_current_text_flush_barrier")]
+    flush_barrier: bool,
+}
+
+fn default_crdt_current_text_flush_barrier() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerEditorRoutePayload {
+    #[serde(default)]
+    relative_path: Option<String>,
+    #[serde(default)]
+    layout_args: Vec<String>,
+    #[serde(default)]
+    dispatch_only: Option<bool>,
+    #[serde(default)]
+    plain_trigger: Option<bool>,
+    #[serde(default)]
+    wait_for_ready_secs: Option<u64>,
+    #[serde(default)]
+    force_disk: Option<bool>,
+    #[serde(default)]
+    attempt_id: Option<String>,
+    #[serde(default)]
+    route_key: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ControllerEditorRouteResult {
+    exit_code: i32,
+    output: String,
+}
+
+fn handle_crdt_current_text_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let file_arg = canonical.to_string_lossy().to_string();
+    let payload = crdt_current_text_payload(&request)?;
+    let source = crdt_current_text_source(&payload);
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        let current = agent_doc_crdt_relay_io::CurrentText::Detached;
+        log_controller_current_text_result(&canonical, &source, &current);
+        return Ok(controller_current_text_response(current));
+    }
+    let current = if payload.recover_projection {
+        agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
+            &canonical, authority,
+        )?
+    } else if !payload.flush_barrier {
+        agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+            &canonical, authority,
+        )?
+    } else {
+        agent_doc_crdt_relay_io::current_text_for_file_with_authority(&canonical, authority)?
+    };
+    log_controller_current_text_result(&canonical, &source, &current);
+    Ok(controller_current_text_response(current))
+}
+
+fn crdt_current_text_payload(
+    request: &ControllerRequest,
+) -> Result<ControllerCrdtCurrentTextPayload> {
+    let Some(payload_json) = request.diagnostic_payload.as_deref() else {
+        return Ok(ControllerCrdtCurrentTextPayload {
+            source: None,
+            recover_projection: false,
+            flush_barrier: default_crdt_current_text_flush_barrier(),
+        });
+    };
+    if payload_json.trim().is_empty() {
+        return Ok(ControllerCrdtCurrentTextPayload {
+            source: None,
+            recover_projection: false,
+            flush_barrier: default_crdt_current_text_flush_barrier(),
+        });
+    }
+    serde_json::from_str(payload_json).context("failed to parse CRDT current-text payload")
+}
+
+fn crdt_current_text_source(payload: &ControllerCrdtCurrentTextPayload) -> String {
+    payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|source| !source.is_empty())
+        .unwrap_or("controller_model")
+        .to_string()
+}
+
+fn handle_crdt_cpc_write_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerCrdtCpcWriteResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerCrdtCpcWritePayload =
+        serde_json::from_str(&payload_json).context("failed to parse CRDT CPC write payload")?;
+    let source = payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("controller_cpc_write");
+    let write = agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+        &canonical,
+        &payload.expected_current,
+        &payload.content,
+        source,
+    )?;
+    Ok(ControllerCrdtCpcWriteResult { write })
+}
+
 fn handle_crdt_replica_rpc(
     bootstrap: &ControllerBootstrap,
-    runtime: Option<&ControllerRuntime>,
+    _runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let requested_file = request_file(&request)?;
@@ -3172,7 +3873,6 @@ fn handle_crdt_replica_rpc(
         .filter(|value| !value.is_empty())
         .context("CRDT replica payload missing identity")?;
     let method_name = payload.method.as_str();
-    let ipc_method = crdt_replica_ipc_method(&payload, &file_arg, identity)?;
     let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
@@ -3187,61 +3887,283 @@ fn handle_crdt_replica_rpc(
         return Ok(crdt_replica_refused_data("detached_authority"));
     }
 
-    let supervisor = ensure_crdt_replica_supervisor_socket(
-        bootstrap,
-        runtime,
-        &canonical,
-        source,
-        method_name,
-        false,
-    )?;
-    let response =
-        agent_doc_supervisor_io::ipc::send_command(Path::new(&supervisor.socket), &ipc_method)
-            .with_context(|| {
-                format!(
-                    "failed to relay CRDT replica `{method_name}` through supervisor socket {}",
-                    supervisor.socket
-                )
-            })?;
-    if !response.ok {
-        let error = response
-            .error
-            .unwrap_or_else(|| "unknown error".to_string());
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_crdt_replica_rejected file={} method={} source={} generation={} socket={} error={:?}",
-                canonical.display(),
-                method_name,
-                source,
-                supervisor.generation,
-                supervisor.socket,
-                error,
-            ),
-        );
-        anyhow::bail!(
-            "controller CRDT replica relay `{}` rejected for {}: {}",
-            method_name,
-            canonical.display(),
-            error
-        );
-    }
-    let data = response.data.unwrap_or_else(|| serde_json::json!({}));
+    let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_crdt_replica_relayed file={} method={} source={} generation={} socket={} data_kind={}",
+            "controller_crdt_replica_handled file={} method={} source={} authority=cpc_model data_kind={}",
             canonical.display(),
             method_name,
             source,
-            supervisor.generation,
-            supervisor.socket,
             data.get("kind")
                 .and_then(|kind| kind.as_str())
                 .unwrap_or("ok"),
         ),
     );
     Ok(data)
+}
+
+fn handle_editor_route_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerEditorRouteResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerEditorRoutePayload =
+        serde_json::from_str(&payload_json).context("failed to parse editor route payload")?;
+    let relative_path = editor_route_relative_path(bootstrap, &canonical, &payload)?;
+    let layout_args = validate_editor_route_layout_args(&payload.layout_args)?;
+    let wait_secs = payload.wait_for_ready_secs.unwrap_or(15).min(600);
+    let source = payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("jetbrains_plugin");
+
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_editor_route_started file={} source={} relative_path={} layout_args={} attempt_id={} route_key={}",
+            canonical.display(),
+            source,
+            relative_path,
+            layout_args.len(),
+            payload.attempt_id.as_deref().unwrap_or("none"),
+            payload.route_key.as_deref().unwrap_or("none"),
+        ),
+    );
+
+    let _attempt_guard =
+        crate::route_snapshot::EditorRouteAttemptIdGuard::set(payload.attempt_id.as_deref());
+    let result = runtime_effects()?.run_editor_route(ControllerEditorRouteInvocation {
+        file: canonical.clone(),
+        relative_path: relative_path.clone(),
+        layout_args,
+        dispatch_only: payload.dispatch_only.unwrap_or(true),
+        plain_trigger: payload.plain_trigger.unwrap_or(true),
+        wait_for_ready_secs: Some(wait_secs),
+        force_disk: payload.force_disk.unwrap_or(false),
+    })?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_editor_route_settled file={} source={} relative_path={} exit_code={} output_bytes={} attempt_id={} route_key={}",
+            canonical.display(),
+            source,
+            relative_path,
+            result.exit_code,
+            result.output.len(),
+            payload.attempt_id.as_deref().unwrap_or("none"),
+            payload.route_key.as_deref().unwrap_or("none"),
+        ),
+    );
+    Ok(ControllerEditorRouteResult {
+        exit_code: result.exit_code,
+        output: result.output,
+    })
+}
+
+fn editor_route_relative_path(
+    bootstrap: &ControllerBootstrap,
+    canonical: &Path,
+    payload: &ControllerEditorRoutePayload,
+) -> Result<String> {
+    if let Some(relative_path) = payload
+        .relative_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        anyhow::ensure!(
+            !relative_path.starts_with('-'),
+            "editor route relative_path must not start with '-'"
+        );
+        return Ok(relative_path.to_string());
+    }
+
+    let project_root = bootstrap
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| bootstrap.project_root.clone());
+    let path = canonical
+        .strip_prefix(&project_root)
+        .unwrap_or(canonical)
+        .to_string_lossy()
+        .to_string();
+    anyhow::ensure!(!path.trim().is_empty(), "editor route path is empty");
+    anyhow::ensure!(
+        !path.starts_with('-'),
+        "editor route path must not start with '-'"
+    );
+    Ok(path)
+}
+
+fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
+    let mut validated = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(flag) = iter.next() {
+        match flag.as_str() {
+            "--col" | "--focus" => {
+                let value = iter
+                    .next()
+                    .with_context(|| format!("editor route layout arg {flag} missing value"))?;
+                anyhow::ensure!(
+                    !value.trim().is_empty(),
+                    "editor route layout arg {flag} has empty value"
+                );
+                validated.push(flag.clone());
+                validated.push(value.clone());
+            }
+            other => anyhow::bail!("unsupported editor route layout arg `{other}`"),
+        }
+    }
+    Ok(validated)
+}
+
+fn controller_crdt_replica_data(
+    canonical: &Path,
+    method_name: &str,
+    identity: &str,
+    payload: &ControllerCrdtReplicaPayload,
+) -> Result<serde_json::Value> {
+    match method_name {
+        "replica_register" => {
+            match agent_doc_crdt_relay_io::register_replica_for_file(canonical, identity)? {
+                Some((client_id, bootstrap)) => Ok(serde_json::json!({
+                    "client_id": client_id,
+                    "bootstrap_b64": base64_standard_encode(&bootstrap),
+                })),
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        "replica_deregister" => {
+            let removed =
+                agent_doc_crdt_relay_io::deregister_replica_for_file(canonical, identity)?;
+            Ok(serde_json::json!({ "removed": removed }))
+        }
+        "replica_update" => {
+            let update_b64 = payload
+                .update_b64
+                .as_deref()
+                .context("CRDT replica update payload missing update_b64")?;
+            let update = base64_standard_decode(update_b64)
+                .context("CRDT replica update payload has invalid base64")?;
+            match agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                canonical, identity, &update,
+            )? {
+                Some(fan_out) => {
+                    let targets: Vec<serde_json::Value> = fan_out
+                        .targets
+                        .iter()
+                        .map(|target| {
+                            serde_json::json!({
+                                "client_id": target,
+                                "update_b64": base64_standard_encode(&fan_out.update),
+                            })
+                        })
+                        .collect();
+                    Ok(serde_json::json!({
+                        "origin": fan_out.origin,
+                        "canonical_len": fan_out.canonical_len,
+                        "targets": targets,
+                    }))
+                }
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        "replica_pull" => {
+            if let Some(canonical_text) =
+                agent_doc_crdt_relay_io::pull_rebootstrap_for_file(canonical, identity)?
+            {
+                return Ok(serde_json::json!({
+                    "kind": "replace",
+                    "replace": canonical_text,
+                }));
+            }
+            match agent_doc_crdt_relay_io::pull_replica_updates_for_file(canonical, identity)? {
+                Some(pull) => {
+                    let updates: Vec<serde_json::Value> = pull
+                        .updates
+                        .iter()
+                        .map(|update| {
+                            serde_json::json!({
+                                "patch_id": update.patch_id,
+                                "origin": update.origin,
+                                "target": update.target,
+                                "generation": update.generation,
+                                "update_b64": base64_standard_encode(&update.update),
+                            })
+                        })
+                        .collect();
+                    Ok(serde_json::json!({
+                        "kind": "delta",
+                        "client_id": pull.client_id,
+                        "updates": updates,
+                        "current_generation": pull.delivery.current_generation,
+                        "last_ack_generation": pull.delivery.last_ack_generation,
+                        "pending_updates": pull.delivery.pending_updates,
+                    }))
+                }
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        "replica_ack" => {
+            let patch_id = payload
+                .patch_id
+                .as_deref()
+                .context("CRDT replica ack payload missing patch_id")?;
+            let generation = payload
+                .generation
+                .context("CRDT replica ack payload missing generation")?;
+            match agent_doc_crdt_relay_io::ack_replica_update_for_file(
+                canonical, identity, patch_id, generation,
+            )? {
+                Some(acknowledged) => Ok(serde_json::json!({ "acknowledged": acknowledged })),
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        "replica_awareness" => {
+            let awareness_b64 = payload
+                .awareness_b64
+                .as_deref()
+                .context("CRDT replica awareness payload missing awareness_b64")?;
+            let json = base64_standard_decode(awareness_b64)
+                .context("CRDT replica awareness payload has invalid base64")?;
+            let state: agent_doc_document_realtime::crdt_relay::AwarenessState =
+                serde_json::from_slice(&json)
+                    .context("CRDT replica awareness payload has invalid JSON")?;
+            match agent_doc_crdt_relay_io::set_replica_awareness_for_file(
+                canonical, identity, state,
+            )? {
+                Some(snapshot) => {
+                    let presence: Vec<serde_json::Value> = snapshot
+                        .iter()
+                        .map(|(client_id, state)| {
+                            serde_json::json!({
+                                "client_id": client_id,
+                                "awareness_b64": base64_standard_encode(
+                                    &serde_json::to_vec(state).unwrap_or_default()
+                                ),
+                            })
+                        })
+                        .collect();
+                    Ok(serde_json::json!({ "presence": presence }))
+                }
+                None => Ok(crdt_replica_refused_data("detached_authority")),
+            }
+        }
+        other => anyhow::bail!("unsupported CRDT replica method `{other}`"),
+    }
+}
+
+fn base64_standard_encode(bytes: &[u8]) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+}
+
+fn base64_standard_decode(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
 }
 
 fn canonical_controller_request_file(
@@ -3256,281 +4178,6 @@ fn canonical_controller_request_file(
     candidate.canonicalize().unwrap_or(candidate)
 }
 
-fn crdt_replica_ipc_method(
-    payload: &ControllerCrdtReplicaPayload,
-    file: &str,
-    identity: &str,
-) -> Result<agent_doc_supervisor::ipc_protocol::IpcMethod> {
-    match payload.method.as_str() {
-        "replica_register" => Ok(
-            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaRegister {
-                file: file.to_string(),
-                identity: identity.to_string(),
-            },
-        ),
-        "replica_deregister" => Ok(
-            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaDeregister {
-                file: file.to_string(),
-                identity: identity.to_string(),
-            },
-        ),
-        "replica_update" => Ok(
-            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaUpdate {
-                file: file.to_string(),
-                identity: identity.to_string(),
-                update_b64: payload
-                    .update_b64
-                    .clone()
-                    .context("CRDT replica update payload missing update_b64")?,
-            },
-        ),
-        "replica_pull" => Ok(agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaPull {
-            file: file.to_string(),
-            identity: identity.to_string(),
-        }),
-        "replica_ack" => Ok(agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaAck {
-            file: file.to_string(),
-            identity: identity.to_string(),
-            patch_id: payload
-                .patch_id
-                .clone()
-                .context("CRDT replica ack payload missing patch_id")?,
-            generation: payload
-                .generation
-                .context("CRDT replica ack payload missing generation")?,
-        }),
-        "replica_awareness" => Ok(
-            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaAwareness {
-                file: file.to_string(),
-                identity: identity.to_string(),
-                awareness_b64: payload
-                    .awareness_b64
-                    .clone()
-                    .context("CRDT replica awareness payload missing awareness_b64")?,
-            },
-        ),
-        other => anyhow::bail!("unsupported CRDT replica method `{other}`"),
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CrdtReplicaSupervisorSocket {
-    generation: u64,
-    socket: String,
-}
-
-fn ensure_crdt_replica_supervisor_socket(
-    bootstrap: &ControllerBootstrap,
-    runtime: Option<&ControllerRuntime>,
-    canonical: &Path,
-    source: &str,
-    method: &str,
-    force: bool,
-) -> Result<CrdtReplicaSupervisorSocket> {
-    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-        &bootstrap.project_root,
-        &canonical.to_string_lossy(),
-    );
-    let Some(record) = actor_record_from_authority(bootstrap, runtime, &document_id)? else {
-        agent_doc_ops_log_io::log_op(
-            canonical,
-            &format!(
-                "controller_crdt_replica_unavailable file={} method={} source={} reason=no_actor_record document_id={}",
-                canonical.display(),
-                method,
-                source,
-                document_id,
-            ),
-        );
-        anyhow::bail!(
-            "CRDT replica relay unavailable for {}: no actor record",
-            canonical.display()
-        );
-    };
-    if let Some(socket) = live_supervisor_socket_for_record(
-        &bootstrap.project_root,
-        &document_id,
-        &record,
-        canonical,
-        source,
-        method,
-        true,
-    )? {
-        return Ok(CrdtReplicaSupervisorSocket {
-            generation: record.generation,
-            socket,
-        });
-    }
-
-    agent_doc_ops_log_io::log_op(
-        canonical,
-        &format!(
-            "controller_crdt_replica_requesting_supervisor_replacement file={} method={} source={} generation={} state={} force={}",
-            canonical.display(),
-            method,
-            source,
-            record.generation,
-            record.state.as_str(),
-            force,
-        ),
-    );
-    let receipt = handle_supervisor_replacement(
-        bootstrap,
-        runtime,
-        ControllerRequest {
-            command: "supervisor_replacement".to_string(),
-            file: Some(canonical.to_path_buf()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: Some("continue".to_string()),
-            caller: Some("controller_crdt_replica".to_string()),
-            reason: Some(format!("crdt_replica_{method}_missing_supervisor")),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(
-                serde_json::json!({
-                    "mode": "continue",
-                    "force": force,
-                    "source": source,
-                    "method": method,
-                })
-                .to_string(),
-            ),
-        },
-    )?;
-    agent_doc_ops_log_io::log_op(
-        canonical,
-        &format!(
-            "controller_crdt_replica_supervisor_replacement_accepted file={} method={} source={} generation={} receipt_id={} background_started={}",
-            canonical.display(),
-            method,
-            source,
-            receipt.generation,
-            receipt.operator_receipt.receipt_id,
-            receipt.background_started,
-        ),
-    );
-    wait_for_crdt_replica_supervisor_socket(
-        &bootstrap.project_root,
-        &document_id,
-        &record,
-        canonical,
-        source,
-        method,
-    )
-}
-
-fn live_supervisor_socket_for_record(
-    project_root: &Path,
-    document_id: &str,
-    record: &agent_doc_sqlite::state_store::ActorRecord,
-    canonical: &Path,
-    source: &str,
-    method: &str,
-    log_unavailable: bool,
-) -> Result<Option<String>> {
-    let conn = open_state_db(project_root)?;
-    let lease = load_supervisor_lease_from_db(&conn, document_id, record.generation)?;
-    let expected_socket =
-        agent_doc_supervisor_io::ipc::socket_path(project_root, &record.session_id)
-            .to_string_lossy()
-            .to_string();
-    let mut candidates = Vec::new();
-    if let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) {
-        candidates.push(socket);
-    }
-    if !candidates
-        .iter()
-        .any(|candidate| candidate == &expected_socket)
-    {
-        candidates.push(expected_socket);
-    }
-    for socket in candidates {
-        let socket_path = Path::new(&socket);
-        match agent_doc_supervisor_io::ipc::probe_socket(socket_path) {
-            agent_doc_supervisor_io::ipc::SocketLiveness::Live => {
-                return Ok(Some(socket));
-            }
-            agent_doc_supervisor_io::ipc::SocketLiveness::Dead => {
-                if log_unavailable {
-                    agent_doc_ops_log_io::log_op(
-                        canonical,
-                        &format!(
-                            "controller_crdt_replica_supervisor_socket_dead file={} method={} source={} generation={} socket={}",
-                            canonical.display(),
-                            method,
-                            source,
-                            record.generation,
-                            socket,
-                        ),
-                    );
-                }
-            }
-        }
-    }
-    if log_unavailable {
-        agent_doc_ops_log_io::log_op(
-            canonical,
-            &format!(
-                "controller_crdt_replica_supervisor_socket_missing file={} method={} source={} generation={} session={}",
-                canonical.display(),
-                method,
-                source,
-                record.generation,
-                record.session_id,
-            ),
-        );
-    }
-    Ok(None)
-}
-
-fn wait_for_crdt_replica_supervisor_socket(
-    project_root: &Path,
-    document_id: &str,
-    record: &agent_doc_sqlite::state_store::ActorRecord,
-    canonical: &Path,
-    source: &str,
-    method: &str,
-) -> Result<CrdtReplicaSupervisorSocket> {
-    let deadline = Instant::now() + CRDT_REPLICA_SUPERVISOR_START_WAIT;
-    while Instant::now() < deadline {
-        if let Some(socket) = live_supervisor_socket_for_record(
-            project_root,
-            document_id,
-            record,
-            canonical,
-            source,
-            method,
-            false,
-        )? {
-            return Ok(CrdtReplicaSupervisorSocket {
-                generation: record.generation,
-                socket,
-            });
-        }
-        std::thread::sleep(CRDT_REPLICA_SUPERVISOR_POLL_INTERVAL);
-    }
-    agent_doc_ops_log_io::log_op(
-        canonical,
-        &format!(
-            "controller_crdt_replica_supervisor_wait_timeout file={} method={} source={} generation={} wait_secs={:.1}",
-            canonical.display(),
-            method,
-            source,
-            record.generation,
-            CRDT_REPLICA_SUPERVISOR_START_WAIT.as_secs_f32(),
-        ),
-    );
-    anyhow::bail!(
-        "CRDT replica relay unavailable for {}: supervisor socket did not become live within {:.1}s",
-        canonical.display(),
-        CRDT_REPLICA_SUPERVISOR_START_WAIT.as_secs_f32()
-    );
-}
-
 fn crdt_replica_refused_data(reason: &str) -> serde_json::Value {
     serde_json::json!({
         "refused": true,
@@ -3538,45 +4185,14 @@ fn crdt_replica_refused_data(reason: &str) -> serde_json::Value {
     })
 }
 
-pub fn checkpoint_supervisors_all_projects(
-    source: &str,
-) -> Result<SupervisorCrdtCheckpointSummary> {
-    let docs = crate::process::route_owned_supervisor_documents(std::process::id());
-    let mut summary = SupervisorCrdtCheckpointSummary::default();
-    for doc in docs {
-        match checkpoint_supervisor_crdt_for_doc(&doc, source) {
-            Ok(Some(status)) if status == "checkpointed" => summary.checkpointed += 1,
-            Ok(Some(status)) if status == "detached" => summary.detached += 1,
-            Ok(Some(_)) | Ok(None) => summary.skipped += 1,
-            Err(err) => {
-                summary.failed += 1;
-                agent_doc_ops_log_io::log_op(
-                    &doc,
-                    &format!(
-                        "supervisor_crdt_checkpoint_failed file={} source={} error={:?}",
-                        doc.display(),
-                        source,
-                        err.to_string(),
-                    ),
-                );
-                eprintln!(
-                    "[agent-doc] warning: failed to checkpoint CRDT durable projection for {} before {source}: {err:#}",
-                    doc.display()
-                );
-            }
-        }
-    }
-    Ok(summary)
-}
-
-pub fn checkpoint_supervisors_for_project(
+pub fn checkpoint_route_owned_documents_for_project(
     project_root: &Path,
     source: &str,
-) -> Result<SupervisorCrdtCheckpointSummary> {
+) -> Result<CrdtCheckpointSummary> {
     let store = load_actor_store(project_root)?;
-    let mut summary = SupervisorCrdtCheckpointSummary::default();
+    let mut summary = CrdtCheckpointSummary::default();
     for record in store.values() {
-        match checkpoint_supervisor_crdt_for_doc(Path::new(&record.document_id), source) {
+        match checkpoint_route_owned_document_crdt(Path::new(&record.document_id), source) {
             Ok(Some(status)) if status == "checkpointed" => summary.checkpointed += 1,
             Ok(Some(status)) if status == "detached" => summary.detached += 1,
             Ok(Some(_)) | Ok(None) => summary.skipped += 1,
@@ -3585,7 +4201,7 @@ pub fn checkpoint_supervisors_for_project(
                 agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
                     &format!(
-                        "supervisor_crdt_checkpoint_failed file={} source={} error={:?}",
+                        "controller_crdt_checkpoint_failed file={} source={} error={:?}",
                         record.document_id,
                         source,
                         err.to_string(),
@@ -3611,7 +4227,7 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     let mut marked = 0;
     let mut skipped = 0;
     for doc in docs {
-        match checkpoint_supervisor_crdt_for_doc(&doc, "supervisor_recycle_request") {
+        match checkpoint_route_owned_document_crdt(&doc, "supervisor_recycle_request") {
             Ok(_) => {}
             Err(err) => {
                 skipped += 1;
@@ -3951,6 +4567,7 @@ pub(crate) fn launch_detached_at(
             ControllerHandoffState::Failed => "failed",
         });
     }
+    close_inherited_fds_on_exec(&mut command);
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -3964,6 +4581,37 @@ pub(crate) fn launch_detached_at(
     // `<defunct>` zombie parented to the supervisor forever (`#zombiereap`).
     agent_doc_supervisor_process::detached_child::reap_detached(child);
     Ok(())
+}
+
+#[cfg(unix)]
+fn close_inherited_fds_on_exec(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    let close_limit = inherited_fd_close_limit();
+    // The controller is often launched by an editor plugin process. Some editor
+    // file descriptors are not CLOEXEC, so explicitly drop everything except
+    // stdio in the controller child before exec.
+    unsafe {
+        command.pre_exec(move || {
+            for fd in 3..close_limit {
+                libc::close(fd);
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn close_inherited_fds_on_exec(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn inherited_fd_close_limit() -> i32 {
+    let limit = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) };
+    if (4..=65_536).contains(&limit) {
+        limit as i32
+    } else {
+        1024
+    }
 }
 
 pub(crate) fn wait_for_controller(
@@ -4064,6 +4712,7 @@ pub(crate) fn serve_with_options(
         .context("failed to set project controller listener nonblocking")?;
 
     let should_stop = Arc::new(AtomicBool::new(false));
+    let active_clients = Arc::new(AtomicUsize::new(0));
     let watchdog_threshold = stale_preparing_controller_threshold();
     let controller_launched_at = Instant::now();
     let recycle_grace = recycle_idle_grace();
@@ -4081,14 +4730,25 @@ pub(crate) fn serve_with_options(
             Ok(stream) => {
                 let runtime = Arc::clone(&runtime);
                 let should_stop = Arc::clone(&should_stop);
+                let active_clients = Arc::clone(&active_clients);
                 let sock = sock.clone();
+                active_clients.fetch_add(1, Ordering::SeqCst);
                 std::thread::spawn(move || {
                     if let Err(err) = serve_client(stream, &runtime, &should_stop, &sock) {
                         eprintln!("[controller] client error: {err}");
                     }
+                    active_clients.fetch_sub(1, Ordering::SeqCst);
                 });
             }
             Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                if !project_root.exists() {
+                    eprintln!(
+                        "[controller] project root {} no longer exists; shutting down detached controller",
+                        project_root.display()
+                    );
+                    should_stop.store(true, Ordering::SeqCst);
+                    break;
+                }
                 // M1 (#stuckhandoff2) — self-watchdog / suicide timer. A controller
                 // wedged in `Preparing`/`Promoted` past the staleness threshold (the
                 // client driving the two-phase handoff died between `prepare_handoff`
@@ -4152,8 +4812,9 @@ pub(crate) fn serve_with_options(
                 // debounced so a brief lull between queue items never triggers it. The
                 // idle DB probe only runs when a recycle is actually wanted (rare), so
                 // the common hot path stays an atomic load plus one binary `stat`.
-                let wants_recycle_and_idle =
-                    controller_wants_recycle(&runtime) && controller_recycle_idle(&runtime);
+                let wants_recycle_and_idle = controller_wants_recycle(&runtime)
+                    && active_clients.load(Ordering::SeqCst) == 0
+                    && controller_recycle_idle(&runtime);
                 let (do_recycle, next_since) =
                     agent_doc_controller::recycle::recycle_debounce_decision(
                         wants_recycle_and_idle,
@@ -4684,35 +5345,32 @@ pub(crate) fn serve_client(
     let (reader_half, mut writer_half) = stream.split();
     let mut reader = BufReader::new(reader_half);
     let mut line = String::new();
-    loop {
-        match reader.read_line(&mut line) {
-            Ok(0) => return Ok(()),
-            Ok(_) => {
-                let (response, request_should_stop) = handle_request_for_client(&line, runtime)?;
-                writer_half.write_all(response.as_bytes())?;
-                writer_half.write_all(b"\n")?;
-                writer_half.flush()?;
-                line.clear();
-                if request_should_stop {
-                    should_stop.store(true, Ordering::SeqCst);
-                    let _ = std::fs::remove_file(sock);
-                    if let Ok(bootstrap) = runtime.bootstrap.lock()
-                        && bootstrap.socket_path != sock
-                    {
-                        let _ = std::fs::remove_file(&bootstrap.socket_path);
-                    }
-                    return Ok(());
+    match reader.read_line(&mut line) {
+        Ok(0) => Ok(()),
+        Ok(_) => {
+            let (response, request_should_stop) = handle_request_for_client(&line, runtime)?;
+            writer_half.write_all(response.as_bytes())?;
+            writer_half.write_all(b"\n")?;
+            writer_half.flush()?;
+            if request_should_stop {
+                should_stop.store(true, Ordering::SeqCst);
+                let _ = std::fs::remove_file(sock);
+                if let Ok(bootstrap) = runtime.bootstrap.lock()
+                    && bootstrap.socket_path != sock
+                {
+                    let _ = std::fs::remove_file(&bootstrap.socket_path);
                 }
             }
-            Err(err) if is_timeout_error(&err) => {
-                eprintln!(
-                    "[controller] closing idle client after {:.1}s without a complete request",
-                    CONTROLLER_IDLE_CLIENT_TIMEOUT.as_secs_f32()
-                );
-                return Ok(());
-            }
-            Err(err) => return Err(err).context("failed to read project controller request"),
+            Ok(())
         }
+        Err(err) if is_timeout_error(&err) => {
+            eprintln!(
+                "[controller] closing idle client after {:.1}s without a complete request",
+                CONTROLLER_IDLE_CLIENT_TIMEOUT.as_secs_f32()
+            );
+            Ok(())
+        }
+        Err(err) => Err(err).context("failed to read project controller request"),
     }
 }
 
@@ -5085,6 +5743,31 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
+        "editor_route" => {
+            controller_envelope(handle_editor_route_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_current_text" => {
+            controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_cpc_write" => {
+            controller_envelope(handle_crdt_cpc_write_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_disk_change_reconcile" => controller_envelope(handle_crdt_disk_change_reconcile_rpc(
+            &bootstrap_snapshot,
+            request,
+        )),
+        "crdt_commit_barrier" => {
+            controller_envelope(handle_crdt_commit_barrier_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_record_committed_baseline" => controller_envelope(
+            handle_crdt_record_committed_baseline_rpc(&bootstrap_snapshot, request),
+        ),
+        "crdt_disk_projection_reconcile" => controller_envelope(
+            handle_crdt_disk_projection_reconcile_rpc(&bootstrap_snapshot, request),
+        ),
+        "crdt_route_disk_change_signal" => controller_envelope(
+            handle_crdt_route_disk_change_signal_rpc(&bootstrap_snapshot, request),
+        ),
         "admin_operation" => {
             controller_envelope(handle_admin_operation(&bootstrap_snapshot, request))
         }
@@ -7523,6 +8206,32 @@ enum SupervisorReplacementIpcStatus {
     Failed,
 }
 
+#[cfg(any(test, not(feature = "test-support")))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SupervisorReplacementPaneStartDecision {
+    PreserveExisting,
+    AutoStartNew,
+    BlockLiveNonShell,
+}
+
+#[cfg(any(test, not(feature = "test-support")))]
+fn supervisor_replacement_pane_start_decision(
+    pane_alive: bool,
+    current_command: Option<&str>,
+) -> SupervisorReplacementPaneStartDecision {
+    if !pane_alive {
+        return SupervisorReplacementPaneStartDecision::AutoStartNew;
+    }
+    let current_command = current_command
+        .map(str::trim)
+        .filter(|command| !command.is_empty());
+    if current_command.is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell) {
+        SupervisorReplacementPaneStartDecision::PreserveExisting
+    } else {
+        SupervisorReplacementPaneStartDecision::BlockLiveNonShell
+    }
+}
+
 pub(crate) fn handle_supervisor_replacement(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -7883,38 +8592,77 @@ fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
-    if !work.pane_id.trim().is_empty() && tmux.pane_alive(&work.pane_id) {
-        let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
-        let start_cmd = agent_doc_supervisor_process::start_command::route_owned_start_command(
-            &agent_doc_bin,
-            &work.file,
-        );
-        agent_doc_tmux_io::input_diag::log_text_submit(
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                Some(&work.file),
-                agent_doc_ops_log_io::log_op,
-            ),
-            "controller.supervisor_replacement.cold_start_preserve_pane",
-            &format!("pane:{}", work.pane_id),
-            &start_cmd,
-            None,
-            "route_owned_start_enter",
-            "Enter",
-        );
-        agent_doc_tmux_io::send_submitted_text_logged(
-            &tmux,
-            &work.pane_id,
-            &start_cmd,
-            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-            "sessions.send_submitted_text",
-        )
-        .with_context(|| {
-            format!(
-                "failed to submit replacement supervisor start command into pane {}",
-                work.pane_id
-            )
-        })?;
-        return Ok(work.pane_id.clone());
+    if !work.pane_id.trim().is_empty() {
+        let pane_alive = tmux.pane_alive(&work.pane_id);
+        let current_command = if pane_alive {
+            agent_doc_tmux_io::target_current_command(&tmux, &work.pane_id)
+        } else {
+            None
+        };
+        match supervisor_replacement_pane_start_decision(pane_alive, current_command.as_deref()) {
+            SupervisorReplacementPaneStartDecision::PreserveExisting => {
+                let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
+                let start_cmd =
+                    agent_doc_supervisor_process::start_command::route_owned_start_command(
+                        &agent_doc_bin,
+                        &work.file,
+                    );
+                agent_doc_tmux_io::input_diag::log_text_submit(
+                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                        Some(&work.file),
+                        agent_doc_ops_log_io::log_op,
+                    ),
+                    "controller.supervisor_replacement.cold_start_preserve_pane",
+                    &format!("pane:{}", work.pane_id),
+                    &start_cmd,
+                    None,
+                    "route_owned_start_enter",
+                    "Enter",
+                );
+                agent_doc_tmux_io::send_submitted_text_logged(
+                    &tmux,
+                    &work.pane_id,
+                    &start_cmd,
+                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                        None,
+                        agent_doc_ops_log_io::log_op,
+                    ),
+                    "sessions.send_submitted_text",
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to submit replacement supervisor start command into pane {}",
+                        work.pane_id
+                    )
+                })?;
+                return Ok(work.pane_id.clone());
+            }
+            SupervisorReplacementPaneStartDecision::BlockLiveNonShell => {
+                let current_command = current_command
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|command| !command.is_empty())
+                    .unwrap_or("unknown");
+                agent_doc_ops_log_io::log_op(
+                    &work.file,
+                    &format!(
+                        "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_non_shell_pane current_command={}",
+                        work.mode,
+                        work.session_id,
+                        work.pane_id,
+                        work.generation,
+                        work.operator_receipt_id,
+                        current_command
+                    ),
+                );
+                anyhow::bail!(
+                    "refusing to cold-start replacement supervisor by typing into live non-shell pane {} (current_command={current_command}); run `agent-doc session restart-supervisor {}` from a different pane, or use --force if the owner pane is genuinely wedged",
+                    work.pane_id,
+                    work.file.display()
+                );
+            }
+            SupervisorReplacementPaneStartDecision::AutoStartNew => {}
+        }
     }
     let file_str = work.file.to_string_lossy().to_string();
     runtime_effects()?
@@ -7966,6 +8714,13 @@ pub fn run_serve(
     handoff_state: &str,
 ) -> Result<()> {
     let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
+    let closed_fds = sanitize_controller_serve_inherited_fds();
+    if closed_fds > 0 {
+        agent_doc_ops_log_io::log_op(
+            &project_root,
+            &format!("controller_serve_inherited_fds_closed count={closed_fds}"),
+        );
+    }
     serve_with_options(
         &project_root,
         LaunchMode::parse(launch_mode)?,
@@ -7974,6 +8729,45 @@ pub fn run_serve(
         previous_controller_pid,
         status::parse_handoff_state(handoff_state)?,
     )
+}
+
+#[cfg(all(unix, not(test)))]
+fn sanitize_controller_serve_inherited_fds() -> usize {
+    let fds = controller_serve_inherited_fds_to_close()
+        .unwrap_or_else(|| (3..inherited_fd_close_limit()).collect());
+    let mut closed = 0usize;
+    for fd in fds {
+        if fd <= 2 {
+            continue;
+        }
+        if unsafe { libc::close(fd) } == 0 {
+            closed += 1;
+        }
+    }
+    closed
+}
+
+#[cfg(all(unix, not(test)))]
+fn controller_serve_inherited_fds_to_close() -> Option<Vec<i32>> {
+    let entries = std::fs::read_dir("/proc/self/fd").ok()?;
+    let mut fds = Vec::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(fd) = name.parse::<i32>() else {
+            continue;
+        };
+        if fd > 2 {
+            fds.push(fd);
+        }
+    }
+    Some(fds)
+}
+
+#[cfg(any(not(unix), test))]
+fn sanitize_controller_serve_inherited_fds() -> usize {
+    0
 }
 
 pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
@@ -8076,6 +8870,171 @@ mod tests {
         assert!(
             !ops_log.contains("controller_rpc_transport_retry"),
             "ordinary controller command errors must not log transport retry:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn crdt_current_text_projection_recovery_is_limited_to_transport_or_publish_failures() {
+        let timeout =
+            anyhow::anyhow!("timed out after 120.0s waiting for project controller response");
+        assert!(controller_current_text_error_allows_projection_recovery(
+            &timeout
+        ));
+
+        let closed = anyhow::anyhow!("project controller closed connection without a response");
+        assert!(controller_current_text_error_allows_projection_recovery(
+            &closed
+        ));
+
+        let command_error = anyhow::anyhow!(
+            "project controller command `crdt_current_text` failed: malformed payload"
+        );
+        assert!(!controller_current_text_error_allows_projection_recovery(
+            &command_error
+        ));
+
+        let stale_editor_publish = anyhow::anyhow!(
+            "project controller command `crdt_current_text` failed: document model startup/reconciliation failed for /tmp/tasks/doc.md: publish-live-buffer request over editor_ipc failed: IPC receipt rejected: {{\"type\":\"receipt\",\"status\":\"rejected\"}}; disk remained non-authoritative and was not read as a fallback"
+        );
+        assert!(controller_current_text_error_allows_projection_recovery(
+            &stale_editor_publish
+        ));
+    }
+
+    #[test]
+    fn crdt_current_text_timeout_allows_slow_controller_reply() {
+        assert!(
+            CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT >= Duration::from_secs(120),
+            "current-text recovery can queue behind large controller store work; \
+             the client timeout must stay above the observed 30s response tail"
+        );
+    }
+
+    #[test]
+    fn crdt_current_text_rpc_reads_relay_without_publish_recovery() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/current-text.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let file_key = canonical.to_string_lossy().to_string();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &file_key,
+                "test-editor-current-text",
+                std::process::id(),
+            ),
+            "test setup should seed a live editor-attached authority lease"
+        );
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "crdt_current_text",
+                "file": canonical,
+                "diagnostic_payload": serde_json::json!({
+                    "source": "test_controller_current_text_pure_read"
+                }).to_string()
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(envelope.get("ok").and_then(|ok| ok.as_bool()), Some(true));
+        assert_eq!(
+            envelope
+                .get("data")
+                .and_then(|data| data.get("status"))
+                .and_then(|status| status.as_str()),
+            Some("editor_attached_model_missing")
+        );
+        assert!(!should_stop);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            !ops_log.contains("document_model_ensure_start"),
+            "controller current-text RPC must not initiate editor publish recovery:\n{ops_log}"
+        );
+        assert!(
+            ops_log.contains("controller_crdt_current_text")
+                && ops_log.contains("status=editor_attached_model_missing"),
+            "controller should log the pure relay-read result:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn crdt_current_text_rpc_recovers_projection_when_requested() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/current-text-recover.md");
+        std::fs::write(&doc, "Body\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let file_key = canonical.to_string_lossy().to_string();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &file_key,
+                "test-editor-current-text-recover",
+                std::process::id(),
+            ),
+            "test setup should seed a live editor-attached authority lease"
+        );
+        let mut prior = agent_doc_document_realtime::crdt_relay::RelayHub::new(1);
+        let editor =
+            agent_doc_document_realtime::crdt_relay::mint_client_id("intellij:controller-recover");
+        prior.register(editor).unwrap();
+        prior
+            .apply_local(editor, 0, 0, "controller projection")
+            .unwrap();
+        agent_doc_snapshot_io::save_crdt(&canonical, &prior.projection_bytes()).unwrap();
+
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "crdt_current_text",
+                "file": canonical,
+                "diagnostic_payload": serde_json::json!({
+                    "source": "test_controller_current_text_recover",
+                    "recover_projection": true
+                }).to_string()
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(envelope.get("ok").and_then(|ok| ok.as_bool()), Some(true));
+        assert_eq!(
+            envelope
+                .get("data")
+                .and_then(|data| data.get("status"))
+                .and_then(|status| status.as_str()),
+            Some("current")
+        );
+        assert_eq!(
+            envelope
+                .get("data")
+                .and_then(|data| data.get("text"))
+                .and_then(|text| text.as_str()),
+            Some("controller projection")
+        );
+        assert!(!should_stop);
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("crdt_current_text_projection_recovered")
+                && ops_log.contains("status=current"),
+            "controller should recover the durable projection on explicit request:\n{ops_log}"
         );
     }
 
@@ -8425,6 +9384,60 @@ mod tests {
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
     }
+
+    #[test]
+    fn controller_client_connection_is_one_request() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let stream = connect(&project_root).unwrap();
+        let (reader_half, mut writer_half) = stream.split();
+        let mut reader = BufReader::new(reader_half);
+        writer_half
+            .write_all(b"{\"command\":\"status\"}\n")
+            .unwrap();
+        writer_half.flush().unwrap();
+        let mut response = String::new();
+        reader.read_line(&mut response).unwrap();
+        let status: ControllerStatus = serde_json::from_str(response.trim()).unwrap();
+        assert!(status.active);
+
+        let mut second = String::new();
+        let closed = reader.read_line(&mut second).unwrap();
+        assert_eq!(closed, 0, "controller should close after one request");
+
+        let next = request(&project_root, "status").unwrap();
+        let next_status: ControllerStatus = serde_json::from_str(&next).unwrap();
+        assert!(next_status.active);
+        let shutdown = request(&project_root, "shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn detached_controller_exits_when_temp_project_root_is_removed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let result = serve(&server_root, LaunchMode::Lazy).map_err(|err| err.to_string());
+            let _ = tx.send(result);
+        });
+        wait_for_test_controller(&project_root);
+
+        drop(dir);
+
+        let result = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("controller should exit after its temp project root is removed");
+        assert_eq!(result, Ok(()));
+        handle.join().unwrap();
+    }
+
     #[test]
     fn run_status_ensure_does_not_hold_idle_controller_stream() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -8699,6 +9712,33 @@ mod tests {
         assert!(
             ops_log.contains("controller_supervisor_replacement_background_stub"),
             "test background stub marker missing:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn supervisor_replacement_preserves_only_bare_shell_panes() {
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(false, None),
+            SupervisorReplacementPaneStartDecision::AutoStartNew
+        );
+        for shell in ["sh", "bash", "zsh", "-zsh", "fish"] {
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(true, Some(shell)),
+                SupervisorReplacementPaneStartDecision::PreserveExisting,
+                "{shell} should be safe for shell-command cold start"
+            );
+        }
+        for live_harness in ["node", "codex", "claude", "agent-doc", "vim", ""] {
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(true, Some(live_harness)),
+                SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+                "{live_harness:?} must not receive route-owned start text"
+            );
+        }
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(true, None),
+            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            "unknown command on a live pane is not safe for prompt injection"
         );
     }
 

@@ -8,9 +8,10 @@
 //! ## Architecture
 //!
 //! Each supervisor instance owns a socket at
-//! `.agent-doc/supervisor/<session-uuid>.sock`. External processes (editor
-//! plugins, `/agent-doc` routing, CLI tools) connect and send JSON commands
-//! to control the supervised claude process.
+//! `.agent-doc/supervisor/<session-uuid>.sock`. Route/runtime and CLI control
+//! paths connect and send JSON commands for supervisor lifecycle/state/inject
+//! operations. Editor document authority and CRDT replica traffic stay on the
+//! CPC/project-controller route, not this per-session socket.
 //!
 //! ## Protocol
 //!
@@ -197,25 +198,6 @@ where
 /// Effect boundary for handling supervisor IPC methods.
 pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
     fn capability_dispatch_blocker(&self) -> Option<String>;
-    fn handle_replica_register(&self, file: &str, identity: &str) -> IpcResponse;
-    fn handle_replica_deregister(&self, file: &str, identity: &str) -> IpcResponse;
-    fn handle_replica_update(&self, file: &str, identity: &str, update_b64: &str) -> IpcResponse;
-    fn handle_replica_pull(&self, file: &str, identity: &str) -> IpcResponse;
-    fn handle_replica_ack(
-        &self,
-        file: &str,
-        identity: &str,
-        patch_id: &str,
-        generation: u64,
-    ) -> IpcResponse;
-    fn handle_replica_awareness(
-        &self,
-        file: &str,
-        identity: &str,
-        awareness_b64: &str,
-    ) -> IpcResponse;
-    fn handle_crdt_checkpoint(&self, file: &str, source: &str) -> IpcResponse;
-    fn handle_crdt_current_text(&self, file: &str, source: &str) -> IpcResponse;
 }
 
 pub trait SupervisorInjectDeliveryState {
@@ -440,33 +422,6 @@ where
         IpcMethod::StopAgent { reason: _ } => {
             request_supervisor_stop_agent(state);
             IpcResponse::ok_empty()
-        }
-        IpcMethod::ReplicaRegister { file, identity } => {
-            state.handle_replica_register(&file, &identity)
-        }
-        IpcMethod::ReplicaDeregister { file, identity } => {
-            state.handle_replica_deregister(&file, &identity)
-        }
-        IpcMethod::ReplicaUpdate {
-            file,
-            identity,
-            update_b64,
-        } => state.handle_replica_update(&file, &identity, &update_b64),
-        IpcMethod::ReplicaPull { file, identity } => state.handle_replica_pull(&file, &identity),
-        IpcMethod::ReplicaAck {
-            file,
-            identity,
-            patch_id,
-            generation,
-        } => state.handle_replica_ack(&file, &identity, &patch_id, generation),
-        IpcMethod::ReplicaAwareness {
-            file,
-            identity,
-            awareness_b64,
-        } => state.handle_replica_awareness(&file, &identity, &awareness_b64),
-        IpcMethod::CrdtCheckpoint { file, source } => state.handle_crdt_checkpoint(&file, &source),
-        IpcMethod::CrdtCurrentText { file, source } => {
-            state.handle_crdt_current_text(&file, &source)
         }
     }
 }
@@ -849,17 +804,6 @@ mod tests {
             }
             IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
             IpcMethod::Clear { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
-            // The echo handler does not exercise the CRDT relay (that is covered
-            // by the live handler tests in `start::supervisor_io` and the
-            // end-to-end fan-out tests); just acknowledge structurally.
-            IpcMethod::ReplicaRegister { .. }
-            | IpcMethod::ReplicaDeregister { .. }
-            | IpcMethod::ReplicaUpdate { .. }
-            | IpcMethod::ReplicaPull { .. }
-            | IpcMethod::ReplicaAck { .. }
-            | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. }
-            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .expect("start test handler")
     }

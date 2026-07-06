@@ -153,6 +153,47 @@ pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Opti
     agent_doc_tmux_io::target_current_command(iso, pane)
 }
 
+pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content: &str) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    mark_test_local_crdt_relay(&canonical);
+    let canonical_key = canonical.to_string_lossy().to_string();
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &canonical_key,
+            editor_id,
+            std::process::id(),
+        ),
+        "test setup should acquire a live plugin-owner lease"
+    );
+    let identity = format!("{editor_id}:{canonical_key}");
+    let (client_id, bootstrap) =
+        agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
+            .expect("test editor should register through CRDT relay")
+            .expect("test editor should be attached under plugin-owner authority");
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+        .expect("test editor should decode relay bootstrap");
+    let replica_text = replica.text();
+    replica.apply_local_edit(0, replica_text.len() as u32, content);
+    agent_doc_crdt_relay_io::relay_replica_update_for_file(
+        &canonical,
+        &identity,
+        &replica.encode_state(),
+    )
+    .expect("test editor should publish through CRDT relay")
+    .expect("test editor relay update should be accepted under plugin-owner authority");
+}
+
+fn mark_test_local_crdt_relay(file: &Path) {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+        .or_else(|| file.parent().map(Path::to_path_buf))
+    else {
+        return;
+    };
+    let agent_doc_dir = project_root.join(".agent-doc");
+    let _ = std::fs::create_dir_all(&agent_doc_dir);
+    let _ = std::fs::write(agent_doc_dir.join("test-local-crdt-relay"), "");
+}
+
 pub fn wait_for_shell(iso: &tmux_router::IsolatedTmux, pane: &str, timeout: Duration) -> bool {
     const IDLE_SHELLS: &[&str] = &["zsh", "bash", "sh", "fish"];
     let start = Instant::now();
@@ -409,6 +450,7 @@ pub fn wait_for_process_pid(pattern: &str, timeout: Duration) -> u32 {
 }
 
 pub fn seed_live_plugin_owner_lease(file: &str) {
+    mark_test_local_crdt_relay(Path::new(file));
     let pid = std::process::id();
     assert!(
         agent_doc_plugin_owner::try_acquire_plugin_owner(file, &format!("test-editor-{pid}"), pid),

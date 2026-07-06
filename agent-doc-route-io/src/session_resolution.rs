@@ -11,6 +11,15 @@ pub fn current_tmux_session(tmux: &Tmux) -> Option<String> {
     tmux.current_session()
 }
 
+pub fn current_agent_doc_session(tmux: &Tmux) -> Option<String> {
+    let current = current_tmux_session(tmux)?;
+    if agent_doc_tmux_io::has_window_named(tmux, &current, "agent-doc") {
+        Some(current)
+    } else {
+        None
+    }
+}
+
 pub fn resolve_preferred_session(
     tmux: &Tmux,
     context_session: Option<&str>,
@@ -18,6 +27,10 @@ pub fn resolve_preferred_session(
 ) -> Option<String> {
     if let Some(ctx) = normalize_context_session(context_session) {
         return Some(ctx.to_string());
+    }
+
+    if let Some(current) = current_agent_doc_session(tmux) {
+        return Some(current);
     }
 
     let configured = agent_doc_project_config_io::project_tmux_session();
@@ -46,6 +59,10 @@ pub(crate) fn resolve_preferred_session_for_layout(
         return Some(ctx.to_string());
     }
 
+    if let Some(current) = current_agent_doc_session(tmux) {
+        return Some(current);
+    }
+
     let focus_owned = focus.map(|path| path.to_string_lossy().into_owned());
     if let Some(scope_root) =
         agent_doc_sync::shared_sync_scope_root(col_args, focus_owned.as_deref())
@@ -62,8 +79,9 @@ pub(crate) fn resolve_preferred_session_for_layout(
 ///
 /// Priority:
 /// 1. `context_session` if provided (from sync --window)
-/// 2. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
-/// 3. Fallback to current tmux session or harness-specific fallback name (auto-detect)
+/// 2. Current tmux session when it already has an `agent-doc` window
+/// 3. config.toml `tmux_session` if the session is alive (user explicitly pinned via `session set`)
+/// 4. Fallback to current tmux session or harness-specific fallback name (auto-detect)
 ///
 /// Session config is never auto-written. Only `agent-doc session set <name>` pins a session.
 /// `agent-doc session clear` returns to auto-detect mode.
@@ -335,7 +353,7 @@ mod tests {
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
-    fn resolve_preferred_session_prefers_live_project_pin_over_current_session() {
+    fn resolve_preferred_session_prefers_current_agent_doc_session_over_live_project_pin() {
         let dir = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(dir.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -348,12 +366,40 @@ mod tests {
         let iso = IsolatedTmux::new("route-test-project-session-pin");
         let _configured = iso.new_session("0", dir.path()).unwrap();
         let _current = iso.new_session("1", dir.path()).unwrap();
+        let _ = iso
+            .cmd()
+            .args(["rename-window", "-t", "1:", "agent-doc"])
+            .status();
+
+        assert_eq!(current_tmux_session(&iso).as_deref(), Some("1"));
+        assert_eq!(
+            resolve_preferred_session(&iso, None, "[test]").as_deref(),
+            Some("1"),
+            "the current agent-doc session should beat a live project tmux_session pin"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_preferred_session_uses_live_project_pin_when_current_has_no_agent_doc_window() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"0\"\n",
+        )
+        .unwrap();
+
+        let iso = IsolatedTmux::new("route-test-project-session-pin-fallback");
+        let _configured = iso.new_session("0", dir.path()).unwrap();
+        let _current = iso.new_session("1", dir.path()).unwrap();
 
         assert_eq!(current_tmux_session(&iso).as_deref(), Some("1"));
         assert_eq!(
             resolve_preferred_session(&iso, None, "[test]").as_deref(),
             Some("0"),
-            "a live project tmux_session pin should beat the caller's current session"
+            "a live project tmux_session pin remains the fallback when the current session has no agent-doc window"
         );
     }
     #[test]

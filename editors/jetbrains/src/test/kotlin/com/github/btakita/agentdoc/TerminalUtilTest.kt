@@ -12,20 +12,17 @@ import org.junit.Test
 class TerminalUtilTest {
 
     @Test
-    fun `run route command requests plain trigger for editor dispatch`() {
+    fun `run route request command uses CPC editor route`() {
         assertEquals(
             listOf(
-                "/usr/local/bin/agent-doc",
-                "route",
+                "cpc:editor_route",
                 "--dispatch-only",
                 "--plain-trigger",
-                "--debounce",
-                "0",
                 "--wait-for-ready",
                 "15",
                 "tasks/root.md",
             ),
-            TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),
+            TerminalUtil.buildEditorRouteRequestCommand("tasks/root.md"),
         )
     }
 
@@ -40,10 +37,39 @@ class TerminalUtilTest {
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
         assertTrue(source.contains("route_supersede_active_run"))
         assertTrue(source.contains("inFlightRouteRegistry.replace(routeKey, handle)"))
-        assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID"))
-        assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_KEY"))
+        assertTrue(source.contains("CpcRouteClient.runEditorRoute("))
+        assertTrue(source.contains("attemptId = attempt?.id"))
+        assertTrue(source.contains("routeKey = attempt?.routeKey"))
+        assertFalse(source.contains("ProcessBuilder(cmd)"))
         assertTrue(source.contains("\"route_retryable_starting\""))
         assertTrue(source.contains("attempt?.finishIfCurrent(stage, command = cmd, error = finalError)"))
+    }
+
+    @Test
+    fun `CPC editor route request carries route metadata`() {
+        val request = CpcRouteClient.editorRouteRequest(
+            filePath = "/repo/tasks/root.md",
+            relativePath = "tasks/root.md",
+            layoutArgs = listOf("--col", "/repo/tasks/root.md", "--focus", "/repo/tasks/root.md"),
+            waitForReadySeconds = 15,
+            attemptId = "attempt-1",
+            routeKey = "route-key-1",
+        )
+
+        assertEquals("editor_route", request.get("command").asString)
+        assertEquals("/repo/tasks/root.md", request.get("file").asString)
+        val payload = com.google.gson.JsonParser.parseString(
+            request.get("diagnostic_payload").asString,
+        ).asJsonObject
+        assertEquals("jetbrains_plugin", payload.get("source").asString)
+        assertEquals("tasks/root.md", payload.get("relative_path").asString)
+        assertEquals(true, payload.get("dispatch_only").asBoolean)
+        assertEquals(true, payload.get("plain_trigger").asBoolean)
+        assertEquals(15L, payload.get("wait_for_ready_secs").asLong)
+        assertEquals("attempt-1", payload.get("attempt_id").asString)
+        assertEquals("route-key-1", payload.get("route_key").asString)
+        assertEquals("--col", payload.getAsJsonArray("layout_args")[0].asString)
+        assertEquals("--focus", payload.getAsJsonArray("layout_args")[2].asString)
     }
 
     @Test

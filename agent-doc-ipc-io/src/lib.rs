@@ -24,8 +24,8 @@
 //! - `{"type": "refresh_content", "file": "...", "content": "...",
 //!   "expected_content_hash": "...", "expected_content_len": N}` — replace a
 //!   stale editor buffer with committed content after a HEAD-authoritative repair
-//! - `{"type": "publish_live_buffer", "file": "..."}` — ask the editor to
-//!   republish its current visible-buffer proof without mutating the document
+//! - `{"type": "publish_live_buffer", "file": "...", "early_receipt": true}` —
+//!   ask the editor to republish its current visible-buffer proof without mutating the document
 //! - `{"type": "vcs_refresh"}` — trigger VCS refresh
 //! - `{"type": "receipt", "status": "applied"}` — terminal plugin receipt
 //!
@@ -68,13 +68,10 @@ fn noop_ops_logger(_: &Path, _: &str) {}
 ///
 /// `send_message` connects first, so a dead listener fails fast at
 /// `try_connect`; this budget only applies to a *connected but slow* plugin.
-/// The JB plugin blocks the socket handler on `agent_doc_await_idle(... , 5_000)`
-/// — a typing-debounce wait capped at 5s — before applying the patch and
-/// returning a receipt.
-/// A 2s budget was below that legitimate apply window, so a plugin that was
-/// merely busy/typing tripped a false receipt timeout that voted toward the
-/// de-wedge degrade latch. Align the sender to just above the plugin's idle cap
-/// so only a genuinely wedged listener times out.
+/// A connected IDE may still be busy applying the patch on its UI/application
+/// thread before returning a receipt. A 2s budget was below that legitimate
+/// apply window and could vote toward the de-wedge degrade latch, so keep this
+/// timeout high enough to distinguish a slow apply from a wedged listener.
 const IPC_RECEIPT_TIMEOUT_SECS: u64 = 6;
 /// Bound the blocking `connect_sync` (`#af88` F). interprocess `ConnectOptions`
 /// exposes no native connect deadline, so we run the connect on a watchdog thread
@@ -194,6 +191,25 @@ pub fn send_message_with_timeout(
     message: &serde_json::Value,
     receipt_timeout: Duration,
 ) -> Result<Option<String>> {
+    send_message_with_timeout_inner(
+        project_root,
+        message,
+        receipt_timeout,
+        PendingReceiptMode::WaitForTerminal,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum PendingReceiptMode {
+    WaitForTerminal,
+}
+
+fn send_message_with_timeout_inner(
+    project_root: &Path,
+    message: &serde_json::Value,
+    receipt_timeout: Duration,
+    pending_mode: PendingReceiptMode,
+) -> Result<Option<String>> {
     let stream = try_connect(project_root)?;
 
     // Bound the outbound write (wedge A): a plugin that accepted the connection
@@ -237,9 +253,13 @@ pub fn send_message_with_timeout(
             Ok(_) => {
                 let receipt = receipt_line.trim().to_string();
                 match classify_socket_receipt(&receipt) {
-                    // Liveness-only: listener received the patch but has not yet
-                    // applied it. Keep waiting for the terminal receipt.
-                    SocketReceiptClassification::Pending => continue,
+                    // Liveness-only: listener received the message but has not
+                    // applied it yet. Callers keep waiting for the terminal
+                    // receipt so receipt success means the plugin-side action
+                    // actually completed.
+                    SocketReceiptClassification::Pending => match pending_mode {
+                        PendingReceiptMode::WaitForTerminal => continue,
+                    },
                     SocketReceiptClassification::Applied => return Ok(Some(receipt)),
                     SocketReceiptClassification::AlreadyApplied => {
                         return Err(anyhow::anyhow!("IPC receipt already_applied: {}", receipt));
@@ -501,7 +521,15 @@ pub fn send_refresh_content(
 pub fn send_publish_live_buffer(project_root: &Path, file: &str) -> Result<bool> {
     let message = publish_live_buffer_message(file);
 
-    send_message(project_root, &message).map(|_| true)
+    // This is a synchronization point for the CRDT relay, not a mere editor
+    // liveness probe. Returning on the early `accepted` receipt lets the caller
+    // poll the relay before the plugin has registered/refreshed its replica.
+    send_message_with_timeout(
+        project_root,
+        &message,
+        Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+    )
+    .map(|_| true)
 }
 
 /// Write a VS Code-style file IPC signal asking the editor to republish its
@@ -1030,13 +1058,12 @@ mod tests {
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
-        let captured_clone = captured.clone();
+        let (captured_tx, captured_rx) = std::sync::mpsc::channel();
         let root_clone = root.clone();
         let server = thread::spawn(move || {
             start_listener(&root_clone, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                *captured_clone.lock().unwrap() = Some(v);
+                let _ = captured_tx.send(v);
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
@@ -1050,16 +1077,64 @@ mod tests {
             "publish_live_buffer should succeed on an applied receipt"
         );
 
-        let msg = captured
-            .lock()
-            .unwrap()
-            .clone()
+        let msg = captured_rx
+            .recv_timeout(Duration::from_secs(1))
             .expect("listener saw a message");
         assert_eq!(msg["type"], "publish_live_buffer");
         assert_eq!(msg["file"], "/tmp/plan.md");
+        assert_eq!(msg["early_receipt"], true);
+        assert!(message_requests_early_receipt(&msg.to_string()));
         assert!(
             msg.get("content").is_none() && msg.get("patches").is_none(),
             "publish_live_buffer must not carry document mutation payload: {msg}"
+        );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn send_publish_live_buffer_waits_for_terminal_applied_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let handler_started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handler_started_for_listener = handler_started.clone();
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                assert!(message_requests_early_receipt(msg));
+                handler_started_for_listener.store(true, std::sync::atomic::Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(1500));
+                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
+            })
+            .ok();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let start = Instant::now();
+        let ok = send_publish_live_buffer(&root, "/tmp/plan.md").unwrap();
+        let elapsed = start.elapsed();
+        assert!(
+            ok,
+            "publish_live_buffer should succeed on terminal applied receipt"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(1200),
+            "publish_live_buffer returned before terminal apply: elapsed={elapsed:?}"
+        );
+
+        for _ in 0..50 {
+            if handler_started.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            handler_started.load(std::sync::atomic::Ordering::SeqCst),
+            "listener handler should have run before send_publish_live_buffer returned"
         );
 
         let _ = std::fs::remove_file(socket_path(&root));

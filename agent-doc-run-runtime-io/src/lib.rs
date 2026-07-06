@@ -49,10 +49,11 @@ impl agent_doc_run_io::DirectRunEffects for RuntimeDirectRunEffects {
         }
     }
 
-    fn complete_required_closeout(&self, file: &Path) -> Result<()> {
-        agent_doc_flow_io::closeout::complete_required_closeout(
+    fn complete_required_closeout(&self, file: &Path, force_disk: bool) -> Result<()> {
+        agent_doc_flow_io::closeout::complete_required_closeout_with_options(
             file,
             &agent_doc_closeout_runtime_io::closeout_effects(),
+            agent_doc_flow_io::closeout::CompleteRequiredCloseoutOptions { force_disk },
         )
         .map(|_| ())
     }

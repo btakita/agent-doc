@@ -27,11 +27,24 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - `Recycle Supervisor` runs `agent-doc session restart-supervisor <relative-path>` and keeps recycle ownership in the binary/supervisor path. The command ID remains `agentDoc.restartSession`. If the binary refuses because the pane is busy or the authoritative actor is still starting, VS Code shows typed restart recovery actions and the confirmed interrupt path invokes `agent-doc session restart-supervisor --force <relative-path>`.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>` and copies the exact output for bug reports.
 
+## Tab Sync Compatibility
+
+- VS Code tab changes remain JetBrains-compatible for real tab/layout changes: the extension issues the immediate best-effort `agent-doc focus <file>` handoff and then keeps the debounced reconciliation on `agent-doc sync --no-autostart --exact-visible ...` with the visible `TabGroups` projection, including empty column placeholders.
+- Automatic sync subprocesses use a short timeout with exponential retry backoff. A slow tmux/controller repair must not cause repeated 30s automatic sync attempts while the user is only changing focus or tabs. Manual `Sync Tmux Layout` and `Load Tmux Window` keep the longer manual timeout.
+
 ## Patch Application Safety
 
 - VS Code must preserve the same no-replay safety boundary as JetBrains for stale visible editor state. Active-typing debounce timeouts may leave a file-watch patch queued for another idle attempt, but once an apply-proof check observes that the editor generation or text changed after patch planning, the extension must fail the payload back to binary retry accounting without scheduling a delayed replay of that same patch file.
 - VS Code consumes `.agent-doc/patches/save-document.signal` as the file-IPC equivalent of JetBrains `save_document` socket messages. The handler must require an already-open markdown document, wait for typing idle, call `TextDocument.save()`, and publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1` for the supplied `patch_id`. It must not write `.agent-doc/ack-content`, open a closed document as proof of a live buffer, or use this path for full-document replacement or reconnect reread repair. Missing lazily receipt support is an incompatible plugin/native-library version error.
 
+## CPC Event Compatibility
+
+- VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope. It must not connect to `.agent-doc/supervisor/*.sock`.
+- VS Code watches `.agent-doc/crdt-replica-events/*.json` and drains the named document's pending CRDT deliveries from the controller. It must not use a fixed interval remote-update pull loop.
+- VS Code watches `.agent-doc/turn-scope/*.json` for turn-state refreshes and the global cdylib reload-broadcast file for native reloads. These paths are event-driven; no fallback status/reload polling interval is allowed. Turn-state refreshes are coalesced, use a minimum refresh interval, and apply slow-projection backoff; active-editor changes may force one immediate refresh.
+- VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
+- Prompt steering is CPC-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
+
 ## Verification Requirements
 
-- Unit tests cover the per-document Run/Clear state machine, exact session-status display, `session clear` command wiring, interrupt-clear command wiring, busy/protected clear refusal parsing, restart refusal parsing, popup-menu parity, persistent route-failure presentation, typed save-document signal handling, and the disabled full-content/reconnect repair guards. Static guards pin the JetBrains-compatible Run route flags and VS Code command contribution surface.
+- Unit tests cover the per-document Run/Clear state machine, exact session-status display, `session clear` command wiring, interrupt-clear command wiring, busy/protected clear refusal parsing, restart refusal parsing, popup-menu parity, persistent route-failure presentation, typed save-document signal handling, CPC-only CRDT/event delivery, bounded turn-state refreshes, disabled full-content delivery, and absent reconnect-repair hooks. Static guards pin the JetBrains-compatible Run route flags and VS Code command contribution surface.

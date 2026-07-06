@@ -5,7 +5,7 @@ import path from 'node:path';
 
 // #cdylib-reload-broadcast: source-level assertions that both editor plugins
 // wire the global reload-broadcast file to a forced native cdylib reload. This
-// mirrors the JetBrains poller for shared-foundation parity: an install (or
+// mirrors the JetBrains watcher for shared-foundation parity: an install (or
 // `agent-doc admin reload-lib`) writes the broadcast, and each plugin watches it
 // and forces its existing native-reload path instead of waiting for the next
 // lazy FFI call.
@@ -32,23 +32,22 @@ describe('cdylib reload broadcast wiring', () => {
         assert.ok(body.includes('koffi.load('), 'forceReloadLib must call koffi.load');
     });
 
-    it('VS Code extension.ts polls the broadcast file and forces a reload on change', () => {
+    it('VS Code extension.ts watches the broadcast file and forces a reload on change', () => {
         const source = fs.readFileSync(path.join(srcDir, 'extension.ts'), 'utf-8');
         assert.ok(
-            source.includes('startLibReloadBroadcastPoll('),
-            'extension.ts must start the broadcast poll',
+            source.includes('startLibReloadBroadcastWatcher('),
+            'extension.ts must start the broadcast watcher',
         );
-        const start = source.indexOf('private pollLibReloadBroadcastOnce(');
-        assert.ok(start >= 0, 'extension.ts must define pollLibReloadBroadcastOnce');
+        const start = source.indexOf('private onLibReloadBroadcastEvent(');
+        assert.ok(start >= 0, 'extension.ts must define onLibReloadBroadcastEvent');
         const end = source.indexOf('dispose(): void {', start);
-        assert.ok(end > start, 'poll method should precede dispose');
-        const poll = source.slice(start, end);
-        assert.ok(poll.includes('native.reloadBroadcastFile('), 'poll must resolve the broadcast file');
-        assert.ok(poll.includes('native.forceReloadLib('), 'poll must force the native reload on change');
-        // The poll must be disposed to avoid a leaked interval.
+        assert.ok(end > start, 'event handler should precede dispose');
+        const handler = source.slice(start, end);
+        assert.ok(handler.includes('native.reloadBroadcastFile('), 'handler must resolve the broadcast file');
+        assert.ok(handler.includes('native.forceReloadLib('), 'handler must force the native reload on change');
         assert.ok(
-            source.includes('clearInterval(this.libReloadBroadcastTimer)'),
-            'dispose must clear the broadcast poll interval',
+            source.includes('this.libReloadBroadcastWatcher?.dispose()'),
+            'dispose must dispose the broadcast watcher',
         );
     });
 
@@ -79,7 +78,7 @@ describe('cdylib reload broadcast wiring', () => {
         assert.ok(nativeLib.includes('Native.load('), 'forceReload must actually reload the native lib');
     });
 
-    it('JetBrains PatchWatcher polls the broadcast file and handles the reload_lib socket message', () => {
+    it('JetBrains PatchWatcher watches the broadcast file and handles the reload_lib socket message', () => {
         const patchWatcher = fs.readFileSync(
             path.join(
                 srcDir,
@@ -98,12 +97,16 @@ describe('cdylib reload broadcast wiring', () => {
             'utf-8',
         );
         assert.ok(
-            patchWatcher.includes('scheduleLibReloadBroadcastPoll('),
-            'PatchWatcher.kt must schedule the broadcast poll',
+            patchWatcher.includes('startLibReloadBroadcastWatcher('),
+            'PatchWatcher.kt must start the broadcast watcher',
+        );
+        assert.ok(
+            patchWatcher.includes('newWatchService()'),
+            'PatchWatcher.kt must use WatchService for the broadcast file',
         );
         assert.ok(
             patchWatcher.includes('AgentDocLib.reloadBroadcastFile('),
-            'PatchWatcher.kt poll must resolve the broadcast file',
+            'PatchWatcher.kt watcher must resolve the broadcast file',
         );
         assert.ok(
             patchWatcher.includes('AgentDocLib.forceReload()'),

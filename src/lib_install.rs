@@ -210,8 +210,9 @@ pub(crate) fn run_paths(
     // the JetBrains plugin hot-reloads this cdylib by mtime, but already-running
     // agent-doc controllers/supervisors keep serving the PRIOR binary until they
     // recycle. Instead of only printing the recycle hint, automatically mark every
-    // running controller to recycle at its next idle boundary so the new build goes
-    // live everywhere, not just in the editor cdylib. The recycle is idle-gated
+    // running controller and route-owned supervisor to recycle at its next idle
+    // boundary so the new build goes live everywhere, not just in the editor cdylib.
+    // The controller recycle path is idle-gated
     // (`recycle_controllers_all_projects` sends a `recycle` RPC that fires only at a
     // turn/inter-queue-item boundary, never mid-turn), so triggering it from
     // `lib-install` is safe. Opt out with a falsey AGENT_DOC_RECYCLE_ON_INSTALL.
@@ -232,31 +233,6 @@ pub(crate) fn run_paths(
 /// successful cdylib install. Best-effort — logs on failure, never returns an
 /// error to the install path.
 fn broadcast_reload_after_install(target_dir: &Path, version: &str, installed: &Path) {
-    match agent_doc_controller_io::project_controller::checkpoint_supervisors_all_projects(
-        "lib_install_reload_broadcast",
-    ) {
-        Ok(summary) if summary.all_clear() => {
-            if summary.total() > 0 {
-                eprintln!(
-                    "[lib-install] CRDT durable checkpoint before plugin reload: {} checkpointed, {} detached, {} skipped",
-                    summary.checkpointed, summary.detached, summary.skipped
-                );
-            }
-        }
-        Ok(summary) => {
-            eprintln!(
-                "[lib-install] warning: skipped cdylib reload broadcast because CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
-                summary.failed, summary.checkpointed, summary.detached, summary.skipped
-            );
-            return;
-        }
-        Err(e) => {
-            eprintln!(
-                "[lib-install] warning: skipped cdylib reload broadcast because CRDT durable checkpoint discovery failed ({e:#})"
-            );
-            return;
-        }
-    }
     let broadcast = ReloadBroadcast {
         lib_version: version.to_string(),
         mtime_ms: mtime_epoch_ms(installed).unwrap_or(0),
@@ -288,9 +264,9 @@ pub struct ReloadLibReport {
 }
 
 /// `agent-doc admin reload-lib` core: write the global reload-broadcast file for
-/// the currently-installed cdylib (the "recycle via API" entry point) and report
-/// how many editor-connected projects it could also signal. `now_epoch_ms` is
-/// supplied by the caller so this stays testable and clock-free at the seam.
+/// the currently-installed cdylib and report how many editor-connected projects it
+/// could also signal. `now_epoch_ms` is supplied by the caller so this stays
+/// testable and clock-free at the seam.
 pub fn reload_lib(now_epoch_ms: u128) -> Result<ReloadLibReport> {
     let version = env!("CARGO_PKG_VERSION");
     let broadcast_target = reload_broadcast_path()?;
@@ -298,19 +274,6 @@ pub fn reload_lib(now_epoch_ms: u128) -> Result<ReloadLibReport> {
         .parent()
         .context("cannot determine binary directory for reload broadcast")?;
     let installed = dir.join(platform_lib_name());
-    let checkpoint =
-        agent_doc_controller_io::project_controller::checkpoint_supervisors_all_projects(
-            "admin_reload_lib",
-        )?;
-    if !checkpoint.all_clear() {
-        anyhow::bail!(
-            "refusing to announce plugin reload: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
-            checkpoint.failed,
-            checkpoint.checkpointed,
-            checkpoint.detached,
-            checkpoint.skipped,
-        );
-    }
     let broadcast = ReloadBroadcast {
         lib_version: version.to_string(),
         mtime_ms: mtime_epoch_ms(&installed).unwrap_or(0),
@@ -399,10 +362,11 @@ fn recycle_on_install_enabled() -> bool {
     }
 }
 
-/// Mark every running controller to recycle onto the freshly-installed binary at its
-/// next idle boundary. Best-effort: a recycle failure must never fail the install, so
-/// errors are logged (never swallowed silently) and the print-only hint is surfaced as
-/// a fallback. When opted out, only the hint is printed.
+/// Mark every running controller and route-owned supervisor to recycle onto the
+/// freshly-installed binary at its next idle boundary. Best-effort: a recycle
+/// failure must never fail the install, so errors are logged (never swallowed
+/// silently) and the print-only hint is surfaced as a fallback. When opted out,
+/// only the hint is printed.
 fn auto_recycle_after_install() {
     if !recycle_on_install_enabled() {
         eprintln!(

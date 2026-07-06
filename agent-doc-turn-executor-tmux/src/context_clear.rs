@@ -34,6 +34,37 @@ pub struct ContextClearSubmitObservation {
     pub command_visible: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ContextClearSubmitPollState {
+    saw_command_visible: bool,
+    saw_changed_absent: bool,
+}
+
+impl ContextClearSubmitPollState {
+    pub const fn saw_submission_evidence(self) -> bool {
+        self.saw_command_visible || self.saw_changed_absent
+    }
+}
+
+pub fn context_clear_submit_poll_status(
+    state: &mut ContextClearSubmitPollState,
+    command_visible: bool,
+    content_changed_since_delivery: bool,
+) -> Option<ContextClearSubmitStatus> {
+    if command_visible {
+        state.saw_command_visible = true;
+        return None;
+    }
+    if state.saw_command_visible {
+        return Some(ContextClearSubmitStatus::Accepted);
+    }
+    if content_changed_since_delivery {
+        state.saw_changed_absent = true;
+        return Some(ContextClearSubmitStatus::Accepted);
+    }
+    None
+}
+
 pub fn context_clear_command_visible_in_active_input(
     content: &str,
     command: &str,
@@ -69,6 +100,22 @@ pub fn context_clear_submit_needs_enter_resubmit(
     pending_draft_enter_resubmit
         && observation.status == ContextClearSubmitStatus::TimedOut
         && observation.command_visible
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContextClearSubmitRetryFacts {
+    pub observation: ContextClearSubmitObservation,
+    pub pending_draft_enter_resubmit: bool,
+    pub attempts_sent: usize,
+    pub max_attempts: usize,
+}
+
+pub fn context_clear_submit_can_enter_resubmit(facts: ContextClearSubmitRetryFacts) -> bool {
+    facts.attempts_sent < facts.max_attempts
+        && context_clear_submit_needs_enter_resubmit(
+            &facts.observation,
+            facts.pending_draft_enter_resubmit,
+        )
 }
 
 pub fn context_clear_submit_observation_line(
@@ -107,6 +154,8 @@ pub fn context_clear_submit_resubmit_proof_line(
     pane: &str,
     harness: &str,
     submit_key: &str,
+    attempt: usize,
+    max_attempts: usize,
     observation: ContextClearSubmitObservation,
 ) -> String {
     let result = match observation.status {
@@ -115,11 +164,13 @@ pub fn context_clear_submit_resubmit_proof_line(
         ContextClearSubmitStatus::CaptureFailed => "capture_failed",
     };
     format!(
-        "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} result={} elapsed_ms={}",
+        "session_clear_submit_resubmit file={} pane={} harness={} action=submit_key key={} attempt={} max_attempts={} result={} elapsed_ms={}",
         file,
         pane,
         harness,
         submit_key,
+        attempt,
+        max_attempts,
         result,
         observation.elapsed.as_millis()
     )
@@ -453,6 +504,37 @@ mod tests {
     }
 
     #[test]
+    fn context_clear_submit_poll_requires_consumption_or_content_change() {
+        let mut state = ContextClearSubmitPollState::default();
+        assert_eq!(
+            context_clear_submit_poll_status(&mut state, false, false),
+            None,
+            "an unchanged empty composer is not submit proof"
+        );
+        assert!(!state.saw_submission_evidence());
+
+        let mut consumed = ContextClearSubmitPollState::default();
+        assert_eq!(
+            context_clear_submit_poll_status(&mut consumed, true, false),
+            None
+        );
+        assert_eq!(
+            context_clear_submit_poll_status(&mut consumed, false, false),
+            Some(ContextClearSubmitStatus::Accepted),
+            "a visible clear command disappearing proves consumption"
+        );
+        assert!(consumed.saw_submission_evidence());
+
+        let mut changed = ContextClearSubmitPollState::default();
+        assert_eq!(
+            context_clear_submit_poll_status(&mut changed, false, true),
+            Some(ContextClearSubmitStatus::Accepted),
+            "fast clear can be proven by post-delivery pane content change"
+        );
+        assert!(changed.saw_submission_evidence());
+    }
+
+    #[test]
     fn context_clear_submit_retry_is_scoped_to_visible_enter_profile_drafts() {
         let visible_timeout = ContextClearSubmitObservation {
             status: ContextClearSubmitStatus::TimedOut,
@@ -482,6 +564,22 @@ mod tests {
         assert!(!context_clear_submit_needs_enter_resubmit(
             &stale_or_empty_timeout,
             true,
+        ));
+        assert!(context_clear_submit_can_enter_resubmit(
+            ContextClearSubmitRetryFacts {
+                observation: visible_timeout,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 0,
+                max_attempts: 2,
+            }
+        ));
+        assert!(!context_clear_submit_can_enter_resubmit(
+            ContextClearSubmitRetryFacts {
+                observation: visible_timeout,
+                pending_draft_enter_resubmit: true,
+                attempts_sent: 2,
+                max_attempts: 2,
+            }
         ));
     }
 
@@ -513,6 +611,8 @@ mod tests {
             "%7",
             "codex",
             "Enter",
+            2,
+            30,
             ContextClearSubmitObservation {
                 status: ContextClearSubmitStatus::Accepted,
                 elapsed: Duration::from_millis(150),
@@ -521,6 +621,8 @@ mod tests {
         );
         assert!(retry.contains("session_clear_submit_resubmit"), "{retry}");
         assert!(retry.contains("action=submit_key key=Enter"), "{retry}");
+        assert!(retry.contains("attempt=2"), "{retry}");
+        assert!(retry.contains("max_attempts=30"), "{retry}");
         assert!(retry.contains("result=accepted"), "{retry}");
     }
 

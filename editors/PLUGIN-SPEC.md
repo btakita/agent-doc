@@ -8,7 +8,7 @@ Editor plugins are a **thin integration layer** between the agent-doc CLI binary
 
 - Watching for IPC patch files and applying them via the editor's Document API
 - Exposing user actions (submit, claim, sync) as keybindings/commands
-- Polling for permission prompts and presenting them in the editor UI
+- Watching CPC-owned editor signal files and controller events
 - Reporting editor layout state to the CLI for tmux sync
 - Providing slash-command autocomplete from CLI metadata
 
@@ -94,7 +94,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
   1. Save the active document to disk.
   2. Run `agent-doc route --dispatch-only --plain-trigger <relative-path>` via subprocess from project root. This must send the plain `agent-doc <FILE>` reopen into the owning session, not a post-`/clear` restart shortcut.
   3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast. A later successful route for the same document must clear that saved route-error diagnostic so obsolete startup/proof failures are not surfaced after recovery.
-  4. Register the file for prompt polling (Section 2.6).
+  4. Do not start prompt polling; permission prompts remain in the owning agent/tmux surface (Section 2.6).
 - **Run action statelessness:** Do not block manual Run behind a plugin-local "already in progress" gate. Repeated Run presses should still dispatch the bare reopen and let the CLI own pane targeting.
 - **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
 
@@ -118,11 +118,11 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 - **Trigger:** Editor tab selection or visible editor set changes.
 - **Debounce:** 100ms. Skip if the visible file set + active file signature is unchanged.
 - **Immediate focus handoff:** On a real active markdown selection change, issue a best-effort `agent-doc focus <file>` immediately for the selected document, before the debounced reconciliation timer fires. This must ignore missing/dead pane failures and must not replace the later `sync --no-autostart` call; it exists only to make existing-pane handoffs feel immediate while full reconciliation continues in the background. The focus command must not depend on controller actor-binding RPC latency.
-- **Concurrency guard:** One automatic command at a time. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes. If the older running command finishes with a retryable preserved-layout or sync-lock-contention result after a newer request exists, the plugin must skip that older deferred retry instead of requeueing an intermediate document.
-- **Timeout:** Manual and automatic layout-sync subprocesses must have a bounded timeout. On timeout, terminate the subprocess, release the plugin-local running guard, and leave the sync state pending so the latest queued editor selection or the next manual `Sync Tmux Layout` can invoke the binary recovery path again.
+- **Concurrency guard:** One automatic command at a time, driven by editor events on an event loop or scheduled executor rather than hot polling, spinlocks, or thread-per-delay retry loops. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes. If the older running command finishes with a retryable preserved-layout or sync-lock-contention result after a newer request exists, the plugin must skip that older deferred retry instead of requeueing an intermediate document.
+- **Timeout:** Manual and automatic layout-sync subprocesses must have a bounded timeout. On timeout, terminate the subprocess, release the plugin-local running guard, and leave the sync state pending so the latest queued editor selection or the next manual `Sync Tmux Layout` can invoke the binary recovery path again. Automatic sync must use a shorter timeout than manual sync and exponential retry backoff so a slow tmux/controller repair cannot monopolize the editor event path.
 - **Snapshot contract:** Capture the exact focus/layout snapshot from the triggering editor event and replay that latest captured snapshot after any in-flight command. Do not resample the live editor state later and risk landing on an earlier splitter hop.
-- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart --exact-visible` when the plugin has captured the full visible markdown projection. Automatic tab-to-pane sync must dispatch `agent-doc sync`, not `agent-doc focus`, even when only one markdown file is visible; the passive sync path owns stash rescue, protected-closeout attach/focus behavior, and safe pane replacement. `--exact-visible` prevents a one-file editor snapshot from expanding through remembered column memory and reintroducing a stale sibling pane. If output from an older binary reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a legacy preserved-layout noop without that marker. Errors are silently ignored.
-- **Safety:** Startup audits must be report-only (`agent-doc resync`), not `resync --fix`, unless the user explicitly invoked a repair action.
+- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart --exact-visible` when the plugin has captured a real tab-selection or visible-layout change and the full visible markdown projection. Automatic tab-to-pane sync must dispatch `agent-doc sync`, not `agent-doc focus`, even when only one markdown file is visible; the passive sync path owns stash rescue, protected-closeout attach/focus behavior, and safe pane replacement. `--exact-visible` prevents a one-file editor snapshot from expanding through remembered column memory and reintroducing a stale sibling pane. Editor-specific focus-only events that do not change the visible markdown projection, such as JetBrains focus-gained events while clicking between already-open split editors, may run only the lightweight `agent-doc focus <file>` handoff and must not repeatedly launch full passive sync. If output from an older binary reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a legacy preserved-layout noop without that marker. Errors are silently ignored.
+- **Safety:** Startup must not run `agent-doc resync` or `resync --fix`. Session repair/audit is an explicit operator action only, because even report-only audits can traverse large tmux/process graphs and stall the IDE in large workspaces.
 
 ### 2.6 Prompt Polling Removed
 
@@ -167,6 +167,8 @@ Resolve the `agent-doc` binary path by checking these locations in order:
 
 Cache the resolved path for the session lifetime.
 
+Embedded native/FFI calls follow the same safety rule: they must not launch `std::env::current_exe()` unless the executable basename is `agent-doc*`. Inside an editor host, `current_exe()` is the IDE process, so treating it as the CLI opens JetBrains/VS Code with controller arguments instead of starting a controller. Controller, recycle, and handoff launch paths must resolve the real CLI through an explicit agent-doc binary override or the install-path/PATH search above.
+
 ### 2.10 Notifications
 
 - **In flight:** Lightweight information notification while the route/fix command is still running; clear it when the subprocess exits.
@@ -181,7 +183,10 @@ Cache the resolved path for the session lifetime.
 - Load `libagent_doc_crdt` shared library via FFI (JNI for JetBrains, napi/N-API for VSCode).
 - Maintain an in-memory CRDT document (Yrs) per open session document.
 - Capture user keystrokes in the editor buffer and convert them to CRDT operations.
-- Receive agent CRDT state via IPC and merge with local document.
+- Exchange CRDT replica messages only with the CPC/project-controller socket (`.agent-doc/controller.sock`), never a per-session supervisor socket.
+- Receive peer CRDT delivery by watching `.agent-doc/crdt-replica-events/*.json` and draining the named document's queued controller deliveries; do not run a fixed interval pull loop.
+- Treat prompt steering as CPC-owned. Legacy supervisor freshness must not veto editor IPC apply, receipt, visible-write proof, repair, or retry decisions; supervisor recycle remains a separate operator/session action.
+- Turn-state/status projection refreshes are event-driven, cached, and bounded. Plugins must coalesce file/editor events, enforce a minimum refresh interval, and back off slow native projection calls instead of synchronously probing projection state on every file-system event.
 - Sync merged result to editor buffer atomically (single write-command action).
 - Re-initialize CRDT from file on external edit detection.
 
@@ -242,11 +247,11 @@ Three states must be reconciled:
 - The receiver must reject missing documents, non-markdown targets, active-typing timeout, failed saves, and missing receipt support without writing `.agent-doc/ack-content`. The binary treats an absent lazily visible-write receipt/projection as an unproven flush.
 - This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, reconnect reread repair, or legacy `fullContent` redelivery.
 
-### 4.3 Future: CRDT State Exchange
+### 4.3 CRDT State Exchange
 
-- **Path:** `.agent-doc/crdt/<sha256_hash>.yrs`
-- **Format:** Binary Yrs state vector encoding.
-- **Lifecycle:** Same consumption-by-deletion pattern as patch files; durable delivery proof must come from the typed state/receipt projection, not deletion alone.
+- **Controller IPC:** editor replicas register, update, pull, ack, and deregister through `.agent-doc/controller.sock` using the controller `crdt_replica` envelope.
+- **Wake signal:** the CPC writes `.agent-doc/crdt-replica-events/<sha256_hash>.json` after it queues fan-out or replace-rebootstrap work for live editor replicas.
+- **Durable recovery projection:** `.agent-doc/crdt/<sha256_hash>.yrs` remains a recovery projection, not an editor delivery queue. Durable delivery proof must come from typed CRDT ACK/receipt state, not sidecar deletion alone.
 
 ## 5. Error Handling
 

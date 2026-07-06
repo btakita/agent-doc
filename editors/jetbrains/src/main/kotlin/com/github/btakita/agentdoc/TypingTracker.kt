@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.UUID
 
 object EditorIdentity {
@@ -112,17 +113,16 @@ private fun reverseApplyEditorOps(finalText: String, ops: List<PendingEditorOp>)
 }
 
 /**
- * Tracks document changes and provides debounce via the FFI shared library.
+ * Tracks document changes and reports editor-buffer projections.
  *
- * On every .md document change, forwards the event to `agent_doc_document_changed()`.
- * Before submission, `awaitIdle()` blocks until the user stops typing.
+ * On every .md document change, queues the lightweight
+ * `agent_doc_document_changed()` marker and the coalesced live-buffer report off
+ * the document listener path.
  *
  * Registered as a bulk DocumentListener in PluginLifecycleListener.
  */
 object TypingTracker : DocumentListener {
 
-    const val DEBOUNCE_MS = 500L
-    private const val TIMEOUT_MS = 30000L
     private const val CONTENT_REPORT_DELAY_MS = 75L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
     private val contentReportExecutor = Executors.newSingleThreadScheduledExecutor { r ->
@@ -130,6 +130,8 @@ object TypingTracker : DocumentListener {
     }
     private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
+    private val pendingNativeChangeMarkers = ConcurrentHashMap.newKeySet<String>()
+    private val nativeChangeDrainQueued = AtomicBoolean(false)
 
     // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
     // disk. Set when a non-remoteCrdtApply document change lands; cleared whenever
@@ -144,46 +146,62 @@ object TypingTracker : DocumentListener {
         if (!vFile.name.endsWith(".md")) return
         val filePath = vFile.path
 
-        // #falsetyping: a remote CRDT-replica apply is NOT operator typing. Marking
-        // the typing indicator for it makes the CLI idle-guard
-        // (`guard_visible_write_idle`) see "typing active" for as long as the
-        // realtime replica keeps reconciling the buffer from other replicas, so
-        // finalize/write defer forever with "retry after typing stops" even though
-        // nobody is typing. Record the pending op and report the live-buffer
-        // content (the buffer genuinely changed), but do NOT bump the typing
-        // indicator / `lastChangeMs` for a programmatic remote apply — mirror the
-        // suppression `CrdtReplicaManager`'s own DocumentListener already applies.
+        // A remote CRDT-replica apply is replica churn, not operator typing. Report
+        // the changed buffer, but do not mark it as an unsynced local edit.
         val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath)
         if (!remoteCrdtApply) {
-            lastChangeMs = System.currentTimeMillis()
             // #falsetyping-guard: a genuine local operator edit is now ahead of
             // disk until saved. A remoteCrdtApply is replica churn, not operator
             // text, so it must NOT set this flag.
             unsyncedLocalEditPaths.add(filePath)
         }
 
-        val lib = AgentDocLib.get()
-        if (lib != null) {
-            if (!remoteCrdtApply) {
-                try {
-                    lib.agent_doc_document_changed(filePath)
-                } catch (_: UnsatisfiedLinkError) {
-                    // older cdylib without the lightweight marker; fall back to local debounce
-                } catch (_: NoSuchMethodError) {
-                    // older cdylib without the lightweight marker; fall back to local debounce
+        if (!remoteCrdtApply) {
+            requestNativeDocumentChanged(filePath)
+        }
+        val op = PendingEditorOp(
+            offset = event.offset,
+            oldFragment = event.oldFragment.toString(),
+            newFragment = event.newFragment.toString(),
+            remoteCrdtApply = remoteCrdtApply,
+        )
+        recordPendingEditorOp(filePath, op)
+        scheduleFullContentReport(filePath, event.document)
+        LOG.debug("[native] document_changed queued content report: ${vFile.name} (remoteCrdtApply=$remoteCrdtApply)")
+    }
+
+    private fun requestNativeDocumentChanged(filePath: String) {
+        pendingNativeChangeMarkers.add(filePath)
+        scheduleNativeChangeDrain()
+    }
+
+    private fun scheduleNativeChangeDrain() {
+        if (!nativeChangeDrainQueued.compareAndSet(false, true)) return
+        contentReportExecutor.execute {
+            try {
+                drainNativeChangeMarkers()
+            } finally {
+                nativeChangeDrainQueued.set(false)
+                if (pendingNativeChangeMarkers.isNotEmpty()) {
+                    scheduleNativeChangeDrain()
                 }
             }
-            val op = PendingEditorOp(
-                offset = event.offset,
-                oldFragment = event.oldFragment.toString(),
-                newFragment = event.newFragment.toString(),
-                remoteCrdtApply = remoteCrdtApply,
-            )
-            recordPendingEditorOp(filePath, op)
-            scheduleFullContentReport(lib, filePath, event.document)
-            LOG.debug("[native] document_changed queued content report: ${vFile.name} (remoteCrdtApply=$remoteCrdtApply)")
-        } else {
-            LOG.debug("[fallback] document_changed: ${vFile.name}")
+        }
+    }
+
+    private fun drainNativeChangeMarkers() {
+        val paths = pendingNativeChangeMarkers.toList()
+        paths.forEach { pendingNativeChangeMarkers.remove(it) }
+        if (paths.isEmpty()) return
+        val lib = AgentDocLib.get() ?: return
+        for (filePath in paths) {
+            try {
+                lib.agent_doc_document_changed(filePath)
+            } catch (_: UnsatisfiedLinkError) {
+                // older cdylib without the lightweight marker; fall back to local debounce
+            } catch (_: NoSuchMethodError) {
+                // older cdylib without the lightweight marker; fall back to local debounce
+            }
         }
     }
 
@@ -233,35 +251,33 @@ object TypingTracker : DocumentListener {
 
     fun scheduleOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
-        val lib = AgentDocLib.get() ?: return
-        // Re-establish the plugin-owner lease with our live pid when a markdown
-        // document is (re)opened — the root-cause fix for stale leases after an IDE
-        // restart.
-        refreshPluginOwner(lib, file.path)
         val document = FileDocumentManager.getInstance().getDocument(file) ?: return
-        scheduleFullContentReport(lib, file.path, document)
+        scheduleFullContentReport(file.path, document)
     }
 
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
+        val filePath = file.path
         // #falsetyping-guard: a closed document has no unsaved operator edits to
         // protect; drop any stale local-edit marker so a reopened buffer starts
         // from the conservative-but-current provenance.
-        unsyncedLocalEditPaths.remove(file.path)
-        val lib = AgentDocLib.get() ?: return
-        try {
-            lib.agent_doc_plugin_owner_release(file.path, EditorIdentity.id)
-        } catch (_: UnsatisfiedLinkError) {
-        } catch (_: NoSuchMethodError) {
-        }
-        try {
-            lib.agent_doc_document_closed_for_editor(file.path, EditorIdentity.id)
-        } catch (_: UnsatisfiedLinkError) {
-            // older cdylib without per-editor close support; stale sidecar cleanup
-            // falls back to PID liveness checks in the binary.
-        } catch (_: NoSuchMethodError) {
-            // older cdylib without per-editor close support; stale sidecar cleanup
-            // falls back to PID liveness checks in the binary.
+        unsyncedLocalEditPaths.remove(filePath)
+        contentReportExecutor.execute {
+            val lib = AgentDocLib.get() ?: return@execute
+            try {
+                lib.agent_doc_plugin_owner_release(filePath, EditorIdentity.id)
+            } catch (_: UnsatisfiedLinkError) {
+            } catch (_: NoSuchMethodError) {
+            }
+            try {
+                lib.agent_doc_document_closed_for_editor(filePath, EditorIdentity.id)
+            } catch (_: UnsatisfiedLinkError) {
+                // older cdylib without per-editor close support; stale sidecar cleanup
+                // falls back to PID liveness checks in the binary.
+            } catch (_: NoSuchMethodError) {
+                // older cdylib without per-editor close support; stale sidecar cleanup
+                // falls back to PID liveness checks in the binary.
+            }
         }
     }
 
@@ -283,13 +299,13 @@ object TypingTracker : DocumentListener {
     }
 
     private fun scheduleFullContentReport(
-        lib: AgentDocLib,
         filePath: String,
         document: com.intellij.openapi.editor.Document,
     ) {
         pendingContentReports.remove(filePath)?.cancel(false)
         val task = contentReportExecutor.schedule({
             try {
+                val lib = AgentDocLib.get() ?: return@schedule
                 reportFullContentNow(
                     lib = lib,
                     filePath = filePath,
@@ -298,9 +314,9 @@ object TypingTracker : DocumentListener {
                     requireAuthority = false,
                 )
             } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without full-content sidecar support; skip
+                // older cdylib without the compatibility content-report ABI; skip
             } catch (_: NoSuchMethodError) {
-                // older cdylib without full-content sidecar support; skip
+                // older cdylib without the compatibility content-report ABI; skip
             } catch (e: Throwable) {
                 LOG.debug("[native] content report skipped: ${e.message}")
             } finally {
@@ -321,15 +337,6 @@ object TypingTracker : DocumentListener {
             // Heartbeat the plugin-owner lease with our live pid on each debounced
             // buffer report so the document stays editor-attached while open.
             refreshPluginOwner(lib, filePath)
-            // Goal-1 coordination probe: log the CPC turn phase this document
-            // projects (via the agent_doc_turn_projection FFI → TurnStateBridge), so
-            // the CPC→plugin turn-state pipeline is verifiable in idea.log
-            // independent of the status-bar widget rendering. Only when in flight,
-            // to avoid steady-state spam.
-            val turnLabel = TurnStateBridge.presentationForFile(filePath).label
-            if (turnLabel.isNotEmpty()) {
-                LOG.info("[turn-state] $filePath → $turnLabel (CPC turn phase projected to plugin)")
-            }
             val text = com.intellij.openapi.application.ApplicationManager.getApplication()
                 .runReadAction<String> { document.text }
             // #falsetyping-guard: derive replica-churn provenance. A document that
@@ -342,6 +349,16 @@ object TypingTracker : DocumentListener {
                 unsyncedLocalEditPaths.remove(filePath)
             }
             val noUnsavedOperatorEdits = !unsaved || filePath !in unsyncedLocalEditPaths
+            if (requireAuthority) {
+                val replicaRefreshAccepted = CrdtReplicaManager.ensureReplicaForOpenDocument(
+                    filePath = filePath,
+                    document = document,
+                    editorText = text,
+                    await = true,
+                    forceRefresh = true,
+                )
+                if (!replicaRefreshAccepted) return false
+            }
             val reported = try {
                 lib.agent_doc_document_changed_digest_content_for_editor_v3(
                     filePath,
@@ -359,14 +376,15 @@ object TypingTracker : DocumentListener {
                 reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
             }
             if (!reported) return false
-            val replicaRefreshAccepted = CrdtReplicaManager.ensureReplicaForOpenDocument(
-                filePath = filePath,
-                document = document,
-                editorText = text,
-                await = false,
-                forceRefresh = requireAuthority,
-            )
-            if (requireAuthority && !replicaRefreshAccepted) return false
+            if (!requireAuthority) {
+                CrdtReplicaManager.ensureReplicaForOpenDocument(
+                    filePath = filePath,
+                    document = document,
+                    editorText = text,
+                    await = false,
+                    forceRefresh = false,
+                )
+            }
             LOG.debug("[native] document_changed content reported: $filePath")
             if (drainEditorOps) {
                 val opReports = prepareEditorOpReports(text, drainPendingEditorOps(filePath))
@@ -466,46 +484,4 @@ object TypingTracker : DocumentListener {
         )
     }
 
-    /** Block until the document has been idle, or timeout. Returns true if idle. */
-    fun awaitIdle(filePath: String): Boolean {
-        val lib = AgentDocLib.get()
-        return if (lib != null) {
-            LOG.info("[native] awaitIdle: waiting for idle (${DEBOUNCE_MS}ms debounce, ${TIMEOUT_MS}ms timeout)")
-            val result = lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, TIMEOUT_MS)
-            LOG.info("[native] awaitIdle: result=$result")
-            result
-        } else {
-            // Fallback: simple local check
-            val elapsed = System.currentTimeMillis() - lastChangeMs
-            if (elapsed >= DEBOUNCE_MS) return true
-            Thread.sleep(DEBOUNCE_MS - elapsed)
-            true
-        }
-    }
-
-    /** Check if the user was recently typing (for conditional debounce). */
-    fun isRecentlyTyping(filePath: String): Boolean {
-        val lib = AgentDocLib.get()
-        return if (lib != null) {
-            // Check if file is tracked — if not, fall back to local tracking
-            // (untracked files return idle=true from await_idle, which is misleading)
-            if (!lib.agent_doc_is_tracked(filePath)) {
-                val local = (System.currentTimeMillis() - lastChangeMs) < DEBOUNCE_MS
-                LOG.info("[native] isRecentlyTyping: file untracked, fallback local=$local")
-                return local
-            }
-            // await_idle with 0 timeout = non-blocking check
-            val idle = lib.agent_doc_await_idle(filePath, DEBOUNCE_MS, 0)
-            LOG.info("[native] isRecentlyTyping: idle=$idle → recentlyTyping=${!idle}")
-            !idle
-        } else {
-            val result = (System.currentTimeMillis() - lastChangeMs) < DEBOUNCE_MS
-            LOG.info("[fallback] isRecentlyTyping: result=$result")
-            result
-        }
-    }
-
-    // Fallback local tracking (used when FFI unavailable or file untracked)
-    @Volatile
-    private var lastChangeMs: Long = 0
 }

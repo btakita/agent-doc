@@ -51,11 +51,12 @@ class SubmitAction : AnAction() {
                 attempt.recordIfCurrent("active_document_saved")
             } else {
                 attempt.recordIfCurrent("document_not_loaded")
-            }
-            LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
-            TerminalUtil.sendToTerminal(project, file, attempt = attempt)
         }
+        LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
+        TerminalUtil.sendToTerminal(project, file, attempt = attempt)
+        TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
     }
+}
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

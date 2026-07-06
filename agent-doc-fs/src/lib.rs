@@ -9,6 +9,7 @@ const LOCK_DIR: &str = ".agent-doc/locks";
 const PENDING_DIR: &str = ".agent-doc/pending";
 const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
 const CRDT_DIR: &str = ".agent-doc/crdt";
+const CRDT_REPLICA_EVENT_DIR: &str = ".agent-doc/crdt-replica-events";
 const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
 const CYCLE_STATE_DIR: &str = ".agent-doc/state/cycles";
 const DISK_CHANGE_REQUEST_DIR: &str = ".agent-doc/disk-change-requests";
@@ -84,11 +85,19 @@ pub fn turn_scope_path_for(doc: &Path) -> Result<PathBuf> {
 
 /// Compute `<project_root>/.agent-doc/disk-change-requests/<hash>.json` for a
 /// document. The controller watch daemon drops this marker when the file changed
-/// on disk out of band; the owning supervisor's idle loop reads it, reconciles the
+/// on disk out of band; the CPC/controller consumer reads it, reconciles the
 /// change into the canonical replica, and clears it (the marker + idle-poll
 /// cross-process signal, mirroring recycle-request).
 pub fn disk_change_request_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, DISK_CHANGE_REQUEST_DIR, "json")
+}
+
+/// Compute `<project_root>/.agent-doc/crdt-replica-events/<hash>.json` for a
+/// document. The controller writes this as an editor-facing event signal after
+/// CRDT fan-out or replace rebootstrap work is queued, and editor plugins watch
+/// the directory to drain pending replica deliveries without polling.
+pub fn crdt_replica_event_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, CRDT_REPLICA_EVENT_DIR, "json")
 }
 
 /// Compute `<project_root>/.agent-doc/state/cycles/<hash>.json` for a document.

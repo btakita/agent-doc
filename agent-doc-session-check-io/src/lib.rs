@@ -63,7 +63,11 @@ pub(crate) fn resolve_current_document(
             &format!("session-check {source}"),
         );
     }
-    agent_doc_document_realtime_io::try_resolve_current_document(file).with_context(|| {
+    agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+        file,
+        &format!("session-check {source}"),
+    )
+    .with_context(|| {
         format!(
             "session-check {source}: resolve current document {}",
             file.display()

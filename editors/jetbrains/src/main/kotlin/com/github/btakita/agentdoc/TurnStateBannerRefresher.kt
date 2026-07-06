@@ -1,58 +1,247 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.EditorNotifications
-import com.intellij.util.Alarm
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+
+private const val TURN_STATE_MIN_REFRESH_INTERVAL_MS = 1_500L
+private const val TURN_STATE_SLOW_PROJECTION_MS = 1_000L
+private const val TURN_STATE_SLOW_BACKOFF_MS = 5_000L
+private const val TURN_STATE_SLOW_BACKOFF_MAX_MS = 60_000L
+private const val TURN_STATE_MAX_PATHS_PER_DRAIN = 4
+private const val TURN_STATE_DRAIN_YIELD_MS = 50L
 
 /**
- * Per-project poller that flips [TurnStateBannerProvider] on and off as the CPC's
- * turn phase changes. Polls the `agent_doc_turn_projection` FFI (via
- * [TurnStateBridge]) for the selected markdown file and only asks the platform to
- * re-collect editor notifications when the phase actually transitions, so the
- * banner appears the moment a turn starts persisting and disappears when it goes
- * idle — without re-collecting on every tick.
+ * Per-project event loop that flips [TurnStateBannerProvider] on and off as the
+ * CPC's turn phase changes. Native projection reads are queued only from IDE or
+ * agent-doc events, then cached for banner/status-bar collection on the EDT.
  */
 @Service(Service.Level.PROJECT)
 class TurnStateBannerRefresher(private val project: Project) : Disposable {
-    private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
-    private var lastState: String = ""
+    fun interface Listener {
+        fun turnStateChanged()
+    }
+
+    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "agent-doc-turn-state-events").apply { isDaemon = true }
+    }
+    private val started = AtomicBoolean(false)
+    private val drainQueued = AtomicBoolean(false)
+    private val pendingPaths = ConcurrentHashMap.newKeySet<String>()
+    private val delayedPaths = ConcurrentHashMap.newKeySet<String>()
+    private val lastRefreshMs = ConcurrentHashMap<String, Long>()
+    private val backoffUntilMs = ConcurrentHashMap<String, Long>()
+    private val slowRefreshCounts = ConcurrentHashMap<String, Int>()
+    private val presentations = ConcurrentHashMap<String, TurnStateBridge.TurnStatePresentation>()
+    private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun start() {
-        LOG.info("[turn-banner] refresher started; polling every ${POLL_MS}ms")
-        schedule()
+        if (!started.compareAndSet(false, true)) return
+        LOG.info("[turn-state] event refresher started")
+        project.messageBus.connect(this).subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    event.newFile?.let { requestRefresh(it, "selection") }
+                    event.oldFile?.let { requestRefresh(it, "selection-old") }
+                }
+
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                    requestRefresh(file, "file-opened")
+                }
+
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    if (!isMarkdown(file)) return
+                    presentations.remove(file.path)
+                    notifyUi(file.path, "file-closed")
+                }
+            },
+        )
+        requestOpenMarkdownRefresh("startup")
     }
 
-    private fun schedule() {
-        alarm.addRequest({
-            poll()
-            if (!project.isDisposed) schedule()
-        }, POLL_MS)
+    fun addListener(listener: Listener): Disposable {
+        listeners.add(listener)
+        return Disposable { listeners.remove(listener) }
     }
 
-    private fun poll() {
-        if (project.isDisposed) return
-        val file = FileEditorManager.getInstance(project).selectedFiles
-            .firstOrNull { it.name.endsWith(".md") }
-        val state = if (file == null) "" else TurnStateBridge.presentationForFile(file.path).label
-        if (state != lastState) {
-            lastState = state
-            LOG.info("[turn-banner] phase changed → \"${state.ifEmpty { "(idle, hidden)" }}\"; re-collecting banners")
-            EditorNotifications.getInstance(project).updateAllNotifications()
+    fun cachedPresentationFor(filePath: String): TurnStateBridge.TurnStatePresentation =
+        presentations[filePath] ?: TurnStateBridge.TurnStatePresentation("", false)
+
+    fun requestRefresh(file: VirtualFile, reason: String) {
+        if (!isMarkdown(file) || project.isDisposed || !file.isValid) return
+        requestRefresh(file.path, reason)
+    }
+
+    fun requestRefresh(filePath: String, reason: String) {
+        if (project.isDisposed || !filePath.endsWith(".md")) return
+        val delayMs = refreshDelayMs(filePath)
+        if (delayMs > 0 && presentations.containsKey(filePath)) {
+            scheduleDelayedRefresh(filePath, delayMs, reason)
+            return
+        }
+        pendingPaths.add(filePath)
+        scheduleDrain(reason)
+    }
+
+    fun requestSelectedRefresh(reason: String) {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            FileEditorManager.getInstance(project).selectedFiles
+                .filter(::isMarkdown)
+                .forEach { requestRefresh(it, reason) }
+        }
+    }
+
+    private fun requestOpenMarkdownRefresh(reason: String) {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            FileEditorManager.getInstance(project).openFiles
+                .filter(::isMarkdown)
+                .forEach { requestRefresh(it, reason) }
+            requestSelectedRefresh(reason)
+        }
+    }
+
+    private fun scheduleDrain(reason: String, delayMs: Long) {
+        if (!drainQueued.compareAndSet(false, true)) return
+        val task = Runnable {
+            try {
+                drainPending(reason)
+            } finally {
+                drainQueued.set(false)
+                if (pendingPaths.isNotEmpty()) {
+                    scheduleDrain("rescheduled", TURN_STATE_DRAIN_YIELD_MS)
+                }
+            }
+        }
+        if (delayMs > 0) {
+            executor.schedule(task, delayMs, TimeUnit.MILLISECONDS)
+        } else {
+            executor.execute(task)
+        }
+    }
+
+    private fun scheduleDrain(reason: String) {
+        scheduleDrain(reason, 0L)
+    }
+
+    private fun scheduleDelayedRefresh(filePath: String, delayMs: Long, reason: String) {
+        if (!delayedPaths.add(filePath)) return
+        val delayedReason = delayedReason(reason)
+        executor.schedule({
+            delayedPaths.remove(filePath)
+            if (project.isDisposed) return@schedule
+            pendingPaths.add(filePath)
+            scheduleDrain("$delayedReason-delayed")
+        }, delayMs, TimeUnit.MILLISECONDS)
+        LOG.debug("[turn-state] delayed refresh for $filePath by ${delayMs}ms via $delayedReason")
+    }
+
+    private fun refreshDelayMs(filePath: String): Long {
+        val now = System.currentTimeMillis()
+        val minIntervalUntil = (lastRefreshMs[filePath] ?: 0L) + TURN_STATE_MIN_REFRESH_INTERVAL_MS
+        val backoffUntil = backoffUntilMs[filePath] ?: 0L
+        return (maxOf(minIntervalUntil, backoffUntil) - now).coerceAtLeast(0L)
+    }
+
+    private fun drainPending(reason: String) {
+        var inspected = 0
+        while (!project.isDisposed && inspected < TURN_STATE_MAX_PATHS_PER_DRAIN) {
+            val iterator = pendingPaths.iterator()
+            if (!iterator.hasNext()) return
+            val filePath = iterator.next()
+            pendingPaths.remove(filePath)
+            inspected++
+            val delayMs = refreshDelayMs(filePath)
+            if (delayMs > 0 && presentations.containsKey(filePath)) {
+                scheduleDelayedRefresh(filePath, delayMs, backoffReason(reason))
+                continue
+            }
+            refreshPath(filePath, reason)
+        }
+    }
+
+    private fun refreshPath(filePath: String, reason: String) {
+        val started = System.nanoTime()
+        val next = TurnStateBridge.presentationForFile(filePath)
+        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+        val now = System.currentTimeMillis()
+        lastRefreshMs[filePath] = now
+        if (elapsedMs >= TURN_STATE_SLOW_PROJECTION_MS) {
+            val slowCount = slowRefreshCounts.merge(filePath, 1) { old, _ -> (old + 1).coerceAtMost(16) } ?: 1
+            val backoffMs = slowBackoffMs(slowCount)
+            backoffUntilMs[filePath] = now + backoffMs
+            LOG.warn("[turn-state] backing off projection for $filePath after slow refresh elapsed_ms=$elapsedMs slow_count=$slowCount backoff_ms=$backoffMs")
+        } else {
+            slowRefreshCounts.remove(filePath)
+            backoffUntilMs.remove(filePath)
+        }
+        val previous = presentations.put(filePath, next)
+        if (previous != next) {
+            LOG.debug("[turn-state] phase changed via $reason for $filePath: ${next.label.ifEmpty { "(idle, hidden)" }}")
+            notifyUi(filePath, reason)
+        }
+    }
+
+    private fun notifyUi(filePath: String, reason: String) {
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            LocalFileSystem.getInstance().findFileByPath(filePath)?.let {
+                EditorNotifications.getInstance(project).updateNotifications(it)
+            }
+            listeners.forEach { it.turnStateChanged() }
+            LOG.debug("[turn-state] UI refreshed via $reason for $filePath")
         }
     }
 
     override fun dispose() {
-        alarm.cancelAllRequests()
+        pendingPaths.clear()
+        delayedPaths.clear()
+        lastRefreshMs.clear()
+        backoffUntilMs.clear()
+        slowRefreshCounts.clear()
+        presentations.clear()
+        listeners.clear()
+        executor.shutdownNow()
     }
 
     companion object {
-        private const val POLL_MS = 1000
         private val LOG = Logger.getInstance(TurnStateBannerRefresher::class.java)
         fun getInstance(project: Project): TurnStateBannerRefresher = project.service()
+
+        private fun isMarkdown(file: VirtualFile): Boolean =
+            file.name.endsWith(".md")
+
+        private fun slowBackoffMs(slowCount: Int): Long {
+            val step = (slowCount - 1).coerceAtLeast(0).coerceAtMost(6)
+            return (TURN_STATE_SLOW_BACKOFF_MS * (1L shl step)).coerceAtMost(TURN_STATE_SLOW_BACKOFF_MAX_MS)
+        }
+
+        private fun backoffReason(reason: String): String =
+            "${baseReason(reason)}-backoff"
+
+        private fun delayedReason(reason: String): String =
+            if (reason.contains("-backoff")) backoffReason(reason) else baseReason(reason)
+
+        private fun baseReason(reason: String): String =
+            reason
+                .substringBefore("-backoff")
+                .substringBefore("-delayed")
+                .ifBlank { "refresh" }
     }
 }

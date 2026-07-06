@@ -6,6 +6,45 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.67
 
+- **Claim/sync now prefer the current live `agent-doc` tmux session before a
+  configured project pin.** `Claim for Tmux Pane` accepts panes in the
+  operator's current session without requiring a temporary
+  `.agent-doc/config.toml` edit, while `route`/`sync` follow the current session
+  only when it already contains an `agent-doc` window. The configured
+  `tmux_session` remains unchanged and still acts as the fallback. Coverage adds
+  focused claim policy tests plus current-session route/sync regressions.
+
+- **JetBrains read-authority refresh routes through the CRDT relay before the
+  compatibility live-buffer projection.** Route document prep can need the
+  editor to republish an attached document model before disk is safe to read.
+  `publish_live_buffer` remains read-only, but `send_publish_live_buffer` now
+  waits for the terminal applied receipt so success means the plugin finished
+  registering/refreshing its CRDT replica instead of merely accepting the socket
+  request. The controller `crdt_current_text` RPC is now a pure CPC relay read:
+  recovery publish requests happen outside the controller handler and then poll
+  CPC state through the same relay, so the plugin has no separate authoritative
+  editor-write path. Controller self-recycle also waits for active client
+  requests to drain, preventing install/recycle recovery from terminating the
+  CPC while a relay poll is in flight. Coverage:
+  `publish_live_buffer_message_is_readonly_and_requests_early_receipt` and
+  `send_publish_live_buffer_waits_for_terminal_applied_receipt`,
+  `crdt_current_text_rpc_reads_relay_without_publish_recovery`, and the
+  controller CRDT checkpoint tests.
+
+- **JetBrains `Clear Session Context` uses the same bounded Enter-resubmit
+  state machine as direct-pane route dispatch.** Clear already detected a
+  visible `/clear` or `/new` draft and sent one bare submit key, but a focused
+  Codex/OpenCode composer can swallow more than one Enter. The verifier now
+  keeps resubmitting while the clear command remains visible, bounded by
+  `AGENT_DOC_DIRECT_PANE_MAX_ENTER_RESUBMITS`, and logs each
+  `session_clear_submit_resubmit` with `attempt` and `max_attempts`.
+
+- **Editor plugins leave debounce ownership to the CPC/binary.** JetBrains and
+  VS Code `Run Agent Doc` no longer force `agent-doc route --debounce 0`, and
+  editor patch/save/reposition handlers no longer wait on plugin-side typing
+  idle before processing CPC requests. The plugin still keeps stale-generation
+  proof checks and retry handling for actual apply conflicts.
+
 - **More launch and sync policy moved out of orchestration.** Claude JSON argv
   construction and Codex default/structural launch argv now live in
   `agent-doc-turn-executor`, while editor sync column-list projection now lives

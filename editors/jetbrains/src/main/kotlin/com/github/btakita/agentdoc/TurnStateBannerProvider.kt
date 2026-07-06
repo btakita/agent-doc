@@ -20,11 +20,11 @@ import javax.swing.JPanel
  * paints — an [EditorNotificationProvider] renders a real editor component and
  * throws loudly if it fails, so it is both reliable and diagnosable.
  *
- * Reads the same `agent_doc_turn_projection` FFI via [TurnStateBridge], so it
- * inherits the proven CPC↔plugin coordination. The banner is shown only while a
- * turn is in flight (persisting / awaiting response); it is hidden when idle so it
- * never permanently consumes editor space. [TurnStateBannerRefresher] drives
- * re-collection on phase transitions.
+ * Reads the cached projection maintained by [TurnStateBannerRefresher]. The
+ * banner is shown only while a turn is in flight (persisting / awaiting
+ * response); it is hidden when idle so it never permanently consumes editor
+ * space. Native projection reads run only on the refresher event loop, not from
+ * notification collection.
  */
 class TurnStateBannerProvider : EditorNotificationProvider {
     override fun collectNotificationData(
@@ -32,8 +32,11 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         file: VirtualFile,
     ): Function<in FileEditor, out JComponent?>? {
         if (!file.name.endsWith(".md")) return null
+        val refresher = TurnStateBannerRefresher.getInstance(project)
+        refresher.start()
+        refresher.requestRefresh(file, "banner-collect")
         // Empty label == idle / not-an-agent-doc-turn → no banner.
-        val label = TurnStateBridge.presentationForFile(file.path).label
+        val label = refresher.cachedPresentationFor(file.path).label
         if (label.isEmpty()) return null
         return Function { _ ->
             // A very thin single-line strip instead of the full-height

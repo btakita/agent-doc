@@ -26,13 +26,30 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.psi.PsiManager
-import com.intellij.util.Alarm
 import java.awt.Color
 import java.awt.Font
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class VisualHighlighterManager private constructor(private val project: Project) : Disposable {
-    private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(VisualHighlighterManager::class.java)
+
+    private data class VisualDocumentText(
+        val text: String,
+        val modificationStamp: Long,
+    )
+
+    private data class VisualTokenSnapshot(
+        val modificationStamp: Long,
+        val tokens: List<NativePatching.VisualToken>,
+    )
+
+    private val refreshExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "agent-doc-visual-highlighter-events").apply { isDaemon = true }
+    }
+    private val pendingRefreshes = ConcurrentHashMap<Document, ScheduledFuture<*>>()
 
     init {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(object : DocumentListener {
@@ -42,7 +59,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
         }, this)
         EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
             override fun editorCreated(event: EditorFactoryEvent) {
-                refreshEditor(event.editor)
+                scheduleRefresh(event.editor.document)
             }
         }, this)
         project.messageBus.connect(this).subscribe(
@@ -93,14 +110,28 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun scheduleRefresh(document: Document) {
         if (!isMarkdown(document)) return
-        alarm.cancelAllRequests()
-        alarm.addRequest({ refreshDocument(document) }, 120)
+        pendingRefreshes.remove(document)?.cancel(false)
+        lateinit var future: ScheduledFuture<*>
+        future = refreshExecutor.schedule({
+            try {
+                val snapshot = collectVisualTokens(document)
+                if (snapshot != null) {
+                    ApplicationManager.getApplication().invokeLater {
+                        if (project.isDisposed) return@invokeLater
+                        applyVisualTokens(document, snapshot)
+                    }
+                }
+            } finally {
+                pendingRefreshes.remove(document, future)
+            }
+        }, 120, TimeUnit.MILLISECONDS)
+        pendingRefreshes[document] = future
     }
 
     private fun refreshAll() {
         EditorFactory.getInstance().allEditors
             .filter { it.project == project }
-            .forEach { refreshEditor(it) }
+            .forEach { scheduleRefresh(it.document) }
     }
 
     fun refreshFile(file: VirtualFile) {
@@ -108,11 +139,32 @@ class VisualHighlighterManager private constructor(private val project: Project)
         scheduleRefresh(document)
     }
 
-    private fun refreshDocument(document: Document) {
-        EditorFactory.getInstance().getEditors(document, project).forEach { refreshEditor(it) }
+    private fun collectVisualTokens(document: Document): VisualTokenSnapshot? {
+        return try {
+            val snapshot = ApplicationManager.getApplication().runReadAction<VisualDocumentText?> {
+                if (!isMarkdown(document)) return@runReadAction null
+                VisualDocumentText(
+                    text = document.text,
+                    modificationStamp = document.modificationStamp,
+                )
+            } ?: return null
+            VisualTokenSnapshot(
+                modificationStamp = snapshot.modificationStamp,
+                tokens = NativePatching.visualTokens(snapshot.text),
+            )
+        } catch (e: Throwable) {
+            LOG.debug("[visual] token refresh skipped: ${e.message}")
+            null
+        }
     }
 
-    private fun refreshEditor(editor: Editor) {
+    private fun applyVisualTokens(document: Document, snapshot: VisualTokenSnapshot) {
+        if (!isMarkdown(document)) return
+        if (document.modificationStamp != snapshot.modificationStamp) return
+        EditorFactory.getInstance().getEditors(document, project).forEach { refreshEditor(it, snapshot.tokens) }
+    }
+
+    private fun refreshEditor(editor: Editor, tokens: List<NativePatching.VisualToken>) {
         if (editor.isDisposed) return
         if (!isMarkdown(editor.document)) {
             clearEditor(editor)
@@ -120,7 +172,6 @@ class VisualHighlighterManager private constructor(private val project: Project)
         }
 
         clearEditor(editor)
-        val tokens = NativePatching.visualTokens(editor.document.text)
         val markup = editor.markupModel
         for (token in tokens) {
             if (token.end <= token.start || token.end > editor.document.textLength) continue
@@ -257,6 +308,9 @@ class VisualHighlighterManager private constructor(private val project: Project)
     }
 
     override fun dispose() {
+        pendingRefreshes.values.forEach { it.cancel(false) }
+        pendingRefreshes.clear()
+        refreshExecutor.shutdownNow()
         EditorFactory.getInstance().allEditors
             .filter { it.project == project }
             .forEach { clearEditor(it) }

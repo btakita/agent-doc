@@ -9,6 +9,10 @@ repository = "https://github.com/btakita/agent-doc"
 [lib]
 name = "agent_doc_session_check_io"
 
+[features]
+default = []
+test-support = ["agent-doc-document-realtime-io/test-support"]
+
 [dependencies]
 agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.67" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }

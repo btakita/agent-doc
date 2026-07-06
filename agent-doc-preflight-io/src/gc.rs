@@ -86,6 +86,19 @@ impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
             caller,
         )
     }
+
+    fn reap_removed_project_root_controllers_all_projects(
+        &mut self,
+        stale_after: Duration,
+        dry_run: bool,
+        caller: &str,
+    ) -> Result<(usize, usize)> {
+        agent_doc_controller_io::project_controller::reap_removed_project_root_controllers_all_projects(
+            stale_after,
+            dry_run,
+            caller,
+        )
+    }
 }
 
 fn run_auto_gc(root: &Path) -> Result<agent_doc_gc_io::GcResult> {

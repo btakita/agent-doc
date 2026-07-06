@@ -1,15 +1,17 @@
 //! Process-tree owner inspection adapters.
 //!
-//! This crate owns shell/process traversal (`pgrep`, `ps`) and composes those
+//! This crate owns process traversal and composes those
 //! observations with pure controller command-line ownership policy.
 
 use agent_doc_controller::command_line::{
     agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(test)]
 fn parse_child_pids(output: &[u8]) -> Vec<String> {
     String::from_utf8_lossy(output)
         .lines()
@@ -20,16 +22,15 @@ fn parse_child_pids(output: &[u8]) -> Vec<String> {
 }
 
 pub fn child_pids(parent_pid: &str) -> Vec<String> {
-    let Ok(output) = Command::new("pgrep").args(["-P", parent_pid]).output() else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    parse_child_pids(&output.stdout)
+    proc_children_snapshot()
+        .remove(parent_pid.trim())
+        .unwrap_or_default()
 }
 
 pub fn process_command(pid: &str) -> Option<String> {
+    if let Some(command) = proc_process_command(pid) {
+        return Some(command);
+    }
     let output = Command::new("ps")
         .args(["-p", pid, "-o", "command="])
         .output()
@@ -41,9 +42,12 @@ pub fn process_command(pid: &str) -> Option<String> {
 }
 
 pub fn process_tree_contains_pid(root_pid: &str, target_pid: u32) -> bool {
-    process_tree_contains_pid_with(root_pid, &target_pid.to_string(), child_pids)
+    process_tree_pids(root_pid)
+        .into_iter()
+        .any(|pid| pid == target_pid.to_string())
 }
 
+#[cfg(test)]
 fn process_tree_contains_pid_with(
     root_pid: &str,
     target_pid: &str,
@@ -54,6 +58,7 @@ fn process_tree_contains_pid_with(
         .any(|pid| pid == target_pid)
 }
 
+#[cfg(test)]
 fn process_tree_pids_with(
     root_pid: &str,
     mut child_pids_for: impl FnMut(&str) -> Vec<String>,
@@ -84,6 +89,75 @@ fn process_tree_pids_with(
     pids
 }
 
+fn process_tree_pids(root_pid: &str) -> Vec<String> {
+    let root_pid = root_pid.trim();
+    if root_pid.is_empty() {
+        return Vec::new();
+    }
+    let children = proc_children_snapshot();
+    let mut pids = Vec::new();
+    let mut seen = HashSet::new();
+    let mut frontier = vec![root_pid.to_string()];
+    while let Some(pid) = frontier.pop() {
+        if !seen.insert(pid.clone()) {
+            continue;
+        }
+        pids.push(pid.clone());
+        if let Some(child_pids) = children.get(&pid) {
+            for child_pid in child_pids {
+                frontier.push(child_pid.to_string());
+            }
+        }
+    }
+    pids
+}
+
+fn proc_children_snapshot() -> HashMap<String, Vec<String>> {
+    let mut children = HashMap::new();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return children;
+    };
+    for entry in entries.flatten() {
+        let pid = entry.file_name().to_string_lossy().to_string();
+        if !pid.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let stat_path = entry.path().join("stat");
+        let Ok(stat) = fs::read_to_string(stat_path) else {
+            continue;
+        };
+        let Some(ppid) = proc_stat_ppid(&stat) else {
+            continue;
+        };
+        children.entry(ppid).or_insert_with(Vec::new).push(pid);
+    }
+    children
+}
+
+fn proc_stat_ppid(stat: &str) -> Option<String> {
+    let rest = stat.rsplit_once(')')?.1;
+    rest.split_whitespace().nth(1).map(ToOwned::to_owned)
+}
+
+fn proc_process_command(pid: &str) -> Option<String> {
+    let pid = pid.trim();
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let bytes = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    let command = bytes
+        .split(|b| *b == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8_lossy(part))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let command = command.trim();
+    (!command.is_empty()).then(|| command.to_string())
+}
+
 pub fn process_is_agent_session(pid: &str) -> bool {
     let Some(cmdline) = process_command(pid) else {
         return false;
@@ -99,9 +173,14 @@ fn cmdline_is_agent_session(cmdline: &str) -> bool {
 }
 
 pub fn process_tree_has_agent_session(root_pid: &str) -> bool {
-    process_tree_has_agent_session_with(root_pid, child_pids, process_command)
+    process_tree_pids(root_pid).into_iter().any(|pid| {
+        process_command(&pid)
+            .as_deref()
+            .is_some_and(cmdline_is_agent_session)
+    })
 }
 
+#[cfg(test)]
 fn process_tree_has_agent_session_with(
     root_pid: &str,
     child_pids_for: impl FnMut(&str) -> Vec<String>,
@@ -124,16 +203,25 @@ pub fn process_has_agent_doc_owner_for_file(pid: &str, file_path: &str) -> bool 
 }
 
 pub fn process_tree_has_agent_doc_owner_for_file(root_pid: &str, file_path: &str) -> bool {
-    process_tree_has_agent_doc_owner_for_file_with(root_pid, file_path, child_pids, process_command)
+    process_tree_pids(root_pid).into_iter().any(|pid| {
+        process_command(&pid)
+            .as_deref()
+            .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+    })
 }
 
 pub fn process_tree_agent_doc_owner_pid_for_file(
     root_pid: &str,
     file_path: &str,
 ) -> Option<String> {
-    process_tree_agent_doc_owner_pid_for_file_with(root_pid, file_path, child_pids, process_command)
+    process_tree_pids(root_pid).into_iter().find(|pid| {
+        process_command(pid)
+            .as_deref()
+            .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+    })
 }
 
+#[cfg(test)]
 fn process_tree_agent_doc_owner_pid_for_file_with(
     root_pid: &str,
     file_path: &str,
@@ -149,6 +237,7 @@ fn process_tree_agent_doc_owner_pid_for_file_with(
         })
 }
 
+#[cfg(test)]
 fn process_tree_has_agent_doc_owner_for_file_with(
     root_pid: &str,
     file_path: &str,
@@ -168,9 +257,15 @@ pub fn process_tree_owner_document_other_than(
     root_pid: &str,
     claimed_file: &Path,
 ) -> Option<String> {
-    process_tree_owner_document_other_than_with(root_pid, claimed_file, child_pids, process_command)
+    let claimed = claimed_file.to_string_lossy();
+    process_tree_pids(root_pid).into_iter().find_map(|pid| {
+        let cmdline = process_command(&pid)?;
+        cmdline_owns_other_document(&cmdline, &claimed)
+            .then(|| owner_document_from_cmdline(&cmdline))?
+    })
 }
 
+#[cfg(test)]
 fn process_tree_owner_document_other_than_with(
     root_pid: &str,
     claimed_file: &Path,

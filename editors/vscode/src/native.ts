@@ -162,10 +162,7 @@ function resetBindings(): void {
     _admin_handoff_json = null;
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
-    _is_idle = null;
-    _await_idle = null;
     _document_changed = null;
-    _is_tracked = null;
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
     _document_changed_digest_content_for_editor_v2 = null;
@@ -341,8 +338,6 @@ let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
-let _is_idle: any = null;
-let _await_idle: any = null;
 let _document_changed: any = null;
 let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
@@ -353,7 +348,6 @@ let _document_changed_digest_content_for_editor_v3: any = null;
 let _document_closed_for_editor: any = null;
 let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
-let _is_tracked: any = null;
 let _resolve_project_path: any = null;
 let _free_state: any = null;
 let _free_string: any = null;
@@ -365,7 +359,6 @@ let _record_state_event: any = null;
 let _editor_content_applied_for_editor_v1: any = null;
 let _editor_patch_applied: any = null;
 let _editor_patch_rejected: any = null;
-let _reconnect_buffer_decision: any = null;
 let _record_editor_op: any = null;
 let _document_base_hash: any = null;
 let _replica_open: any = null;
@@ -448,8 +441,6 @@ function bindFunctions(): void {
         _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
-    _is_idle = lib.func('agent_doc_is_idle', 'bool', ['str', 'int64']);
-    _await_idle = lib.func('agent_doc_await_idle', 'bool', ['str', 'int64', 'int64']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
@@ -513,7 +504,6 @@ function bindFunctions(): void {
         _plugin_owner_try_acquire = null;
         _plugin_owner_release = null;
     }
-    _is_tracked = lib.func('agent_doc_is_tracked', 'bool', ['str']);
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_state = lib.func('agent_doc_free_state', 'void', ['void*', 'size_t']);
     _free_string = lib.func('agent_doc_free_string', 'void', ['char*']);
@@ -553,18 +543,6 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] state subscribe ABI unavailable: ${e.message}`);
         _state_subscribe = null;
-    }
-    try {
-        // #yzer reconnect-reread (VS Code parity with the JB plugin). Optional so an
-        // older cdylib without the symbol does not break the rest of the bindings.
-        _reconnect_buffer_decision = lib.func(
-            'agent_doc_reconnect_buffer_decision',
-            'char*',
-            ['str', 'str', 'str'],
-        );
-    } catch (e: any) {
-        console.log(`[agent-doc/native] reconnect_buffer_decision ABI unavailable: ${e.message}`);
-        _reconnect_buffer_decision = null;
     }
     try {
         // #qnodemerge4wire Phase 4 editor-op reporters. Optional so an older
@@ -626,58 +604,6 @@ function verifyVersion(libPath: string): void {
         }
     } catch (e: any) {
         console.log(`[agent-doc/native] agent_doc_version() failed — ABI mismatch at ${libPath}: ${e.message}`);
-    }
-}
-
-export interface ReconnectDecision {
-    decision: string;
-    content?: string;
-}
-
-/**
- * Parse the JSON returned by `agent_doc_reconnect_buffer_decision` into a typed
- * decision. Pure (no FFI) so it is unit-testable. Returns null on malformed JSON
- * or a missing/invalid `decision` field (fail safe — the caller keeps the buffer).
- */
-export function parseReconnectDecision(json: string): ReconnectDecision | null {
-    try {
-        const parsed = JSON.parse(json);
-        if (!parsed || typeof parsed.decision !== 'string') return null;
-        const out: ReconnectDecision = { decision: parsed.decision };
-        if (typeof parsed.content === 'string') out.content = parsed.content;
-        return out;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * #yzer — ask the binary how the editor should reconcile its buffer with disk on
- * (re)connect. The binary owns the staleness decision (disk==HEAD vs buffer==a
- * prior commit blob); the plugin is a thin caller and only re-reads when told to,
- * so genuine unsynced user edits are never clobbered (editor wins, #editorbufwin).
- * Returns the decision, or null if the FFI is unavailable/errors (fail safe).
- * VS Code parity for the JB plugin's `agent_doc_reconnect_buffer_decision` usage.
- */
-export function reconnectBufferDecision(
-    projectRoot: string,
-    filePath: string,
-    buffer: string,
-): ReconnectDecision | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    if (!_reconnect_buffer_decision) return null;
-    let ptr: any = null;
-    try {
-        ptr = _reconnect_buffer_decision(projectRoot, filePath, buffer);
-        if (!ptr) return null;
-        const json = koffi.decode(ptr, 'char', -1);
-        return parseReconnectDecision(json);
-    } catch (e: any) {
-        console.warn(`[agent-doc/native] reconnect_buffer_decision error: ${e.message}`);
-        return null;
-    } finally {
-        if (ptr) _free_string(ptr);
     }
 }
 
@@ -1351,16 +1277,6 @@ function hashText(value: string): string {
     return crypto.createHash('sha256').update(value, 'utf-8').digest('hex').slice(0, 16);
 }
 
-/** Whether the loaded cdylib exposes the reconnect-reread decision FFI. */
-export function hasReconnectBufferDecision(): boolean {
-    try {
-        bindFunctions();
-    } catch {
-        return false;
-    }
-    return Boolean(_reconnect_buffer_decision);
-}
-
 /**
  * Reposition boundary marker to end of exchange component.
  * Returns the updated document, or null if FFI is unavailable/errors.
@@ -1641,28 +1557,6 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
 }
 
 /**
- * Non-blocking idle check.
- * Returns true if no document_changed event within debounceMs.
- * Returns true if FFI is unavailable (don't block callers).
- */
-export function isIdle(filePath: string, debounceMs: number, projectRoot?: string): boolean {
-    if (!ensureLoaded(projectRoot)) return true;
-    bindFunctions();
-    return _is_idle(filePath, debounceMs);
-}
-
-/**
- * Block until idle for debounceMs, or timeoutMs expires.
- * Returns true if idle was reached.
- * Returns true if FFI is unavailable (don't block callers).
- */
-export function awaitIdle(filePath: string, debounceMs: number, timeoutMs: number, projectRoot?: string): boolean {
-    if (!ensureLoaded(projectRoot)) return true;
-    bindFunctions();
-    return _await_idle(filePath, debounceMs, timeoutMs);
-}
-
-/**
  * Record a document change event for debounce tracking.
  */
 export function documentChanged(filePath: string, projectRoot?: string): void {
@@ -1782,15 +1676,6 @@ export function pluginOwnerRelease(
     } catch (e: any) {
         console.warn(`[agent-doc/native] pluginOwnerRelease error: ${e.message}`);
     }
-}
-
-/**
- * Check if file is tracked (at least one document_changed call).
- */
-export function isTracked(filePath: string, projectRoot?: string): boolean {
-    if (!ensureLoaded(projectRoot)) return false;
-    bindFunctions();
-    return _is_tracked(filePath);
 }
 
 /**

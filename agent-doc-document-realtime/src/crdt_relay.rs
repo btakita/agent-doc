@@ -6,7 +6,7 @@
 //! layer the plan calls for (`tasks/agent-doc/plan-crdt-authority-model.md`,
 //! "Multiple editors"):
 //!
-//! - The **supervisor hosts the canonical replica**; editor replicas
+//! - The **project controller/CPC hosts the canonical replica**; editor replicas
 //!   register/deregister with the hub. On a replica's local update the hub pulls
 //!   that op into the canonical replica and **broadcasts only the missing update**
 //!   to every OTHER live replica via the existing `diff(their_sv)` /
@@ -106,7 +106,7 @@ pub struct ReplicaDeliverySnapshot {
 /// file-watch propagation path (`plan-crdt-scramble-and-disk-propagation.md`
 /// Phases C/D): the watcher hands the settled disk text to the hub, and the hub
 /// decides how it relates to the live canonical replica.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiskChangeOutcome {
     /// The canonical replica already reflects the disk text — a live editor that
     /// authored the change (or a peer that already pulled it) means reconcile is
@@ -135,7 +135,7 @@ pub enum DiskChangeOutcome {
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
 pub struct RelayHub {
-    /// The supervisor's canonical replica (the hub / git-checkpoint authority).
+    /// The CPC-owned canonical replica (the hub / git-checkpoint authority).
     canonical: ReplicaState,
     canonical_id: u64,
     members: HashMap<u64, Member>,
@@ -454,6 +454,54 @@ impl RelayHub {
     ) -> Result<BroadcastPacket> {
         self.local_edit(client_id, offset, delete_len, insert)?;
         self.relay(client_id)
+    }
+
+    /// Apply a CPC-authored whole-document replacement to the canonical replica
+    /// and queue the resulting CRDT delta for every live editor replica.
+    ///
+    /// This is the controller→editor direction of the relay. The caller supplies
+    /// the `expected_current` text it merged against; if the canonical text has
+    /// moved since then, the write is refused so newer editor-buffer changes are
+    /// not overwritten by a stale response.
+    pub fn apply_canonical_replace(
+        &mut self,
+        expected_current: &str,
+        content: &str,
+    ) -> Result<BroadcastPacket> {
+        let current = self.canonical.text();
+        if current != expected_current {
+            return Err(anyhow!(
+                "canonical text changed before CPC relay write: expected_len={} current_len={}",
+                expected_current.len(),
+                current.len()
+            ));
+        }
+        let before = self.canonical.state_vector();
+        if current != content {
+            let delete_len: u32 = current
+                .len()
+                .try_into()
+                .map_err(|_| anyhow!("canonical text is too large for a single CRDT replace"))?;
+            self.canonical.apply_local_edit(0, delete_len, content);
+        }
+        let update = self.canonical.diff(&before)?;
+        let mut targets: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(_, m)| m.live)
+            .map(|(id, _)| *id)
+            .collect();
+        targets.sort_unstable();
+        let packet = BroadcastPacket {
+            origin: self.canonical_id,
+            update,
+            targets,
+        };
+        self.enqueue_delivery(&packet);
+        for target in &packet.targets {
+            self.deliver(*target, &packet.update)?;
+        }
+        Ok(packet)
     }
 
     fn enqueue_delivery(&mut self, packet: &BroadcastPacket) {
@@ -937,6 +985,48 @@ mod tests {
             .expect("target delivery snapshot");
         assert_eq!(target.current_generation, 1);
         assert_eq!(target.last_ack_generation, 1);
+    }
+
+    #[test]
+    fn cpc_canonical_replace_queues_delta_for_live_editors() {
+        let mut hub = RelayHub::from_text(1, "before\n");
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let packet = hub
+            .apply_canonical_replace("before\n", "before\nresponse\n")
+            .unwrap();
+        assert_eq!(packet.origin, 1);
+        assert_eq!(packet.targets, vec![2, 3]);
+        assert_eq!(hub.canonical_text(), "before\nresponse\n");
+        assert_eq!(hub.member_text(2).unwrap(), "before\nresponse\n");
+        assert_eq!(hub.member_text(3).unwrap(), "before\nresponse\n");
+        assert!(
+            !hub.delivery_converged(),
+            "CPC-origin editor delivery still requires editor ACK"
+        );
+
+        let pending = hub.pending_updates(2).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].origin, 1);
+        assert_eq!(pending[0].target, 2);
+        assert!(pending[0].patch_id.starts_with("crdt:1:2:1"));
+    }
+
+    #[test]
+    fn cpc_canonical_replace_rejects_stale_expected_text() {
+        let mut hub = RelayHub::from_text(1, "operator text\n");
+        hub.register(2).unwrap();
+
+        let err = hub
+            .apply_canonical_replace("stale text\n", "agent response\n")
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("canonical text changed before CPC relay write"),
+            "stale CPC relay writes must be rejected: {err:#}"
+        );
+        assert_eq!(hub.canonical_text(), "operator text\n");
+        assert!(hub.pending_updates(2).unwrap().is_empty());
     }
 
     #[test]

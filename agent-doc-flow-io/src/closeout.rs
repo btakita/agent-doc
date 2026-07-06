@@ -23,6 +23,12 @@ pub trait CloseoutEffects {
         self.commit(file)
     }
 
+    fn crdt_commit_barrier(&self, file: &Path) -> Result<bool> {
+        agent_doc_controller_io::project_controller::commit_barrier_via_controller_model_for_doc(
+            file,
+        )
+    }
+
     fn run_pending_maintenance(
         &self,
         file: &Path,
@@ -118,7 +124,16 @@ pub fn complete_required_closeout_with_options(
     // Under `CrdtAuthority::GitAuthoritative` (Detached / headless — most traffic)
     // this is a trivial no-op that touches no hub and leaves the commit path
     // byte-for-byte unchanged.
-    let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(file);
+    let barrier_ready = if options.force_disk {
+        true
+    } else {
+        effects.crdt_commit_barrier(file).with_context(|| {
+            format!(
+                "controller CRDT commit barrier failed for {}",
+                file.display()
+            )
+        })?
+    };
     if !barrier_ready {
         log_closeout_guard_event(
             file,
@@ -136,7 +151,17 @@ pub fn complete_required_closeout_with_options(
     // `#staleinmem` — record the just-committed on-disk content as the hub baseline
     // so a later out-of-band disk correction is detectable at the next commit
     // barrier (no-op under the Detached / headless path).
-    agent_doc_crdt_relay_io::record_committed_baseline_for_file(file);
+    if let Err(err) = agent_doc_controller_io::project_controller::
+        record_committed_baseline_via_controller_model_for_doc(file)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "controller_crdt_record_committed_baseline_error file={} error={err}",
+                file.display()
+            ),
+        );
+    }
     rc.invalidate_head_content();
     rc.invalidate_snapshot_content();
     timer.mark("git_commit");
@@ -961,7 +986,7 @@ pub fn gather_closeout_recovery_evidence(
         snapshot_hash.as_deref(),
         capture.as_ref(),
     )?;
-    let editor_ipc = closeout_editor_ipc_evidence(file, visible, effects);
+    let editor_ipc = closeout_editor_ipc_evidence(file, &visible_doc);
     let binary_freshness =
         match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
             Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
@@ -1465,35 +1490,21 @@ fn closeout_queue_only_drift_evidence(
 
 fn closeout_editor_ipc_evidence(
     file: &Path,
-    visible: &str,
-    _effects: &dyn CloseoutEffects,
+    visible_doc: &agent_doc_document_realtime::CurrentDocument,
 ) -> CloseoutEditorIpcEvidence {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let file_key = canonical.to_string_lossy().to_string();
-    let live_buffers = agent_doc_debounce::live_buffer_snapshots(&file_key);
     let socket_degraded = agent_doc_project_root_io::project_root_containing(&canonical)
         .and_then(|root| {
             agent_doc_write_converge_io::ipc_direct_disk_degraded(&root, &canonical).ok()
         })
         .unwrap_or(false);
-    if let Some(diverged) =
-        agent_doc_debounce::live_buffer_diverges_from_content(&file_key, visible)
-    {
-        return CloseoutEditorIpcEvidence::DivergedLiveBuffer {
-            live_buffer_count: live_buffers.len().max(1),
-            editor_id: diverged.editor_id,
-            live_len: diverged.len,
-            live_hash: diverged.hash,
-            socket_degraded,
-        };
-    }
-    if live_buffers.is_empty() {
-        CloseoutEditorIpcEvidence::NoLiveBuffer { socket_degraded }
-    } else {
+    if visible_doc.authority() == agent_doc_document_realtime::DocAuthority::EditorBuffer {
         CloseoutEditorIpcEvidence::FreshLiveBuffer {
-            live_buffer_count: live_buffers.len(),
+            live_buffer_count: 1,
             socket_degraded,
         }
+    } else {
+        CloseoutEditorIpcEvidence::NoLiveBuffer { socket_degraded }
     }
 }
 

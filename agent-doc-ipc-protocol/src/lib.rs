@@ -502,9 +502,9 @@ pub fn effective_unmatched_for_patch_payload(
 
 /// Tag a `patch` message with the `early_receipt` opt-in when enabled.
 ///
-/// Non-patch traffic is returned unchanged so queue convergence, VCS refreshes,
-/// and read-only live-buffer proof requests never accidentally request a
-/// two-phase patch receipt.
+/// Non-patch traffic is returned unchanged; non-mutating operations that can
+/// tolerate accepted-before-terminal semantics should opt in through their own
+/// message builder.
 pub fn early_receipt_tagged_message(
     message: &serde_json::Value,
     enabled: bool,
@@ -669,6 +669,7 @@ pub fn publish_live_buffer_message(file: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "publish_live_buffer",
         "file": file,
+        "early_receipt": true,
     })
 }
 
@@ -1283,11 +1284,13 @@ mod tests {
     }
 
     #[test]
-    fn publish_live_buffer_message_is_readonly() {
+    fn publish_live_buffer_message_is_readonly_and_requests_early_receipt() {
         let message = publish_live_buffer_message("/tmp/plan.md");
 
         assert_eq!(message["type"], "publish_live_buffer");
         assert_eq!(message["file"], "/tmp/plan.md");
+        assert_eq!(message["early_receipt"], true);
+        assert!(message_requests_early_receipt(&message.to_string()));
         assert!(message.get("content").is_none());
         assert!(message.get("patches").is_none());
     }

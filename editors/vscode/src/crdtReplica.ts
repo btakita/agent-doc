@@ -1,5 +1,6 @@
 import * as net from 'net';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { NativeReplicaNode } from './native';
 
 export interface ReplicaRegisterAck {
@@ -79,6 +80,10 @@ function decodeBase64(value: unknown): Uint8Array | null {
     }
 }
 
+function sha256(value: string): string {
+    return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
 export function utf16RangeToCodePoints(
     oldText: string,
     rangeOffset: number,
@@ -129,7 +134,7 @@ export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUp
 /**
  * D2: the outcome of a `replica_pull` — a normal additive-delta batch, or a
  * **replace** delivery (out-of-band deletion re-bootstrap) whose text the editor
- * installs into its buffer wholesale instead of CRDT-merging. The controller
+ * installs into its buffer wholesale instead of CRDT-merging. The CPC
  * decides which (FFI-first); the plugin is a thin consumer. Mirrors the JetBrains
  * `ReplicaPullDelivery` (specs/14-realtime-workflow.md § Editor Parity Requirement).
  */
@@ -304,9 +309,25 @@ export class CrdtReplicaForwarder {
         await this.transport.broadcastUpdate(this.filePath, this.identity, update);
     }
 
+    async ensureEditorText(editorText: string): Promise<void> {
+        if (!this.attached) return;
+        const current = this.node.text();
+        if (current == null || current === editorText) return;
+        const deleteLen = Array.from(current).length;
+        if (!this.node.applyLocal(this.clientId, 0, deleteLen, editorText)) return;
+        const update = this.node.encodeState();
+        if (!update) return;
+        await this.transport.broadcastUpdate(this.filePath, this.identity, update);
+    }
+
     applyRemoteUpdate(update: Uint8Array): string | null {
         if (!this.attached) return null;
         if (!this.node.applyUpdate(this.clientId, update)) return null;
+        return this.node.text();
+    }
+
+    replicaText(): string | null {
+        if (!this.attached) return null;
         return this.node.text();
     }
 
@@ -346,6 +367,7 @@ export interface CrdtReplicaManagerOptions {
     transport?: ReplicaTransport;
     nodeFactory?: () => ReplicaNode;
     listDocuments: () => ReplicaDocumentSnapshot[];
+    currentText: (filePath: string) => string | null;
     applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
     logger?: ReplicaLogger;
 }
@@ -359,7 +381,11 @@ export class CrdtReplicaManager {
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
     private readonly pendingLocalEdits = new Map<string, number>();
-    private pollTimer: ReturnType<typeof setInterval> | undefined;
+    private readonly drainRequestedPaths = new Set<string>();
+    private drainAllRequested = false;
+    private drainQueued = false;
+    private drainTimer: ReturnType<typeof setTimeout> | undefined;
+    private disposed = false;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
         this.logger = options.logger ?? noopLogger;
@@ -368,18 +394,20 @@ export class CrdtReplicaManager {
     }
 
     start(): void {
+        this.disposed = false;
         for (const doc of this.options.listDocuments()) {
             this.seedDocument(doc.filePath, doc.text);
             void this.attachDocument(doc.filePath);
         }
-        this.pollTimer = setInterval(() => {
-            void this.pollRemoteUpdates();
-        }, 250);
     }
 
     dispose(): void {
-        if (this.pollTimer) clearInterval(this.pollTimer);
-        this.pollTimer = undefined;
+        this.disposed = true;
+        this.drainRequestedPaths.clear();
+        this.drainAllRequested = false;
+        this.drainQueued = false;
+        if (this.drainTimer) clearTimeout(this.drainTimer);
+        this.drainTimer = undefined;
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
         }
@@ -392,9 +420,12 @@ export class CrdtReplicaManager {
         this.shadows.set(filePath, text);
     }
 
-    async attachDocument(filePath: string, text?: string): Promise<boolean> {
+    async attachDocument(filePath: string, text?: string, forceRefresh = false): Promise<boolean> {
         if (text !== undefined) this.seedDocument(filePath, text);
-        return (await this.forwarderFor(filePath)) != null;
+        const forwarder = await this.forwarderFor(filePath);
+        if (forceRefresh && forwarder && text !== undefined) await forwarder.ensureEditorText(text);
+        if (forwarder) this.requestRemoteDrain(filePath);
+        return forwarder != null;
     }
 
     isApplyingRemote(filePath: string): boolean {
@@ -434,6 +465,7 @@ export class CrdtReplicaManager {
             await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
         } finally {
             this.clearLocalPending(filePath);
+            this.requestRemoteDrain(filePath);
         }
     }
 
@@ -465,6 +497,7 @@ export class CrdtReplicaManager {
             await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
         } finally {
             this.clearLocalPending(filePath);
+            this.requestRemoteDrain(filePath);
         }
     }
 
@@ -496,8 +529,59 @@ export class CrdtReplicaManager {
         }
     }
 
-    async pollRemoteUpdates(): Promise<void> {
-        for (const [filePath, forwarder] of Array.from(this.forwarders.entries())) {
+    requestRemoteDrain(filePath?: string): void {
+        if (this.disposed) return;
+        if (filePath) {
+            this.drainRequestedPaths.add(filePath);
+        } else {
+            this.drainAllRequested = true;
+        }
+        if (this.drainQueued) return;
+        this.drainQueued = true;
+        this.drainTimer = setTimeout(() => {
+            this.drainTimer = undefined;
+            void this.drainRequestedRemoteUpdates();
+        }, 0);
+    }
+
+    async drainRemoteUpdates(filePath?: string): Promise<void> {
+        if (filePath) {
+            this.drainRequestedPaths.delete(filePath);
+        } else {
+            this.drainRequestedPaths.clear();
+            this.drainAllRequested = false;
+        }
+        if (this.drainTimer && !this.drainAllRequested && this.drainRequestedPaths.size === 0) {
+            clearTimeout(this.drainTimer);
+            this.drainTimer = undefined;
+            this.drainQueued = false;
+        }
+        const paths = filePath ? [filePath] : Array.from(this.forwarders.keys());
+        await this.drainRemoteUpdatesForPaths(paths);
+    }
+
+    private async drainRequestedRemoteUpdates(): Promise<void> {
+        try {
+            const paths = this.drainAllRequested
+                ? Array.from(this.forwarders.keys())
+                : Array.from(this.drainRequestedPaths);
+            this.drainAllRequested = false;
+            for (const filePath of paths) {
+                this.drainRequestedPaths.delete(filePath);
+            }
+            await this.drainRemoteUpdatesForPaths(paths);
+        } finally {
+            this.drainQueued = false;
+            if (!this.disposed && (this.drainAllRequested || this.drainRequestedPaths.size > 0)) {
+                this.requestRemoteDrain();
+            }
+        }
+    }
+
+    private async drainRemoteUpdatesForPaths(paths: Iterable<string>): Promise<void> {
+        for (const filePath of new Set(paths)) {
+            const forwarder = this.forwarders.get(filePath);
+            if (!forwarder) continue;
             if (this.hasPendingLocal(filePath)) continue;
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
             // corrected canonical wholesale; a normal delta batch applies per-update.
@@ -516,6 +600,7 @@ export class CrdtReplicaManager {
                 }
                 const expectedText = this.shadows.get(filePath);
                 if (expectedText === undefined) continue;
+                if (!(await this.editorReplicaBaselineMatches(filePath, forwarder, expectedText))) continue;
                 const converged = forwarder.applyRemoteUpdate(update.update);
                 if (converged == null) continue;
                 if (this.hasPendingLocal(filePath)) continue;
@@ -525,12 +610,68 @@ export class CrdtReplicaManager {
                     if (applied) {
                         this.shadows.set(filePath, converged);
                         await forwarder.ackRemoteUpdate(update);
+                    } else {
+                        const current = this.currentEditorText(filePath);
+                        if (current != null) {
+                            this.shadows.set(filePath, current);
+                            await forwarder.ensureEditorText(current);
+                            this.requestRemoteDrain(filePath);
+                        }
                     }
                 } finally {
                     this.applyingRemote.delete(filePath);
                 }
             }
         }
+    }
+
+    private async editorReplicaBaselineMatches(
+        filePath: string,
+        forwarder: CrdtReplicaForwarder,
+        expectedText: string,
+    ): Promise<boolean> {
+        const editorText = this.currentEditorText(filePath);
+        if (editorText == null) {
+            this.logger.warn(
+                `[crdt-replica] incoming update deferred because the authoritative editor buffer is unavailable for ${filePath}: ` +
+                `expected_hash=${sha256(expectedText)}`,
+            );
+            return false;
+        }
+        const replicaText = forwarder.replicaText();
+        if (editorText === expectedText && replicaText === expectedText) return true;
+        if (replicaText === expectedText) {
+            this.logger.warn(
+                `[crdt-replica] incoming update deferred while editor buffer is published first for ${filePath}: ` +
+                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} replica_hash=${sha256(replicaText)}`,
+            );
+            this.shadows.set(filePath, editorText);
+            await forwarder.ensureEditorText(editorText);
+            this.requestRemoteDrain(filePath);
+            return false;
+        }
+        if (replicaText === editorText) {
+            this.logger.warn(
+                `[crdt-replica] incoming update deferred after shadow realignment for ${filePath}: ` +
+                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} replica_hash=${sha256(replicaText)}`,
+            );
+            this.shadows.set(filePath, editorText);
+            this.requestRemoteDrain(filePath);
+            return false;
+        }
+        this.logger.warn(
+            `[crdt-replica] incoming update deferred because local replica baseline differs from the authoritative editor buffer for ${filePath}: ` +
+            `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
+            `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
+        );
+        this.shadows.set(filePath, editorText);
+        await forwarder.ensureEditorText(editorText);
+        this.requestRemoteDrain(filePath);
+        return false;
+    }
+
+    private currentEditorText(filePath: string): string | null {
+        return this.options.currentText(filePath);
     }
 
     private async forwarderFor(filePath: string): Promise<CrdtReplicaForwarder | null> {
@@ -549,6 +690,8 @@ export class CrdtReplicaManager {
             );
             try {
                 if (!(await forwarder.register())) return null;
+                const editorText = this.shadows.get(filePath);
+                if (editorText !== undefined) await forwarder.ensureEditorText(editorText);
                 this.forwarders.set(filePath, forwarder);
                 return forwarder;
             } catch (e: any) {

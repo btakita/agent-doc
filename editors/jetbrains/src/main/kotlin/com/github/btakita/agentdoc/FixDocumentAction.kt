@@ -18,6 +18,7 @@ class FixDocumentAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
         FileDocumentManager.getInstance().saveAllDocuments()
         TerminalUtil.fixDocument(project, file)
+        TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "fix-document")
     }
 
     override fun update(e: AnActionEvent) {

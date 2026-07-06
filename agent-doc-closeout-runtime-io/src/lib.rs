@@ -186,9 +186,9 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
     fn resolve_current_document(
         &self,
         file: &Path,
-        _source: &str,
+        source: &str,
     ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
-        agent_doc_document_realtime_io::try_resolve_current_document(file)
+        agent_doc_document_realtime_io::try_resolve_current_document_with_source(file, source)
     }
 
     fn resolve_current_document_for_authority(

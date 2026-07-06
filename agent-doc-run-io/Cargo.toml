@@ -13,7 +13,6 @@ name = "agent_doc_run_io"
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
 agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.34.67" }
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
 agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.67" }
@@ -47,6 +46,7 @@ agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version =
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.67" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.67" }
 agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.67" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.67" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.67" }

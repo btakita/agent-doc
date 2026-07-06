@@ -57,7 +57,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
     Arc, Condvar, Mutex, OnceLock,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -100,6 +100,23 @@ pub struct ControllerQueueConsumptionOutcome {
     pub drained: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerEditorRouteInvocation {
+    pub file: PathBuf,
+    pub relative_path: String,
+    pub layout_args: Vec<String>,
+    pub dispatch_only: bool,
+    pub plain_trigger: bool,
+    pub wait_for_ready_secs: Option<u64>,
+    pub force_disk: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerEditorRouteRuntimeResult {
+    pub exit_code: i32,
+    pub output: String,
+}
+
 pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn consume_queue_prompt_force_disk(
         &self,
@@ -114,6 +131,11 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         file_arg: &str,
         window: Option<&str>,
     ) -> Result<String>;
+
+    fn run_editor_route(
+        &self,
+        invocation: ControllerEditorRouteInvocation,
+    ) -> Result<ControllerEditorRouteRuntimeResult>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -188,6 +210,19 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _window: Option<&str>,
     ) -> Result<String> {
         anyhow::bail!("project controller test runtime does not route auto-start")
+    }
+
+    fn run_editor_route(
+        &self,
+        invocation: ControllerEditorRouteInvocation,
+    ) -> Result<ControllerEditorRouteRuntimeResult> {
+        Ok(ControllerEditorRouteRuntimeResult {
+            exit_code: 0,
+            output: format!(
+                "test editor route accepted for {}",
+                invocation.relative_path
+            ),
+        })
     }
 }
 
@@ -1947,6 +1982,79 @@ pub fn reap_orphaned_preparing_controllers(
     reap_orphaned_preparing_controllers_for_caller(project_root, stale_after, dry_run, "gc")
 }
 
+/// Reap controller processes whose recorded `--project-root` has been removed.
+///
+/// This covers detached controllers launched for temporary test/dev projects. Once
+/// the root disappears, no future in-root GC tick can reach that controller, and
+/// older binaries did not self-exit. Verification still goes through the process
+/// cmdline (`agent-doc controller serve --project-root <root>`) and never targets
+/// the current process.
+pub fn reap_removed_project_root_controllers_for_caller(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    if project_root.exists() {
+        return Ok((0, 0));
+    }
+    let mut reaped = 0;
+    let mut kept = 0;
+    for pid in crate::process::project_controller_pids(project_root) {
+        if pid == std::process::id() {
+            continue;
+        }
+        let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
+        if age < stale_after.as_secs() {
+            kept += 1;
+            continue;
+        }
+        if dry_run {
+            eprintln!(
+                "[{caller}] would reap controller for removed project root: pid={pid} root={} age_secs={age}",
+                project_root.display()
+            );
+            reaped += 1;
+            continue;
+        }
+        reap_verified_controller_pid(project_root, pid, 0);
+        eprintln!(
+            "[{caller}] reaped controller for removed project root: pid={pid} root={} age_secs={age}",
+            project_root.display()
+        );
+        reaped += 1;
+    }
+    Ok((reaped, kept))
+}
+
+pub fn reap_removed_project_root_controllers(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+) -> Result<(usize, usize)> {
+    reap_removed_project_root_controllers_for_caller(project_root, stale_after, dry_run, "gc")
+}
+
+/// Cross-project sweep for stable controllers whose temp project roots vanished.
+pub fn reap_removed_project_root_controllers_all_projects(
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+) -> Result<(usize, usize)> {
+    let mut reaped = 0;
+    let mut kept = 0;
+    for root in crate::process::controller_project_roots(std::process::id()) {
+        if root.exists() {
+            continue;
+        }
+        let (root_reaped, root_kept) =
+            reap_removed_project_root_controllers_for_caller(&root, stale_after, dry_run, caller)?;
+        reaped += root_reaped;
+        kept += root_kept;
+    }
+    Ok((reaped, kept))
+}
+
 /// M5 (#stuckhandoff2) — cross-project process-scan sweep for wedged `Preparing`
 /// controllers.
 ///
@@ -2649,7 +2757,7 @@ mod tests {
     }
 
     #[test]
-    fn crdt_checkpoint_skips_detached_actor_with_dead_supervisor_socket() {
+    fn crdt_checkpoint_skips_detached_actor_without_supervisor_route() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/detached.md");
@@ -2659,26 +2767,18 @@ mod tests {
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
-        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
-        upsert_supervisor_lease(
-            dir.path(),
-            &record,
-            Some(std::process::id()),
-            missing_socket.to_str(),
-            "ready",
-        )
-        .unwrap();
 
-        let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
+        let summary =
+            checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
         assert_eq!(summary.detached, 1);
         assert_eq!(summary.failed, 0);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_skipped"));
+        assert!(ops_log.contains("controller_crdt_checkpoint_skipped"));
         assert!(ops_log.contains("reason=detached_authority"));
     }
 
     #[test]
-    fn crdt_checkpoint_defers_editor_attached_actor_with_dead_supervisor_socket() {
+    fn crdt_checkpoint_defers_editor_attached_actor_without_supervisor_route() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor.md");
@@ -2693,27 +2793,17 @@ mod tests {
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
-        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
-        upsert_supervisor_lease(
-            dir.path(),
-            &record,
-            Some(std::process::id()),
-            missing_socket.to_str(),
-            "ready",
-        )
-        .unwrap();
 
-        let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
+        let summary =
+            checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
         assert_eq!(summary.failed, 0);
         assert_eq!(summary.detached, 0);
         assert_eq!(summary.skipped, 1);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_reconcile"));
-        assert!(ops_log.contains("reason=dead_supervisor_socket"));
-        assert!(ops_log.contains("action=local_document_model_checkpoint"));
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback"));
+        assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(ops_log.contains("status=deferred"));
         assert!(ops_log.contains("recovery=background_yrs_repair"));
+        assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
     }
 
     #[test]
@@ -2732,28 +2822,19 @@ mod tests {
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
-        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
-        upsert_supervisor_lease(
-            dir.path(),
-            &record,
-            Some(std::process::id()),
-            missing_socket.to_str(),
-            "ready",
-        )
-        .unwrap();
 
         let recycled = recycle_controller_force(dir.path(), false).unwrap();
 
         assert!(!recycled, "no live controller was present to recycle");
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_reconcile"));
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback"));
+        assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(ops_log.contains("status=deferred"));
         assert!(ops_log.contains("recovery=background_yrs_repair"));
+        assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
     }
 
     #[test]
-    fn crdt_checkpoint_reconciles_dead_supervisor_socket_through_local_model() {
+    fn crdt_checkpoint_uses_controller_document_model_directly() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor-current.md");
@@ -2771,25 +2852,15 @@ mod tests {
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
-        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
-        upsert_supervisor_lease(
-            dir.path(),
-            &record,
-            Some(std::process::id()),
-            missing_socket.to_str(),
-            "ready",
-        )
-        .unwrap();
 
-        let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
+        let summary =
+            checkpoint_route_owned_documents_for_project(dir.path(), "test_recycle").unwrap();
         assert_eq!(summary.checkpointed, 1);
         assert_eq!(summary.failed, 0);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_reconcile"));
-        assert!(ops_log.contains("reason=dead_supervisor_socket"));
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback"));
+        assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(ops_log.contains("status=checkpointed"));
-        assert!(ops_log.contains("fallback_reason=dead_supervisor_socket"));
+        assert!(!ops_log.contains("supervisor_crdt_checkpoint"));
     }
 
     fn actor_record(
@@ -6386,6 +6457,38 @@ agent:queue\n\
         let _ = sentinel.kill();
         let _ = sentinel.wait();
     }
+
+    #[test]
+    fn removed_project_root_reaper_reaps_stable_temp_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let project_root = dir.path().to_path_buf();
+        let sentinel = spawn_controller_sentinel(&project_root);
+        let pid = sentinel.id();
+        assert!(is_same_project_controller_pid(&project_root, pid));
+
+        drop(dir);
+
+        let (reaped, kept) = reap_removed_project_root_controllers_for_caller(
+            &project_root,
+            Duration::from_secs(0),
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "stable temp-root controller must be reaped after its project root disappears",
+        );
+        assert!(
+            !status.success(),
+            "removed-root controller must be signal-terminated: {status:?}"
+        );
+    }
+
     #[test]
     fn recycle_reaps_aged_orphaned_preparing_controller() {
         // #stuckhandoff2: `admin recycle` must process-scan-reap a wedged `Preparing`

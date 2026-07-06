@@ -201,6 +201,14 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `replace delivery boundary requires editor buffer and replica to match the expected baseline`() {
+        assertTrue(remoteCrdtReplaceStillCurrentUtil("base", "base", "base"))
+        assertFalse(remoteCrdtReplaceStillCurrentUtil("base", "base typed", "base"))
+        assertFalse(remoteCrdtReplaceStillCurrentUtil("base", "base", "base typed"))
+        assertFalse(remoteCrdtReplaceStillCurrentUtil("base", "base", null))
+    }
+
+    @Test
     fun `a refused register leaves the forwarder detached and no-ops local deltas`() {
         // The Detached / headless path: the supervisor refuses register, so the
         // plugin must fall back (attached=false) and never ship deltas.
@@ -219,7 +227,7 @@ class CrdtReplicaForwarderTest {
 
     @Test
     fun `two forwarders converge through a relaying transport (seam-level fan-out)`() {
-        // Model the supervisor hub fan-out at the seam level: editor A's broadcast
+        // Model the CPC hub fan-out at the seam level: editor A's broadcast
         // is delivered to editor B's applyRemoteUpdate (the Rust hub does the real
         // delta math; this proves the plugin-side ingress/egress wiring).
         val nodeA = FakeNode()

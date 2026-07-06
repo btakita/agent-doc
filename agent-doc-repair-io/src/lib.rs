@@ -1700,22 +1700,6 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     )
     .is_none()
     {
-        if agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-            file,
-            Some(&head_doc),
-            &current_doc,
-            "historical snapshot repair",
-        )? {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_repair file={} reason={} basis=visible_rebase_guard",
-                    file.display(),
-                    reason
-                ),
-            );
-            return Ok(Some(reason));
-        }
         let basis = if agent_doc_git::is_safe_user_only_follow_up_after_committed_head(
             &head_doc,
             &current_doc,

@@ -397,6 +397,7 @@ dependencies = [
  "agent-doc-capture-io",
  "agent-doc-commit-io",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",
@@ -412,6 +413,7 @@ dependencies = [
  "agent-doc-merge",
  "agent-doc-merge-io",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
  "agent-doc-session-accretion-io",
  "agent-doc-snapshot-io",
@@ -466,6 +468,7 @@ dependencies = [
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",
+ "agent-doc-document-realtime",
  "agent-doc-flow",
  "agent-doc-frontmatter",
  "agent-doc-fs",
@@ -484,11 +487,13 @@ dependencies = [
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
+ "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
  "agent-doc-turn",
  "agent-doc-turn-executor",
  "anyhow",
+ "base64 0.22.1",
  "fs2",
  "interprocess",
  "lazily 0.21.5",
@@ -516,6 +521,7 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-snapshot-io",
  "anyhow",
+ "serde",
  "serde_json",
  "tempfile",
  "uuid",
@@ -1285,6 +1291,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-config",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
@@ -1308,8 +1315,10 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-memory",
  "agent-doc-memory-io",
+ "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
  "agent-doc-queue",
@@ -1340,6 +1349,7 @@ name = "agent-doc-preflight-runtime-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-commit-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
@@ -1348,6 +1358,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-ipc-io",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-preflight-io",
  "agent-doc-project-root-io",
  "agent-doc-queue",
@@ -1360,6 +1371,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
+ "tempfile",
  "uuid",
 ]
 
@@ -1739,7 +1751,6 @@ dependencies = [
  "agent-doc-agent-io",
  "agent-doc-config",
  "agent-doc-controller-io",
- "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-diff",
@@ -1777,6 +1788,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-supervisor-io",
  "agent-doc-sync-io",
  "agent-doc-template",
  "agent-doc-template-io",
@@ -2036,7 +2048,6 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-hooks-io",
  "agent-doc-ipc-io",
- "agent-doc-merge",
  "agent-doc-model-tier",
  "agent-doc-ops-log-io",
  "agent-doc-plugin-owner",
@@ -2052,7 +2063,6 @@ dependencies = [
  "agent-doc-start-io",
  "agent-doc-state-backbone",
  "agent-doc-supervisor",
- "agent-doc-supervisor-crdt-io",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
  "agent-doc-supervisor-process-io",
@@ -2065,7 +2075,6 @@ dependencies = [
  "agent-doc-workflow-io",
  "agent-doc-write-converge-io",
  "anyhow",
- "base64 0.22.1",
  "libc",
  "portable-pty",
  "serde_json",
@@ -2172,18 +2181,6 @@ dependencies = [
  "agent-doc-tmux-commands",
  "lazily 0.21.5",
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "agent-doc-supervisor-crdt-io"
-version = "0.34.67"
-dependencies = [
- "agent-doc-crdt-relay-io",
- "agent-doc-document-realtime",
- "agent-doc-hash",
- "agent-doc-supervisor",
- "base64 0.22.1",
  "serde_json",
 ]
 
@@ -2365,9 +2362,12 @@ name = "agent-doc-test-support"
 version = "0.34.67"
 dependencies = [
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-harness",
  "agent-doc-ipc-io",
+ "agent-doc-merge",
  "agent-doc-plugin-owner",
+ "agent-doc-project-root-io",
  "agent-doc-template",
  "agent-doc-tmux-io",
  "serde_json",
@@ -2561,6 +2561,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
  "agent-doc-document",

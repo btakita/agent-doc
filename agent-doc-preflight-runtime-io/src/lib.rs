@@ -127,7 +127,7 @@ impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects
 
 pub fn resolve_current_preflight_document(file: &Path, source: &str) -> Result<String> {
     Ok(
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
+        agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(file, source)
             .with_context(|| {
                 format!(
                     "preflight {source}: resolve current document {}",
@@ -610,4 +610,96 @@ fn poll_save_document_visible_write_receipt(
         std::time::Duration::from_secs(6),
         std::time::Duration::from_millis(100),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_missing_editor_model_uses_idle_disk_without_model_ensure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nagent: codex\n---\n\nbody\n";
+        std::fs::write(&file, disk).unwrap();
+        let file = file.canonicalize().unwrap();
+        let file_str = file.to_string_lossy().to_string();
+        let owner = "preflight-missing-editor-model-test";
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(&file_str, owner, std::process::id()),
+            "test setup should acquire editor authority"
+        );
+
+        let current = resolve_current_preflight_document(&file, "test")
+            .expect("idle missing editor model should fall back to the disk session document");
+        assert_eq!(current, disk);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("realtime_doc_resolve_disk_fallback")
+                && ops_log.contains("reason=missing_replica"),
+            "preflight should use the idle disk fallback when the editor model is missing:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("document_model_ensure_start"),
+            "preflight current-doc reads must not enter document-model ensure:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("preflight_current_document_local_relay_unavailable"),
+            "preflight must not fast-fail before shared recovery:\n{ops_log}"
+        );
+
+        agent_doc_plugin_owner::release_plugin_owner(&file_str, owner);
+    }
+
+    #[test]
+    fn preflight_missing_editor_model_recovers_after_delayed_replica_registration() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nagent: codex\n---\n\nbody\n";
+        std::fs::write(&file, disk).unwrap();
+        let file = file.canonicalize().unwrap();
+        let file_str = file.to_string_lossy().to_string();
+        let owner = "preflight-missing-editor-model-recover-test";
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(&file_str, owner, std::process::id()),
+            "test setup should acquire editor authority"
+        );
+
+        let file_for_register = file.clone();
+        let register = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            agent_doc_crdt_relay_io::register_replica_for_file(
+                &file_for_register,
+                "intellij:preflight-recover",
+            )
+            .expect("delayed register should not fail")
+            .expect("editor-attached register should allocate model");
+        });
+
+        let current = resolve_current_preflight_document(&file, "test_preflight_recover")
+            .expect("preflight should use the idle disk document while the editor model recovers");
+        register.join().unwrap();
+        assert_eq!(current, disk);
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("realtime_doc_resolve_disk_fallback")
+                && ops_log.contains("reason=missing_replica"),
+            "preflight should use idle disk fallback instead of waiting for model ensure:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("document_model_ensure_start"),
+            "preflight current-doc reads must not enter document-model ensure:\n{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("preflight_current_document_local_relay_unavailable"),
+            "preflight must not use the stale local fast-fail guard:\n{ops_log}"
+        );
+
+        agent_doc_plugin_owner::release_plugin_owner(&file_str, owner);
+    }
 }

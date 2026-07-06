@@ -1204,16 +1204,7 @@ mod tests {
             IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-            IpcMethod::Stop { .. }
-            | IpcMethod::StopAgent { .. }
-            | IpcMethod::ReplicaRegister { .. }
-            | IpcMethod::ReplicaDeregister { .. }
-            | IpcMethod::ReplicaUpdate { .. }
-            | IpcMethod::ReplicaPull { .. }
-            | IpcMethod::ReplicaAck { .. }
-            | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. }
-            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

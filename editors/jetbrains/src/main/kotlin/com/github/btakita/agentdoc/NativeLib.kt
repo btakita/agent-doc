@@ -310,18 +310,6 @@ interface AgentDocLib : Library {
     /** Clear this editor instance's live-buffer sidecar for a closed document. */
     fun agent_doc_document_closed_for_editor(file_path: String, editor_id: String)
 
-    /** Non-blocking idle check. Returns true if no document_changed event within debounce_ms. */
-    fun agent_doc_is_idle(file_path: String, debounce_ms: Long): Boolean
-
-    /** Block until document is idle for debounce_ms, or timeout_ms expires. Returns true if idle. */
-    fun agent_doc_await_idle(file_path: String, debounce_ms: Long, timeout_ms: Long): Boolean
-
-    /** Check if the document has been tracked (at least one document_changed call). */
-    fun agent_doc_is_tracked(file_path: String): Boolean
-
-    /** Return the number of files tracked in the debounce state. */
-    fun agent_doc_tracked_count(): Int
-
     /**
      * Explicit run-cancel reclaim (#cancel-orphans-preflight-cycle): abandon an
      * orphaned empty `preflight_started` cycle (no response capture) so the next
@@ -534,20 +522,6 @@ interface AgentDocLib : Library {
     fun agent_doc_commit(filePath: String): Boolean
 
     /**
-     * Decide how to reconcile an editor buffer with disk on plugin IPC reconnect
-     * (#yzer / #evmhplugin). Returns a JSON pointer:
-     * `{"decision":"reread_disk"|"keep_buffer"|"in_sync","content":"<disk>"}`
-     * (`content` present only for `reread_disk`). Fail-safe `keep_buffer` on any
-     * error so a buffer with genuine user edits is never clobbered.
-     * Caller must free the result with [agent_doc_free_string].
-     */
-    fun agent_doc_reconnect_buffer_decision(
-        projectRoot: String,
-        filePath: String,
-        bufferContent: String,
-    ): Pointer?
-
-    /**
      * Record one real editor operation for CRDT-based op replay
      * (`#qnodemerge4wire`). `offset`/`deleteLen` are UTF-8 BYTE units — the
      * reporter converts the editor's UTF-16 offset/length first. `opKind` is
@@ -588,7 +562,7 @@ interface AgentDocLib : Library {
      * client-id (mint one from a stable editor-process identity so two IDEs never
      * collide). When [init_state] is non-null/non-empty it bootstraps the replica
      * from that encoded state (e.g. the canonical bootstrap returned by the
-     * controller `replica_register` ack). Returns 0 on success, negative on error.
+     * CPC `replica_register` ack). Returns 0 on success, negative on error.
      */
     fun agent_doc_replica_open(replica_id: Long, init_state: ByteArray?, init_len: Long): Int
 
@@ -1203,15 +1177,6 @@ object NativePatching {
         } finally {
             lib.agent_doc_free_string(result.text)
         }
-    }
-
-    /**
-     * Non-blocking idle check via FFI debounce tracker.
-     * Returns true if the user hasn't typed within debounceMs, or if FFI is unavailable.
-     */
-    fun isIdle(filePath: String, debounceMs: Long): Boolean {
-        val lib = AgentDocLib.get() ?: return true // No FFI — assume idle (don't block)
-        return lib.agent_doc_is_idle(filePath, debounceMs)
     }
 
     /**

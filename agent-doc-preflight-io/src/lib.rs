@@ -77,6 +77,33 @@ fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Displa
     );
 }
 
+fn current_text_via_preflight_authority(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    #[cfg(test)]
+    if test_local_crdt_relay_enabled(file) {
+        return Ok(Some(
+            agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file)?,
+        ));
+    }
+    agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file, source,
+    )
+}
+
+#[cfg(test)]
+fn test_local_crdt_relay_enabled(file: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
+        .or_else(|| file.parent().map(Path::to_path_buf))
+    else {
+        return false;
+    };
+    project_root
+        .join(".agent-doc/test-local-crdt-relay")
+        .is_file()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateVerifyResult {
     pub id: String,
@@ -1941,30 +1968,40 @@ fn record_queue_worklist_state(
     Ok(())
 }
 
-/// Fold a proven editor-buffer queue deletion into the preflight queue source.
+/// Fold a CPC-proven editor-buffer queue deletion into the preflight queue source.
 ///
 /// Queue maintenance normally starts from disk and then converges that queue
 /// shape back into a live editor buffer. When the operator deletes queue rows in
 /// the editor during a turn, that delete may be unsaved: blindly starting from
-/// disk re-pushes the stale rows and makes them "reappear". Only adopt the live
-/// queue when the live-buffer classifier says it is a real unsaved buffer and
-/// the live queue is a count-wise subset of disk after stripping cosmetic
-/// progress/pin markers. That covers deleting one duplicate row or all copies of
-/// a row without treating same-cycle queue additions as an implicit merge.
-fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> Result<bool> {
-    let Some(file_str) = file.to_str() else {
-        return Ok(false);
+/// disk re-pushes the stale rows and makes them "reappear". Only adopt the CPC
+/// current document when its queue is a count-wise subset of disk after
+/// stripping cosmetic progress/pin markers. That covers deleting one duplicate
+/// row or all copies of a row without treating same-cycle queue additions as an
+/// implicit merge. Plugin sidecars are not consulted.
+fn adopt_cpc_queue_deletions(file: &Path, disk_content: &mut String) -> Result<bool> {
+    let live_content = match current_text_via_preflight_authority(
+        file,
+        "preflight_queue_delete_adopt",
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
+        Ok(Some(_)) | Ok(None) => return Ok(false),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_cpc_delete_adopt_skipped file={} reason=current_text_unavailable error={}",
+                    file.display(),
+                    err
+                ),
+            );
+            return Ok(false);
+        }
     };
-    let Some(snapshot) =
-        agent_doc_debounce::live_buffer_diverges_from_content(file_str, disk_content)
-    else {
+    if &live_content == disk_content {
         return Ok(false);
-    };
-    let Some(live_content) = snapshot.content.as_deref() else {
-        return Ok(false);
-    };
+    }
     let disk_components = agent_doc_element::element::parse(disk_content)?;
-    let live_components = agent_doc_element::element::parse(live_content)?;
+    let live_components = agent_doc_element::element::parse(&live_content)?;
     let Some(disk_queue) = disk_components
         .iter()
         .find(|component| component.name == "queue")
@@ -1978,7 +2015,7 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
         return Ok(false);
     };
     let disk_body = disk_queue.content(disk_content);
-    let live_body = live_queue.content(live_content);
+    let live_body = live_queue.content(&live_content);
     if disk_body == live_body {
         return Ok(false);
     }
@@ -2007,10 +2044,10 @@ fn adopt_live_buffer_queue_deletions(file: &Path, disk_content: &mut String) -> 
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_live_buffer_delete_adopted file={} deleted_count={} buffer_timestamp_ms={} (#qeditdelete)",
+            "queue_cpc_delete_adopted file={} deleted_count={} current_hash={} (#qeditdelete)",
             file.display(),
             deleted_count,
-            snapshot.timestamp_ms
+            agent_doc_hash::content_hash(&live_content)
         ),
     );
     Ok(true)
@@ -2220,12 +2257,43 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         );
         return Ok(QueueState::default());
     }
-    let mut content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(_) => return Ok(QueueState::default()),
+    let mut content = match current_text_via_preflight_authority(
+        file,
+        "preflight_queue_maintenance",
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) | Ok(None) => {
+            match std::fs::read_to_string(file) {
+                Ok(c) => c,
+                Err(_) => return Ok(QueueState::default()),
+            }
+        }
+        Ok(Some(
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+        )) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_deferred file={} reason=editor_authority_not_current",
+                    file.display()
+                ),
+            );
+            return Ok(QueueState::default());
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_deferred file={} reason=current_text_unavailable error={}",
+                    file.display(),
+                    err
+                ),
+            );
+            return Ok(QueueState::default());
+        }
     };
-    let adopted_live_queue_delete =
-        adopt_live_buffer_queue_deletions(file, &mut content).unwrap_or(false);
+    let adopted_live_queue_delete = adopt_cpc_queue_deletions(file, &mut content).unwrap_or(false);
     let mut current_content = content.clone();
     let mut mutated = adopted_live_queue_delete;
     let mut components = match agent_doc_element::element::parse(&current_content) {
@@ -4335,6 +4403,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
 
         Command::new("git")
             .current_dir(dir.path())
@@ -5091,11 +5160,30 @@ mod tests {
             "- :pushpin: do [#dup]\n",
             1,
         );
-        agent_doc_debounce::record_live_buffer_digest_content(
-            &doc.to_string_lossy(),
-            &live_content,
+        let canonical = doc.canonicalize().unwrap();
+        let canonical_key = canonical.to_string_lossy().to_string();
+        let editor_id = "preflight-queue-maintenance-test";
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &canonical_key,
+            editor_id,
+            std::process::id(),
+        ));
+        let identity = format!("{editor_id}:{canonical_key}");
+        let (client_id, bootstrap) =
+            agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
+                .unwrap()
+                .expect("test editor should register a CRDT relay replica");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let replica_text = replica.text();
+        replica.apply_local_edit(0, replica_text.len() as u32, &live_content);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &canonical,
+            &identity,
+            &replica.encode_state(),
         )
-        .unwrap();
+        .unwrap()
+        .expect("test editor should publish live buffer through CRDT relay");
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 

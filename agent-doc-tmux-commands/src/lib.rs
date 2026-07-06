@@ -156,12 +156,12 @@ impl Default for TmuxSubmitProfile {
     }
 }
 
-/// OpenCode needs the split text+Enter send because its slash-command palette
-/// opens on `/` and swallows a same-call Enter. This is `const fn`-safe byte
-/// compare because `str` equality is not const.
-const fn harness_is_opencode(harness: &str) -> bool {
+/// Codex/OpenCode need the split text+Enter send because their slash-command
+/// palettes can open on `/` and swallow a same-call Enter. This is
+/// `const fn`-safe byte compare because `str` equality is not const.
+const fn harness_uses_split_text_submit(harness: &str) -> bool {
     let b = harness.as_bytes();
-    b.len() == 8
+    let opencode = b.len() == 8
         && b[0] == b'o'
         && b[1] == b'p'
         && b[2] == b'e'
@@ -169,11 +169,18 @@ const fn harness_is_opencode(harness: &str) -> bool {
         && b[4] == b'c'
         && b[5] == b'o'
         && b[6] == b'd'
-        && b[7] == b'e'
+        && b[7] == b'e';
+    let codex = b.len() == 5
+        && b[0] == b'c'
+        && b[1] == b'o'
+        && b[2] == b'd'
+        && b[3] == b'e'
+        && b[4] == b'x';
+    opencode || codex
 }
 
 pub const fn tmux_submit_profile_for_harness(harness: &str) -> TmuxSubmitProfile {
-    if harness_is_opencode(harness) {
+    if harness_uses_split_text_submit(harness) {
         TmuxSubmitProfile::with_split_text_submit_delay(80)
     } else {
         TmuxSubmitProfile::new()
@@ -969,7 +976,17 @@ mod tests {
     }
 
     #[test]
-    fn tmux_submit_profile_splits_text_and_enter_only_for_opencode() {
+    fn tmux_submit_profile_splits_text_and_enter_for_slash_palette_harnesses() {
+        let codex = tmux_submit_profile_for_harness("codex");
+        assert!(
+            codex.split_text_and_submit_delay_ms() > 0,
+            "codex must request a split text+Enter send so slash commands like /clear submit instead of lingering in the composer"
+        );
+        assert_eq!(codex.submit_key(), "Enter");
+        assert_eq!(codex.mode(), "tmux_text_enter");
+        assert_eq!(codex.transform(), "tmux_text_enter");
+        assert!(codex.pending_draft_enter_resubmit());
+
         let opencode = tmux_submit_profile_for_harness("opencode");
         assert!(
             opencode.split_text_and_submit_delay_ms() > 0,
@@ -980,12 +997,12 @@ mod tests {
         assert_eq!(opencode.transform(), "tmux_text_enter");
         assert!(opencode.pending_draft_enter_resubmit());
 
-        for non_opencode in ["codex", "claude", "claude-code", "default", "", "unknown"] {
-            let profile = tmux_submit_profile_for_harness(non_opencode);
+        for non_split in ["claude", "claude-code", "default", "", "unknown"] {
+            let profile = tmux_submit_profile_for_harness(non_split);
             assert_eq!(
                 profile.split_text_and_submit_delay_ms(),
                 0,
-                "{non_opencode:?} must keep the single-call text+Enter send (no split)"
+                "{non_split:?} must keep the single-call text+Enter send (no split)"
             );
         }
     }

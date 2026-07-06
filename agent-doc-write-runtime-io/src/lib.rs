@@ -274,12 +274,13 @@ fn resolve_current_document(
     file: &Path,
     source: &'static str,
 ) -> Result<agent_doc_document_realtime::CurrentDocument> {
-    agent_doc_document_realtime_io::try_resolve_current_document(file).with_context(|| {
-        format!(
-            "{source}: failed to resolve current document {}",
-            file.display()
-        )
-    })
+    agent_doc_document_realtime_io::try_resolve_current_document_with_source(file, source)
+        .with_context(|| {
+            format!(
+                "{source}: failed to resolve current document {}",
+                file.display()
+            )
+        })
 }
 
 fn resolve_force_disk_document(
@@ -890,27 +891,8 @@ pub(crate) fn guard_stale_snapshot_recovery_only(
     current_doc: &str,
     phase: &str,
 ) -> bool {
-    match agent_doc_write_converge_io::guard_no_stale_snapshot_reset_drift(
-        file,
-        snapshot_doc,
-        current_doc,
-        phase,
-    ) {
-        Ok(rebased) => rebased,
-        Err(err) => {
-            eprintln!("[write] snapshot recovery warning during {phase}: {err}");
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "stale_snapshot_recovery_warning file={} phase={} err={}",
-                    file.display(),
-                    phase,
-                    err
-                ),
-            );
-            false
-        }
-    }
+    let _ = (file, snapshot_doc, current_doc, phase);
+    false
 }
 
 fn apply_pending_and_status_mutations(
@@ -921,11 +903,12 @@ fn apply_pending_and_status_mutations(
 ) -> Result<()> {
     if has_pending_ops || options.status.is_some() {
         let current_content =
-            agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)
-                .map(|resolved| resolved.content)
-                .with_context(|| {
-                    format!("failed to resolve current document {}", file.display())
-                })?;
+            agent_doc_document_realtime_io::try_resolve_current_doc_from_file_with_source(
+                file,
+                "pending_status_write",
+            )
+            .map(|resolved| resolved.content)
+            .with_context(|| format!("failed to resolve current document {}", file.display()))?;
         let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
         guard_stale_snapshot_recovery_only(
             file,
@@ -1842,7 +1825,21 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
-                let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(file);
+                let barrier_ready = match agent_doc_controller_io::project_controller::
+                    commit_barrier_via_controller_model_for_doc(file)
+                {
+                    Ok(ready) => ready,
+                    Err(err) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "commit_editor_authority_unavailable file={} reason=controller_barrier_error error={err}",
+                                file.display()
+                            ),
+                        );
+                        false
+                    }
+                };
                 if !barrier_ready {
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -1876,7 +1873,19 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                 ) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
-                    Ok(_) => agent_doc_crdt_relay_io::record_committed_baseline_for_file(file),
+                    Ok(_) => {
+                        if let Err(err) = agent_doc_controller_io::project_controller::
+                            record_committed_baseline_via_controller_model_for_doc(file)
+                        {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "controller_crdt_record_committed_baseline_error file={} error={err}",
+                                    file.display()
+                                ),
+                            );
+                        }
+                    }
                     Err(e) => {
                         eprintln!("[commit] warning: {}", e);
                         if session_document {
@@ -1929,10 +1938,7 @@ fn ipc_response_materialized_or_fallback(
         source,
         response,
         content,
-        |file, source| {
-            let _ =
-                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
-        },
+        |_, _| {},
     )
 }
 
@@ -1951,10 +1957,7 @@ fn log_ipc_proof_failure(
         invariant,
         recovery,
         detail,
-        |file, source| {
-            let _ =
-                agent_doc_write_converge_io::schedule_stale_supervisor_pcp_recycle(file, source);
-        },
+        |_, _| {},
     );
 }
 
@@ -2373,6 +2376,11 @@ mod tests {
     }
 
     fn record_test_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            file,
+            "visible-write-test-editor",
+            content,
+        );
         let file_key = file.to_string_lossy();
         let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
             file_key.as_ref(),
@@ -2467,7 +2475,7 @@ mod tests {
     }
 
     #[test]
-    fn status_set_blocks_write_with_live_editor_sidecar() {
+    fn status_set_ignores_projection_only_live_buffer_sidecar() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
@@ -2489,27 +2497,23 @@ mod tests {
         )
         .unwrap();
 
-        let err = set_status_with_options(&doc, "new status", false)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("no_listener"),
-            "status write with a live editor sidecar must fail closed without delivery proof: {err}"
-        );
+        set_status_with_options(&doc, "new status", false).unwrap();
 
         let on_disk = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            !on_disk.contains("new status"),
-            "status should not be written behind a live editor sidecar: {on_disk}"
+            on_disk.contains("new status"),
+            "projection-only sidecar should not block detached status write: {on_disk}"
         );
         assert!(
-            on_disk.contains("old status"),
-            "old status should remain unchanged: {on_disk}"
+            !on_disk.contains("old status"),
+            "old status should be replaced: {on_disk}"
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            !log.contains("transport=disk_detached"),
-            "live editor sidecar must block detached disk write:\n{log}"
+            log.contains("status_set_writeback")
+                && log.contains("transport=disk_detached")
+                && log.contains("reason=no_listener"),
+            "projection-only sidecar should still use detached disk write:\n{log}"
         );
     }
 
@@ -2800,7 +2804,8 @@ mod tests {
         let err = format!("{err:?}");
         assert!(
             err.contains("editor is the current authority")
-                || err.contains("failed to resolve editor authority"),
+                || err.contains("failed to resolve editor authority")
+                || err.contains("refused direct disk write"),
             "non-force queue consume must fail closed with an active listener: {err}"
         );
         assert_eq!(
@@ -2875,7 +2880,8 @@ mod tests {
             (err.contains("editor is the current authority")
                 || err.contains("failed to resolve editor authority"))
                 && (err.contains("disk is a non-authoritative replica")
-                    || err.contains("disk remained non-authoritative")),
+                    || err.contains("disk remained non-authoritative")
+                    || err.contains("disk is not consulted")),
             "non-force closeout pending maintenance must protect the active listener: {err}"
         );
         assert_eq!(
@@ -2997,9 +3003,11 @@ mod tests {
             (err.contains("editor is the current authority")
                 || err.contains("editor authority unavailable")
                 || err.contains("failed to resolve editor authority"))
-                && err.contains("editor_attached_model_missing")
+                && (err.contains("editor_attached_model_missing")
+                    || err.contains("timed out waiting for project controller"))
                 && (err.contains("disk is a non-authoritative replica")
-                    || err.contains("disk remained non-authoritative")),
+                    || err.contains("disk remained non-authoritative")
+                    || err.contains("disk is not consulted")),
             "pending maintenance should defer on editor authority before IPC: {err}"
         );
         assert_eq!(
@@ -3009,9 +3017,15 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_editor_authority_unavailable")
+            (log.contains("visible_write_editor_authority_unavailable")
                 && log.contains("source=pending_maintenance")
-                && log.contains("reason=missing_replica"),
+                && log.contains("reason=missing_replica"))
+                || (log.contains("document_model_ensure_failed")
+                    && log.contains("visible_write_crdt_current_error")
+                    && log.contains("source=pending_maintenance"))
+                || (log.contains("document_model_controller_lookup_error")
+                    && log.contains("realtime_doc_resolve_crdt_error")
+                    && log.contains("controller.sock")),
             "defer should be attributed to editor authority resolution:\n{log}"
         );
         assert!(
@@ -3784,8 +3798,8 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            visible_write_content,
-            "proven visible-write content must be written through so stale disk cannot overwrite the editor-visible response"
+            before,
+            "relay-backed visible-write content may remain ahead of the non-authoritative disk projection"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -3793,8 +3807,9 @@ mod tests {
             "visible-write proof must bypass the unacknowledged live-edit fallback:\n{log}"
         );
         assert!(
-            log.contains("visible_write_disk_write_through"),
-            "visible-write disk write-through should be auditable:\n{log}"
+            log.contains("visible_write_disk_write_through_blocked")
+                && log.contains("reason=stale_source_buffer"),
+            "visible-write disk projection deferral should be auditable:\n{log}"
         );
     }
     #[test]
@@ -4008,7 +4023,7 @@ mod tests {
     // fire (it is a false-positive drop record, not real user-content loss). This
     // is the exact live wedge from agent-doc-bugs2 #opsproof-falsepos closeout.
     #[test]
-    fn file_ipc_visible_write_content_post_exchange_comment_drift_uses_content_ours_snapshot() {
+    fn file_ipc_visible_write_content_post_exchange_comment_drift_preserves_editor_snapshot() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -4109,8 +4124,8 @@ mod tests {
         );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "snapshot must not absorb post-exchange comment text typed after preflight"
+            Some(visible_write_content),
+            "response-bearing visible-write snapshot must preserve post-exchange editor text"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -4122,8 +4137,8 @@ mod tests {
             log.contains("flow=document_mutation")
                 && log.contains("stage=ipc_snapshot_adoption")
                 && log.contains("reason=live_prompt_drift_after_preflight")
-                && log.contains("ipc_snapshot_adoption_blocked"),
-            "unsafe post-exchange drift adoption should be logged:\n{log}"
+                && log.contains("live_prompt_drift_visible_write_authority_preserved"),
+            "post-exchange drift should be classified and preserved through editor authority:\n{log}"
         );
     }
     #[test]

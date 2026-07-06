@@ -6531,7 +6531,7 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
 // digest the plugin writes on every change) and reads "current document" back
 // through the *production* `realtime_model::resolve_current_doc` seam (rung 3b,
 // `#rtwatch`). This lets a SimWorld scenario exercise the editor-buffer-vs-disk
-// read-authority reconcile, multi-editor CRDT broadcast (`#rtwbcast`), and the
+// read-authority reconcile, multi-editor CRDT relay, and the
 // tmux dispatch/drain integrated system (`#kp5z`) *without a live IDE* — turning
 // the File-Cache-Conflict / IPC-drift / queue-flood live-verify-only classes
 // into deterministic regressions.
@@ -6584,18 +6584,18 @@ enum CacheConflict {
     VsCodeKeepBuffer,
 }
 
-/// A deterministic editor-buffer actor that speaks the durable live-buffer
-/// protocol against a real on-disk document, so SimWorld scenarios can drive the
+/// A deterministic editor-buffer actor that speaks the CRDT relay protocol
+/// against a real on-disk document, so SimWorld scenarios can drive the
 /// production read-authority reconcile without a live IDE.
-#[derive(Debug)]
 struct SimEditor {
     kind: EditorKind,
     editor_id: String,
     path: PathBuf,
-    /// Canonical path string used as the live-buffer sidecar key. Mirrors the key
-    /// `realtime_model::resolve_current_doc` canonicalizes the file to, so a
-    /// relative-vs-absolute mismatch cannot silently miss the sidecar.
+    /// Canonical path string used by compatibility projections and plugin-owner
+    /// lease keys.
     key: String,
+    replica_identity: String,
+    replica: agent_doc_merge::crdt_sync::ReplicaState,
     buffer: String,
     dirty: bool,
     generation: u64,
@@ -6611,11 +6611,22 @@ impl SimEditor {
     fn attach_with_id(kind: EditorKind, path: &Path, editor_id: &str) -> Result<Self> {
         let buffer = std::fs::read_to_string(path)
             .map_err(|err| anyhow!("SimEditor attach read {}: {err}", path.display()))?;
+        let key = editor_buffer_key(path);
+        let _ =
+            agent_doc_plugin_owner::try_acquire_plugin_owner(&key, editor_id, std::process::id());
+        let replica_identity = format!("{editor_id}:{key}");
+        let (client_id, bootstrap) =
+            agent_doc_crdt_relay_io::register_replica_for_file(path, &replica_identity)?
+                .ok_or_else(|| anyhow!("SimEditor attach could not register CRDT replica"))?;
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)?;
         Ok(Self {
             kind,
             editor_id: editor_id.to_string(),
             path: path.to_path_buf(),
-            key: editor_buffer_key(path),
+            key,
+            replica_identity,
+            replica,
             buffer,
             dirty: false,
             generation: 0,
@@ -6634,12 +6645,12 @@ impl SimEditor {
         Self::attach(EditorKind::VsCode, path)
     }
 
-    /// Type an unsaved edit: the buffer now holds `content` ahead of disk. Records
-    /// the durable live-buffer sidecar so the production realtime feed surfaces it
-    /// as a genuine unsaved edit (the `#queue-user-edit-overwrite` no-clobber
-    /// hazard this whole plan exists to defend).
+    /// Type an unsaved edit: the buffer now holds `content` ahead of disk. Publishes
+    /// the local edit through the CRDT relay so the production realtime feed
+    /// surfaces it as a genuine unsaved edit (the `#queue-user-edit-overwrite`
+    /// no-clobber hazard this whole plan exists to defend).
     fn type_unsaved(&mut self, content: &str) -> Result<()> {
-        self.buffer = content.to_string();
+        self.publish_buffer_replace(content)?;
         self.dirty = true;
         self.generation += 1;
         self.record_buffer()
@@ -6659,86 +6670,13 @@ impl SimEditor {
     /// cycle falls back to disk (`editor_absent`). Uses the production
     /// `debounce::clear_live_buffer` editor-close primitive.
     fn close(self) -> Result<()> {
+        let _ = agent_doc_crdt_relay_io::deregister_replica_for_file(
+            &self.path,
+            &self.replica_identity,
+        )?;
+        agent_doc_plugin_owner::release_plugin_owner(&self.key, &self.editor_id);
         agent_doc_debounce::clear_live_buffer_for_editor(&self.key, Some(&self.editor_id))
             .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))
-    }
-
-    /// Adopt a CRDT-merged document broadcast back from a peer editor (Slice 3,
-    /// `#rtwbcast`): the realtime model merged a peer's change and pushed the
-    /// conflict-free result back into this buffer. The buffer stays unsaved (the
-    /// merge lives in-buffer) but converged.
-    fn adopt_broadcast(&mut self, merged: &str) -> Result<()> {
-        self.buffer = merged.to_string();
-        self.dirty = true;
-        self.generation += 1;
-        self.record_buffer()
-    }
-
-    fn apply_targeted_patch_file(&mut self, patch_file: &Path) -> Result<bool> {
-        let payload: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(patch_file).map_err(|err| {
-                anyhow!(
-                    "SimEditor read targeted patch {}: {err}",
-                    patch_file.display()
-                )
-            })?)
-            .map_err(|err| anyhow!("SimEditor parse targeted patch JSON: {err}"))?;
-        let target = payload
-            .get("editor_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
-        if target != self.editor_id {
-            return Ok(false);
-        }
-        let origin = payload
-            .get("origin_editor_id")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default();
-        if origin == self.editor_id {
-            bail!("targeted broadcast patch echoed back to originator {origin}");
-        }
-        let mut next = self.buffer.clone();
-        for patch in payload
-            .get("patches")
-            .and_then(|value| value.as_array())
-            .ok_or_else(|| anyhow!("targeted patch payload missing patches array"))?
-        {
-            let component_name = patch
-                .get("component")
-                .and_then(|value| value.as_str())
-                .ok_or_else(|| anyhow!("targeted patch missing component"))?;
-            let op = patch
-                .get("op")
-                .and_then(|value| value.as_str())
-                .unwrap_or("replace");
-            let content = patch
-                .get("content")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default();
-            let component = agent_doc_element::element::parse(&next)?
-                .into_iter()
-                .find(|component| component.name == component_name)
-                .ok_or_else(|| anyhow!("component {component_name} not found in editor buffer"))?;
-            let existing = component.content(&next);
-            let replacement = match op {
-                "replace" => content.to_string(),
-                "append" => format!("{existing}{content}"),
-                "prepend" => format!("{content}{existing}"),
-                other => bail!("unsupported targeted component patch op {other}"),
-            };
-            next = component.replace_content(&next, &replacement);
-            agent_doc_element::element::parse(&next).map_err(|err| {
-                anyhow!("targeted patch made component {component_name} invalid: {err}\n{next}")
-            })?;
-        }
-        self.adopt_broadcast(&next)?;
-        std::fs::remove_file(patch_file).map_err(|err| {
-            anyhow!(
-                "SimEditor remove targeted patch {} after ACK: {err}",
-                patch_file.display()
-            )
-        })?;
-        Ok(true)
     }
 
     /// Reload from disk after the controller wrote+committed the document model
@@ -6746,7 +6684,7 @@ impl SimEditor {
     fn reload_from_disk(&mut self) -> Result<()> {
         let disk = std::fs::read_to_string(&self.path)
             .map_err(|err| anyhow!("SimEditor reload read {}: {err}", self.path.display()))?;
-        self.buffer = disk;
+        self.publish_buffer_replace(&disk)?;
         self.dirty = false;
         self.generation += 1;
         self.record_buffer()
@@ -6765,7 +6703,7 @@ impl SimEditor {
             )
         })?;
         if !self.dirty {
-            self.buffer = content.to_string();
+            self.publish_buffer_replace(content)?;
             self.generation += 1;
             self.record_buffer()?;
             return Ok(CacheConflict::NoneAdopted);
@@ -6796,6 +6734,20 @@ impl SimEditor {
             Some(&self.editor_id),
         )
         .map_err(|err| anyhow!("SimEditor record live buffer: {err}"))
+    }
+
+    fn publish_buffer_replace(&mut self, content: &str) -> Result<()> {
+        let delete_len = self.buffer.len() as u32;
+        self.replica.apply_local_edit(0, delete_len, content);
+        let update = self.replica.encode_state();
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &self.path,
+            &self.replica_identity,
+            &update,
+        )?
+        .ok_or_else(|| anyhow!("SimEditor relay update refused under detached authority"))?;
+        self.buffer = content.to_string();
+        Ok(())
     }
 
     /// The pure [`BufferState`] this editor currently holds — what the plugin
@@ -6837,6 +6789,10 @@ fn editor_project(disk: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+    // SimEditor is an in-process deterministic editor fixture. The production
+    // path observes CPC-owned relay state; this marker keeps SimWorld tests on
+    // their local relay without spawning a real project controller.
+    std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
     let doc = dir.path().join("doc.md");
     std::fs::write(&doc, disk).unwrap();
     (dir, doc)
@@ -6869,8 +6825,12 @@ fn simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit()
     let (dir, doc) = editor_project(&disk);
 
     let mut editor = SimEditor::generic(&doc).unwrap();
-    // Clean buffer in sync with disk → disk authority.
-    assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+    // Clean open buffer still resolves through the CRDT relay: the editor buffer
+    // is authoritative while the editor is attached, even when it matches disk.
+    assert_eq!(
+        editor.resolve().unwrap().authority,
+        DocAuthority::EditorBuffer
+    );
 
     editor.type_unsaved(&buffer).unwrap();
     let reconciliation = editor.resolve().unwrap();
@@ -6909,9 +6869,8 @@ fn simeditor_unsaved_buffer_edit_resolves_to_editor_buffer_and_survives_commit()
 
 #[test]
 fn simeditor_save_then_close_falls_back_to_disk_authority() {
-    // The "falling back to the file on disk" half of the authority model: once the
-    // editor saves (buffer == disk) disk is canonical, and once it closes (sidecar
-    // cleared) the realtime model reports `editor_absent`.
+    // The "falling back to the file on disk" half of the authority model: saving
+    // does not demote a live editor buffer; closing the editor does.
     let disk = editor_baseline_doc();
     let buffer = editor_doc_with_backlog("- [ ] [#unsaved-then-saved] typed then saved\n");
     let (dir, doc) = editor_project(&disk);
@@ -6934,8 +6893,12 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
         agent_doc_document_realtime::reconcile_current_doc(&disk_now, Some(&editor.buffer_state()));
     assert_eq!(in_sync.authority, DocAuthority::Disk);
     assert_eq!(in_sync.reason, "in_sync");
-    // Durable seam: the in-sync buffer is suppressed to no-feed, so disk wins.
-    assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+    // Durable seam: the live CRDT relay remains authoritative while attached,
+    // even when the buffer text matches disk.
+    assert_eq!(
+        editor.resolve().unwrap().authority,
+        DocAuthority::EditorBuffer
+    );
 
     editor.close().unwrap();
     let closed = agent_doc_document_realtime_io::try_resolve_current_doc_from_file(&doc).unwrap();
@@ -6964,11 +6927,12 @@ fn simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict()
         let (dir, doc) = editor_project(&disk);
         let mut editor = SimEditor::attach(kind, &doc).unwrap();
 
-        // Parity 1: a clean buffer defers to disk regardless of kind.
+        // Parity 1: a clean open buffer resolves through the CRDT relay
+        // regardless of kind.
         assert_eq!(
             editor.resolve().unwrap().authority,
-            DocAuthority::Disk,
-            "{kind:?}: clean buffer defers to disk"
+            DocAuthority::EditorBuffer,
+            "{kind:?}: clean open buffer stays editor-authoritative"
         );
 
         // Parity 2: an unsaved edit is authoritative regardless of kind.
@@ -7001,137 +6965,30 @@ fn simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict()
         );
         assert!(after.content.contains(&marker));
 
-        // A clean buffer, by contrast, silently adopts the external write.
+        // A clean buffer, by contrast, silently adopts the external write while
+        // remaining editor-authoritative until it closes.
         editor.save().unwrap();
         assert_eq!(
             editor.external_disk_write(&disk).unwrap(),
             CacheConflict::NoneAdopted,
             "{kind:?}: a clean buffer adopts the external write with no conflict"
         );
-        assert_eq!(editor.resolve().unwrap().authority, DocAuthority::Disk);
+        assert_eq!(
+            editor.resolve().unwrap().authority,
+            DocAuthority::EditorBuffer
+        );
         drop(dir);
     }
 }
 
-// -------- Slice 3: multi-editor sync (#rtwbcast harness) --------
-
-#[test]
-fn multi_editor_crdt_broadcast_converges_without_file_cache_conflict() {
-    // #swint Slice 3 / #rtwbcast: two editors open the same document; an edit in A
-    // and an edit in B merge conflict-free via the production CRDT path and
-    // targeted broadcast patch delivery so both buffers converge. Only testable
-    // with two emulated editors — there is no live two-IDE harness.
-    let disk = editor_baseline_doc();
-    let (dir, doc) = editor_project(&disk);
-    std::fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
-    let mut editor_a = SimEditor::attach_with_id(EditorKind::JetBrains, &doc, "editor-A").unwrap();
-    let mut editor_b = SimEditor::attach_with_id(EditorKind::VsCode, &doc, "editor-B").unwrap();
-
-    let buffer_a = editor_doc_with_backlog("- [ ] [#edit-A] queued in editor A\n");
-    let buffer_b = editor_doc_with_backlog("- [ ] [#edit-B] queued in editor B\n");
-    editor_a.type_unsaved(&buffer_a).unwrap();
-    editor_b.type_unsaved(&buffer_b).unwrap();
-
-    // A's edit queues a targeted patch for B through the production broadcast
-    // writer. A ignores the peer-targeted file; B applies and ACK-deletes it.
-    let deliveries =
-        agent_doc_document_realtime_io::broadcast_editor_change(&doc, "editor-A", &buffer_a)
-            .unwrap();
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].editor_id, "editor-B");
-    assert!(
-        deliveries[0].node_patch_count > 0,
-        "targeted peer delivery should carry node patches"
-    );
-    assert!(
-        !editor_a
-            .apply_targeted_patch_file(&deliveries[0].patch_file)
-            .unwrap()
-    );
-    assert_eq!(editor_a.buffer, buffer_a);
-    assert!(
-        editor_b
-            .apply_targeted_patch_file(&deliveries[0].patch_file)
-            .unwrap()
-    );
-    assert!(
-        !deliveries[0].patch_file.exists(),
-        "targeted patch file should be deleted after peer ACK"
-    );
-    let merged = editor_b.buffer.clone();
-
-    assert!(
-        merged.contains("#edit-A") && merged.contains("#edit-B"),
-        "CRDT merge must union both editors' edits:\n{merged}"
-    );
-    for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
-        assert!(
-            !merged.contains(marker),
-            "CRDT broadcast must be conflict-free; found `{marker}`:\n{merged}"
-        );
-    }
-
-    // B now rebroadcasts the converged buffer to A. Echo suppression again skips
-    // the originator and targets only the stale peer buffer.
-    let rebroadcast =
-        agent_doc_document_realtime_io::broadcast_editor_change(&doc, "editor-B", &merged).unwrap();
-    assert_eq!(rebroadcast.len(), 1);
-    assert_eq!(rebroadcast[0].editor_id, "editor-A");
-    assert!(
-        rebroadcast[0].node_patch_count > 0,
-        "rebroadcast peer delivery should carry node patches"
-    );
-    assert!(
-        !editor_b
-            .apply_targeted_patch_file(&rebroadcast[0].patch_file)
-            .unwrap()
-    );
-    assert!(
-        editor_a
-            .apply_targeted_patch_file(&rebroadcast[0].patch_file)
-            .unwrap()
-    );
-    assert!(
-        !rebroadcast[0].patch_file.exists(),
-        "rebroadcast patch file should be deleted after peer ACK"
-    );
-
-    assert_eq!(editor_a.buffer, merged);
-    assert_eq!(editor_b.buffer, merged);
-
-    let ra = editor_a.resolve().unwrap();
-    let rb = editor_b.resolve().unwrap();
-    assert_eq!(ra.authority, DocAuthority::EditorBuffer);
-    assert_eq!(rb.authority, DocAuthority::EditorBuffer);
-    assert_eq!(
-        ra.content, rb.content,
-        "both editors converge on the same merged document after broadcast"
-    );
-    assert!(ra.content.contains("#edit-A") && ra.content.contains("#edit-B"));
-    let disk_after = std::fs::read_to_string(&doc).unwrap();
-    assert_eq!(
-        disk_after, disk,
-        "broadcast convergence must not write disk"
-    );
-    let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        ops_log.contains("realtime_broadcast_queued")
-            && ops_log.contains("origin_editor_id=editor-A target_editor_id=editor-B")
-            && ops_log.contains("origin_editor_id=editor-B target_editor_id=editor-A")
-            && ops_log.contains("node_patches="),
-        "ops.log must prove targeted two-way broadcast delivery:\n{ops_log}"
-    );
-    drop(dir);
-}
-
-// -------- Slice 4: tmux + integrated system --------
+// -------- Slice 3: tmux + integrated system --------
 
 #[test]
 fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_back() {
     // #swint Slice 4: editor edit → queue trigger → route dispatch → drain-owner
     // gate (#kp5z) → controller drain → document update → broadcast back to
     // editors, with the stuck-handoff reaper gating ownership under multi-owner
-    // contention. Connects the SimEditor seam (Slices 1–3) to the existing
+    // contention. Connects the SimEditor seam to the existing
     // route/controller actor model and the public `drain_owner` lease.
     let disk = editor_baseline_doc();
     let (dir, doc) = editor_project(&disk);
@@ -7202,8 +7059,9 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     );
     assert!(world.coverage.stale_generation_blocks >= 2);
 
-    // 6. The controller saved the committed document; broadcast back to both
-    //    editors — they reload and converge on the committed state, clean.
+    // 6. The controller saved the committed document; the CRDT relay carries it
+    //    back to both editors — they reload and converge on the committed state,
+    //    clean but still editor-authoritative while attached.
     std::fs::write(&doc, &world.snapshot).unwrap();
     owner_editor.reload_from_disk().unwrap();
     observer_editor.reload_from_disk().unwrap();
@@ -7211,13 +7069,13 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     assert_eq!(observer_editor.buffer, world.snapshot);
     assert_eq!(
         owner_editor.resolve().unwrap().authority,
-        DocAuthority::Disk,
-        "after broadcast-back the owner editor is in sync with committed disk"
+        DocAuthority::EditorBuffer,
+        "after relay-back the owner editor remains authoritative while attached"
     );
     assert_eq!(
         observer_editor.resolve().unwrap().authority,
-        DocAuthority::Disk,
-        "the observer editor also converges on committed disk"
+        DocAuthority::EditorBuffer,
+        "the observer editor also converges through the relay while attached"
     );
 
     // The loop terminates: release the drain-owner lease back to the supervisor.

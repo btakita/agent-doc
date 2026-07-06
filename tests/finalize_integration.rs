@@ -272,10 +272,10 @@ fn write_commit_requires_git_repo_before_mutating_session_document() {
 }
 
 #[test]
-fn finalize_stale_snapshot_warns_but_does_not_block_response_or_pending_flags() {
+fn finalize_stale_snapshot_does_not_block_response_or_pending_flags() {
     // Snapshots are durable recovery evidence, not hot-path authority. A stale
-    // sidecar can warn, but it must not prevent the response and its same-cycle
-    // pending mutation from landing atomically.
+    // sidecar must not prevent the response and its same-cycle pending mutation
+    // from landing atomically.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
     let current = fs::read_to_string(&doc).unwrap();
@@ -309,8 +309,7 @@ fn finalize_stale_snapshot_warns_but_does_not_block_response_or_pending_flags() 
             "<!-- patch:exchange -->\n### Re: stale snapshot — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .success()
-        .stderr(predicates::str::contains("snapshot recovery warning"));
+        .success();
 
     let after = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -390,7 +389,7 @@ fn write_commit_empty_stdin_does_not_commit_live_prompt_drift() {
 }
 
 #[test]
-fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
+fn stream_ipc_timeout_recovers_when_document_is_detached() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -399,6 +398,7 @@ fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
 
     agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args([
             "write",
             doc.to_str().unwrap(),
@@ -410,23 +410,20 @@ fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
             "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
+        .success()
         .stderr(predicates::str::contains(
-            "recovery=retry_without_disk_write",
-        ))
-        .stderr(predicates::str::contains(
-            "refusing direct document write",
+            "recovering through document authority (detached_disk_authority)",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        !content.contains("### Re: ipc timeout — gpt-5"),
-        "IPC timeout must not write the response directly to the document"
+        content.contains("### Re: ipc timeout — gpt-5"),
+        "detached timeout recovery should materialize the response:\n{content}"
     );
-    assert_eq!(
+    assert_ne!(
         initial_head,
         head_blob(tmp.path()),
-        "IPC timeout must fail before committing any response"
+        "detached timeout recovery should commit the response"
     );
 
     let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
@@ -435,13 +432,13 @@ fn stream_ipc_timeout_retains_patch_and_refuses_direct_write() {
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
         .collect::<Vec<_>>();
     assert!(
-        !patch_jsons.is_empty(),
-        "IPC timeout should leave the patch queued for an editor retry"
+        patch_jsons.is_empty(),
+        "detached timeout recovery should cancel the queued file IPC patch"
     );
 }
 
 #[test]
-fn finalize_ipc_timeout_does_not_apply_done_before_response_materializes() {
+fn finalize_ipc_timeout_applies_done_after_detached_response_recovery() {
     let (tmp, doc) = setup_session_stream_doc();
     insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
@@ -450,45 +447,46 @@ fn finalize_ipc_timeout_does_not_apply_done_before_response_materializes() {
 
     agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args(["finalize", doc.to_str().unwrap(), "--done", "done1"])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .failure()
+        .success()
         .stderr(predicates::str::contains(
-            "recovery=retry_without_disk_write",
-        ))
-        .stderr(predicates::str::contains(
-            "refusing direct document write",
+            "recovering through document authority (detached_disk_authority)",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        !content.contains("### Re: #done1 close the loop — gpt-5"),
-        "IPC timeout must not leave a response in the working tree"
+        content.contains("### Re: #done1 close the loop — gpt-5"),
+        "detached timeout recovery should materialize the response:\n{content}"
     );
     assert!(
-        content.contains("- [ ] [#done1] Close the loop"),
-        "failed response placement must not apply --done before the response materializes:\n{content}"
+        !content.contains("- [ ] [#done1] Close the loop"),
+        "--done should not remain open after the response materializes:\n{content}"
     );
     assert!(
-        !content.contains("- [x] [#done1] Close the loop"),
-        "failed response placement must not mark the item done:\n{content}"
+        content.contains("<!-- agent:done -->")
+            && content.contains("[#done1] Close the loop")
+            && content.contains("## Completed / Reaped"),
+        "--done should be reaped only after detached response recovery succeeds:\n{content}"
     );
-    assert_eq!(
+    assert_ne!(
         initial_head,
         head_blob(tmp.path()),
-        "IPC timeout must not commit tracked-work mutations without the response"
+        "detached timeout recovery should commit the response and tracked-work mutation"
     );
 }
 
 #[test]
-fn write_commit_force_disk_replays_pending_crdt_response_with_editor_owner() {
+fn write_commit_force_disk_with_editor_owner_fails_before_disk_write_when_crdt_pending() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
     init_git_repo(tmp.path(), &doc);
+    let initial_head = head_blob(tmp.path());
     agent_doc_plugin_owner::try_acquire_plugin_owner(
         doc.to_str().unwrap(),
         "jetbrains-test-owner",
@@ -521,25 +519,32 @@ fn write_commit_force_disk_replays_pending_crdt_response_with_editor_owner() {
         .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains(
+            "CRDT relay convergence is still pending",
+        ))
+        .stderr(predicates::str::contains(
+            "disk is a non-authoritative replica and was not used as write authority",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("### Re: retained response — gpt-5"),
-        "force-disk retained-response replay should materialize the response:\n{content}"
+        !content.contains("### Re: retained response — gpt-5"),
+        "force-disk with pending editor CRDT authority must not materialize the response on disk:\n{content}"
     );
-    let head = head_blob(tmp.path());
-    assert!(
-        head.contains("### Re: retained response — gpt-5"),
-        "force-disk retained-response replay should commit the response"
+    assert_eq!(
+        initial_head,
+        head_blob(tmp.path()),
+        "force-disk with pending editor CRDT authority must fail before committing"
     );
 }
 
 #[test]
-fn finalize_force_disk_crdt_merge_drift_skips_editor_checkpoint_lock() {
+fn finalize_force_disk_with_editor_owner_fails_before_disk_write_when_crdt_pending() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
     init_git_repo(tmp.path(), &doc);
+    let initial_head = head_blob(tmp.path());
     agent_doc_plugin_owner::try_acquire_plugin_owner(
         doc.to_str().unwrap(),
         "jetbrains-test-owner-merge",
@@ -580,16 +585,27 @@ fn finalize_force_disk_crdt_merge_drift_skips_editor_checkpoint_lock() {
             "<!-- patch:exchange -->\n### Re: live drift — gpt-5\nRecovered without checkpoint lock.\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains(
+            "CRDT relay convergence is still pending",
+        ))
+        .stderr(predicates::str::contains(
+            "disk is a non-authoritative replica and was not used as write authority",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("### Re: live drift — gpt-5"),
-        "force-disk closeout should materialize the response:\n{content}"
+        !content.contains("### Re: live drift — gpt-5"),
+        "force-disk with pending editor CRDT authority must not materialize the response on disk:\n{content}"
     );
     assert!(
         content.contains("❯ live editor drift"),
-        "force-disk merge should preserve live editor drift:\n{content}"
+        "failed force-disk attempt must preserve the existing live editor drift projection:\n{content}"
+    );
+    assert_eq!(
+        initial_head,
+        head_blob(tmp.path()),
+        "force-disk with pending editor CRDT authority must fail before committing"
     );
 }
 

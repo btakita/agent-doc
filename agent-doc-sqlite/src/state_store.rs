@@ -701,9 +701,12 @@ pub fn load_control_plane_store_counts(conn: &Connection) -> Result<ControlPlane
             "SELECT COUNT(*) FROM queue_backpressure",
             "queue backpressure",
         )?,
+        // This ledger can grow into the millions on crash-looping projects. Status
+        // only needs a scale signal, so use the rowid high-water mark instead of
+        // forcing every controller health poll to scan the full table.
         crash_recovery_markers: count_rows(
             conn,
-            "SELECT COUNT(*) FROM crash_recovery_markers",
+            "SELECT COALESCE(MAX(id), 0) FROM crash_recovery_markers",
             "crash recovery markers",
         )?,
         layout_states: count_rows(conn, "SELECT COUNT(*) FROM layout_states", "layout states")?,
@@ -2461,6 +2464,37 @@ mod tests {
         assert_eq!(state_events[0].event_id, "state-event-1");
         assert_eq!(state_events[0].domain, "document");
         assert_eq!(state_events[0].fact_type, "file_watch_change_observed");
+
+        Ok(())
+    }
+
+    #[test]
+    fn control_plane_store_counts_use_marker_high_water_mark() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        initialize_state_db(&conn)?;
+        insert_crash_recovery_marker_in_db(
+            &conn,
+            "startup_reconcile",
+            Some("doc.md"),
+            Some(1),
+            "pending",
+            Some("first marker"),
+        )?;
+        insert_crash_recovery_marker_in_db(
+            &conn,
+            "watchdog_restart",
+            Some("doc.md"),
+            Some(2),
+            "pending",
+            Some("second marker"),
+        )?;
+        conn.execute("DELETE FROM crash_recovery_markers WHERE id = 1", [])?;
+
+        let counts = load_control_plane_store_counts(&conn)?;
+        assert_eq!(
+            counts.crash_recovery_markers, 2,
+            "controller status should use the marker high-water mark instead of an exact full-table scan"
+        );
 
         Ok(())
     }

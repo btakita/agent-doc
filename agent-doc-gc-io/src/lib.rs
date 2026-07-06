@@ -15,6 +15,8 @@
 //! - Removes old `.agent-doc/codex-hooks/blocked-stop/` diagnostic files (>7 days).
 //! - Closes stale `starting` actor records when no fresh supervisor lease proves
 //!   that the actor is still booting.
+//! - Reaps detached project controllers whose temporary project root has been
+//!   removed.
 //! - `--dry-run` flag shows what would be deleted without deleting.
 //!
 //! ## Agentic Contracts
@@ -98,6 +100,13 @@ pub trait GcControllerEffects {
         dry_run: bool,
         caller: &str,
     ) -> Result<(usize, usize)>;
+
+    fn reap_removed_project_root_controllers_all_projects(
+        &mut self,
+        stale_after: Duration,
+        dry_run: bool,
+        caller: &str,
+    ) -> Result<(usize, usize)>;
 }
 
 pub struct NoopGcControllerEffects;
@@ -150,6 +159,15 @@ impl GcControllerEffects for NoopGcControllerEffects {
     }
 
     fn reap_orphaned_preparing_controllers_all_projects(
+        &mut self,
+        _stale_after: Duration,
+        _dry_run: bool,
+        _caller: &str,
+    ) -> Result<(usize, usize)> {
+        Ok((0, 0))
+    }
+
+    fn reap_removed_project_root_controllers_all_projects(
         &mut self,
         _stale_after: Duration,
         _dry_run: bool,
@@ -432,6 +450,21 @@ pub fn run_with_controller_effects(
     total_deleted += xproj_reaped;
     total_skipped += xproj_kept;
 
+    let (removed_root_reaped, removed_root_kept) = controller
+        .reap_removed_project_root_controllers_all_projects(
+            controller_config.stale_preparing_controller_after,
+            dry_run,
+            "gc",
+        )?;
+    if removed_root_reaped > 0 {
+        eprintln!(
+            "[gc] controllers: {} removed-root orphaned reaped, {} kept",
+            removed_root_reaped, removed_root_kept
+        );
+    }
+    total_deleted += removed_root_reaped;
+    total_skipped += removed_root_kept;
+
     // Clean orphaned supervisor sockets + stale sessions.json entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
     if sock_deleted > 0 {
@@ -442,6 +475,23 @@ pub fn run_with_controller_effects(
     }
     total_deleted += sock_deleted;
     total_skipped += sock_kept;
+
+    // Reap leaked controller-handoff temp sockets (#stuckhandoff2 followup). A
+    // handoff creates `.agent-doc/controller-handoff-<pid>-<seq>.sock` and its
+    // drop-guard unlinks it on clean rollback/promotion — but a crash or `execve`
+    // recycle before the guard runs leaks the file. They accumulate across days
+    // (a wedged-editor-IPC smell) and are never covered by the supervisor-socket
+    // sweep above (different dir, PID-keyed name, no registry entry). Prune any
+    // whose embedded `<pid>` is dead.
+    let (handoff_deleted, handoff_kept) = clean_orphaned_handoff_sockets(&agent_doc_dir, dry_run)?;
+    if handoff_deleted > 0 {
+        eprintln!(
+            "[gc] handoff sockets: {} dead removed, {} alive kept",
+            handoff_deleted, handoff_kept
+        );
+    }
+    total_deleted += handoff_deleted;
+    total_skipped += handoff_kept;
 
     // Prune accumulated recovery checkpoint tags (pre-auto-run / pre-compact)
     let (tag_deleted, tag_kept) =
@@ -877,6 +927,60 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
     Ok((deleted, kept))
 }
 
+/// Reap leaked `controller-handoff-<pid>-<seq>.sock` temp sockets whose owning
+/// PID is dead (#stuckhandoff2 followup).
+///
+/// The controller handoff path creates a per-attempt temp socket named
+/// `controller-handoff-<pid>-<seq>.sock` directly under `.agent-doc/`; its
+/// drop-guard unlinks it on a clean rollback or once the handoff is promoted to
+/// the public socket. A crash or `execve` recycle before that guard runs leaks
+/// the file, so they pile up across sessions and are never touched by
+/// `clean_orphaned_sockets` (that sweep only scans `.agent-doc/supervisor/` and
+/// keys on the session registry, not the embedded PID). We only remove a socket
+/// whose `<pid>` is no longer live, so a handoff in flight for a running
+/// controller is always preserved.
+fn clean_orphaned_handoff_sockets(agent_doc_dir: &Path, dry_run: bool) -> Result<(usize, usize)> {
+    if !agent_doc_dir.is_dir() {
+        return Ok((0, 0));
+    }
+    let mut deleted = 0;
+    let mut kept = 0;
+    for entry in std::fs::read_dir(agent_doc_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = match path.file_name() {
+            Some(n) => n.to_string_lossy(),
+            None => continue,
+        };
+        // `controller-handoff-<pid>-<seq>.sock`
+        let Some(rest) = file_name
+            .strip_prefix("controller-handoff-")
+            .and_then(|r| r.strip_suffix(".sock"))
+        else {
+            continue;
+        };
+        // `<pid>` is the first `-`-separated numeric field.
+        let Some(pid) = rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid_alive(pid) {
+            kept += 1;
+            continue;
+        }
+        if dry_run {
+            eprintln!(
+                "[gc] would delete leaked handoff socket: {} (pid {} dead)",
+                path.display(),
+                pid
+            );
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+        deleted += 1;
+    }
+    Ok((deleted, kept))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -926,6 +1030,39 @@ mod tests {
             stale_signal.exists(),
             "signal control file must not be reaped by the patch gc"
         );
+    }
+
+    #[test]
+    fn clean_orphaned_handoff_sockets_reaps_dead_pid_keeps_live() {
+        // #stuckhandoff2 followup: a crash/execve before the handoff drop-guard
+        // runs leaks `controller-handoff-<pid>-<seq>.sock`. The reaper must remove
+        // sockets whose embedded PID is dead, keep one owned by a live PID (this
+        // test process), and ignore unrelated files.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(&agent_doc_dir).unwrap();
+
+        // Dead PID (1 is init, but use a very high unlikely-live pid instead).
+        let dead_pid = 4_294_967_294u32; // near u32::MAX — no such process
+        let dead = agent_doc_dir.join(format!("controller-handoff-{dead_pid}-9.sock"));
+        std::fs::write(&dead, "").unwrap();
+
+        // Live PID — this test process. Must be kept.
+        let live_pid = std::process::id();
+        let live = agent_doc_dir.join(format!("controller-handoff-{live_pid}-3.sock"));
+        std::fs::write(&live, "").unwrap();
+
+        // Unrelated file — must be ignored.
+        let other = agent_doc_dir.join("sync.lock");
+        std::fs::write(&other, "").unwrap();
+
+        let (deleted, kept) = clean_orphaned_handoff_sockets(&agent_doc_dir, false).unwrap();
+
+        assert_eq!(deleted, 1, "only the dead-PID handoff socket should be reaped");
+        assert_eq!(kept, 1, "the live-PID handoff socket should be kept");
+        assert!(!dead.exists(), "dead-PID handoff socket must be removed");
+        assert!(live.exists(), "live-PID handoff socket must be preserved");
+        assert!(other.exists(), "unrelated files must be ignored");
     }
 
     #[test]

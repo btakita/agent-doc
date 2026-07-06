@@ -929,7 +929,10 @@ mod tests {
 
         assert_eq!(
             runner.commands(),
-            vec![vec!["send-keys", "-t", "%1", "agent-doc plan.md", "Enter"]]
+            vec![
+                vec!["send-keys", "-t", "%1", "agent-doc plan.md"],
+                vec!["send-keys", "-t", "%1", "Enter"],
+            ]
         );
     }
 

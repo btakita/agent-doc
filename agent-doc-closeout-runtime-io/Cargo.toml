@@ -9,6 +9,15 @@ repository = "https://github.com/btakita/agent-doc"
 [lib]
 name = "agent_doc_closeout_runtime_io"
 
+[features]
+default = []
+test-support = [
+    "agent-doc-commit-io/test-support",
+    "agent-doc-document-realtime-io/test-support",
+    "agent-doc-preflight-runtime-io/test-support",
+    "agent-doc-session-check-io/test-support",
+]
+
 [dependencies]
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }

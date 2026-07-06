@@ -301,7 +301,9 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
             || ops_log.contains("live_prompt_drift_forward_merged")
             || ops_log.contains("live_prompt_drift_agent_target_not_snapshot_authority")
             || ops_log.contains("live_prompt_drift_visible_write_component_reconciled")
-            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge"),
+            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge")
+            || (ops_log.contains("out_of_band_write")
+                && ops_log.contains("write_authority action=routed transport=write_queue")),
         "IPC snapshot adoption should log visible-write reconciliation:\n{ops_log}"
     );
     assert!(
@@ -311,8 +313,7 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
 }
 
 #[test]
-fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327_scratch_directives()
- {
+fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_directives() {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");
     for subdir in [
@@ -413,7 +414,7 @@ fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
 
     let output = agent_doc()
         .current_dir(tmp.path())
@@ -479,8 +480,8 @@ fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327
     );
     assert_eq!(
         head.matches(scratch_prompt).count(),
-        0,
-        "post-exchange scratch prompt should remain visible but uncommitted:\n{head}"
+        1,
+        "response-bearing visible-write closeout must preserve post-exchange scratch prompt in HEAD:\n{head}"
     );
 
     let snapshot = fs::read_to_string(snapshot_path(tmp.path(), &doc)).unwrap();
@@ -493,8 +494,8 @@ fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327
     );
     assert_eq!(
         snapshot.matches(scratch_prompt).count(),
-        0,
-        "snapshot must not absorb post-exchange scratch prompt drift:\n{snapshot}"
+        1,
+        "response-bearing visible-write snapshot must preserve post-exchange scratch prompt drift:\n{snapshot}"
     );
 
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -503,7 +504,8 @@ fn finalize_commits_response_without_absorbing_visible_write_cycle_1779845677327
             || ops_log.contains("live_prompt_drift_forward_merged")
             || ops_log.contains("live_prompt_drift_agent_target_not_snapshot_authority")
             || ops_log.contains("live_prompt_drift_visible_write_component_reconciled")
-            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge"),
+            || ops_log.contains("live_prompt_drift_visible_write_reconciled_merge")
+            || ops_log.contains("live_prompt_drift_visible_write_authority_preserved"),
         "IPC snapshot adoption should log visible-write reconciliation:\n{ops_log}"
     );
     assert!(

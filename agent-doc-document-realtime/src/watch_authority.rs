@@ -25,6 +25,7 @@
 //! (the controller's writer arm into the editor) stays active.
 
 use crate::crdt_authority::CrdtAuthority;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -88,6 +89,72 @@ pub enum WatchDelivery {
     SelfWriteEcho,
     /// Not a content-bearing event (or a path mismatch).
     Ignored,
+}
+
+/// Stable controller/state boundary projection of a disk-change watch delivery.
+///
+/// `WatchDelivery` is the edge watcher's local decision. `DiskChangeSignal` is
+/// the small serializable fact that can cross the CPC/state boundary and be
+/// converted back when the controller routes the signal through the canonical
+/// document model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DiskChangeSignal {
+    /// A new settled change the actor should reconcile. `generation` increments
+    /// per distinct delivered change.
+    Change { generation: u64 },
+    /// Same content as the last delivered change — a coalesced burst event.
+    Coalesced,
+    /// The current content matches agent-doc's own most recent write.
+    SelfWriteEcho,
+    /// Not a content-bearing event (or a path mismatch).
+    Ignored,
+}
+
+impl DiskChangeSignal {
+    pub fn from_delivery(delivery: &WatchDelivery) -> Self {
+        Self::from(delivery)
+    }
+
+    pub fn into_delivery(self) -> WatchDelivery {
+        WatchDelivery::from(self)
+    }
+}
+
+impl From<&WatchDelivery> for DiskChangeSignal {
+    fn from(delivery: &WatchDelivery) -> Self {
+        match delivery {
+            WatchDelivery::Change { generation } => Self::Change {
+                generation: *generation,
+            },
+            WatchDelivery::Coalesced => Self::Coalesced,
+            WatchDelivery::SelfWriteEcho => Self::SelfWriteEcho,
+            WatchDelivery::Ignored => Self::Ignored,
+        }
+    }
+}
+
+impl From<WatchDelivery> for DiskChangeSignal {
+    fn from(delivery: WatchDelivery) -> Self {
+        Self::from(&delivery)
+    }
+}
+
+impl From<DiskChangeSignal> for WatchDelivery {
+    fn from(signal: DiskChangeSignal) -> Self {
+        match signal {
+            DiskChangeSignal::Change { generation } => Self::Change { generation },
+            DiskChangeSignal::Coalesced => Self::Coalesced,
+            DiskChangeSignal::SelfWriteEcho => Self::SelfWriteEcho,
+            DiskChangeSignal::Ignored => Self::Ignored,
+        }
+    }
+}
+
+impl From<&DiskChangeSignal> for WatchDelivery {
+    fn from(signal: &DiskChangeSignal) -> Self {
+        Self::from(*signal)
+    }
 }
 
 /// Per-document coalescing + self-write-suppression gate. The orchestration
@@ -375,6 +442,25 @@ mod tests {
             WatchDelivery::Ignored
         );
         assert_eq!(gate.generation(), 0);
+    }
+
+    #[test]
+    fn disk_change_signal_projects_watch_delivery_for_controller_boundary() {
+        for (delivery, signal) in [
+            (
+                WatchDelivery::Change { generation: 7 },
+                DiskChangeSignal::Change { generation: 7 },
+            ),
+            (WatchDelivery::Coalesced, DiskChangeSignal::Coalesced),
+            (
+                WatchDelivery::SelfWriteEcho,
+                DiskChangeSignal::SelfWriteEcho,
+            ),
+            (WatchDelivery::Ignored, DiskChangeSignal::Ignored),
+        ] {
+            assert_eq!(DiskChangeSignal::from_delivery(&delivery), signal);
+            assert_eq!(signal.into_delivery(), delivery);
+        }
     }
 
     #[test]

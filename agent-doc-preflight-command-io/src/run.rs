@@ -382,7 +382,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         || if options.probe {
             false
         } else {
-            match agent_doc_commit_io::commit(file) {
+            match commit_previous_cycle_for_preflight(file) {
                 Ok(did_commit) => {
                     if did_commit {
                         rc.invalidate_head_content();
@@ -1414,6 +1414,29 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     println!("{}", json);
 
     Ok(())
+}
+
+fn commit_previous_cycle_for_preflight(file: &Path) -> Result<bool> {
+    match agent_doc_commit_io::commit(file) {
+        Ok(did_commit) => Ok(did_commit),
+        Err(err)
+            if preflight_commit_error_is_live_editor_pending(&err)
+                && !agent_doc_git_io::status::focused_tracked_file_modified(file)? =>
+        {
+            eprintln!(
+                "[preflight] commit: live editor convergence pending but focused file is clean; closing no-op cycle from disk authority"
+            );
+            agent_doc_commit_io::commit_for_authority(file, true)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn preflight_commit_error_is_live_editor_pending(err: &anyhow::Error) -> bool {
+    let message = format!("{err:#}");
+    message.contains("CRDT relay convergence is still pending")
+        || message.contains("editor_sync_pending")
+        || message.contains("editor_attached_model_missing")
 }
 
 #[cfg(test)]

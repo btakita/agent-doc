@@ -36,6 +36,7 @@ class RunWithJunieAction : AnAction() {
         FileDocumentManager.getInstance().saveAllDocuments()
 
         TerminalUtil.runWithAgent(project, "junie", file, onComplete = { running.set(false) })
+        TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-with-junie")
     }
 
     override fun update(e: AnActionEvent) {

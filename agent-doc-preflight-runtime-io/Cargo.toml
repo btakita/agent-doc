@@ -9,8 +9,17 @@ repository = "https://github.com/btakita/agent-doc"
 [lib]
 name = "agent_doc_preflight_runtime_io"
 
+[features]
+default = []
+test-support = [
+    "agent-doc-commit-io/test-support",
+    "agent-doc-document-realtime-io/test-support",
+    "agent-doc-write-converge-io/test-support",
+]
+
 [dependencies]
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.67" }
@@ -32,3 +41,8 @@ agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.67" }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67", features = ["test-support"] }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
+tempfile = "3"

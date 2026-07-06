@@ -17,19 +17,24 @@ use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_timestamp};
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
 use agent_doc_turn_executor_tmux::context_clear::{
-    ContextClearSubmitObservation, ContextClearSubmitStatus, InterruptClearTimeoutFacts,
-    busy_clear_already_deferred_message, busy_clear_deferred_message, busy_clear_refusal_message,
+    ContextClearSubmitObservation, ContextClearSubmitPollState, ContextClearSubmitRetryFacts,
+    ContextClearSubmitStatus, InterruptClearTimeoutFacts, busy_clear_already_deferred_message,
+    busy_clear_deferred_message, busy_clear_refusal_message,
     context_clear_command_visible_in_active_input, context_clear_submit_blocked_line,
-    context_clear_submit_blocked_message, context_clear_submit_needs_enter_resubmit,
-    context_clear_submit_observation_line, context_clear_submit_resubmit_proof_line,
-    interrupt_clear_timeout_message, operator_interrupt_key_plan, operator_interrupt_step_delay,
-    protected_clear_refusal_message, terminal_editor_command,
+    context_clear_submit_blocked_message, context_clear_submit_can_enter_resubmit,
+    context_clear_submit_observation_line, context_clear_submit_poll_status,
+    context_clear_submit_resubmit_proof_line, interrupt_clear_timeout_message,
+    operator_interrupt_key_plan, operator_interrupt_step_delay, protected_clear_refusal_message,
+    terminal_editor_command,
 };
 use tmux_router::{Registry as SessionRegistry, RegistryEntry as SessionEntry, Tmux};
 
 const SUPERVISOR_INJECT_SUBMIT_MODE: &str = "supervisor_normalized_submit";
-const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(2);
+const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT: Duration = Duration::from_millis(900);
 const CLEAR_DIRECT_SUBMIT_ACCEPTANCE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT: usize = 1;
+const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_ENV: &str =
+    "AGENT_DOC_CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS";
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str =
     agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED;
 
@@ -527,6 +532,22 @@ pub fn clear(file: &Path) -> Result<()> {
     )?;
     let tmux = Tmux::default_server();
     guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Clear)?;
+    if session_clear_already_satisfied(&ctx, &tmux) {
+        agent_doc_ops_log_io::log_op(
+            &ctx.canonical_file,
+            &format!(
+                "session_clear_already_satisfied file={} reason=closed_actor_no_live_delivery_target",
+                ctx.canonical_file.display()
+            ),
+        );
+        reclaim_orphaned_cycle_on_clear(&ctx.canonical_file);
+        println!(
+            "Cleared session context for {} (already no live session; controller stage {}).",
+            ctx.canonical_file.display(),
+            authorization.accepted_stage
+        );
+        return Ok(());
+    }
     if reconcile_idle_projection_before_clear(&ctx, &tmux)?
         == ClearPreflightOutcome::DeferredPreempt
     {
@@ -537,6 +558,11 @@ pub fn clear(file: &Path) -> Result<()> {
         return Ok(());
     }
     if supervisor_clear_inject_available(&ctx) {
+        let pre_delivery_capture_hash = ctx
+            .supervisor_runtime
+            .actor_pane_id
+            .as_deref()
+            .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
@@ -547,7 +573,12 @@ pub fn clear(file: &Path) -> Result<()> {
                         SUPERVISOR_INJECT_SUBMIT_MODE
                     ),
                 );
-                verify_supervisor_clear_submit(&ctx, &tmux, "supervisor_runtime")?;
+                verify_supervisor_clear_submit(
+                    &ctx,
+                    &tmux,
+                    "supervisor_runtime",
+                    pre_delivery_capture_hash.as_deref(),
+                )?;
             }
             SupervisorClearDelivery::LegacyClearUnsupported { error } => {
                 if !send_clear_to_resolved_pane(
@@ -563,6 +594,11 @@ pub fn clear(file: &Path) -> Result<()> {
             }
         }
     } else if !send_clear_to_resolved_pane(&ctx, &tmux, None)? {
+        let pre_delivery_capture_hash = ctx
+            .supervisor_runtime
+            .actor_pane_id
+            .as_deref()
+            .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
@@ -573,7 +609,12 @@ pub fn clear(file: &Path) -> Result<()> {
                         SUPERVISOR_INJECT_SUBMIT_MODE
                     ),
                 );
-                verify_supervisor_clear_submit(&ctx, &tmux, "none")?;
+                verify_supervisor_clear_submit(
+                    &ctx,
+                    &tmux,
+                    "none",
+                    pre_delivery_capture_hash.as_deref(),
+                )?;
             }
             SupervisorClearDelivery::LegacyClearUnsupported { error } => {
                 anyhow::bail!(
@@ -666,6 +707,24 @@ fn supervisor_clear_inject_available(ctx: &SessionContext) -> bool {
         && ctx.supervisor_socket.exists()
 }
 
+fn session_clear_already_satisfied(ctx: &SessionContext, tmux: &Tmux) -> bool {
+    session_clear_already_satisfied_facts(
+        ctx.actor_record.as_ref().map(|record| record.state),
+        supervisor_clear_inject_available(ctx),
+        resolve_direct_submit_pane(ctx, tmux).is_some(),
+    )
+}
+
+fn session_clear_already_satisfied_facts(
+    actor_state: Option<ActorState>,
+    supervisor_inject_available: bool,
+    direct_submit_pane_available: bool,
+) -> bool {
+    actor_state == Some(ActorState::Closed)
+        && !supervisor_inject_available
+        && !direct_submit_pane_available
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SupervisorClearDelivery {
     Sent,
@@ -713,6 +772,7 @@ fn verify_supervisor_clear_submit(
     ctx: &SessionContext,
     tmux: &Tmux,
     pane_source: &str,
+    pre_delivery_capture_hash: Option<&str>,
 ) -> Result<()> {
     let Some(pane) = ctx.supervisor_runtime.actor_pane_id.as_deref() else {
         agent_doc_ops_log_io::log_op(
@@ -726,15 +786,16 @@ fn verify_supervisor_clear_submit(
         );
         return Ok(());
     };
-    verify_context_clear_submit_after_delivery(
+    verify_context_clear_submit_after_delivery(ContextClearSubmitVerification {
         tmux,
         pane,
-        &ctx.canonical_file,
-        &ctx.harness,
-        harness_clear_command(&ctx.harness),
-        "supervisor_ipc_acceptance",
-        "session_clear.supervisor_ipc_resubmit",
-    )
+        file: &ctx.canonical_file,
+        harness: &ctx.harness,
+        command: harness_clear_command(&ctx.harness),
+        initial_phase: "supervisor_ipc_acceptance",
+        resubmit_source: "session_clear.supervisor_ipc_resubmit",
+        pre_delivery_capture_hash,
+    })
 }
 
 fn send_clear_to_resolved_pane(
@@ -1761,6 +1822,7 @@ fn harness_clear_command(harness: &str) -> &'static str {
 
 fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
     let command = harness_clear_command(harness);
+    let pre_delivery_capture_hash = capture_context_clear_submit_content_hash(tmux, pane);
     agent_doc_tmux_io::send_submitted_text_for_harness_logged(
         tmux,
         pane,
@@ -1776,79 +1838,106 @@ fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Re
             file.display()
         )
     })?;
-    verify_context_clear_submit_after_delivery(
+    verify_context_clear_submit_after_delivery(ContextClearSubmitVerification {
         tmux,
         pane,
         file,
         harness,
         command,
-        "direct_pane_acceptance",
-        "session_clear.direct_pane_resubmit",
-    )
+        initial_phase: "direct_pane_acceptance",
+        resubmit_source: "session_clear.direct_pane_resubmit",
+        pre_delivery_capture_hash: pre_delivery_capture_hash.as_deref(),
+    })
+}
+
+struct ContextClearSubmitVerification<'a> {
+    tmux: &'a Tmux,
+    pane: &'a str,
+    file: &'a Path,
+    harness: &'a str,
+    command: &'a str,
+    initial_phase: &'a str,
+    #[allow(dead_code)]
+    resubmit_source: &'a str,
+    pre_delivery_capture_hash: Option<&'a str>,
 }
 
 fn verify_context_clear_submit_after_delivery(
-    tmux: &Tmux,
-    pane: &str,
-    file: &Path,
-    harness: &str,
-    command: &str,
-    initial_phase: &str,
-    resubmit_source: &str,
+    ctx: ContextClearSubmitVerification<'_>,
 ) -> Result<()> {
-    let first =
-        poll_context_clear_submit_acceptance(tmux, pane, file, harness, command, initial_phase);
-    let mut final_phase = initial_phase;
+    let first = poll_context_clear_submit_acceptance(
+        ctx.tmux,
+        ctx.pane,
+        ctx.file,
+        ctx.harness,
+        ctx.command,
+        ctx.initial_phase,
+        ctx.pre_delivery_capture_hash,
+    );
+    let mut final_phase = ctx.initial_phase;
     let mut final_observation = first;
-    if context_clear_submit_needs_enter_resubmit(
-        &first,
-        agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness)
-            .pending_draft_enter_resubmit(),
-    ) {
-        let resubmit_phase = match initial_phase {
+    let profile_allows_pending_draft_enter_resubmit =
+        agent_doc_tmux_commands::tmux_submit_profile_for_harness(ctx.harness)
+            .pending_draft_enter_resubmit();
+    let max_attempts = clear_direct_submit_max_enter_resubmits();
+    let mut attempts_sent = 0usize;
+    while context_clear_submit_can_enter_resubmit(ContextClearSubmitRetryFacts {
+        observation: final_observation,
+        pending_draft_enter_resubmit: profile_allows_pending_draft_enter_resubmit,
+        attempts_sent,
+        max_attempts,
+    }) {
+        attempts_sent += 1;
+        let resubmit_phase = match ctx.initial_phase {
             "supervisor_ipc_acceptance" => "supervisor_ipc_resubmit_acceptance",
             _ => "direct_pane_resubmit_acceptance",
         };
-        let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(harness);
+        let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(ctx.harness);
+        let pre_resubmit_capture_hash =
+            capture_context_clear_submit_content_hash(ctx.tmux, ctx.pane);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                Some(file),
+                Some(ctx.file),
                 agent_doc_ops_log_io::log_op,
             ),
-            resubmit_source,
-            &format!("pane:{pane}"),
+            ctx.resubmit_source,
+            &format!("pane:{}", ctx.pane),
             "",
-            Some(harness),
+            Some(ctx.harness),
             "clear_resubmit_submit_key",
             submit_key,
         );
         if let Err(err) = agent_doc_tmux_io::send_submitted_text_for_harness_logged(
-            tmux,
-            pane,
+            ctx.tmux,
+            ctx.pane,
             "",
-            harness,
+            ctx.harness,
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "sessions.send_submitted_text_for_harness",
         ) {
             eprintln!(
-                "[clear] warning: {harness} clear resubmit {submit_key} failed for pane {pane}: {err}"
+                "[clear] warning: {} clear resubmit {submit_key} failed for pane {}: {err}",
+                ctx.harness, ctx.pane
             );
         }
         let second = poll_context_clear_submit_acceptance(
-            tmux,
-            pane,
-            file,
-            harness,
-            command,
+            ctx.tmux,
+            ctx.pane,
+            ctx.file,
+            ctx.harness,
+            ctx.command,
             resubmit_phase,
+            pre_resubmit_capture_hash.as_deref(),
         );
         agent_doc_ops_log_io::log_op(
-            file,
+            ctx.file,
             &context_clear_submit_resubmit_proof_line(
-                file.display(),
-                pane,
-                harness,
+                ctx.file.display(),
+                ctx.pane,
+                ctx.harness,
                 submit_key,
+                attempts_sent,
+                max_attempts,
                 second,
             ),
         );
@@ -1856,14 +1945,26 @@ fn verify_context_clear_submit_after_delivery(
         final_observation = second;
     }
     require_context_clear_submit_accepted(
-        file,
-        pane,
-        harness,
-        command,
+        ctx.file,
+        ctx.pane,
+        ctx.harness,
+        ctx.command,
         final_phase,
         final_observation,
     )?;
     Ok(())
+}
+
+fn clear_direct_submit_max_enter_resubmits_from_env_value(value: Option<&str>) -> usize {
+    value
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT)
+}
+
+fn clear_direct_submit_max_enter_resubmits() -> usize {
+    let value = std::env::var(CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_ENV).ok();
+    clear_direct_submit_max_enter_resubmits_from_env_value(value.as_deref())
 }
 
 fn poll_context_clear_submit_acceptance(
@@ -1873,10 +1974,12 @@ fn poll_context_clear_submit_acceptance(
     harness: &str,
     command: &str,
     phase: &str,
+    pre_delivery_capture_hash: Option<&str>,
 ) -> ContextClearSubmitObservation {
     let harness_config = agent_doc_harness::HarnessConfig::from_agent_name(harness);
     let start = Instant::now();
     let mut last_capture: Option<(bool, usize, String)> = None;
+    let mut poll_state = ContextClearSubmitPollState::default();
     let mut capture_failed = false;
     while start.elapsed() < CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT {
         match agent_doc_tmux_io::capture_pane(tmux, pane) {
@@ -1887,8 +1990,17 @@ fn poll_context_clear_submit_acceptance(
                     });
                 let capture_hash = short_context_clear_submit_content_hash(&content);
                 let capture_len = content.len();
+                let content_changed_since_delivery = pre_delivery_capture_hash
+                    .map(|pre_hash| pre_hash != capture_hash)
+                    .unwrap_or(false);
                 last_capture = Some((command_visible, capture_len, capture_hash));
-                if !command_visible {
+                if context_clear_submit_poll_status(
+                    &mut poll_state,
+                    command_visible,
+                    content_changed_since_delivery,
+                )
+                .is_some()
+                {
                     let observation = ContextClearSubmitObservation {
                         status: ContextClearSubmitStatus::Accepted,
                         elapsed: start.elapsed(),
@@ -1917,8 +2029,10 @@ fn poll_context_clear_submit_acceptance(
     let (status, command_visible) = if let Some((visible, _, _)) = last_capture.as_ref() {
         if *visible {
             (ContextClearSubmitStatus::TimedOut, true)
-        } else {
+        } else if poll_state.saw_submission_evidence() {
             (ContextClearSubmitStatus::Accepted, false)
+        } else {
+            (ContextClearSubmitStatus::TimedOut, false)
         }
     } else if capture_failed {
         (ContextClearSubmitStatus::CaptureFailed, false)
@@ -1996,6 +2110,12 @@ fn require_context_clear_submit_accepted(
             observation
         )
     );
+}
+
+fn capture_context_clear_submit_content_hash(tmux: &Tmux, pane: &str) -> Option<String> {
+    agent_doc_tmux_io::capture_pane(tmux, pane)
+        .ok()
+        .map(|content| short_context_clear_submit_content_hash(&content))
 }
 
 fn short_context_clear_submit_content_hash(content: &str) -> String {
@@ -4330,6 +4450,60 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(!supervisor_clear_legacy_unsupported_error(
             "supervisor response timeout (2s)"
         ));
+    }
+
+    #[test]
+    fn session_clear_already_satisfied_only_for_closed_session_without_delivery_target() {
+        assert!(session_clear_already_satisfied_facts(
+            Some(ActorState::Closed),
+            false,
+            false,
+        ));
+        assert!(!session_clear_already_satisfied_facts(
+            Some(ActorState::Closed),
+            true,
+            false,
+        ));
+        assert!(!session_clear_already_satisfied_facts(
+            Some(ActorState::Closed),
+            false,
+            true,
+        ));
+        assert!(!session_clear_already_satisfied_facts(
+            Some(ActorState::Ready),
+            false,
+            false,
+        ));
+        assert!(!session_clear_already_satisfied_facts(None, false, false));
+    }
+
+    #[test]
+    fn session_clear_submit_retry_budget_is_fast_and_independent_from_dispatch() {
+        assert_eq!(
+            clear_direct_submit_max_enter_resubmits_from_env_value(None),
+            CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert_eq!(
+            clear_direct_submit_max_enter_resubmits_from_env_value(Some("4")),
+            4
+        );
+        assert_eq!(
+            clear_direct_submit_max_enter_resubmits_from_env_value(Some("0")),
+            CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert_eq!(
+            clear_direct_submit_max_enter_resubmits_from_env_value(Some("nope")),
+            CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
+        );
+        assert!(
+            CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT <= Duration::from_secs(1),
+            "clear should fail fast instead of holding JB Run Agent Doc behind a long submit proof window"
+        );
+        assert!(
+            CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
+                < agent_doc_controller::dispatch::DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+            "clear must not reuse dispatch's long stuck-draft recovery budget"
+        );
     }
 
     #[test]

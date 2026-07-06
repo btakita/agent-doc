@@ -56,7 +56,7 @@ Last-call-wins: any `claim` overwrites the previous mapping for that document's 
 
 **Canonical same-document claim reuse:** `claim` must judge "is this pane already mine?" by canonical document identity, not by the raw map key it happens to be iterating in `sessions.json`. The registry key is a canonical file path, not a session UUID. Re-claiming the same live pane for the same document, including submodule-relative `entry.file` shapes, must remain idempotent and must not provision a duplicate pane.
 
-**Cross-session claim guard:** `claim` may only bind to a pane in another tmux session when the configured project session is no longer alive or the user explicitly passes `--force`. A healthy configured session is a hard boundary; cross-session claims fail closed instead of silently rebinding the document.
+**Cross-session claim guard:** `claim` may bind to a pane in the operator's current tmux session even when the configured project `tmux_session` points at another still-live session. This is a live-session override, not a config rewrite: the configured value remains unchanged, and it is still the fallback when the current session is not the active `agent-doc` session. Other cross-session claims are invalid unless the configured project session is stale or the user explicitly passes `--force`.
 
 **Fresh-start stale-session rebind:** When `start` falls through to a fresh pane, finds that the configured project session is dead, and therefore registers the document in the caller's current live tmux session instead, it must persist that new session back to `.agent-doc/config.toml`. That keeps later `route` / `claim` resolution aligned with the new binding instead of repeatedly targeting the dead session name.
 

@@ -57,7 +57,13 @@ fn node_trailing_boundary_split(node: &ExchangeNode) -> Option<(Vec<String>, Vec
 /// for signature parity with the 3-way merge and reserved for per-node body merge
 /// in Phase 3; node bodies are never cross-merged here.
 pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
-    let theirs_nodes = parse_exchange_nodes(theirs);
+    // `#exchangeconverge`: collapse any duplicate node identities the operator
+    // side already carries (a poisoned/scrambled buffer from a prior failed 3-way
+    // merge) BEFORE merging, so the merge output converges instead of preserving
+    // mirror-ordered duplicates. Node identity keys on the response heading /
+    // prompt body, so this only removes true duplicates — distinct turns and
+    // distinct prompts are untouched.
+    let (theirs_nodes, _) = dedup_nodes_by_identity(parse_exchange_nodes(theirs));
     let ours_nodes = parse_exchange_nodes(ours);
 
     let theirs_ids: HashSet<String> = theirs_nodes.iter().map(ExchangeNode::node_id).collect();
@@ -95,6 +101,44 @@ pub fn merge_exchange_nodes(_base: &str, ours: &str, theirs: &str) -> String {
     let mut out = render_exchange_nodes(&out_nodes);
     out.push_str(&trailing_boundary.concat());
     out
+}
+
+/// `#exchangeconverge` — collapse nodes that share a [`ExchangeNode::node_id`],
+/// keeping the first occurrence in document order. Returns the deduped list and
+/// whether any duplicate was removed.
+///
+/// Node identity keys on the response heading (`r:hash(key)`) / the prompt body
+/// (`p:hash(body)`), so two nodes collide only when they are the same response
+/// turn or a byte-identical prompt — exactly the non-adjacent / mirror-ordered
+/// duplicates a failed 3-way merge leaves behind. Distinct turns and distinct
+/// prompts have distinct ids and are never collapsed. This is the same identity
+/// the node merge keys on, so the operation is idempotent.
+fn dedup_nodes_by_identity(nodes: Vec<ExchangeNode>) -> (Vec<ExchangeNode>, bool) {
+    let mut seen: HashSet<String> = HashSet::with_capacity(nodes.len());
+    let mut out: Vec<ExchangeNode> = Vec::with_capacity(nodes.len());
+    let mut removed = false;
+    for node in nodes {
+        if seen.insert(node.node_id()) {
+            out.push(node);
+        } else {
+            removed = true;
+        }
+    }
+    (out, removed)
+}
+
+/// `#exchangeconverge` — collapse duplicate exchange nodes in an `agent:exchange`
+/// body by node identity (see [`dedup_nodes_by_identity`]). Idempotent
+/// convergence pass that repairs a buffer already poisoned with mirror-ordered
+/// duplicates (a prior failed CRDT/3-way merge). When there is nothing to
+/// collapse, the input is returned **verbatim** so a clean exchange is never
+/// reformatted by the parse→render round-trip.
+pub fn dedup_exchange_nodes_by_identity(exchange: &str) -> String {
+    let (nodes, removed) = dedup_nodes_by_identity(parse_exchange_nodes(exchange));
+    if !removed {
+        return exchange.to_string();
+    }
+    render_exchange_nodes(&nodes)
 }
 
 #[cfg(test)]
@@ -159,5 +203,59 @@ mod tests {
         let theirs = "### Re: A — opus\n\nAnswer A.\n\nOperator tail.\n";
         let merged = merge_exchange_nodes("", theirs, theirs);
         assert_eq!(merged, theirs);
+    }
+
+    #[test]
+    fn dedup_collapses_mirror_ordered_duplicate_response_turns() {
+        // `#exchangeconverge`: a poisoned buffer with the same response turn
+        // repeated non-adjacently must converge to a single occurrence.
+        let poisoned =
+            "### Re: A — opus\n\nAnswer A.\n\n❯ Prompt.\n\n### Re: A — opus\n\nAnswer A.\n";
+        let converged = dedup_exchange_nodes_by_identity(poisoned);
+        assert_eq!(
+            converged.matches("### Re: A").count(),
+            1,
+            "the duplicated response turn collapses to one"
+        );
+        assert!(converged.contains("❯ Prompt."), "distinct prompt is preserved");
+    }
+
+    #[test]
+    fn dedup_collapses_byte_identical_duplicate_prompts() {
+        let poisoned = "❯ Do the thing.\n\n❯ Do the thing.\n";
+        let converged = dedup_exchange_nodes_by_identity(poisoned);
+        assert_eq!(converged.matches("❯ Do the thing.").count(), 1);
+    }
+
+    #[test]
+    fn dedup_preserves_distinct_nodes_and_is_verbatim_when_clean() {
+        // Distinct prompts/responses have distinct ids — never collapsed — and a
+        // clean exchange is returned byte-for-byte (no reformatting round-trip).
+        let clean = "❯ First prompt.\n\n### Re: A — opus\n\nAnswer A.\n\n❯ Second prompt.\n";
+        let out = dedup_exchange_nodes_by_identity(clean);
+        assert_eq!(out, clean);
+    }
+
+    #[test]
+    fn dedup_is_idempotent() {
+        let poisoned = "### Re: A — opus\n\nAnswer A.\n\n### Re: A — opus\n\nAnswer A.\n";
+        let once = dedup_exchange_nodes_by_identity(poisoned);
+        let twice = dedup_exchange_nodes_by_identity(&once);
+        assert_eq!(once, twice, "convergence pass is idempotent");
+    }
+
+    #[test]
+    fn merge_exchange_nodes_converges_a_poisoned_operator_side() {
+        // The node merge now collapses duplicate identities the operator side
+        // already carries, so the merge output converges instead of preserving
+        // mirror-ordered duplicates.
+        let poisoned_theirs =
+            "### Re: A — opus\n\nAnswer A.\n\n### Re: A — opus\n\nAnswer A.\n";
+        let merged = merge_exchange_nodes("", poisoned_theirs, poisoned_theirs);
+        assert_eq!(
+            merged.matches("### Re: A").count(),
+            1,
+            "the merge collapses the operator side's duplicate turn"
+        );
     }
 }

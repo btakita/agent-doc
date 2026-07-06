@@ -588,7 +588,7 @@ interface AgentDocLib : Library {
      * client-id (mint one from a stable editor-process identity so two IDEs never
      * collide). When [init_state] is non-null/non-empty it bootstraps the replica
      * from that encoded state (e.g. the canonical bootstrap returned by the
-     * supervisor `replica_register` ack). Returns 0 on success, negative on error.
+     * controller `replica_register` ack). Returns 0 on success, negative on error.
      */
     fun agent_doc_replica_open(replica_id: Long, init_state: ByteArray?, init_len: Long): Int
 

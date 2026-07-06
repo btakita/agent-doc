@@ -96,22 +96,33 @@ pub fn run(file: &Path, cli: Option<LintCliMode>) -> Result<()> {
 
 /// Run the finalize lint gate with an injected best-effort marker logger.
 pub fn run_with_logger(file: &Path, cli: Option<LintCliMode>, ops_logger: OpsLogger) -> Result<()> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(c) => c,
-        Err(e) => {
-            // The session file is expected to exist by the time the lint
-            // gate runs; missing files are upstream bugs. Surface the error
-            // so finalize can fail closed instead of silently skipping the
-            // gate.
-            return Err(anyhow::anyhow!(
-                "[lint-gate] failed to read session document {}: {}",
-                file.display(),
-                e
-            ));
-        }
-    };
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "lint_gate_document",
+    )?;
+    run_on_content(file, &content, cli, ops_logger)
+}
 
-    let (mode, source) = resolve_mode(file, &content, cli);
+/// Run the finalize lint gate against explicit detached-disk authority.
+pub fn run_force_disk_with_logger(
+    file: &Path,
+    cli: Option<LintCliMode>,
+    ops_logger: OpsLogger,
+) -> Result<()> {
+    let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "lint_gate_document_force_disk",
+    )?;
+    run_on_content(file, &content, cli, ops_logger)
+}
+
+fn run_on_content(
+    file: &Path,
+    content: &str,
+    cli: Option<LintCliMode>,
+    ops_logger: OpsLogger,
+) -> Result<()> {
+    let (mode, source) = resolve_mode(file, content, cli);
     if mode == LintDialectMode::Off {
         ops_logger(
             file,
@@ -128,8 +139,7 @@ pub fn run_with_logger(file: &Path, cli: Option<LintCliMode>, ops_logger: OpsLog
         fs_checks: false,
         rule_filter: Vec::new(),
     };
-    let findings =
-        reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, &content, &opts));
+    let findings = reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, content, &opts));
 
     classify_and_emit(file, &findings, mode, source, ops_logger)
 }

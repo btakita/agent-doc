@@ -114,6 +114,14 @@ pub enum IpcMethod {
         #[serde(default = "default_checkpoint_source")]
         source: String,
     },
+    /// Resolve the supervisor-owned current CRDT text for `file`, performing the
+    /// bounded publish-live-buffer startup path inside the process that owns the
+    /// relay hub. This is the read-side counterpart to `crdt_checkpoint`.
+    CrdtCurrentText {
+        file: String,
+        #[serde(default = "default_current_text_source")]
+        source: String,
+    },
 }
 
 fn default_restart_mode() -> String {
@@ -121,6 +129,10 @@ fn default_restart_mode() -> String {
 }
 
 fn default_checkpoint_source() -> String {
+    "supervisor_ipc".to_string()
+}
+
+fn default_current_text_source() -> String {
     "supervisor_ipc".to_string()
 }
 
@@ -287,6 +299,22 @@ mod tests {
                 source: "supervisor_ipc".into(),
             }
         );
+        let current_text = IpcMethod::CrdtCurrentText {
+            file: "plan.md".into(),
+            source: "resolve_current_doc".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&current_text).unwrap(),
+            r#"{"method":"crdt_current_text","file":"plan.md","source":"resolve_current_doc"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<IpcMethod>(r#"{"method":"crdt_current_text","file":"plan.md"}"#)
+                .unwrap(),
+            IpcMethod::CrdtCurrentText {
+                file: "plan.md".into(),
+                source: "supervisor_ipc".into(),
+            }
+        );
 
         assert_eq!(
             serde_json::to_string(&IpcMethod::State).unwrap(),
@@ -346,6 +374,12 @@ mod tests {
         ));
         assert!(!ipc_method_requires_capability_gate(
             &IpcMethod::CrdtCheckpoint {
+                file: "doc.md".to_string(),
+                source: "test".to_string(),
+            },
+        ));
+        assert!(!ipc_method_requires_capability_gate(
+            &IpcMethod::CrdtCurrentText {
                 file: "doc.md".to_string(),
                 source: "test".to_string(),
             },

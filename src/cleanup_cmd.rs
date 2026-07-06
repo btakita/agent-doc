@@ -78,8 +78,11 @@ fn spawn_fallback_agent(file: &Path, model: &str) -> Result<String> {
         model
     );
 
-    let content = std::fs::read_to_string(file)
-        .context("could not read document for fallback summarization")?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "cleanup_fallback_document",
+    )
+    .context("could not resolve document for fallback summarization")?;
 
     // Truncate to avoid exceeding context limits on the subagent
     let max_chars = 30_000;

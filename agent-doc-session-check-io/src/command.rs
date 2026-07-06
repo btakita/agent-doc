@@ -196,7 +196,12 @@ pub fn run_with_options(
                 );
                 return Ok(());
             }
-            if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)? {
+            let continuation_content =
+                crate::resolve_current_document_content(file, "session_check_queue_continuation")?;
+            if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect_for_content(
+                file,
+                &continuation_content,
+            )? {
                 // #prompt-preempts-auto-queue: a live unresolved exchange prompt
                 // must run before queue continuation, even when it was already
                 // baselined into the snapshot. Defer the queue (do not force the
@@ -455,9 +460,10 @@ pub fn inspect_with_warnings(
         // #rtwwire (rung 3): seed the guard-sweep cache from the authoritative
         // current document. Active editors resolve through the CRDT relay; disk
         // is consulted only when no editor is attached.
-        rc.set_current_document(
-            agent_doc_document_realtime_io::try_resolve_current_document(file)?,
-        );
+        rc.set_current_document(crate::resolve_current_document(
+            file,
+            "session_check_guard_sweep",
+        )?);
         match crate::check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
@@ -663,6 +669,18 @@ fn self_heal_late_ipc_overapplication(
 }
 
 pub fn enforce_clean_closeout(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
+    enforce_clean_closeout_with_force_disk(file, false, effects)
+}
+
+pub fn enforce_clean_closeout_with_force_disk(
+    file: &Path,
+    force_disk: bool,
+    effects: &impl SessionCheckEffects,
+) -> Result<()> {
+    crate::with_force_disk_resolution(force_disk, || enforce_clean_closeout_inner(file, effects))
+}
+
+fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
     self_heal_late_ipc_overapplication(file, effects)?;
     let report = inspect_with_warnings(file, effects)?;
     for warning in report.warnings {
@@ -753,68 +771,6 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     }
 }
 
-fn closeout_projection_event_label(
-    projection: &agent_doc_cycle_state_io::ProjectedCloseoutState,
-    phase: CyclePhase,
-) -> String {
-    match phase {
-        CyclePhase::PreflightStarted => "state_backbone_preflight_started".to_string(),
-        CyclePhase::ResponseCaptured => projection
-            .capture_id
-            .as_deref()
-            .map(|capture_id| format!("state_backbone_response_captured capture_id={capture_id}"))
-            .unwrap_or_else(|| "state_backbone_response_captured".to_string()),
-        CyclePhase::WriteApplied => projection
-            .patch_id
-            .as_deref()
-            .map(|patch_id| format!("state_backbone_write_applied patch_id={patch_id}"))
-            .unwrap_or_else(|| "state_backbone_write_applied".to_string()),
-        CyclePhase::Committed => projection
-            .commit
-            .as_deref()
-            .map(|commit| format!("state_backbone_commit_observed commit={commit}"))
-            .unwrap_or_else(|| "state_backbone_commit_observed".to_string()),
-        CyclePhase::Abandoned => projection
-            .abandoned_reason
-            .as_deref()
-            .map(|reason| format!("state_backbone_cycle_abandoned reason={reason}"))
-            .unwrap_or_else(|| "state_backbone_cycle_abandoned".to_string()),
-    }
-}
-
-fn apply_closeout_projection_to_cycle_state(
-    file: &Path,
-    state: &mut agent_doc_cycle_state_io::CycleState,
-    projection: Option<&agent_doc_cycle_state_io::ProjectedCloseoutState>,
-) {
-    let Some(projection) = projection else {
-        return;
-    };
-    let Some(projected_phase) = projection.phase else {
-        return;
-    };
-    if state.phase != projected_phase {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "session_check_closeout_projection_preferred file={} cycle_id={} json_phase={} projected_phase={}",
-                file.display(),
-                state.cycle_id,
-                state.phase.as_str(),
-                projected_phase.as_str()
-            ),
-        );
-    }
-    state.phase = projected_phase;
-    state.last_event = closeout_projection_event_label(projection, projected_phase);
-    if state.capture_id.is_none() {
-        state.capture_id = projection.capture_id.clone();
-    }
-    if state.response_sha256.is_none() {
-        state.response_sha256 = projection.response_sha256.clone();
-    }
-}
-
 fn projected_open_closeout_message(
     file: &Path,
     projection: &agent_doc_cycle_state_io::ProjectedCloseoutState,
@@ -878,11 +834,7 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
 
     let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
 
-    if let Some(mut state) = agent_doc_cycle_state_io::load(file)? {
-        let projected_same_cycle = closeout_projection
-            .as_ref()
-            .filter(|projection| projection.matches_cycle(&state.cycle_id));
-        apply_closeout_projection_to_cycle_state(file, &mut state, projected_same_cycle);
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
         if state.is_open() {
             if let Some(blocked) = state.blocked_closeout.as_ref() {
                 return Ok(SessionCheckStatus::Interrupted(blocked_closeout_message(
@@ -1026,15 +978,6 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         let mut latest_head_response_visible_in_live_buffer = false;
         let latest_head_response_missing = match agent_doc_git_io::revision::show_head(file)? {
             Some(head) => {
-                if let Ok(disk) = std::fs::read_to_string(file)
-                    && let Some(heading) =
-                        agent_doc_document::write_normalization::latest_response_heading_missing_from_current(
-                            &head, &disk,
-                        )
-                    && operator_live_buffer_contains_heading(file, &heading)
-                {
-                    latest_head_response_visible_in_live_buffer = true;
-                }
                 match crate::resolve_current_document_content(file, "latest_head_response_missing")
                 {
                     Ok(working) => {

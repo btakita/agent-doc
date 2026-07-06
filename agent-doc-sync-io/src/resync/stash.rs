@@ -979,7 +979,8 @@ mod tests {
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -1042,7 +1043,8 @@ mod tests {
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();

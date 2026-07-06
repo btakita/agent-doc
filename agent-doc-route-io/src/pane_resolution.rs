@@ -255,7 +255,7 @@ pub fn resolve_or_create_pane_dispatch_only(
     startup_effects: RouteStartupEffects,
 ) -> Result<String> {
     let registered = lookup_dispatch_registration(file_path, session_id)?;
-    let cycle_baseline = agent_doc_cycle_state_io::load(file)?;
+    let cycle_baseline = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     let authoritative_actor =
@@ -634,7 +634,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
         "route::resolve_or_create_pane"
     );
     let registered = lookup_dispatch_registration(file_path, session_id)?;
-    let cycle_baseline = agent_doc_cycle_state_io::load(file)?;
+    let cycle_baseline = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let pending_prompt_context =
         pending_prompt_bearing_context_for_route(file, cycle_baseline.as_ref())?;
     if let Some(actor) = load_authoritative_actor_dispatch_target(

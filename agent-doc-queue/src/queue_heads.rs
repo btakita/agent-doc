@@ -22,14 +22,17 @@ pub fn active_queue_heads(doc: &str) -> Vec<String> {
 pub fn active_free_text_queue_heads(doc: &str) -> Vec<String> {
     queue_prompt_heads(doc)
         .into_iter()
-        .filter(|text| !is_do_directive(text))
+        .map(|text| strip_priority_markers(&text))
+        .filter(|text| {
+            !text.is_empty() && !is_do_directive(text) && queue_prompt_text_is_free_text(doc, text)
+        })
         .collect()
 }
 
 /// True when a queue head is id-backed: explicit `do [#id]` / `do #id`, or the
 /// optional-`do` bare leading `[#id]` / `#id` form.
 pub fn is_do_directive(text: &str) -> bool {
-    let lower = text.trim().to_ascii_lowercase();
+    let lower = strip_priority_markers(text).to_ascii_lowercase();
     lower.starts_with("do [#") || lower.starts_with("do #") || leads_with_bare_id_directive(&lower)
 }
 
@@ -337,8 +340,11 @@ mod tests {
         assert!(is_do_directive("do [#opt]"));
         assert!(is_do_directive("do #opt"));
         assert!(is_do_directive("DO [#opt]. trailing note"));
+        assert!(is_do_directive("🚧 do [#opt]"));
+        assert!(is_do_directive(":pushpin: 🚧 do [#opt]"));
         // Optional-`do`: bare id token is id-backed.
         assert!(is_do_directive("[#opt]"));
+        assert!(is_do_directive("🚧 [#opt]"));
         assert!(is_do_directive("[#opt]. do the small fix"));
         assert!(is_do_directive("#opt"));
         assert!(is_do_directive("#opt do the thing"));
@@ -359,8 +365,10 @@ mod tests {
             "---\n\n",
             "<!-- agent:queue -->\n",
             "- do [#build]\n",
+            "- 🚧 [#running]\n",
             "- [#bare] do the small fix\n",
             "- [#note]: this is annotation prose\n",
+            "- 🚧 write an active status summary\n",
             "- write a status summary\n",
             "<!-- /agent:queue -->\n"
         );
@@ -369,8 +377,10 @@ mod tests {
             active_queue_heads(doc),
             vec![
                 "do [#build]".to_string(),
+                "🚧 [#running]".to_string(),
                 "[#bare] do the small fix".to_string(),
                 "[#note]: this is annotation prose".to_string(),
+                "🚧 write an active status summary".to_string(),
                 "write a status summary".to_string(),
             ]
         );
@@ -378,6 +388,7 @@ mod tests {
             active_free_text_queue_heads(doc),
             vec![
                 "[#note]: this is annotation prose".to_string(),
+                "write an active status summary".to_string(),
                 "write a status summary".to_string(),
             ]
         );

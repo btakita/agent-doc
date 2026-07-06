@@ -10,13 +10,14 @@
 //!   - **Set** (`set = Some(mode)`): maps the mode string to `(AgentDocFormat, AgentDocWrite)`:
 //!     `"append"` → `(Append, Crdt)`, `"template"` → `(Template, Crdt)`, `"stream"` →
 //!     `(Template, Crdt)`.  Any other value returns `Err`.  Calls
-//!     `frontmatter::set_format_and_write` and writes the updated content back to the file.
+//!     `frontmatter::set_format_and_write` and writes the updated content back to the file
+//!     through document authority.
 //!
 //! ## Agentic Contracts
 //! - Returns `Err` if the file does not exist or is unreadable.
 //! - Returns `Err` for unrecognised mode strings.
-//! - The set path writes the full document back atomically via `std::fs::write`; the rest of the
-//!   document content is preserved exactly.
+//! - The set path writes the full document back atomically through document authority; the rest of
+//!   the document content is preserved exactly.
 //! - Get output goes to stdout; all diagnostic messages go to stderr.
 //!
 //! ## Evals
@@ -36,8 +37,11 @@ pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "mode_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let (fm, _) = frontmatter::parse(&content)?;
 
     if let Some(mode) = set {
@@ -52,7 +56,7 @@ pub fn run(file: &Path, set: Option<&str>) -> Result<()> {
             ),
         };
         let updated = frontmatter::set_format_and_write(&content, format, write)?;
-        std::fs::write(file, &updated)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!(
             "set agent_doc_format={}, agent_doc_write={} in {}",

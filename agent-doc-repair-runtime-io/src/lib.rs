@@ -44,8 +44,11 @@ pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "recover_missing_committed_head_response",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     let Some(response_block) = latest_response_block_missing_from_current(&head_content, &current)
     else {
         return Ok(false);
@@ -76,8 +79,11 @@ pub fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
     let Some(head_content) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
-    let current = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "recover_dedupe_only_drift",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     if current == head_content {
         return Ok(false);
     }

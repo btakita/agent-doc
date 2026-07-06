@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,6 +24,10 @@ use agent_doc_git_io::{
 };
 use agent_doc_queue_io::queue_consume;
 use anyhow::Result;
+
+thread_local! {
+    static FORCE_DISK_COMMIT_RESOLUTION: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitOutcome {
@@ -108,7 +113,7 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     for RuntimeCommitPreStageRepairEffects
 {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        commit_atomic_write(file, content)
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
@@ -136,6 +141,9 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
         file: &Path,
     ) -> Result<Option<agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization>>
     {
+        if let Some(capture) = projected_active_capture_materialization(file)? {
+            return Ok(Some(capture));
+        }
         Ok(agent_doc_capture_io::load_active(file)?.map(|capture| {
             agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
                 capture_id: capture.capture_id,
@@ -164,6 +172,35 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
     }
 }
 
+fn projected_active_capture_materialization(
+    file: &Path,
+) -> Result<Option<agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(projected) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    else {
+        return Ok(None);
+    };
+    if state.cycle_id != projected.cycle_id
+        || state.response_sha256.as_deref() != Some(projected.response_sha256.as_str())
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
+            capture_id: projected.capture_id,
+            response_sha256: projected.response_sha256,
+            response_body: projected.response_body,
+            terminal: !state.is_open(),
+        },
+    ))
+}
+
 impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
     for RuntimeGuardMarkerCleanupEffects
 {
@@ -176,10 +213,7 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
     }
 
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "guard_marker_cleanup",
-        )
+        commit_current_document_content(file, "guard_marker_cleanup")
     }
 
     fn converge_or_disk_write(
@@ -189,6 +223,9 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
         target_content: &str,
         reason: &str,
     ) -> Result<()> {
+        if force_disk_commit_resolution_enabled() {
+            return commit_atomic_write(file, target_content);
+        }
         agent_doc_write_converge_io::converge_or_disk_write(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
             file,
@@ -245,10 +282,7 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     }
 
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "live_buffer_guard",
-        )
+        commit_current_document_content(file, "live_buffer_guard")
     }
 
     fn queue_file_ipc_reposition_boundary(
@@ -275,7 +309,7 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        commit_atomic_write(file, content)
     }
 }
 
@@ -295,7 +329,7 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
     for RuntimeTransientCleanupEffects
 {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        commit_atomic_write(file, content)
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
@@ -336,10 +370,7 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
     for RuntimePostCommitCleanupEffects
 {
     fn read_to_string(&self, file: &Path) -> Result<String> {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "post_commit_cleanup",
-        )
+        commit_current_document_content(file, "post_commit_cleanup")
     }
 
     fn load_snapshot(&self, file: &Path) -> Option<String> {
@@ -347,7 +378,7 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
     }
 
     fn cycle_is_terminal(&self, file: &Path) -> bool {
-        agent_doc_cycle_state_io::load(file)
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)
             .ok()
             .flatten()
             .is_some_and(|state| !state.is_open())
@@ -397,8 +428,8 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
         Ok(())
     }
 
-    fn mark_capture_committed(&self, file: &Path) -> Result<()> {
-        agent_doc_capture_io::mark_committed(file)
+    fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()> {
+        agent_doc_capture_io::mark_committed_with_current_content(file, current_content)
     }
 
     fn clear_queue_journal(&self, file: &Path) {
@@ -435,6 +466,10 @@ pub fn commit(file: &Path) -> Result<bool> {
     Ok(commit_with_outcome(file)?.did_commit)
 }
 
+pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
+    Ok(commit_with_outcome_for_authority(file, force_disk)?.did_commit)
+}
+
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
     commit_with_ports_outcome(
         CommitCoordinatorPorts {
@@ -452,6 +487,52 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
             write_convergence: &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
         },
         file,
+    )
+}
+
+pub fn commit_with_outcome_for_authority(file: &Path, force_disk: bool) -> Result<CommitOutcome> {
+    with_force_disk_commit_resolution(force_disk, || commit_with_outcome(file))
+}
+
+fn with_force_disk_commit_resolution<T>(
+    force_disk: bool,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if !force_disk {
+        return f();
+    }
+    FORCE_DISK_COMMIT_RESOLUTION.with(|slot| {
+        let previous = slot.replace(true);
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+fn force_disk_commit_resolution_enabled() -> bool {
+    FORCE_DISK_COMMIT_RESOLUTION.with(Cell::get)
+}
+
+fn commit_current_document_content(file: &Path, source: &str) -> Result<String> {
+    if force_disk_commit_resolution_enabled() {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+}
+
+fn commit_atomic_write(file: &Path, content: &str) -> Result<()> {
+    if force_disk_commit_resolution_enabled() {
+        agent_doc_fs::write_atomic(file, content.as_bytes())
+    } else {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+}
+
+fn commit_detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
+    agent_doc_session_check_io::detect_bypassed_response_write_with_force_disk(
+        file,
+        force_disk_commit_resolution_enabled(),
     )
 }
 
@@ -524,18 +605,15 @@ where
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
     let mut snapshot_content = agent_doc_snapshot_io::load(file)?;
-    let mut file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "commit_initial_current",
-    )
-    .unwrap_or_default();
+    let mut file_content =
+        commit_current_document_content(file, "commit_initial_current").unwrap_or_default();
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let snapshot_matched_head_before_absorb = snapshot_content
         .as_deref()
         .zip(head_doc.as_deref())
         .is_some_and(|(snapshot, head)| strip_head_markers(snapshot) == head);
     let bypassed_response_write = snapshot_matched_head_before_absorb
-        .then(|| agent_doc_session_check_io::detect_bypassed_response_write(file))
+        .then(|| commit_detect_bypassed_response_write(file))
         .transpose()?
         .flatten();
     let safe_out_of_band_mutation = snapshot_content
@@ -631,21 +709,20 @@ where
         false
     };
 
-    let cycle_state_for_commit = agent_doc_cycle_state_io::load(file)?;
+    let cycle_state_for_commit = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let ipc_snapshot_adoption_blocked = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| state.ipc_snapshot_adoption_blocked);
     let has_dropped_queue_prompt_evidence = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
-    let active_response_target = agent_doc_capture_io::load_active(file)
-        .ok()
-        .flatten()
-        .and_then(|capture| {
-            agent_doc_turn::response_text::response_prompt_target_from_re_heading(
-                &capture.response_body,
-            )
-        });
+    let active_response_target = captured_response_body_for_commit(
+        file,
+        cycle_state_for_commit.as_ref(),
+    )
+    .and_then(|response_body| {
+        agent_doc_turn::response_text::response_prompt_target_from_re_heading(&response_body)
+    });
     if ipc_snapshot_adoption_blocked
         && let Some(snapshot) = snapshot_content.as_deref()
         && live_prompt_drift_missing_response_with_unanswered_prompt_for_commit(
@@ -1089,11 +1166,8 @@ where
     if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load(file) {
         snapshot_content = Some(reloaded);
     }
-    file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "commit_after_boundary_reposition",
-    )
-    .unwrap_or_default();
+    file_content = commit_current_document_content(file, "commit_after_boundary_reposition")
+        .unwrap_or_default();
     agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
         ports.pre_stage_repair,
         file,
@@ -1218,10 +1292,7 @@ where
             ports.guard_marker_cleanup,
             file,
         );
-        if let Ok(cleaned) = agent_doc_document_realtime_io::try_resolve_current_document_content(
-            file,
-            "commit_transient_cleanup",
-        ) {
+        if let Ok(cleaned) = commit_current_document_content(file, "commit_transient_cleanup") {
             match agent_doc_git_io::transient_cleanup::repair_clean_head_if_only_transient_worktree_drift(
                 ports.transient_cleanup,
                 file,
@@ -1271,6 +1342,25 @@ where
         did_commit,
         vcs_refresh_signaled,
     })
+}
+
+fn captured_response_body_for_commit(
+    file: &Path,
+    state: Option<&agent_doc_cycle_state_io::CycleState>,
+) -> Option<String> {
+    if let Some(state) = state
+        && let Some(capture_id) = state.capture_id.as_deref()
+        && let Ok(Some(projected)) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+        && state.cycle_id == projected.cycle_id
+        && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
+    {
+        return Some(projected.response_body);
+    }
+    agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .map(|capture| capture.response_body)
 }
 
 fn exchange_has_unanswered_disk_only_prompt_target_for_commit(

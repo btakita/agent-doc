@@ -212,6 +212,10 @@ pub static RUNTIME_PIPELINE_FRONTMATTER_EFFECTS: RuntimePipelineFrontmatterEffec
 impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
     for RuntimePipelineFrontmatterEffects
 {
+    fn read_current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        try_resolve_current_document_content(file, source)
+    }
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -478,10 +482,40 @@ pub fn observe_live_editor_authority_after_model_ensure(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    agent_doc_crdt_relay_io::defer_if_document_model_ensure_suppressed(file, source)?;
     let current = observe_live_editor_authority(file, source)?;
     match current {
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
         | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            match agent_doc_controller_io::project_controller::current_text_via_supervisor_for_doc(
+                file, source,
+            ) {
+                Ok(Some(supervisor_current)) => {
+                    record_current_text_authority(file, source, &supervisor_current);
+                    return Ok(supervisor_current);
+                }
+                Ok(None) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "document_model_supervisor_lookup_unavailable file={} source={} fallback=local_document_model",
+                            file.display(),
+                            source,
+                        ),
+                    );
+                }
+                Err(e) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "document_model_supervisor_lookup_error file={} source={} error={} fallback=local_document_model",
+                            file.display(),
+                            source,
+                            e,
+                        ),
+                    );
+                }
+            }
             let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source)?;
             record_current_text_authority(file, source, &ensured);
             Ok(ensured)
@@ -1664,6 +1698,60 @@ mod tests {
         assert!(
             !err.contains("failed to read") && !err.contains("re-read"),
             "active-editor error must not look like a disk read failure: {err}"
+        );
+    }
+
+    #[test]
+    fn current_resolve_suppresses_probe_during_recent_model_ensure_failure() {
+        let disk = "plain disk body\n";
+        let (dir, file, _canonical) = temp_doc(disk);
+        let file_str = file.display().to_string();
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &file_str,
+                "test-editor-authority-suppression",
+                std::process::id(),
+            ),
+            "test setup should acquire a live plugin-owner lease"
+        );
+
+        let first = try_resolve_current_doc_from_file(&file)
+            .expect_err("first missing model resolve should fail closed")
+            .to_string();
+        assert!(
+            first.contains("recovery=retry_without_disk_write"),
+            "first failure should carry retry recovery: {first}"
+        );
+        let log_path = dir.path().join(".agent-doc/logs/ops.log");
+        let first_log = std::fs::read_to_string(&log_path).unwrap();
+        let first_missing_count = first_log.matches("crdt_current_text_unavailable").count();
+        assert!(
+            first_missing_count > 0,
+            "first resolve should prove the missing replica once:\n{first_log}"
+        );
+
+        let second = try_resolve_current_doc_from_file(&file)
+            .expect_err("recent failed ensure should suppress duplicate probing")
+            .to_string();
+        assert!(
+            second.contains("recovery=retry_without_disk_write"),
+            "suppressed failure should preserve retry recovery: {second}"
+        );
+        let second_log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            second_log.contains("document_model_ensure_suppressed")
+                && second_log.contains("reason=recent_failure"),
+            "second resolve should hit the cooldown marker:\n{second_log}"
+        );
+        assert_eq!(
+            second_log.matches("crdt_current_text_unavailable").count(),
+            first_missing_count,
+            "suppressed resolve must not emit another missing-replica probe:\n{second_log}"
+        );
+        assert_eq!(
+            second_log.matches("document_model_ensure_start").count(),
+            1,
+            "suppressed resolve must not start another ensure loop:\n{second_log}"
         );
     }
 

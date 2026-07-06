@@ -78,30 +78,32 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Compute the plugin-owner lease path for a document. Mirrors
-/// the queue drain-owner sidecar: hash the document path and land the sidecar in the
-/// nearest ancestor `.agent-doc/` directory.
-fn plugin_owner_lease_path(file: &str) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut hasher);
-    let hash = hasher.finish();
-    let mut dir = PathBuf::from(file);
-    dir.pop();
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return dir.join(PLUGIN_OWNER_DIR).join(format!("{hash:016x}.json"));
-        }
-        if !dir.pop() {
-            let parent = PathBuf::from(file)
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf();
-            return parent
-                .join(PLUGIN_OWNER_DIR)
-                .join(format!("{hash:016x}.json"));
-        }
+fn canonicalish_document_path(file: &str) -> PathBuf {
+    let path = PathBuf::from(file);
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
     }
+    if path.is_absolute() {
+        return path;
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(&path))
+        .unwrap_or(path)
+}
+
+/// Compute the plugin-owner lease path for a document. Mirrors the queue
+/// drain-owner sidecar: hash the canonical document identity and land the sidecar
+/// in the nearest ancestor `.agent-doc/` directory.
+fn plugin_owner_lease_path(file: &str) -> PathBuf {
+    let canonicalish = canonicalish_document_path(file);
+    let hash = agent_doc_fs::document_state_hash(&canonicalish).unwrap_or_else(|_| {
+        agent_doc_fs::document_state_hash_from_str(&canonicalish.to_string_lossy())
+    });
+    let root = agent_doc_fs::find_project_root(&canonicalish)
+        .or_else(|| agent_doc_fs::find_project_root(Path::new(file)))
+        .or_else(|| canonicalish.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    root.join(PLUGIN_OWNER_DIR).join(format!("{hash}.json"))
 }
 
 fn read_lease_at(path: &Path) -> Option<PluginOwnerLease> {
@@ -400,6 +402,45 @@ mod tests {
             pid,
             heartbeat_secs: 0,
         }
+    }
+
+    #[test]
+    fn plugin_owner_lease_path_uses_canonical_document_identity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = doc_in(dir.path());
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        let alias = dir.path().join("sub").join("..").join("plan.md");
+        let canonical_path = plugin_owner_lease_path(&file);
+        let alias_path = plugin_owner_lease_path(&alias.to_string_lossy());
+        let expected_hash = agent_doc_fs::document_state_hash(Path::new(&file)).unwrap();
+
+        assert_eq!(alias_path, canonical_path);
+        assert_eq!(
+            canonical_path.file_name().unwrap().to_string_lossy(),
+            format!("{expected_hash}.json")
+        );
+    }
+
+    #[test]
+    fn public_lease_reads_use_canonical_document_identity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = doc_in(dir.path());
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        let alias = dir.path().join("sub").join("..").join("plan.md");
+
+        assert!(try_acquire_plugin_owner(
+            &alias.to_string_lossy(),
+            "jetbrains-1-aaa",
+            std::process::id(),
+        ));
+        assert!(
+            read_plugin_owner_lease(&file).is_some(),
+            "canonical path must observe the alias-acquired lease"
+        );
+        assert!(
+            live_editor_endpoint_attached(&file),
+            "authority liveness must not split on path spelling"
+        );
     }
 
     #[test]

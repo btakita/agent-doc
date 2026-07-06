@@ -7,8 +7,10 @@ use agent_doc_element_boundary::boundary::{BOUNDARY_PREFIX, insert};
 pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
     let component_name = component.unwrap_or("exchange");
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "boundary_insert",
+    )?;
     let stale_count = content.matches(BOUNDARY_PREFIX).count();
 
     let (id, updated) = insert(&content, component_name)?;
@@ -20,11 +22,8 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
         );
     }
 
-    let tmp = file.with_extension("boundary.tmp");
-    std::fs::write(&tmp, &updated)
-        .with_context(|| format!("failed to write temp file {}", tmp.display()))?;
-    std::fs::rename(&tmp, file)
-        .with_context(|| format!("failed to rename {} to {}", tmp.display(), file.display()))?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)
+        .with_context(|| format!("failed to write {}", file.display()))?;
 
     signal_editor_refresh(file);
 

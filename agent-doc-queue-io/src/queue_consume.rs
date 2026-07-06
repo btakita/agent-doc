@@ -20,13 +20,10 @@ use agent_doc_queue::{
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, normalized_done_id_bag,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_prompt_node_keys_for_count,
-        queue_prompt_node_keys_for_done_ids, should_consume_queue_prompt_for_diff_content,
-        strike_all_noise_queue_heads,
+        queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
     },
-    queue_heads::active_queue_head_text,
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
-        response_explicitly_targets_queue_head,
     },
 };
 
@@ -279,30 +276,6 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-pub fn should_consume_queue_prompt_for_diff(file: &Path, diff_text: Option<&str>) -> Result<bool> {
-    let content = std::fs::read_to_string(file)
-        .context("queue consume guard: failed to read detached disk document")?;
-    should_consume_queue_prompt_for_diff_content(file, &content, diff_text)
-}
-
-pub fn queue_skip_diagnostic_for_file(file: &Path) -> Result<String> {
-    let content = std::fs::read_to_string(file)
-        .context("queue skip diagnostic: failed to read detached disk document")?;
-    agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
-}
-
-pub fn response_explicitly_targets_active_queue_head(file: &Path, response: &str) -> Result<bool> {
-    let content = std::fs::read_to_string(file)
-        .context("queue consume guard: failed to read detached disk document")?;
-    let Some(queue_head) = active_queue_head_text(&content)? else {
-        return Ok(false);
-    };
-    Ok(response_explicitly_targets_queue_head(
-        response,
-        &queue_head,
-    ))
-}
-
 /// Strike every free-text queue head that the committed `response_body` answers,
 /// regardless of position (#ftstrike). The normal leading-head consume only
 /// strikes a contiguous leading run and stops at an id-backed head, so a free-text
@@ -424,9 +397,9 @@ pub fn strike_answered_free_text_queue_heads(
 
 /// Strike answered free-text queue heads at the commit seam.
 ///
-/// Sources the answered response from the durable capture ledger (the
-/// cycle-state sidecar records the `capture_id`; the capture holds the
-/// `response_body`) and runs the same focused free-text strike used by finalize.
+/// Sources the answered response from the typed closeout projection first, then
+/// the durable capture ledger as a compatibility fallback, and runs the same
+/// focused free-text strike used by finalize.
 /// Best-effort: a missing capture, inactive queue, or strike error never blocks
 /// the commit.
 pub fn strike_answered_free_text_heads_at_commit_seam(
@@ -460,12 +433,21 @@ pub fn strike_answered_free_text_heads_at_commit_seam(
 }
 
 fn capture_response_body_for_commit(file: &Path) -> Option<String> {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
-    let capture_id = state.capture_id?;
-    let record = agent_doc_capture_io::load_by_id(file, &capture_id)
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
         .flatten()?;
-    Some(record.response_body)
+    let capture_id = state.capture_id.as_deref()?;
+    if let Ok(Some(projected)) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+        && state.cycle_id == projected.cycle_id
+        && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
+    {
+        return Some(projected.response_body);
+    }
+    agent_doc_capture_io::load_by_id(file, capture_id)
+        .ok()
+        .flatten()
+        .map(|record| record.response_body)
 }
 
 /// Strike every active queue head that is non-drainable **noise**, at ANY position
@@ -910,10 +892,8 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
                 current = frontmatter::merge_queue_state(&current, false)?;
             }
 
-            let response_first_line = agent_doc_capture_io::load_active(file)
-                .ok()
-                .flatten()
-                .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+            let response_first_line = capture_response_body_for_commit(file)
+                .and_then(|body| first_nonempty_line(&body).map(str::to_string));
             current = embed_consumed_prompt_in_response(
                 &current,
                 &consumed_texts,
@@ -1107,10 +1087,8 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
     // and the snapshot, so the selective-commit boundary stays consistent) when
     // the prompt is not already present in the exchange. Fail-safe: any locator
     // miss leaves the content unchanged rather than risk corrupting the exchange.
-    let response_first_line = agent_doc_capture_io::load_active(file)
-        .ok()
-        .flatten()
-        .and_then(|c| first_nonempty_line(&c.response_body).map(str::to_string));
+    let response_first_line = capture_response_body_for_commit(file)
+        .and_then(|body| first_nonempty_line(&body).map(str::to_string));
     current = embed_consumed_prompt_in_response(
         &current,
         &consumed_texts,

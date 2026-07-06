@@ -22,7 +22,8 @@ pub mod backlog_normalization;
 pub mod response_materialization_io;
 pub mod write_normalize;
 pub use backlog_normalization::{
-    NormalizedTemplateResponse, canonicalize_response_for_capture, enforce_no_replace_pending,
+    NormalizedTemplateResponse, canonicalize_response_for_capture,
+    canonicalize_response_for_capture_with_current_content, enforce_no_replace_pending,
     normalize_backlog_patch_response, pending_replace_escape_hatch_enabled,
 };
 pub use response_materialization_io::{
@@ -416,8 +417,10 @@ pub fn template_info_with_project_config(
     file: &Path,
     project_config: Option<Arc<ProjectConfig>>,
 ) -> Result<TemplateInfo> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "template_info_with_project_config",
+    )?;
 
     let (fm, _body) = agent_doc_frontmatter::frontmatter::parse(&doc)?;
     let template_mode = fm.resolve_mode().is_template();

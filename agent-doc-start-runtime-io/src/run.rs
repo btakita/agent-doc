@@ -89,6 +89,7 @@ pub fn run_with_reap_policy(
         pane_id,
         supervisor_instance_id,
         actor_record,
+        post_start_document_model_ensure,
     } = prepare_start_runtime(file, force, route_owned)?;
     let _stderr_redirect = stderr_redirect;
 
@@ -194,9 +195,12 @@ pub fn run_with_reap_policy(
     };
 
     // Create shared state for IPC handler
+    let launch_binary_identity =
+        agent_doc_controller_io::project_controller::current_binary_identity().ok();
     let shared = Arc::new(SupervisorShared::with_actor_runtime(
         resolved_cwd.source.as_str(),
         supervisor_instance_id,
+        launch_binary_identity,
         &harness.binary,
         Some(actor_runtime),
         Some(agent_doc_sqlite::state_store::ActorState::Starting),
@@ -240,6 +244,55 @@ pub fn run_with_reap_policy(
         &mut session_log,
         "controller_supervisor_registered state=starting",
     );
+    if post_start_document_model_ensure {
+        log_event(
+            &mut session_log,
+            "post_start_document_model_ensure status=started reason=start_admission_disk_metadata_bootstrap",
+        );
+        start_console_status(
+            &mut session_log,
+            route_owned,
+            "[start] live editor model unavailable during admission; rechecking after supervisor registration",
+        );
+        let ensured = agent_doc_crdt_relay_io::ensure_document_model(
+            &canonical,
+            "start_post_supervisor_registered",
+        )
+        .with_context(|| {
+            format!(
+                "post-start live document model ensure failed for {}",
+                canonical.display()
+            )
+        })?;
+        match ensured {
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                live_editors,
+                delivery_converged,
+                ..
+            } => {
+                log_event(
+                    &mut session_log,
+                    &format!(
+                        "post_start_document_model_ensure status=ready live_editors={} delivery_converged={}",
+                        live_editors, delivery_converged
+                    ),
+                );
+            }
+            agent_doc_crdt_relay_io::CurrentText::Detached => {
+                log_event(
+                    &mut session_log,
+                    "post_start_document_model_ensure status=detached",
+                );
+            }
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                anyhow::bail!(
+                    "post-start live document model ensure did not produce current editor text for {}",
+                    canonical.display()
+                );
+            }
+        }
+    }
 
     // Crash policy state machine
     let mut policy = CrashPolicy::new();
@@ -408,9 +461,12 @@ pub fn run_with_reap_policy(
             // INERT for an unchanged `agent:`: the re-resolved binary matches, so we
             // skip the swap entirely and the same-harness restart path is byte-for-
             // byte unchanged (no spec swap, `pending_adopt` untouched, no marker).
-            let restart_fm = std::fs::read_to_string(file)
-                .ok()
-                .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
+            let restart_fm = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "start_runtime_restart_frontmatter",
+            )
+            .ok()
+            .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm));
             match restart_fm {
                 Some(restart_fm) => {
                     let mut launch_log = StartRunLaunchLog {
@@ -543,6 +599,19 @@ pub fn run_with_reap_policy(
             );
             args
         };
+
+        let adopting_preserved_child = pending_adopt
+            .as_ref()
+            .is_some_and(|state| state.child_survived());
+        if !adopting_preserved_child {
+            clear_matching_turn_status_projection(
+                &canonical,
+                &shared,
+                "supervisor_child_spawn",
+                &mut session_log,
+            );
+            clear_turn_status_title_for_owned_pane(&canonical, &shared);
+        }
 
         // Build PtySpawnConfig and spawn child under pty
         let cfg = PtySpawnConfig {
@@ -1703,6 +1772,7 @@ mod tests {
         let shared = Arc::new(SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            None,
             "claude",
             None,
             Some(agent_doc_sqlite::state_store::ActorState::Ready),

@@ -18,6 +18,36 @@ use agent_doc_write_converge_io::{
 use anyhow::Result;
 use std::path::Path;
 
+pub(crate) fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+}
+
+pub(crate) fn disk_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+}
+
+pub(crate) fn ipc_document_content(
+    file: &Path,
+    current_source: &str,
+    disk_fallback_source: &str,
+) -> Result<String> {
+    current_document_content(file, current_source)
+        .or_else(|_| disk_document_content(file, disk_fallback_source))
+}
+
+pub(crate) fn projected_or_sidecar_cycle_id(file: &Path) -> Option<String> {
+    agent_doc_cycle_state_io::load_closeout_projection(file)
+        .ok()
+        .flatten()
+        .and_then(|projection| projection.cycle_id)
+        .or_else(|| {
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                .ok()
+                .flatten()
+                .map(|state| state.cycle_id)
+        })
+}
+
 /// Result of an IPC write attempt, including the patch_id used.
 ///
 /// The `patch_id` is returned so callers can report/retry the same logical
@@ -73,7 +103,11 @@ pub fn build_ipc_patches_json(
     normalize_prefix_lines: Option<&[String]>,
     boundary_seed: Option<&str>,
 ) -> Result<Vec<serde_json::Value>> {
-    let raw_doc = std::fs::read_to_string(file).unwrap_or_default();
+    let raw_doc = ipc_document_content(
+        file,
+        "write_ipc_build_patches_current",
+        "write_ipc_build_patches_disk_fallback",
+    )?;
     let summary = file.file_stem().and_then(|s| s.to_str());
     // #finalize-visible-buffer-ipc-timeout-race: when a stable seed (the IPC
     // patch_id) is supplied, derive a deterministic boundary so socket/file
@@ -261,10 +295,14 @@ pub fn queue_file_ipc_reposition_boundary(
     // #late-ipc-patch-duplicate-stall: tag the queued file patch with the cycle
     // id + a baseline content hash of the doc it targets so a late applier can
     // fence a superseded patch instead of blindly re-applying it.
-    if let Ok(Some(cs)) = agent_doc_cycle_state_io::load(file) {
-        payload["cycle_id"] = serde_json::Value::String(cs.cycle_id);
+    if let Some(cycle_id) = projected_or_sidecar_cycle_id(file) {
+        payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
-    if let Ok(live) = std::fs::read_to_string(file) {
+    if let Ok(live) = ipc_document_content(
+        file,
+        "write_ipc_reposition_baseline_hash",
+        "write_ipc_reposition_baseline_hash_disk_fallback",
+    ) {
         payload["baseline_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(&live));
     }
     target_payload_to_live_editor(file, &mut payload, "file_reposition");
@@ -319,7 +357,12 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         }
     }
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
-    let working_doc = std::fs::read_to_string(file).ok();
+    let working_doc = ipc_document_content(
+        file,
+        "write_ipc_reposition_working_doc",
+        "write_ipc_reposition_working_doc_disk_fallback",
+    )
+    .ok();
     let boundary_id = snapshot_doc
         .as_deref()
         .and_then(|doc| find_boundary_id(doc, "exchange"))
@@ -696,6 +739,66 @@ mod tests {
         assert_eq!(
             payload["reposition_boundary_id"],
             serde_json::json!("abc123")
+        );
+    }
+
+    #[test]
+    fn queued_file_reposition_patch_prefers_projected_cycle_over_stale_sidecar() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        let doc = root.join("plan.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior - opus\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let first =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_first_sidecar = fs::read(&sidecar_path).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        assert_ne!(first.cycle_id, second.cycle_id);
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        fs::write(&sidecar_path, stale_first_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            first.cycle_id
+        );
+
+        let result = queue_file_ipc_reposition_boundary(&doc, Some("abc123"), &[]).unwrap();
+        assert!(matches!(result, FileIpcRepositionResult::Queued));
+
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let patch_file = root.join(".agent-doc/patches").join(format!("{hash}.json"));
+        let payload: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
+        assert_eq!(
+            payload["cycle_id"].as_str(),
+            Some(second.cycle_id.as_str()),
+            "queued reposition patch should tag the latest projected cycle id"
         );
     }
 }

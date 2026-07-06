@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Production editor-as-CRDT-replica wiring (`#crdtauth5`, realtime phase 3).
  *
  * The manager is intentionally thin: local edits are forwarded to [CrdtReplicaForwarder],
- * remote updates are pulled from the supervisor, and document mutation uses the same
+ * remote updates are pulled from the CPC document model, and document mutation uses the same
  * minimal-edit helper as IPC patches. It never saves the document after a realtime
  * CRDT update.
  */
@@ -290,7 +290,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             filePath = filePath,
             identity = identity,
             node = NativeReplicaNode(),
-            transport = SupervisorSocketReplicaTransport(root),
+            transport = ControllerSocketReplicaTransport(root),
         )
         if (!forwarder.register()) {
             return null

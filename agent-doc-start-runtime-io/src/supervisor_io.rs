@@ -48,6 +48,18 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
             None => Err("no active session".to_string()),
         }
     }
+
+    fn begin_prompt_dispatch(
+        &self,
+        source: &str,
+        bytes: &str,
+    ) -> agent_doc_supervisor_io::ipc::PromptDispatchAdmission {
+        self.begin_prompt_dispatch_projection(source, bytes)
+    }
+
+    fn clear_prompt_dispatch_on_failure(&self, key: &str) {
+        self.clear_prompt_dispatch_projection_on_failure(key);
+    }
 }
 
 impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared {
@@ -76,7 +88,7 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
     }
 
     fn binary_stale(&self) -> bool {
-        self.binary_stale.load(Ordering::Relaxed)
+        self.refresh_binary_stale()
     }
 
     fn set_restart_reexec(&self, reexec: bool) {
@@ -202,6 +214,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcHandlerState for SupervisorShare
     fn handle_crdt_checkpoint(&self, file: &str, source: &str) -> IpcResponse {
         agent_doc_supervisor_crdt_io::handle_crdt_checkpoint(file, source)
     }
+
+    fn handle_crdt_current_text(&self, file: &str, source: &str) -> IpcResponse {
+        agent_doc_supervisor_crdt_io::handle_crdt_current_text(file, source)
+    }
 }
 
 #[cfg(test)]
@@ -233,6 +249,51 @@ mod tests {
     /// per-document `crdt_relay_host` hub.
     fn crdt_send(sock: &std::path::Path, method: &IpcMethod) -> IpcResponse {
         agent_doc_supervisor_io::ipc::send_command(sock, method).expect("send crdt ipc")
+    }
+
+    #[test]
+    fn restart_ipc_refreshes_stale_binary_before_reexec_decision() {
+        let mut stale_launch =
+            agent_doc_controller_io::project_controller::current_binary_identity()
+                .expect("current binary identity");
+        stale_launch.len = stale_launch.len.saturating_add(1);
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "stale-restart-instance".to_string(),
+            Some(stale_launch),
+            "claude",
+            None,
+            None,
+            None,
+        );
+
+        assert!(!shared.binary_stale.load(Ordering::Relaxed));
+        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string());
+
+        assert!(shared.binary_stale.load(Ordering::Relaxed));
+        assert!(shared.restart_requested.load(Ordering::Relaxed));
+        assert!(shared.restart_reexec.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn restart_ipc_keeps_fresh_binary_on_relaunch_path() {
+        let fresh_launch = agent_doc_controller_io::project_controller::current_binary_identity()
+            .expect("current binary identity");
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "fresh-restart-instance".to_string(),
+            Some(fresh_launch),
+            "claude",
+            None,
+            None,
+            None,
+        );
+
+        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string());
+
+        assert!(!shared.binary_stale.load(Ordering::Relaxed));
+        assert!(shared.restart_requested.load(Ordering::Relaxed));
+        assert!(!shared.restart_reexec.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -480,6 +541,73 @@ mod tests {
     }
 
     #[test]
+    fn handle_ipc_inject_suppresses_duplicate_before_ready_projection_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("projection.md");
+        std::fs::write(&doc, "# projection\n").unwrap();
+        let runtime = SessionActorRuntime {
+            project_root: dir.path().to_path_buf(),
+            file: doc,
+            session_id: "projection-session".to_string(),
+            pane_id: "%1".to_string(),
+            generation: 9,
+        };
+        let shared = Arc::new(SupervisorShared::with_actor_runtime(
+            "test",
+            "projection-instance".to_string(),
+            None,
+            "claude",
+            Some(runtime),
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            None,
+        ));
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
+            Box::new(RecordingWriter(written.clone())),
+        ))));
+
+        let bytes = "agent-doc tasks/software/tsift.md\n";
+        let first = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+            shared.as_ref(),
+            bytes,
+            "ipc_inject",
+        );
+        let duplicate = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+            shared.as_ref(),
+            bytes,
+            "ipc_inject",
+        );
+
+        assert_eq!(
+            first.unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
+        );
+        assert_eq!(
+            duplicate.unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::DuplicateSuppressed
+        );
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\r"
+        );
+
+        *shared.prompt_dispatch_projection.lock().unwrap() = None;
+        let after_ready = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
+            shared.as_ref(),
+            bytes,
+            "ipc_inject",
+        );
+        assert_eq!(
+            after_ready.unwrap(),
+            agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
+        );
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"agent-doc tasks/software/tsift.md\ragent-doc tasks/software/tsift.md\r"
+        );
+    }
+
+    #[test]
     fn handle_ipc_state_includes_editor_sync_for_actor_file() {
         let (_dir, doc) = crdt_temp_doc("state-editor-sync.md");
         let project_root = doc.parent().unwrap().to_path_buf();
@@ -499,6 +627,7 @@ mod tests {
         let shared = Arc::new(SupervisorShared::with_actor_runtime(
             "test",
             "state-instance".to_string(),
+            None,
             "claude",
             Some(runtime),
             Some(agent_doc_sqlite::state_store::ActorState::Ready),

@@ -114,8 +114,11 @@ pub fn run_with_tmux(
         if !file.exists() {
             anyhow::bail!("file not found: {}", file.display());
         }
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "layout_command_document",
+        )
+        .with_context(|| format!("failed to resolve {}", file.display()))?;
         let (_updated, session_id) = frontmatter::ensure_session(&content)?;
         let pane = agent_doc_session_registry_io::lookup(&session_id)?;
         match pane {

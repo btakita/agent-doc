@@ -650,6 +650,7 @@ mod tests {
                 document_hash: doc.to_string(),
                 cycle_id: cycle.to_string(),
                 session_id: None,
+                tracked_work_maintenance_required: Some(false),
             },
         )
     }
@@ -1096,6 +1097,7 @@ mod tests {
                     document_hash: doc.to_string(),
                     cycle_id: cycle.to_string(),
                     session_id: None,
+                    tracked_work_maintenance_required: Some(false),
                 },
             ));
             ledger.append(StateEvent::new(

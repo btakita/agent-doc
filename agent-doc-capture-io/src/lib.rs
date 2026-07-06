@@ -149,7 +149,7 @@ impl PartialCheckpointWriter {
     }
 
     pub fn with_interval(file: &Path, interval: Duration) -> Self {
-        let cycle_id = agent_doc_cycle_state_io::load(file)
+        let cycle_id = agent_doc_cycle_state_io::load_with_closeout_projection(file)
             .ok()
             .flatten()
             .map(|state| state.cycle_id)
@@ -166,6 +166,22 @@ impl PartialCheckpointWriter {
     }
 
     pub fn maybe_checkpoint(&mut self, response: &str) -> Result<Option<PartialCaptureRecord>> {
+        self.maybe_checkpoint_inner(response, None)
+    }
+
+    pub fn maybe_checkpoint_with_current_content(
+        &mut self,
+        response: &str,
+        current_content: &str,
+    ) -> Result<Option<PartialCaptureRecord>> {
+        self.maybe_checkpoint_inner(response, Some(current_content))
+    }
+
+    fn maybe_checkpoint_inner(
+        &mut self,
+        response: &str,
+        current_content: Option<&str>,
+    ) -> Result<Option<PartialCaptureRecord>> {
         if self.stopped || !self.active_cycle_accepts_checkpoint()? {
             return Ok(None);
         }
@@ -186,19 +202,29 @@ impl PartialCheckpointWriter {
         }
 
         self.checkpoint_count += 1;
-        let record = checkpoint_partial_response_for_cycle(
-            &self.file,
-            response,
-            self.checkpoint_count,
-            &self.cycle_id,
-        )?;
+        let record = match current_content {
+            Some(current_content) => checkpoint_partial_response_for_cycle_with_current_content(
+                &self.file,
+                response,
+                self.checkpoint_count,
+                &self.cycle_id,
+                current_content,
+            )?,
+            None => checkpoint_partial_response_for_cycle(
+                &self.file,
+                response,
+                self.checkpoint_count,
+                &self.cycle_id,
+            )?,
+        };
         self.last_checkpoint = Some(Instant::now());
         self.last_response_sha256 = Some(response_sha256);
         Ok(Some(record))
     }
 
     fn active_cycle_accepts_checkpoint(&mut self) -> Result<bool> {
-        let Some(state) = agent_doc_cycle_state_io::load(&self.file)? else {
+        let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(&self.file)?
+        else {
             return Ok(self.cycle_id.starts_with("partial-"));
         };
         if state.cycle_id == self.cycle_id && state.is_open() {
@@ -229,13 +255,22 @@ impl PartialCheckpointWriter {
 pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
     let file_content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for response capture", file.display()))?;
+    capture_response_with_current_content(file, response, &file_content)
+}
+
+pub fn capture_response_with_current_content(
+    file: &Path,
+    response: &str,
+    file_content: &str,
+) -> Result<CaptureRecord> {
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let response_sha256 = agent_doc_hash::content_hash(response);
-    let existing_cycle_id = agent_doc_cycle_state_io::load(file)?.map(|s| s.cycle_id);
+    let existing_cycle_id =
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|s| s.cycle_id);
     let capture_id = existing_cycle_id.unwrap_or_else(|| format!("synthetic-{}", now_millis()));
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
 
-    let metadata = metadata_from_frontmatter(&file_content);
+    let metadata = metadata_from_frontmatter(file_content);
 
     // Redact secrets from the response body before it lands in the capture
     // sidecar JSON. The `response_sha256` keeps the original-bytes hash so
@@ -261,7 +296,7 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         snapshot_hash: snapshot_content
             .as_deref()
             .map(agent_doc_hash::content_hash),
-        file_hash: Some(replay_file_hash(&file_content)),
+        file_hash: Some(replay_file_hash(file_content)),
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
         state: CaptureState::Captured,
@@ -271,9 +306,18 @@ pub fn capture_response(file: &Path, response: &str) -> Result<CaptureRecord> {
         file,
         "response_captured",
         snapshot_content.as_deref(),
-        Some(&file_content),
+        Some(file_content),
         &response_sha256,
         Some(&capture_id),
+    )?;
+    agent_doc_cycle_state_io::append_response_captured_body(
+        file,
+        &record.cycle_id,
+        &record.capture_id,
+        &record.response_sha256,
+        &record.response_body,
+        record.file_hash.as_deref(),
+        record.snapshot_hash.as_deref(),
     )?;
     Ok(record)
 }
@@ -290,11 +334,27 @@ fn checkpoint_partial_response_for_cycle(
             file.display()
         )
     })?;
+    checkpoint_partial_response_for_cycle_with_current_content(
+        file,
+        response,
+        checkpoint_count,
+        cycle_id,
+        &file_content,
+    )
+}
+
+fn checkpoint_partial_response_for_cycle_with_current_content(
+    file: &Path,
+    response: &str,
+    checkpoint_count: u64,
+    cycle_id: &str,
+    file_content: &str,
+) -> Result<PartialCaptureRecord> {
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     let response_sha256 = agent_doc_hash::content_hash(response);
     let checkpoint_id = format!("{cycle_id}-partial");
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let metadata = metadata_from_frontmatter(&file_content);
+    let metadata = metadata_from_frontmatter(file_content);
     let existing = load_partial_by_cycle(file, cycle_id)?;
     let captured_at = existing
         .as_ref()
@@ -316,7 +376,7 @@ fn checkpoint_partial_response_for_cycle(
         snapshot_hash: snapshot_content
             .as_deref()
             .map(agent_doc_hash::content_hash),
-        file_hash: Some(replay_file_hash(&file_content)),
+        file_hash: Some(replay_file_hash(file_content)),
         response_sha256,
         response_body: redacted_response,
     };
@@ -335,7 +395,7 @@ fn checkpoint_partial_response_for_cycle(
 }
 
 pub fn load_active(file: &Path) -> Result<Option<CaptureRecord>> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
     let Some(capture_id) = state.capture_id.as_deref() else {
@@ -479,7 +539,15 @@ pub fn replay_baseline_drifted(file: &Path, capture: &CaptureRecord) -> Result<b
             file.display()
         )
     })?;
-    let current_file_hash = replay_file_hash(&current_file);
+    replay_baseline_drifted_with_current_content(file, capture, &current_file)
+}
+
+pub fn replay_baseline_drifted_with_current_content(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file: &str,
+) -> Result<bool> {
+    let current_file_hash = replay_file_hash(current_file);
     let current_snapshot = agent_doc_snapshot_io::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
@@ -492,7 +560,15 @@ pub fn replay_baseline_drifted(file: &Path, capture: &CaptureRecord) -> Result<b
 pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     let current_file = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {} for capture replay", file.display()))?;
-    let current_file_hash = replay_file_hash(&current_file);
+    validate_replay_with_current_content(file, capture, &current_file)
+}
+
+pub fn validate_replay_with_current_content(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file: &str,
+) -> Result<()> {
+    let current_file_hash = replay_file_hash(current_file);
     let current_snapshot = agent_doc_snapshot_io::load(file)?;
     let current_snapshot_hash = current_snapshot
         .as_deref()
@@ -512,7 +588,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     // the capture's file/snapshot hashes from the current state and proceed.
     //
     // Plan: tasks/agent-doc/plan-baseline-drift-after-user-commit.md
-    if response_body_intact_in_current(file, &capture.response_body, &current_file)? {
+    if response_body_intact_in_current(file, &capture.response_body, current_file)? {
         refresh_replay_baseline_for_reason(
             file,
             capture,
@@ -531,7 +607,7 @@ pub fn validate_replay(file: &Path, capture: &CaptureRecord) -> Result<()> {
     // reset.
     if file_mismatch
         && !snapshot_mismatch
-        && live_drift_is_queue_only_against_snapshot(&current_file, current_snapshot.as_deref())?
+        && live_drift_is_queue_only_against_snapshot(current_file, current_snapshot.as_deref())?
     {
         refresh_replay_baseline_for_reason(
             file,
@@ -701,6 +777,10 @@ pub fn mark_committed(file: &Path) -> Result<()> {
     update_active_state(file, CaptureState::Committed)
 }
 
+pub fn mark_committed_with_current_content(file: &Path, current_content: &str) -> Result<()> {
+    update_active_state_with_current_content(file, CaptureState::Committed, Some(current_content))
+}
+
 pub fn mark_discarded(file: &Path) -> Result<()> {
     update_active_state(file, CaptureState::Discarded)
 }
@@ -787,6 +867,14 @@ pub fn discard_captures_for_archived_responses(file: &Path, archived_text: &str)
 }
 
 fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
+    update_active_state_with_current_content(file, state, None)
+}
+
+fn update_active_state_with_current_content(
+    file: &Path,
+    state: CaptureState,
+    current_content: Option<&str>,
+) -> Result<()> {
     let Some(mut record) = load_active(file)? else {
         return Ok(());
     };
@@ -823,9 +911,15 @@ fn update_active_state(file: &Path, state: CaptureState) -> Result<()> {
                 record.committed_at = Some(now);
                 changed = true;
             }
-            let current_file = std::fs::read_to_string(file)
-                .with_context(|| format!("failed to read {} for capture commit", file.display()))?;
-            let current_file_hash = replay_file_hash(&current_file);
+            let current_file_hash = match current_content {
+                Some(current_content) => replay_file_hash(current_content),
+                None => {
+                    let current_file = std::fs::read_to_string(file).with_context(|| {
+                        format!("failed to read {} for capture commit", file.display())
+                    })?;
+                    replay_file_hash(&current_file)
+                }
+            };
             if record.file_hash.as_deref() != Some(current_file_hash.as_str()) {
                 record.file_hash = Some(current_file_hash);
                 changed = true;
@@ -972,6 +1066,14 @@ mod tests {
             cycle.capture_id.as_deref(),
             Some(record.capture_id.as_str())
         );
+        let projected =
+            agent_doc_cycle_state_io::load_projected_captured_response(&doc, &record.capture_id)
+                .unwrap()
+                .expect("captured response projection");
+        assert_eq!(projected.response_sha256, record.response_sha256);
+        assert_eq!(projected.response_body, "response body");
+        assert_eq!(projected.file_hash, record.file_hash);
+        assert_eq!(projected.snapshot_hash, record.snapshot_hash);
     }
 
     #[test]
@@ -1023,6 +1125,33 @@ mod tests {
         assert!(writer.maybe_checkpoint("first").unwrap().is_some());
         agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
 
+        assert!(writer.maybe_checkpoint("second").unwrap().is_none());
+        let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
+        assert_eq!(loaded.response_body, "first");
+    }
+
+    #[test]
+    fn partial_checkpoint_stops_after_committed_projection_when_sidecar_is_stale_open() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_snapshot_io::save(&doc, "body", agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+
+        let mut writer = PartialCheckpointWriter::with_interval(&doc, Duration::ZERO);
+        assert!(writer.maybe_checkpoint("first").unwrap().is_some());
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
         assert!(writer.maybe_checkpoint("second").unwrap().is_none());
         let loaded = latest_partial_checkpoint(&doc).unwrap().unwrap();
         assert_eq!(loaded.response_body, "first");

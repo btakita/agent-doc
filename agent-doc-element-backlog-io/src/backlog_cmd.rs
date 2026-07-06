@@ -67,11 +67,22 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     crate::converge_or_disk_write(file, current, target, "pending_write")
 }
 
+fn read_command_document(file: &Path, source: &str) -> Result<String> {
+    let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
+    if force_disk {
+        crate::force_disk_document_content(file, source)
+            .with_context(|| format!("{source}: failed to read disk document"))
+    } else {
+        crate::current_document_content(file, source)
+            .with_context(|| format!("{source}: failed to resolve current document"))
+    }
+}
+
 fn find_tracked_list_component(
     file: &Path,
     list: backlog::TrackedWorkList,
 ) -> Result<(String, element::Component)> {
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let content = read_command_document(file, "backlog_find_tracked_list_component")?;
     let comp = backlog::find_tracked_work_component_in_content(&content, list)?;
     Ok((content, comp))
 }
@@ -84,13 +95,13 @@ fn find_component_containing_open_id(
     file: &Path,
     id: &str,
 ) -> Result<(String, element::Component)> {
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let content = read_command_document(file, "backlog_find_open_id_component")?;
     let comp = backlog::find_open_tracked_work_component_in_content(&content, id)?;
     Ok((content, comp))
 }
 
 pub fn open_item_component_name(file: &Path, id: &str) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let content = read_command_document(file, "backlog_open_item_component")?;
     backlog::open_tracked_work_component_name_in_content(&content, id)
 }
 
@@ -103,7 +114,7 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
         return Ok(true);
     }
 
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let content = read_command_document(file, "backlog_resolved_id")?;
     backlog::content_has_resolved_tracked_work_id(&content, &id)
 }
 
@@ -266,7 +277,7 @@ pub fn icebox_add_back(file: &Path, item: &str) -> Result<String> {
 /// `NEXT:` annotation tail surfaced so a quick pass can triage a long review list
 /// without reading the whole component. Read-only.
 pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<ReviewItemView>> {
-    let content = std::fs::read_to_string(file)?;
+    let content = read_command_document(file, "review_list_items")?;
     agent_doc_element_review::review_item_views_from_content(&content, filter)
 }
 
@@ -275,7 +286,7 @@ pub fn list_review_items(file: &Path, filter: &ReviewListFilter) -> Result<Vec<R
 /// On-demand and idempotent: a review id whose ungate task already exists in the
 /// backlog is skipped.
 pub fn add_ungate_tasks_for_review(file: &Path) -> Result<UngateTasksReport> {
-    let content = std::fs::read_to_string(file)?;
+    let content = read_command_document(file, "review_ungate_tasks")?;
     let plan = agent_doc_element_review::plan_ungate_tasks_for_review(&content)?;
     if !plan.task_texts.is_empty() {
         add_many(file, &plan.task_texts, false)?;
@@ -387,7 +398,7 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 /// only when a new item was inserted so the caller can record actual same-cycle
 /// adds (`#opsproof-samecycle-add`).
 pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = read_command_document(file, "review_add")?;
     let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
@@ -403,7 +414,7 @@ pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
 
 /// Edit a review item's text, preserving its hash id.
 pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = read_command_document(file, "review_edit")?;
     let comp = find_review_component_in_content(&full_content)?
         .context("document has no review component")?;
     let existing = &full_content[comp.open_end..comp.close_start];
@@ -425,7 +436,7 @@ pub fn review_edit(file: &Path, id: &str, text: &str) -> Result<()> {
 /// can be deleted outright without an ambiguous edit-by-id. Errors when the
 /// document has no review component or no item matches the id.
 pub fn review_remove(file: &Path, id: &str) -> Result<()> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = read_command_document(file, "review_remove")?;
     let plan = remove_review_items_from_document(
         &full_content,
         id,
@@ -447,7 +458,7 @@ pub fn review_remove(file: &Path, id: &str) -> Result<()> {
 /// stale/duplicate entry). Errors when the document has no review component or
 /// no item matches the id.
 pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = read_command_document(file, "review_resolve")?;
     let plan = resolve_review_items_in_document(
         &full_content,
         id,
@@ -469,7 +480,7 @@ pub fn review_resolve(file: &Path, id: &str) -> Result<()> {
 /// Transition an item back to `Open` (`[ ]`) by id.
 /// Errors on `Open` or `Done` items — the source must be `[/]`.
 pub fn ungate(file: &Path, id: &str) -> Result<()> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = read_command_document(file, "review_ungate")?;
     let Some(review_comp) = find_review_component_in_content(&full_content)? else {
         let (full_content, comp) = find_pending_component(file)?;
         let existing = &full_content[comp.open_end..comp.close_start];
@@ -904,8 +915,39 @@ mod tests {
         (tmp, doc)
     }
 
+    struct TestBacklogCommandEffects;
+
+    static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;
+
+    impl crate::BacklogCommandEffects for TestBacklogCommandEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
+        fn force_disk_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            file: &Path,
+            _current_content: &str,
+            target_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            fs::write(file, target_content)?;
+            Ok(())
+        }
+
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+    }
+
+    fn with_test_effects<T>(f: impl FnOnce() -> T) -> T {
+        crate::with_backlog_command_effects(&TEST_BACKLOG_COMMAND_EFFECTS, f)
+    }
+
     fn force_pending<T>(f: impl FnOnce() -> Result<T>) -> T {
-        with_force_disk_pending_writes(true, f).unwrap()
+        with_test_effects(|| with_force_disk_pending_writes(true, f).unwrap())
     }
 
     fn doc_with_pending(items: &str) -> (TempDir, PathBuf) {
@@ -963,7 +1005,8 @@ mod tests {
         // #preset-item-id-collision-enforce: an explicit id matching a
         // prompt_presets key must fail closed at mutation time.
         let (_tmp, doc) = doc_with_preset_and_pending("next-steps", "- [ ] [#abcd] existing");
-        let err = add(&doc, "id=next-steps add follow-up", false).unwrap_err();
+        let err =
+            with_test_effects(|| add(&doc, "id=next-steps add follow-up", false).unwrap_err());
         let msg = format!("{err:#}");
         assert!(msg.contains("#next-steps"), "{msg}");
         assert!(msg.contains("prompt_presets"), "{msg}");
@@ -976,7 +1019,7 @@ mod tests {
     fn add_rejects_explicit_id_colliding_with_active_item() {
         // Bracketed `[#id]` form colliding with an existing active backlog id.
         let (_tmp, doc) = doc_with_pending("- [ ] [#gscaccess] grant Google Ads access");
-        let err = add(&doc, "[#gscaccess] duplicate", false).unwrap_err();
+        let err = with_test_effects(|| add(&doc, "[#gscaccess] duplicate", false).unwrap_err());
         let msg = format!("{err:#}");
         assert!(msg.contains("#gscaccess"), "{msg}");
         assert!(msg.contains("agent:") || msg.contains("active"), "{msg}");
@@ -1176,7 +1219,7 @@ mod tests {
         );
         let (tmp, doc) = setup_test_dir();
         fs::write(&doc, content).unwrap();
-        let err = done(&doc, "done1").unwrap_err();
+        let err = with_test_effects(|| done(&doc, "done1").unwrap_err());
         assert!(err.to_string().contains("id not found in backlog/icebox"));
         drop(tmp);
     }
@@ -1278,7 +1321,7 @@ mod tests {
     #[test]
     fn list_prints_pending_items() {
         let (_tmp, doc) = doc_with_pending("- item one\n- item two");
-        list(&doc).unwrap();
+        with_test_effects(|| list(&doc).unwrap());
         // Just checking it doesn't panic
     }
 
@@ -1297,7 +1340,7 @@ mod tests {
     #[test]
     fn resolve_gate_noop_no_match() {
         let (_tmp, doc) = doc_with_pending("- [/release] [#a1b2] Release");
-        resolve_gate(&doc, "deploy").unwrap();
+        with_test_effects(|| resolve_gate(&doc, "deploy").unwrap());
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("[/release]"), "should be unchanged");
     }
@@ -1364,7 +1407,7 @@ mod tests {
     #[test]
     fn ungate_tasks_noop_when_no_gated_review_items() {
         let (_tmp, doc) = doc_with_pending("- [ ] [#a] open item\n");
-        let report = add_ungate_tasks_for_review(&doc).unwrap();
+        let report = with_test_effects(|| add_ungate_tasks_for_review(&doc).unwrap());
         assert_eq!(report.scanned, 0);
         assert!(report.added.is_empty());
     }
@@ -1382,7 +1425,8 @@ mod tests {
         );
         fs::write(&doc, content).unwrap();
 
-        let all = list_review_items(&doc, &ReviewListFilter::default()).unwrap();
+        let all =
+            with_test_effects(|| list_review_items(&doc, &ReviewListFilter::default()).unwrap());
         assert_eq!(all.len(), 3);
 
         let aa = all.iter().find(|v| v.id == "aa11").unwrap();
@@ -1398,7 +1442,7 @@ mod tests {
             gate_type: Some("release".into()),
             ..Default::default()
         };
-        let rel = list_review_items(&doc, &f).unwrap();
+        let rel = with_test_effects(|| list_review_items(&doc, &f).unwrap());
         assert_eq!(rel.len(), 1);
         assert_eq!(rel[0].id, "cc33");
 
@@ -1407,7 +1451,7 @@ mod tests {
             has_next: Some(true),
             ..Default::default()
         };
-        let with_next = list_review_items(&doc, &f).unwrap();
+        let with_next = with_test_effects(|| list_review_items(&doc, &f).unwrap());
         assert_eq!(with_next.len(), 1);
         assert_eq!(with_next[0].id, "aa11");
 
@@ -1416,14 +1460,17 @@ mod tests {
             has_next: Some(false),
             ..Default::default()
         };
-        assert_eq!(list_review_items(&doc, &f).unwrap().len(), 2);
+        assert_eq!(
+            with_test_effects(|| list_review_items(&doc, &f).unwrap()).len(),
+            2
+        );
 
         // tag filter accepts the bare form (without leading `#`)
         let f = ReviewListFilter {
             tag: Some("bar".into()),
             ..Default::default()
         };
-        let tagged = list_review_items(&doc, &f).unwrap();
+        let tagged = with_test_effects(|| list_review_items(&doc, &f).unwrap());
         assert_eq!(tagged.len(), 1);
         assert_eq!(tagged[0].id, "bb22");
     }
@@ -1456,7 +1503,7 @@ mod tests {
     #[test]
     fn review_remove_errors_when_id_absent() {
         let (_tmp, doc) = doc_with_review("- [/] [#aa11] only item\n");
-        let err = review_remove(&doc, "nope99").unwrap_err();
+        let err = with_test_effects(|| review_remove(&doc, "nope99").unwrap_err());
         assert!(format!("{err:#}").contains("#nope99"), "{err:#}");
         // Document is untouched on a miss.
         let after = fs::read_to_string(&doc).unwrap();

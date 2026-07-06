@@ -100,7 +100,7 @@ fn assemble(file: &Path, doc_git_root: &Path) -> (ChartFacts, ObservedPhases) {
         installed_build_id,
     };
 
-    let closeout = agent_doc_cycle_state_io::load(file)
+    let closeout = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
         .flatten()
         .map(|state| closeout_phase_from_cycle(state.phase))
@@ -186,5 +186,38 @@ mod tests {
         assert!(snap.contains("editor_sync.synced"), "got: {snap}");
         assert!(snap.contains("closeout.idle"), "got: {snap}");
         assert!(snap.contains("supervisor.sup_idle"), "got: {snap}");
+    }
+
+    #[test]
+    fn advisory_snapshot_prefers_terminal_projection_over_stale_sidecar() {
+        let dir = std::env::temp_dir().join(format!(
+            "adstatechart_snapshot_projection_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let file = dir.join("doc.md");
+        let content = "body";
+        std::fs::write(&file, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&file)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &file,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        let snap = advisory_snapshot(&file);
+        assert!(snap.contains("closeout.committed"), "got: {snap}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

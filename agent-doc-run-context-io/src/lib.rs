@@ -247,7 +247,7 @@ where
     // the normal `None` case.
     ctx.memoized_slot::<CycleStateKey, _, _>(|ctx| {
         let path: PathBuf = ctx.get(file_path_cell(ctx));
-        match agent_doc_cycle_state_io::load(&path) {
+        match agent_doc_cycle_state_io::load_with_closeout_projection(&path) {
             Ok(state) => state.map(Arc::new),
             Err(e) => {
                 eprintln!(
@@ -1298,6 +1298,27 @@ mod tests {
             .expect("cycle state now present after reload");
         assert!(!state.cycle_id.is_empty());
         assert!(rc.is_cycle_state_cached());
+
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("hello"), Some("hello"))
+            .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
+        rc.invalidate_cycle_state();
+        let projected = rc
+            .cycle_state()
+            .expect("projection-aware cycle state should still load");
+        assert!(
+            !projected.is_open(),
+            "cycle-state slot should honor terminal closeout projections before sidecars"
+        );
     }
 
     // ---- Phase 8 (#lr-head-8) ----

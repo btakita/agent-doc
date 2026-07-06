@@ -117,7 +117,10 @@ pub fn log_partial_response_materialization_for_retry(
     source: &str,
     response: &str,
 ) -> Result<()> {
-    let Ok(current) = std::fs::read_to_string(file) else {
+    let Ok(current) = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "log_partial_response_materialization_for_retry",
+    ) else {
         return Ok(());
     };
     if response_materialized_in_content(response, &current) {

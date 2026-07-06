@@ -171,12 +171,13 @@ pub fn normalize_backlog_patch_response(
 
         let rewritten_doc = backlog_component.replace_content(current_content, &normalized_body);
         agent_doc_document_realtime_io::guard_visible_write_idle(file, "normalize_pending_patch")?;
-        std::fs::write(file, &rewritten_doc).with_context(|| {
-            format!(
-                "failed to write normalized pending state {}",
-                file.display()
-            )
-        })?;
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &rewritten_doc)
+            .with_context(|| {
+                format!(
+                    "failed to write normalized pending state {}",
+                    file.display()
+                )
+            })?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -208,9 +209,23 @@ pub fn canonicalize_response_for_capture(file: &Path, response: &str) -> Result<
         return Ok(response.to_string());
     }
 
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} for response capture", file.display()))?;
-    let Ok((fm, _)) = frontmatter::parse(&current_content) else {
+    let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "canonicalize_response_for_capture",
+    )?;
+    canonicalize_response_for_capture_with_current_content(file, response, &current_content)
+}
+
+pub fn canonicalize_response_for_capture_with_current_content(
+    file: &Path,
+    response: &str,
+    current_content: &str,
+) -> Result<String> {
+    if !response.contains("<!-- patch:") {
+        return Ok(response.to_string());
+    }
+
+    let Ok((fm, _)) = frontmatter::parse(current_content) else {
         return Ok(response.to_string());
     };
     if !fm.resolve_mode().is_template() {
@@ -230,7 +245,7 @@ pub fn canonicalize_response_for_capture(file: &Path, response: &str) -> Result<
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
     let normalized =
-        normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;
+        normalize_backlog_patch_response(file, current_content, patches, unmatched, false)?;
     Ok(normalized
         .response_for_capture
         .unwrap_or_else(|| response.to_string()))

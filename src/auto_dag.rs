@@ -21,8 +21,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// planning. Pure graph analysis/rendering lives in `agent-doc-work-graph`; the
 /// binary owns file IO and terminal output.
 pub(crate) fn run_command(file: &Path, json: bool) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("auto-dag: read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "auto_dag_command_document",
+    )?;
     let dag = agent_doc_work_graph::analyze_document(&content)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&dag)?);

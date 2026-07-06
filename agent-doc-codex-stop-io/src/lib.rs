@@ -303,10 +303,7 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     if let Some(prompt) = agent_doc_session_check_io::unresolved_exchange_prompt(file)? {
         return Ok(Some(prompt));
     }
-    let content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(_) => return Ok(None),
-    };
+    let content = current_document_content(file, "codex_stop_active_session_queue_head")?;
     Ok(first_active_queue_prompt_in_content(&content))
 }
 
@@ -402,7 +399,11 @@ fn repeated_queue_response_for_write(
     prompt: &str,
     response: &str,
 ) -> Result<std::result::Result<String, String>> {
-    if queue_consume::response_explicitly_targets_active_queue_head(file, response)? {
+    if response_explicitly_targets_current_queue_head(
+        file,
+        response,
+        "codex_stop_repeated_queue_response",
+    )? {
         return Ok(Ok(response.to_string()));
     }
     if response_has_patch_markers(response) || response_has_response_heading(response) {
@@ -456,8 +457,8 @@ fn try_recover_repeated_queue_head_response(
                 });
             }
         };
-    let content_before_repair = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content_before_repair =
+        current_document_content(file, "codex_stop_repeated_queue_before_repair")?;
     let queue_completion_ids =
         agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
             file,
@@ -933,9 +934,10 @@ fn attempt_stop_closeout(
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
         match &payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-                queue_consume::response_explicitly_targets_active_queue_head(
+                response_explicitly_targets_current_queue_head(
                     file,
                     response.as_ref(),
+                    "codex_stop_captured_response_targets_queue_head",
                 )?
             }
             _ => false,
@@ -946,8 +948,8 @@ fn attempt_stop_closeout(
     let queue_completion_ids = if queue_synthetic_cycle && captured_response_targets_queue_head {
         match &payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
-                let content_before_repair = std::fs::read_to_string(file)
-                    .with_context(|| format!("failed to read {}", file.display()))?;
+                let content_before_repair =
+                    current_document_content(file, "codex_stop_auto_close_before_repair")?;
                 agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
                     file,
                     None,
@@ -1147,6 +1149,34 @@ fn read_stdin_payload() -> Result<String> {
         .read_to_string(&mut payload)
         .context("read hook payload from stdin")?;
     Ok(payload)
+}
+
+fn response_explicitly_targets_current_queue_head(
+    file: &Path,
+    response: &str,
+    source: &str,
+) -> Result<bool> {
+    let content = current_document_content(file, source)?;
+    let Some(queue_head) = agent_doc_queue::queue_heads::active_queue_head_text(&content)? else {
+        return Ok(false);
+    };
+    Ok(
+        agent_doc_queue::queue_response::response_explicitly_targets_queue_head(
+            response,
+            &queue_head,
+        ),
+    )
+}
+
+fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source).with_context(
+        || {
+            format!(
+                "{source}: failed to resolve current document {}",
+                file.display()
+            )
+        },
+    )
 }
 
 fn active_auto_queue_prompt(file: &Path) -> Result<Option<String>> {

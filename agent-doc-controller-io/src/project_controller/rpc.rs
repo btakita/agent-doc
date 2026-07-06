@@ -17,6 +17,12 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 
+#[cfg(not(any(test, feature = "test-support")))]
+const CRDT_REPLICA_SUPERVISOR_START_WAIT: Duration = Duration::from_secs(3);
+#[cfg(any(test, feature = "test-support"))]
+const CRDT_REPLICA_SUPERVISOR_START_WAIT: Duration = Duration::from_millis(250);
+const CRDT_REPLICA_SUPERVISOR_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
 }
@@ -2580,16 +2586,7 @@ pub fn recycle_controller(project_root: &Path) -> Result<bool> {
 pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool> {
     let checkpoint =
         checkpoint_supervisors_for_project(project_root, "controller_recycle_request")?;
-    if !checkpoint.all_clear() {
-        anyhow::bail!(
-            "refusing controller recycle for {}: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
-            project_root.display(),
-            checkpoint.failed,
-            checkpoint.checkpointed,
-            checkpoint.detached,
-            checkpoint.skipped,
-        );
-    }
+    warn_controller_recycle_checkpoint_failures(&project_root.display().to_string(), checkpoint);
     // The `recycle` RPC re-execs only the *authoritative* controller reachable over
     // the project socket. Capture its result but DON'T early-return — the orphan
     // reap below must run even when no authoritative controller answers (an orphaned
@@ -2629,15 +2626,7 @@ pub fn recycle_controllers_all_projects() -> Result<(usize, usize)> {
 pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usize)> {
     let roots = crate::process::controller_project_roots(std::process::id());
     let checkpoint = checkpoint_supervisors_all_projects("controller_recycle_request")?;
-    if !checkpoint.all_clear() {
-        anyhow::bail!(
-            "refusing controller recycle: CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped)",
-            checkpoint.failed,
-            checkpoint.checkpointed,
-            checkpoint.detached,
-            checkpoint.skipped,
-        );
-    }
+    warn_controller_recycle_checkpoint_failures("all projects", checkpoint);
     let mut recycled = 0;
     let mut skipped = 0;
     for root in roots {
@@ -2685,6 +2674,19 @@ impl SupervisorCrdtCheckpointSummary {
     }
 }
 
+fn warn_controller_recycle_checkpoint_failures(
+    scope: &str,
+    checkpoint: SupervisorCrdtCheckpointSummary,
+) {
+    if checkpoint.all_clear() {
+        return;
+    }
+    eprintln!(
+        "[agent-doc] warning: continuing controller recycle for {scope} after CRDT durable checkpoint failed for {} supervisor(s) ({} checkpointed, {} detached, {} skipped); supervisor recycle fan-out still skips any uncheckpointed supervisor",
+        checkpoint.failed, checkpoint.checkpointed, checkpoint.detached, checkpoint.skipped,
+    );
+}
+
 fn checkpoint_crdt_via_local_document_model(
     canonical: &Path,
     source: &str,
@@ -2725,6 +2727,19 @@ fn checkpoint_crdt_via_local_document_model(
                 ),
             );
             Ok(Some("checkpointed".to_string()))
+        }
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Deferred { reason }) => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "supervisor_crdt_checkpoint_fallback file={} source={} status=deferred fallback_reason={} transport=local_document_model reason={} recovery=background_yrs_repair",
+                    canonical.display(),
+                    source,
+                    fallback_reason,
+                    reason,
+                ),
+            );
+            Ok(Some("deferred".to_string()))
         }
         Err(err) => {
             agent_doc_ops_log_io::log_op(
@@ -2896,6 +2911,631 @@ fn checkpoint_supervisor_crdt_for_doc(doc: &Path, source: &str) -> Result<Option
         ),
     );
     Ok(Some(status))
+}
+
+pub fn current_text_via_supervisor_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_current_text_skipped file={} source={} authority=git reason=detached_authority",
+                canonical.display(),
+                source,
+            ),
+        );
+        return Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached));
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "supervisor_crdt_current_text_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &canonical.to_string_lossy(),
+    );
+    let Some(record) = load_actor_record(&project_root, &document_id)? else {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_current_text_skipped file={} source={} reason=no_actor_record document_id={}",
+                canonical.display(),
+                source,
+                document_id,
+            ),
+        );
+        return Ok(None);
+    };
+    let conn = open_state_db(&project_root)?;
+    let lease = load_supervisor_lease_from_db(&conn, &document_id, record.generation)?;
+    let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) else {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=no_supervisor_socket generation={}",
+                canonical.display(),
+                source,
+                record.generation,
+            ),
+        );
+        return Ok(None);
+    };
+    let socket_path = Path::new(&socket);
+    if matches!(
+        agent_doc_supervisor_io::ipc::probe_socket(socket_path),
+        agent_doc_supervisor_io::ipc::SocketLiveness::Dead
+    ) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=dead_supervisor_socket generation={} socket={}",
+                canonical.display(),
+                source,
+                record.generation,
+                socket,
+            ),
+        );
+        return Ok(None);
+    }
+
+    let response = agent_doc_supervisor_io::ipc::send_command(
+        socket_path,
+        &agent_doc_supervisor::ipc_protocol::IpcMethod::CrdtCurrentText {
+            file: file_arg,
+            source: source.to_string(),
+        },
+    )
+    .with_context(|| {
+        format!("failed to request current CRDT text from supervisor socket {socket}")
+    })?;
+    if !response.ok {
+        let error = response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string());
+        if error.contains("unknown variant `crdt_current_text`")
+            || error.contains("unknown variant crdt_current_text")
+        {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "supervisor_crdt_current_text_unavailable file={} source={} authority=multi_replica reason=unsupported_supervisor_current_text_rpc generation={} socket={} error={:?}",
+                    canonical.display(),
+                    source,
+                    record.generation,
+                    socket,
+                    error,
+                ),
+            );
+            return Ok(None);
+        }
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "supervisor_crdt_current_text_rejected file={} source={} authority=multi_replica generation={} socket={} error={:?}",
+                canonical.display(),
+                source,
+                record.generation,
+                socket,
+                error,
+            ),
+        );
+        anyhow::bail!(
+            "supervisor CRDT current text rejected for {}: {}",
+            canonical.display(),
+            error,
+        );
+    }
+    let data = response
+        .data
+        .as_ref()
+        .context("supervisor CRDT current text response missing data")?;
+    let current = supervisor_current_text_from_data(data)?;
+    log_supervisor_current_text_result(&canonical, source, record.generation, &socket, &current);
+    Ok(Some(current))
+}
+
+fn supervisor_current_text_from_data(
+    data: &serde_json::Value,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    match data.get("status").and_then(|status| status.as_str()) {
+        Some("detached") => Ok(agent_doc_crdt_relay_io::CurrentText::Detached),
+        Some("editor_attached_model_missing") => {
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+        }
+        Some("editor_sync_pending") => Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending),
+        Some("current") => {
+            let text = data
+                .get("text")
+                .and_then(|text| text.as_str())
+                .context("supervisor current text response missing text")?
+                .to_string();
+            let live_editors = data
+                .get("live_editors")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(0);
+            let delivery_converged = data
+                .get("delivery_converged")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+            })
+        }
+        Some(status) => anyhow::bail!("unknown supervisor current text status `{status}`"),
+        None => anyhow::bail!("supervisor current text response missing status"),
+    }
+}
+
+fn log_supervisor_current_text_result(
+    canonical: &Path,
+    source: &str,
+    generation: u64,
+    socket: &str,
+    current: &agent_doc_crdt_relay_io::CurrentText,
+) {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "supervisor_crdt_current_text file={} source={} status=detached generation={} socket={}",
+                canonical.display(),
+                source,
+                generation,
+                socket,
+            ),
+        ),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!(
+                    "supervisor_crdt_current_text file={} source={} status=editor_attached_model_missing generation={} socket={}",
+                    canonical.display(),
+                    source,
+                    generation,
+                    socket,
+                ),
+            )
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "supervisor_crdt_current_text file={} source={} status=editor_sync_pending generation={} socket={}",
+                canonical.display(),
+                source,
+                generation,
+                socket,
+            ),
+        ),
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+        } => agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "supervisor_crdt_current_text file={} source={} status=current generation={} socket={} text_len={} text_hash={} live_editors={} delivery_converged={}",
+                canonical.display(),
+                source,
+                generation,
+                socket,
+                text.len(),
+                agent_doc_hash::content_hash(text),
+                live_editors,
+                delivery_converged,
+            ),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ControllerCrdtReplicaPayload {
+    method: String,
+    identity: Option<String>,
+    update_b64: Option<String>,
+    patch_id: Option<String>,
+    generation: Option<u64>,
+    awareness_b64: Option<String>,
+    source: Option<String>,
+}
+
+fn handle_crdt_replica_rpc(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let file_arg = canonical.to_string_lossy().to_string();
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerCrdtReplicaPayload =
+        serde_json::from_str(&payload_json).context("failed to parse CRDT replica payload")?;
+    let source = payload.source.as_deref().unwrap_or("jetbrains_plugin");
+    let identity = payload
+        .identity
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("CRDT replica payload missing identity")?;
+    let method_name = payload.method.as_str();
+    let ipc_method = crdt_replica_ipc_method(&payload, &file_arg, identity)?;
+    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_replica_refused file={} method={} source={} reason=detached_authority",
+                canonical.display(),
+                method_name,
+                source,
+            ),
+        );
+        return Ok(crdt_replica_refused_data("detached_authority"));
+    }
+
+    let supervisor = ensure_crdt_replica_supervisor_socket(
+        bootstrap,
+        runtime,
+        &canonical,
+        source,
+        method_name,
+        false,
+    )?;
+    let response =
+        agent_doc_supervisor_io::ipc::send_command(Path::new(&supervisor.socket), &ipc_method)
+            .with_context(|| {
+                format!(
+                    "failed to relay CRDT replica `{method_name}` through supervisor socket {}",
+                    supervisor.socket
+                )
+            })?;
+    if !response.ok {
+        let error = response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string());
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_replica_rejected file={} method={} source={} generation={} socket={} error={:?}",
+                canonical.display(),
+                method_name,
+                source,
+                supervisor.generation,
+                supervisor.socket,
+                error,
+            ),
+        );
+        anyhow::bail!(
+            "controller CRDT replica relay `{}` rejected for {}: {}",
+            method_name,
+            canonical.display(),
+            error
+        );
+    }
+    let data = response.data.unwrap_or_else(|| serde_json::json!({}));
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_crdt_replica_relayed file={} method={} source={} generation={} socket={} data_kind={}",
+            canonical.display(),
+            method_name,
+            source,
+            supervisor.generation,
+            supervisor.socket,
+            data.get("kind")
+                .and_then(|kind| kind.as_str())
+                .unwrap_or("ok"),
+        ),
+    );
+    Ok(data)
+}
+
+fn canonical_controller_request_file(
+    bootstrap: &ControllerBootstrap,
+    requested_file: &Path,
+) -> PathBuf {
+    let candidate = if requested_file.is_absolute() {
+        requested_file.to_path_buf()
+    } else {
+        bootstrap.project_root.join(requested_file)
+    };
+    candidate.canonicalize().unwrap_or(candidate)
+}
+
+fn crdt_replica_ipc_method(
+    payload: &ControllerCrdtReplicaPayload,
+    file: &str,
+    identity: &str,
+) -> Result<agent_doc_supervisor::ipc_protocol::IpcMethod> {
+    match payload.method.as_str() {
+        "replica_register" => Ok(
+            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaRegister {
+                file: file.to_string(),
+                identity: identity.to_string(),
+            },
+        ),
+        "replica_deregister" => Ok(
+            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaDeregister {
+                file: file.to_string(),
+                identity: identity.to_string(),
+            },
+        ),
+        "replica_update" => Ok(
+            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaUpdate {
+                file: file.to_string(),
+                identity: identity.to_string(),
+                update_b64: payload
+                    .update_b64
+                    .clone()
+                    .context("CRDT replica update payload missing update_b64")?,
+            },
+        ),
+        "replica_pull" => Ok(agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaPull {
+            file: file.to_string(),
+            identity: identity.to_string(),
+        }),
+        "replica_ack" => Ok(agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaAck {
+            file: file.to_string(),
+            identity: identity.to_string(),
+            patch_id: payload
+                .patch_id
+                .clone()
+                .context("CRDT replica ack payload missing patch_id")?,
+            generation: payload
+                .generation
+                .context("CRDT replica ack payload missing generation")?,
+        }),
+        "replica_awareness" => Ok(
+            agent_doc_supervisor::ipc_protocol::IpcMethod::ReplicaAwareness {
+                file: file.to_string(),
+                identity: identity.to_string(),
+                awareness_b64: payload
+                    .awareness_b64
+                    .clone()
+                    .context("CRDT replica awareness payload missing awareness_b64")?,
+            },
+        ),
+        other => anyhow::bail!("unsupported CRDT replica method `{other}`"),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CrdtReplicaSupervisorSocket {
+    generation: u64,
+    socket: String,
+}
+
+fn ensure_crdt_replica_supervisor_socket(
+    bootstrap: &ControllerBootstrap,
+    runtime: Option<&ControllerRuntime>,
+    canonical: &Path,
+    source: &str,
+    method: &str,
+    force: bool,
+) -> Result<CrdtReplicaSupervisorSocket> {
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &canonical.to_string_lossy(),
+    );
+    let Some(record) = actor_record_from_authority(bootstrap, runtime, &document_id)? else {
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_crdt_replica_unavailable file={} method={} source={} reason=no_actor_record document_id={}",
+                canonical.display(),
+                method,
+                source,
+                document_id,
+            ),
+        );
+        anyhow::bail!(
+            "CRDT replica relay unavailable for {}: no actor record",
+            canonical.display()
+        );
+    };
+    if let Some(socket) = live_supervisor_socket_for_record(
+        &bootstrap.project_root,
+        &document_id,
+        &record,
+        canonical,
+        source,
+        method,
+        true,
+    )? {
+        return Ok(CrdtReplicaSupervisorSocket {
+            generation: record.generation,
+            socket,
+        });
+    }
+
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_replica_requesting_supervisor_replacement file={} method={} source={} generation={} state={} force={}",
+            canonical.display(),
+            method,
+            source,
+            record.generation,
+            record.state.as_str(),
+            force,
+        ),
+    );
+    let receipt = handle_supervisor_replacement(
+        bootstrap,
+        runtime,
+        ControllerRequest {
+            command: "supervisor_replacement".to_string(),
+            file: Some(canonical.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some("continue".to_string()),
+            caller: Some("controller_crdt_replica".to_string()),
+            reason: Some(format!("crdt_replica_{method}_missing_supervisor")),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({
+                    "mode": "continue",
+                    "force": force,
+                    "source": source,
+                    "method": method,
+                })
+                .to_string(),
+            ),
+        },
+    )?;
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_replica_supervisor_replacement_accepted file={} method={} source={} generation={} receipt_id={} background_started={}",
+            canonical.display(),
+            method,
+            source,
+            receipt.generation,
+            receipt.operator_receipt.receipt_id,
+            receipt.background_started,
+        ),
+    );
+    wait_for_crdt_replica_supervisor_socket(
+        &bootstrap.project_root,
+        &document_id,
+        &record,
+        canonical,
+        source,
+        method,
+    )
+}
+
+fn live_supervisor_socket_for_record(
+    project_root: &Path,
+    document_id: &str,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
+    canonical: &Path,
+    source: &str,
+    method: &str,
+    log_unavailable: bool,
+) -> Result<Option<String>> {
+    let conn = open_state_db(project_root)?;
+    let lease = load_supervisor_lease_from_db(&conn, document_id, record.generation)?;
+    let expected_socket =
+        agent_doc_supervisor_io::ipc::socket_path(project_root, &record.session_id)
+            .to_string_lossy()
+            .to_string();
+    let mut candidates = Vec::new();
+    if let Some(socket) = lease.and_then(|lease| lease.supervisor_socket) {
+        candidates.push(socket);
+    }
+    if !candidates
+        .iter()
+        .any(|candidate| candidate == &expected_socket)
+    {
+        candidates.push(expected_socket);
+    }
+    for socket in candidates {
+        let socket_path = Path::new(&socket);
+        match agent_doc_supervisor_io::ipc::probe_socket(socket_path) {
+            agent_doc_supervisor_io::ipc::SocketLiveness::Live => {
+                return Ok(Some(socket));
+            }
+            agent_doc_supervisor_io::ipc::SocketLiveness::Dead => {
+                if log_unavailable {
+                    agent_doc_ops_log_io::log_op(
+                        canonical,
+                        &format!(
+                            "controller_crdt_replica_supervisor_socket_dead file={} method={} source={} generation={} socket={}",
+                            canonical.display(),
+                            method,
+                            source,
+                            record.generation,
+                            socket,
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    if log_unavailable {
+        agent_doc_ops_log_io::log_op(
+            canonical,
+            &format!(
+                "controller_crdt_replica_supervisor_socket_missing file={} method={} source={} generation={} session={}",
+                canonical.display(),
+                method,
+                source,
+                record.generation,
+                record.session_id,
+            ),
+        );
+    }
+    Ok(None)
+}
+
+fn wait_for_crdt_replica_supervisor_socket(
+    project_root: &Path,
+    document_id: &str,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
+    canonical: &Path,
+    source: &str,
+    method: &str,
+) -> Result<CrdtReplicaSupervisorSocket> {
+    let deadline = Instant::now() + CRDT_REPLICA_SUPERVISOR_START_WAIT;
+    while Instant::now() < deadline {
+        if let Some(socket) = live_supervisor_socket_for_record(
+            project_root,
+            document_id,
+            record,
+            canonical,
+            source,
+            method,
+            false,
+        )? {
+            return Ok(CrdtReplicaSupervisorSocket {
+                generation: record.generation,
+                socket,
+            });
+        }
+        std::thread::sleep(CRDT_REPLICA_SUPERVISOR_POLL_INTERVAL);
+    }
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_replica_supervisor_wait_timeout file={} method={} source={} generation={} wait_secs={:.1}",
+            canonical.display(),
+            method,
+            source,
+            record.generation,
+            CRDT_REPLICA_SUPERVISOR_START_WAIT.as_secs_f32(),
+        ),
+    );
+    anyhow::bail!(
+        "CRDT replica relay unavailable for {}: supervisor socket did not become live within {:.1}s",
+        canonical.display(),
+        CRDT_REPLICA_SUPERVISOR_START_WAIT.as_secs_f32()
+    );
+}
+
+fn crdt_replica_refused_data(reason: &str) -> serde_json::Value {
+    serde_json::json!({
+        "refused": true,
+        "reason": reason,
+    })
 }
 
 pub fn checkpoint_supervisors_all_projects(
@@ -3233,7 +3873,7 @@ fn connect_or_launch_with_lock_wait(
     }
 
     launch_detached(project_root, launch_mode)?;
-    wait_for_controller(project_root)
+    wait_for_controller_after_launch(project_root)
 }
 
 fn log_launch_lock_waiter_adopted(
@@ -3330,6 +3970,12 @@ pub(crate) fn wait_for_controller(
     project_root: &Path,
 ) -> Result<interprocess::local_socket::Stream> {
     wait_for_controller_path(&socket_path(project_root))
+}
+
+pub(crate) fn wait_for_controller_after_launch(
+    project_root: &Path,
+) -> Result<interprocess::local_socket::Stream> {
+    wait_for_controller_path_with_timeout(&socket_path(project_root), LAUNCH_CONNECT_WAIT)
 }
 
 pub(crate) fn wait_for_controller_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
@@ -4434,6 +5080,11 @@ pub(crate) fn handle_request_locked(
             Some(runtime.as_ref()),
             request,
         )),
+        "crdt_replica" => controller_envelope(handle_crdt_replica_rpc(
+            &bootstrap_snapshot,
+            Some(runtime.as_ref()),
+            request,
+        )),
         "admin_operation" => {
             controller_envelope(handle_admin_operation(&bootstrap_snapshot, request))
         }
@@ -4452,7 +5103,7 @@ pub(crate) fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<Str
         }))?),
         Err(err) => Ok(serde_json::to_string(&serde_json::json!({
             "ok": false,
-            "error": err.to_string()
+            "error": format!("{err:#}")
         }))?),
     }
 }
@@ -9385,5 +10036,72 @@ mod tests {
             .expect("bumped-generation start must pass the CAS");
         assert_eq!(record.generation, 84);
         assert_eq!(record.pane_id, "%44");
+    }
+
+    #[test]
+    fn start_session_reopens_closed_same_document_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/closed-efs.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: closed-efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
+
+        let closed = agent_doc_sqlite::state_store::ActorRecord {
+            document_id: doc_id.clone(),
+            session_id: "closed-efs".to_string(),
+            generation: 1096,
+            pane_id: String::new(),
+            window_id: String::new(),
+            harness: agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                &doc_id,
+            ),
+            state: agent_doc_sqlite::state_store::ActorState::Closed,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "sync".to_string(),
+                reason: "stale_dead_pane_actor".to_string(),
+                timestamp: 1,
+                prior_generation: 1096,
+                new_generation: 1096,
+            },
+        };
+        store_actor_record(&bootstrap.project_root, None, &closed).unwrap();
+
+        let record = handle_start_session(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "start_session".to_string(),
+                file: Some(doc.clone()),
+                session_id: Some("closed-efs".to_string()),
+                pane_id: Some("%162".to_string()),
+                window_id: Some("@79".to_string()),
+                generation: Some(1097),
+                state: None,
+                caller: Some("start".to_string()),
+                reason: Some("session_start".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+        .expect("start_session must reopen a closed same-document generation");
+
+        assert_eq!(record.generation, 1097);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+        assert_eq!(record.pane_id, "%162");
     }
 }

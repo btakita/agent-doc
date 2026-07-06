@@ -74,19 +74,23 @@ fn context_clear_projection_source_allows_supervisor_action(
     )
 }
 
-/// `#fbwire` Phase 2 — is the session document's on-disk working tree converged
-/// to `HEAD`? This is the same ground truth `git::emit_postcommit_worktree_check`
-/// logs as `match=...`: normalize both blobs for replay and compare. A non-git
-/// document or an unreadable `HEAD`/working tree must NEVER wedge the drain, so
-/// those degenerate cases report `true` (converged) and the gate falls through to
-/// dispatch; the fail-closed blocked boundary is reserved for genuine editor
-/// wedges, not missing git state.
+/// `#fbwire` Phase 2 — is the session document's current visible text converged
+/// to `HEAD`? This mirrors the `git::emit_postcommit_worktree_check`
+/// `match=...` proof but reads through the realtime document boundary first, so
+/// an unsaved editor buffer ahead of disk participates in the gate. A non-git
+/// document or an unreadable `HEAD`/current document must NEVER wedge the drain,
+/// so those degenerate cases report `true` (converged) and the gate falls
+/// through to dispatch; the fail-closed blocked boundary is reserved for
+/// genuine editor wedges, not missing git state.
 fn editor_buffer_converged_to_head(file: &std::path::Path) -> bool {
     let head_doc = match agent_doc_git_io::revision::show_head(file) {
         Ok(Some(doc)) => doc,
         _ => return true,
     };
-    let working = match std::fs::read_to_string(file) {
+    let working = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "idle_watch_editor_converged_to_head",
+    ) {
         Ok(doc) => doc,
         Err(_) => return true,
     };
@@ -147,6 +151,9 @@ fn checkpoint_crdt_before_supervisor_recycle(
             let detail = match &outcome {
                 agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Detached => {
                     "status=detached changed=false".to_string()
+                }
+                agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Deferred { reason } => {
+                    format!("status=deferred reason={reason} recovery=background_yrs_repair")
                 }
                 agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Checkpointed {
                     bytes,
@@ -318,7 +325,11 @@ fn record_context_clear_prompt_for_hooks(
 /// re-inject a no-op `/agent-doc` drain trigger every idle boundary for a queue
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
 fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(file).ok()?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "idle_watch_active_queue_head",
+    )
+    .ok()?;
     agent_doc_queue::queue_continuation::live_drainable_continuation_head(
         &content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
@@ -348,7 +359,11 @@ fn log_idle_queue_context_reset_submit(
 }
 
 fn forced_context_reset_reason_for_head(file: &Path, head: &str) -> Option<&'static str> {
-    let content = std::fs::read_to_string(file).ok()?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "idle_watch_forced_context_reset_reason",
+    )
+    .ok()?;
     if agent_doc_queue::queue_continuation::head_requires_focused_cycle_in(&content, head) {
         Some(FOCUSED_CYCLE_CONTEXT_RESET_REASON)
     } else if agent_doc_queue::queue_continuation::head_requires_clean_session_in(&content, head) {
@@ -570,10 +585,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // `CONVERGENCE_GATE_TIMEOUT_MS` → loud fail-closed block (`#fullboundary`).
             let mut convergence_gate_deferring_since: Option<std::time::Instant> = None;
             let mut convergence_gate_blocked_reported = false;
-            // R3 (#ctlrecycle): capture this supervisor's launch binary identity (≈ the
-            // installed binary at process start). A later `cargo install` makes
-            // `current_binary_identity()` differ, marking this supervisor stale.
-            let recycle_launch_identity = agent_doc_controller_io::project_controller::current_binary_identity().ok();
+            // R3 (#ctlrecycle): stale probes compare this supervisor process against
+            // the installed binary via `SupervisorShared::refresh_binary_stale`.
+            // That covers both a later `cargo install` and a process already
+            // mapping an old executable at start.
             let recycle_auto_enabled =
                 agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&path);
             let recycle_grace = agent_doc_controller_io::project_controller::recycle_idle_grace();
@@ -773,7 +788,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 let prompt_visible =
                     ready_busy_reconciled || idle_queue_prompt_visible(&shared, &harness);
-                let turn_active = turn_active_for_owned_pane(&path, &shared);
+                let turn_active = turn_active_for_owned_pane_with_idle_evidence(
+                    &path,
+                    &shared,
+                    prompt_visible,
+                    &mut session_log,
+                );
 
                 // `#agentreloadrestart` Phase 1a: detect a frontmatter `agent:`
                 // change and log the boundary-gate decision. Re-resolve the
@@ -1455,11 +1475,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         path.display()
                     ),
                 }
-                let current_recycle_identity = agent_doc_controller_io::project_controller::current_binary_identity().ok();
-                let supervisor_stale = agent_doc_controller::status::process_binary_is_stale(
-                    recycle_launch_identity.as_ref(),
-                    current_recycle_identity.as_ref(),
-                );
+                let supervisor_stale = shared.refresh_binary_stale();
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without
                 // recomputing it.
@@ -3298,6 +3314,7 @@ mod tests {
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            None,
             "codex",
             None,
             None,
@@ -3360,6 +3377,7 @@ mod tests {
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            None,
             "codex",
             None,
             None,
@@ -3446,6 +3464,53 @@ mod tests {
         // Diverge the working tree → not converged (a wedge candidate).
         std::fs::write(&doc, "committed body\nuncommitted editor drift\n").unwrap();
         assert!(!editor_buffer_converged_to_head(&doc));
+    }
+
+    #[test]
+    fn editor_buffer_converged_to_head_uses_live_current_document() {
+        // Disk still equals HEAD, but the editor-visible buffer is ahead. The
+        // convergence gate must see the current document authority, not only the
+        // detached disk replica.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        std::fs::create_dir_all(repo.join(".agent-doc/live-buffer")).unwrap();
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "t@t.com"],
+            vec!["config", "user.name", "T"],
+        ] {
+            std::process::Command::new("git")
+                .current_dir(repo)
+                .args(&args)
+                .output()
+                .unwrap();
+        }
+        let doc = repo.join("task.md");
+        let committed = "committed body\n";
+        std::fs::write(&doc, committed).unwrap();
+        std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["add", "--", "task.md"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["commit", "-m", "c", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(editor_buffer_converged_to_head(&doc));
+
+        let canonical = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_debounce::record_live_buffer_digest_content(
+            &canonical,
+            "committed body\nunsaved editor queue head\n",
+        )
+        .unwrap();
+
+        assert!(
+            !editor_buffer_converged_to_head(&doc),
+            "unsaved editor-current content must block HEAD convergence even while disk still equals HEAD"
+        );
     }
 
     #[test]
@@ -3594,6 +3659,7 @@ mod tests {
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            None,
             "codex",
             None,
             None,

@@ -104,8 +104,10 @@ pub(crate) fn run_ordered_task_step(
     lifecycle.admit(file)?;
     let injected_diff = injected_prompt_diff(task);
 
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "orchestrate_dispatch_frontmatter",
+    )?;
     let (fm, _) = frontmatter::parse(&doc)?;
     let mode = fm.resolve_mode();
     let agent_name = options
@@ -257,13 +259,13 @@ fn injected_prompt_diff(task: &str) -> String {
 }
 
 pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(());
     };
     if state.phase != agent_doc_turn::CyclePhase::PreflightStarted {
         return Ok(());
     }
-    if agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some() {
+    if preflight_handoff_cycle_has_capture(file, &state)? {
         return Ok(());
     }
 
@@ -271,8 +273,10 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
         "[orchestrate] closing preflight handoff cycle {} before task injection",
         state.cycle_id
     );
-    let file_content = fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} before orchestrating", file.display()))?;
+    let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "orchestrate_preflight_handoff_close",
+    )?;
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
     agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
     agent_doc_cycle_state_io::mark_abandoned(
@@ -282,6 +286,29 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
         Some(&file_content),
     )?;
     Ok(())
+}
+
+fn preflight_handoff_cycle_has_capture(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> Result<bool> {
+    if let Some(capture_id) = state.capture_id.as_deref()
+        && let Some(projected) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        && projected.cycle_id == state.cycle_id
+        && state
+            .response_sha256
+            .as_deref()
+            .is_none_or(|sha| sha == projected.response_sha256)
+    {
+        return Ok(true);
+    }
+    if let Some(capture_id) = state.capture_id.as_deref()
+        && agent_doc_capture_io::load_by_id(file, capture_id)?.is_some()
+    {
+        return Ok(true);
+    }
+    agent_doc_capture_io::load_by_id(file, &state.cycle_id).map(|capture| capture.is_some())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,7 +386,13 @@ pub(crate) fn stream_step_response(
         if !chunk.text.is_empty() {
             response = chunk.text;
             if !chunk.is_final {
-                checkpoint_writer.maybe_checkpoint(&response)?;
+                let current_content =
+                    agent_doc_document_realtime_io::try_resolve_current_document_content(
+                        file,
+                        "orchestrate_partial_response_checkpoint",
+                    )?;
+                checkpoint_writer
+                    .maybe_checkpoint_with_current_content(&response, &current_content)?;
             }
             if !chunk.is_final && should_stream_exchange_patch(&response) {
                 let exchange = render_streamed_exchange(seed, &response);
@@ -453,6 +486,57 @@ mod tests {
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
             agent_doc_turn::CyclePhase::Abandoned
         );
+    }
+
+    #[test]
+    fn close_open_preflight_handoff_cycle_prefers_projection_over_stale_sidecar() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot = template_doc();
+        fs::write(&doc, &snapshot).unwrap();
+        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        let started =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&snapshot))
+                .unwrap();
+        let capture = agent_doc_capture_io::capture_response(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: do #first — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let sidecar = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let mut stale_state = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("cycle state");
+        stale_state.phase = agent_doc_turn::CyclePhase::PreflightStarted;
+        stale_state.capture_id = None;
+        stale_state.response_sha256 = None;
+        fs::write(
+            &sidecar,
+            serde_json::to_string_pretty(&stale_state).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
+            .unwrap();
+
+        close_open_preflight_handoff_cycle(&doc).unwrap();
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .unwrap()
+                .phase,
+            agent_doc_turn::CyclePhase::ResponseCaptured
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted,
+            "stale JSON sidecar should remain untouched; projection prevented abandonment"
+        );
+        assert_eq!(stale_state.cycle_id, started.cycle_id);
     }
     #[test]
     fn injected_prompt_diff_preserves_multiline_task_as_prompt_bearing_diff() {

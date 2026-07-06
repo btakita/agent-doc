@@ -63,6 +63,15 @@ pub struct RouteAuthoritativeActorEffects {
     pub wait_for_ready_override: fn() -> Option<Duration>,
 }
 
+fn detect_active_queue_continuation(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_queue::queue_continuation::QueueContinuation>> {
+    let content =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)?;
+    agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn route_via_authoritative_actor(
     tmux: &Tmux,
@@ -682,7 +691,9 @@ pub fn route_via_authoritative_actor(
                 // loop is alive). Report deferred success so the IDE surfaces an
                 // "auto-loop active, will continue" acknowledgment instead of an
                 // error, mirroring the existing `*_busy_existing_queue_deferred` path.
-                if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)? {
+                if let Some(continuation) =
+                    detect_active_queue_continuation(file, "route_busy_focus_queue_continuation")?
+                {
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
@@ -821,7 +832,8 @@ pub fn route_via_authoritative_actor(
                     )
                 );
                 Ok(dispatch_pane)
-            } else if let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
+            } else if let Some(continuation) =
+                detect_active_queue_continuation(file, "route_busy_queue_continuation")?
             {
                 // #jb-busy-reopen-auto-drain-when-idle: a bare reopen (no prompt to
                 // queue) against a busy actor whose document already has an active

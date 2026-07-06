@@ -22,7 +22,7 @@ class TerminalUtilTest {
                 "--debounce",
                 "0",
                 "--wait-for-ready",
-                "120",
+                "15",
                 "tasks/root.md",
             ),
             TerminalUtil.buildRunRouteCommand("/usr/local/bin/agent-doc", "tasks/root.md"),
@@ -38,6 +38,8 @@ class TerminalUtilTest {
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_prepare\")"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_command_built\", command = cmd)"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
+        assertTrue(source.contains("route_supersede_active_run"))
+        assertTrue(source.contains("inFlightRouteRegistry.replace(routeKey, handle)"))
         assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_ATTEMPT_ID"))
         assertTrue(source.contains("AGENT_DOC_EDITOR_ROUTE_KEY"))
         assertTrue(source.contains("\"route_retryable_starting\""))
@@ -553,11 +555,9 @@ class TerminalUtilTest {
 
     @Test
     fun `starting actor retry backoff uses bounded attempt delays`() {
-        assertEquals(4, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
-        assertEquals(2_000L, TerminalUtil.startingActorRouteRetryDelayMillis(1))
-        assertEquals(4_000L, TerminalUtil.startingActorRouteRetryDelayMillis(2))
-        assertEquals(8_000L, TerminalUtil.startingActorRouteRetryDelayMillis(3))
-        assertEquals(8_000L, TerminalUtil.startingActorRouteRetryDelayMillis(4))
+        assertEquals(2, TerminalUtil.STARTING_ACTOR_ROUTE_MAX_ATTEMPTS)
+        assertEquals(500L, TerminalUtil.startingActorRouteRetryDelayMillis(1))
+        assertEquals(500L, TerminalUtil.startingActorRouteRetryDelayMillis(2))
     }
 
     @Test

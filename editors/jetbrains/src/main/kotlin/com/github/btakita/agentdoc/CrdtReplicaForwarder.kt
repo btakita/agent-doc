@@ -20,17 +20,17 @@ import java.util.Base64
  *  1. forwards a local IntelliJ `Document` delta into the FFI replica
  *     (`apply_local`), encodes the resulting update (`diff` against an empty
  *     state vector, i.e. "everything a fresh peer is missing"), and ships it to
- *     the supervisor over the new `replica_update` IPC family, and
- *  2. applies a remote update received from the supervisor back into the FFI
+ *     the CPC over the `crdt_replica` controller relay, and
+ *  2. applies a remote update received from the CPC back into the FFI
  *     replica (`apply_update`) so a peer's keystrokes converge locally —
  *     cursor/undo preserving is handled by the caller that writes the converged
  *     text back through the IntelliJ Document API.
  *
- * Both the FFI replica binding ([ReplicaNode]) and the supervisor transport
+ * Both the FFI replica binding ([ReplicaNode]) and the controller transport
  * ([ReplicaTransport]) are injected so the seam is unit-testable without loading
  * the native library or opening a real Unix-domain socket. The production wiring
 * (a [ReplicaNode] backed by [AgentDocLib] + a [ReplicaTransport] backed by the
-* supervisor socket + an IntelliJ `DocumentListener`) is the operator's live
+* CPC socket + an IntelliJ `DocumentListener`) is the operator's live
 * hookup — see [NativeReplicaNode] and [CrdtReplicaManager].
 */
 class CrdtReplicaForwarder(
@@ -48,10 +48,10 @@ class CrdtReplicaForwarder(
         private set
 
     /**
-     * Register this editor as a replica with the supervisor hub and open the
-     * local FFI replica bootstrapped from the canonical state the supervisor
+     * Register this editor as a replica with the CPC-owned document model and open the
+     * local FFI replica bootstrapped from the canonical state the controller
      * returns. Returns true when the document is editor-attached and the replica
-     * is live; false when the supervisor refuses (e.g. a headless / Detached
+     * is live; false when the controller refuses (e.g. a headless / Detached
      * document) — the caller then falls back to the existing patch-file path.
      */
     fun register(): Boolean {
@@ -64,7 +64,7 @@ class CrdtReplicaForwarder(
 
     /**
      * Forward a local `Document` delta into the replica and broadcast it to the
-     * supervisor hub. Offsets/lengths are yrs char units (the caller converts the
+     * document model. Offsets/lengths are yrs char units (the caller converts the
      * IntelliJ UTF-16 offsets first). A no-op when not [attached].
      */
     fun forwardLocalDelta(offset: Int, deleteLen: Int, insert: String) {
@@ -78,7 +78,7 @@ class CrdtReplicaForwarder(
 
     /**
      * Align a newly attached native replica with the live editor buffer before
-     * forwarding the first real `DocumentEvent` delta. The supervisor bootstrap is
+     * forwarding the first real `DocumentEvent` delta. The controller bootstrap is
      * seeded from disk, while JetBrains can already hold unsaved edits; applying
      * an event offset against that stale bootstrap can otherwise clamp/truncate.
      */
@@ -93,7 +93,7 @@ class CrdtReplicaForwarder(
     }
 
     /**
-     * Apply a remote update (a peer's ops fanned out by the supervisor hub) into
+     * Apply a remote update (a peer's ops fanned out by the document model) into
      * the local replica. Returns the converged text the caller should write back
      * into the IntelliJ Document (cursor/undo preserving), or null on failure /
      * when not attached.
@@ -104,7 +104,7 @@ class CrdtReplicaForwarder(
         return node.text()
     }
 
-    /** Pull remote updates the supervisor queued for this replica. */
+    /** Pull remote updates the document model queued for this replica. */
     fun pullRemoteUpdates(): List<ReplicaRemoteUpdate> {
         if (!attached) return emptyList()
         return transport.pullUpdates(filePath, identity)
@@ -135,10 +135,10 @@ class CrdtReplicaForwarder(
     }
 }
 
-/** The supervisor `register` ack: the minted client-id + canonical bootstrap state. */
+/** The controller `register` ack: the minted client-id + canonical bootstrap state. */
 data class ReplicaRegisterAck(val clientId: Long, val bootstrap: ByteArray?)
 
-/** One queued supervisor-to-editor CRDT update owned by this replica. */
+/** One queued controller-to-editor CRDT update owned by this replica. */
 data class ReplicaRemoteUpdate(
     val patchId: String,
     val origin: Long,
@@ -148,7 +148,7 @@ data class ReplicaRemoteUpdate(
 )
 
 /**
- * The outcome of a `replica_pull` (D2). The supervisor decides which kind to send
+ * The outcome of a `replica_pull` (D2). The controller decides which kind to send
  * (FFI-first): a normal additive-delta delivery, or a **replace** delivery when the
  * editor was flagged for re-bootstrap — an out-of-band *deletion* (`RebuiltFromDisk`)
  * cannot be expressed as an additive CRDT delta, so the plugin must replace its
@@ -160,15 +160,14 @@ sealed interface ReplicaPullDelivery {
 }
 
 /**
- * Transport to the supervisor's per-document relay hub over the new
- * `#crdtauth5` IPC family (`replica_register` / `replica_deregister` /
- * `replica_update`). Injected so the seam is testable without a real socket.
+ * Transport to the CPC-owned document model over the `crdt_replica` controller
+ * relay. Injected so the seam is testable without a real socket.
  */
 interface ReplicaTransport {
-    /** `replica_register`; null when the supervisor refuses (Detached document). */
+    /** `replica_register`; null when the controller refuses (Detached document). */
     fun register(filePath: String, identity: String): ReplicaRegisterAck?
 
-    /** `replica_update`: ship a local yrs update to the hub for fan-out. */
+    /** `replica_update`: ship a local yrs update to the document model for fan-out. */
     fun broadcastUpdate(filePath: String, identity: String, update: ByteArray)
 
     /** `replica_pull`: fetch pending peer updates queued for this replica. */
@@ -191,15 +190,13 @@ interface ReplicaTransport {
 }
 
 /**
- * Production transport over the supervisor's NDJSON Unix-domain socket.
+ * Production transport over the CPC/controller NDJSON Unix-domain socket.
  *
- * The transport is intentionally conservative: it tries the latest supervisor
- * sockets under `.agent-doc/supervisor/` and treats refusal/no socket as a soft
- * detached fallback so the legacy patch-file path remains available.
+ * The plugin does not discover or restart supervisors. It speaks only to the
+ * project controller; supervisor lookup/replacement is controller policy.
  */
-class SupervisorSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
-    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(SupervisorSocketReplicaTransport::class.java)
-    @Volatile private var cachedSocket: File? = null
+class ControllerSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
+    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(ControllerSocketReplicaTransport::class.java)
 
     override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
         val response = send(
@@ -213,8 +210,9 @@ class SupervisorSocketReplicaTransport(private val projectRoot: String) : Replic
     }
 
     override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
-        val request = jsonRequest("replica_update", filePath, identity)
-        request.addProperty("update_b64", Base64.getEncoder().encodeToString(update))
+        val request = jsonRequest("replica_update", filePath, identity) {
+            it.addProperty("update_b64", Base64.getEncoder().encodeToString(update))
+        }
         send(request)
     }
 
@@ -223,7 +221,7 @@ class SupervisorSocketReplicaTransport(private val projectRoot: String) : Replic
             ?: return ReplicaPullDelivery.Deltas(emptyList())
         if (!response.ok) return ReplicaPullDelivery.Deltas(emptyList())
         // D2: a replace delivery carries the corrected canonical text to install
-        // wholesale (the supervisor already decided merging cannot express it).
+        // wholesale (the controller already decided merging cannot express it).
         if (response.data?.get("kind")?.asString == "replace") {
             val text = response.data.get("replace")?.asString
             if (text != null) return ReplicaPullDelivery.Replace(text)
@@ -254,9 +252,10 @@ class SupervisorSocketReplicaTransport(private val projectRoot: String) : Replic
     }
 
     override fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean {
-        val request = jsonRequest("replica_ack", filePath, identity)
-        request.addProperty("patch_id", patchId)
-        request.addProperty("generation", generation)
+        val request = jsonRequest("replica_ack", filePath, identity) {
+            it.addProperty("patch_id", patchId)
+            it.addProperty("generation", generation)
+        }
         val response = send(request) ?: return false
         return response.ok && (response.data?.get("acknowledged")?.asBoolean ?: false)
     }
@@ -265,55 +264,54 @@ class SupervisorSocketReplicaTransport(private val projectRoot: String) : Replic
         send(jsonRequest("replica_deregister", filePath, identity))
     }
 
-    private data class SupervisorResponse(
+    private data class ControllerResponse(
         val ok: Boolean,
         val data: JsonObject?,
         val error: String?,
     )
 
-    private fun jsonRequest(method: String, filePath: String, identity: String): JsonObject {
+    private fun jsonRequest(
+        method: String,
+        filePath: String,
+        identity: String,
+        payloadFields: (JsonObject) -> Unit = {},
+    ): JsonObject {
+        val payload = JsonObject()
+        payload.addProperty("method", method)
+        payload.addProperty("identity", identity)
+        payload.addProperty("source", "jetbrains_plugin")
+        payloadFields(payload)
+
         val obj = JsonObject()
-        obj.addProperty("method", method)
+        obj.addProperty("command", "crdt_replica")
         obj.addProperty("file", filePath)
-        obj.addProperty("identity", identity)
+        obj.addProperty("diagnostic_payload", payload.toString())
         return obj
     }
 
-    private fun send(request: JsonObject): SupervisorResponse? {
-        val candidates = socketCandidates()
-        for (socket in candidates) {
-            try {
-                val response = sendToSocket(socket, request)
-                cachedSocket = socket
-                return response
-            } catch (e: Exception) {
-                if (socket == cachedSocket) cachedSocket = null
-                log.debug("[crdt-replica] supervisor socket ${socket.path} unavailable: ${e.message}")
-            }
+    private fun send(request: JsonObject): ControllerResponse? {
+        val socket = controllerSocket()
+        return try {
+            sendToSocket(socket, request)
+        } catch (e: Exception) {
+            log.debug("[crdt-replica] controller socket ${socket.path} unavailable: ${e.message}")
+            null
         }
-        return null
     }
 
-    private fun socketCandidates(): List<File> {
-        val cached = cachedSocket?.takeIf { it.exists() }
-        val dir = File(projectRoot, ".agent-doc/supervisor")
-        val discovered = dir.listFiles { file -> file.extension == "sock" }
-            ?.sortedByDescending { it.lastModified() }
-            ?: emptyList()
-        return if (cached != null) listOf(cached) + discovered.filter { it != cached } else discovered
-    }
+    private fun controllerSocket(): File = File(projectRoot, ".agent-doc/controller.sock")
 
-    private fun sendToSocket(socket: File, request: JsonObject): SupervisorResponse {
+    private fun sendToSocket(socket: File, request: JsonObject): ControllerResponse {
         SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
             val writer = Channels.newWriter(channel, Charsets.UTF_8)
             writer.write(request.toString())
             writer.write("\n")
             writer.flush()
             val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
-            val line = reader.readLine() ?: return SupervisorResponse(false, null, "empty response")
+            val line = reader.readLine() ?: return ControllerResponse(false, null, "empty response")
             val root = JsonParser.parseString(line).asJsonObject
             val data = root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
-            return SupervisorResponse(
+            return ControllerResponse(
                 ok = root.get("ok")?.asBoolean ?: false,
                 data = data,
                 error = root.get("error")?.asString,
@@ -434,6 +432,6 @@ class NativeReplicaNode : ReplicaNode {
 
 /*
  * Production live hookup lives in CrdtReplicaManager: it owns the DocumentListener,
- * supervisor-socket transport, pull/ACK loop, and minimal editor-buffer apply.
+ * controller-socket transport, pull/ACK loop, and minimal editor-buffer apply.
  * This file stays the testable seam around the native replica node and transport.
  */

@@ -7,7 +7,7 @@ internal enum class EditorCommandKind {
 
 internal enum class EditorCommandDecision {
     START_NOW,
-    DEDUPE_ACTIVE_RUN,
+    SUPERSEDE_ACTIVE_RUN,
     DEDUPE_ACTIVE_CLEAR,
     QUEUE_RUN_AFTER_CLEAR,
     PREEMPT_RUN_WITH_CLEAR,
@@ -37,7 +37,7 @@ internal object EditorCommandStateMachine {
         }
         if (active == requested) {
             return state to when (requested) {
-                EditorCommandKind.RUN_AGENT_DOC -> EditorCommandDecision.DEDUPE_ACTIVE_RUN
+                EditorCommandKind.RUN_AGENT_DOC -> EditorCommandDecision.SUPERSEDE_ACTIVE_RUN
                 EditorCommandKind.CLEAR_SESSION_CONTEXT -> EditorCommandDecision.DEDUPE_ACTIVE_CLEAR
             }
         }

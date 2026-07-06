@@ -2219,7 +2219,9 @@ Duplicate replay should stay live.
         // blockquote, as the strike matcher requires).
         let response =
             "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
-        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
+            .unwrap();
 
         queue_consume::strike_answered_free_text_heads_at_commit_seam(
             &doc,
@@ -2288,7 +2290,9 @@ Duplicate replay should stay live.
             "Recovered answer.\n",
             "<!-- /patch:exchange -->\n"
         );
-        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
+            .unwrap();
 
         let head_before = Command::new("git")
             .current_dir(root)
@@ -2316,11 +2320,6 @@ Duplicate replay should stay live.
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
-        assert_eq!(
-            capture.state,
-            agent_doc_workflow::capture::CaptureState::Captured
-        );
 
         let head = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()

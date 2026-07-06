@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::cell::Cell;
 use std::path::Path;
 
 pub mod backlog_guards;
@@ -29,10 +30,39 @@ pub use queue_head_provenance_guards::*;
 pub use response_guards::*;
 pub use write_pending_checks::*;
 
+thread_local! {
+    static FORCE_DISK_RESOLUTION: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn with_force_disk_resolution<T>(
+    force_disk: bool,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if !force_disk {
+        return f();
+    }
+    FORCE_DISK_RESOLUTION.with(|slot| {
+        let previous = slot.replace(true);
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+fn force_disk_resolution_enabled() -> bool {
+    FORCE_DISK_RESOLUTION.with(Cell::get)
+}
+
 pub(crate) fn resolve_current_document(
     file: &Path,
     source: &str,
 ) -> Result<agent_doc_document_realtime_io::CurrentDocument> {
+    if force_disk_resolution_enabled() {
+        return agent_doc_document_realtime_io::resolve_disk_current_document(
+            file,
+            &format!("session-check {source}"),
+        );
+    }
     agent_doc_document_realtime_io::try_resolve_current_document(file).with_context(|| {
         format!(
             "session-check {source}: resolve current document {}",
@@ -65,6 +95,38 @@ pub(crate) fn resolve_current_document_content_with_force_disk(
     force_disk: bool,
 ) -> Result<String> {
     Ok(resolve_current_document_with_force_disk(file, source, force_disk)?.into_content())
+}
+
+pub(crate) struct CapturedResponseGuardEvidence {
+    pub response_body: String,
+    pub capture_committed: bool,
+}
+
+pub(crate) fn captured_response_guard_evidence(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+    capture_id: &str,
+) -> Result<Option<CapturedResponseGuardEvidence>> {
+    if let Some(projected) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
+        && state.cycle_id == projected.cycle_id
+    {
+        return Ok(Some(CapturedResponseGuardEvidence {
+            response_body: projected.response_body,
+            capture_committed: state.phase == agent_doc_turn::CyclePhase::Committed,
+        }));
+    }
+
+    Ok(
+        agent_doc_capture_io::load_by_id(file, capture_id)?.map(|capture| {
+            CapturedResponseGuardEvidence {
+                response_body: capture.response_body,
+                capture_committed: capture.state
+                    == agent_doc_workflow::capture::CaptureState::Committed,
+            }
+        }),
+    )
 }
 
 pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {

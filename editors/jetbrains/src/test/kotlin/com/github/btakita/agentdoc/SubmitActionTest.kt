@@ -6,26 +6,25 @@ import org.junit.Test
 
 class SubmitActionTest {
     @Test
-    fun `run agent doc waits for typing idle before saving and routing`() {
+    fun `run agent doc saves active document before routing without blocking debounce`() {
         val source = Paths.get(
             "src/main/kotlin/com/github/btakita/agentdoc/SubmitAction.kt"
         ).toFile().readText()
 
-        val awaitIdx = source.indexOf("TypingTracker.awaitIdle(file.path)")
-        val deferIdx = source.indexOf("return@Thread")
-        val saveIdx = source.indexOf("FileDocumentManager.getInstance().saveAllDocuments()")
         val ledgerIdx = source.indexOf("RunAgentDocAttemptLedger.begin(")
-        val awaitRecordIdx = source.indexOf("attempt.recordIfCurrent(\"await_typing_idle\")")
-        val saveRecordIdx = source.indexOf("attempt.recordIfCurrent(\"documents_saved\")")
+        val currentCheckIdx = source.indexOf("if (!attempt.isCurrent())")
+        val saveIdx = source.indexOf("fdm.saveDocument(document)")
+        val saveRecordIdx = source.indexOf("attempt.recordIfCurrent(\"active_document_saved\")")
         val routeIdx = source.indexOf("TerminalUtil.sendToTerminal(project, file, attempt = attempt)")
 
         assertTrue("SubmitAction should begin a durable Run Agent Doc attempt", ledgerIdx >= 0)
-        assertTrue("SubmitAction should wait for typing idle", awaitIdx >= 0)
-        assertTrue("SubmitAction should record the typing wait stage", awaitRecordIdx in ledgerIdx..awaitIdx)
-        assertTrue("SubmitAction should defer routing when typing never settles", deferIdx > awaitIdx)
-        assertTrue("SubmitAction should defer before saving", saveIdx > deferIdx)
-        assertTrue("SubmitAction should save after waiting for idle", saveIdx > awaitIdx)
+        assertTrue("SubmitAction should drop stale queued callbacks before saving", currentCheckIdx > ledgerIdx)
+        assertTrue("SubmitAction should check current attempt before saving", saveIdx > currentCheckIdx)
+        assertTrue("SubmitAction should save the active document", saveIdx > ledgerIdx)
         assertTrue("SubmitAction should record document save before routing", saveRecordIdx > saveIdx)
         assertTrue("SubmitAction should route after saving", routeIdx > saveIdx)
+        assertTrue("SubmitAction should not block on the typing debounce", !source.contains("TypingTracker.awaitIdle(file.path)"))
+        assertTrue("SubmitAction should not save unrelated open documents", !source.contains("saveAllDocuments()"))
+        assertTrue("SubmitAction should let repeated Run clicks reach the route supersede path", !source.contains("InvocationCoalescer.key(\"run\""))
     }
 }

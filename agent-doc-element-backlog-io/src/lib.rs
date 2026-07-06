@@ -12,6 +12,10 @@ pub mod backlog_cmd;
 pub mod done_archive;
 
 pub trait BacklogCommandEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -43,6 +47,30 @@ pub fn with_backlog_command_effects<T>(
         Ok(value) => value,
         Err(payload) => std::panic::resume_unwind(payload),
     }
+}
+
+pub(crate) fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    CURRENT_EFFECTS.with(|slot| {
+        if let Some(effects) = slot.borrow().last().copied() {
+            return effects.current_document_content(file, source);
+        }
+        anyhow::bail!(
+            "backlog command read effects are not installed for {}",
+            file.display()
+        )
+    })
+}
+
+pub(crate) fn force_disk_document_content(file: &Path, source: &str) -> Result<String> {
+    CURRENT_EFFECTS.with(|slot| {
+        if let Some(effects) = slot.borrow().last().copied() {
+            return effects.force_disk_document_content(file, source);
+        }
+        anyhow::bail!(
+            "backlog command force-disk read effects are not installed for {}",
+            file.display()
+        )
+    })
 }
 
 pub(crate) fn converge_or_disk_write(

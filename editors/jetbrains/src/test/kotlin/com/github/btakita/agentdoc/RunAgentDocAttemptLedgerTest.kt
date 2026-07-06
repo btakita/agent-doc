@@ -16,17 +16,17 @@ class RunAgentDocAttemptLedgerTest {
             focusedFile = "${cwd.path}/tasks/root.md",
         )
 
-        attempt.recordIfCurrent("await_typing_idle")
-        attempt.finishIfCurrent("typing_idle_timeout", error = "mtime did not settle")
+        attempt.recordIfCurrent("active_document_saved")
+        attempt.finishIfCurrent("route_failed", error = "exit=1 output=boom")
 
         val diagnostics = RunAgentDocAttemptLedger.attemptDiagnosticsFile(cwd.path, "tasks/root.md")
         val text = diagnostics.readText()
         assertTrue(text.contains("attempt_id=${attempt.id}"))
         assertTrue(text.contains("relative_path=tasks/root.md"))
-        assertTrue(text.contains("stage=typing_idle_timeout"))
-        assertTrue(text.contains("error=mtime did not settle"))
+        assertTrue(text.contains("stage=route_failed"))
+        assertTrue(text.contains("error=exit=1 output=boom"))
         assertTrue(text.contains("stage=clicked"))
-        assertTrue(text.contains("stage=await_typing_idle"))
+        assertTrue(text.contains("stage=active_document_saved"))
     }
 
     @Test

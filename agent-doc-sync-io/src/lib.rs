@@ -166,8 +166,15 @@ pub fn write_sync_status_with(
     text: &str,
     mut save_snapshot: impl FnMut(&Path, &str) -> Result<()>,
 ) -> Result<bool> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {} for sync status update", file.display()))?;
+    let effects = runtime_effects()?;
+    let doc = effects
+        .resolve_current_document(file, "sync_status_document")
+        .with_context(|| {
+            format!(
+                "failed to resolve {} for sync status update",
+                file.display()
+            )
+        })?;
     let components = agent_doc_element::element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
     let Some(status) = components
@@ -187,7 +194,8 @@ pub fn write_sync_status_with(
         format!("{text}\n")
     };
     let updated = status.replace_content(&doc, &payload);
-    std::fs::write(file, &updated)
+    effects
+        .write_current_document(file, &updated)
         .with_context(|| format!("failed to write {} for sync status update", file.display()))?;
     save_snapshot(file, &updated).with_context(|| {
         format!(
@@ -225,7 +233,9 @@ pub fn clear_frontmatter_status_with(
     mut save_snapshot: impl FnMut(&Path, &str) -> Result<()>,
     mut log: impl FnMut(String),
 ) {
-    let doc = match std::fs::read_to_string(file) {
+    let doc = match runtime_effects()
+        .and_then(|effects| effects.resolve_current_document(file, "sync_status_document"))
+    {
         Ok(doc) => doc,
         Err(_) => return,
     };
@@ -269,6 +279,10 @@ pub enum SyncSessionCheckStatus {
 }
 
 pub trait SyncRuntimeEffects: Send + Sync + 'static {
+    fn resolve_current_document(&self, file: &Path, source: &str) -> Result<String>;
+
+    fn write_current_document(&self, file: &Path, content: &str) -> Result<()>;
+
     fn commit(&self, file: &Path) -> Result<bool>;
 
     fn detect_jb_cache_conflict_cancel_recoverable(&self, file: &Path) -> Result<bool>;
@@ -437,13 +451,23 @@ impl TestSyncRuntimeEffects {
             Some(&content),
             Some(&content),
         )?;
-        let _ = agent_doc_capture_io::mark_committed(file);
+        let _ = agent_doc_capture_io::mark_committed_with_current_content(file, &content);
         Ok(())
     }
 }
 
 #[cfg(test)]
 impl SyncRuntimeEffects for TestSyncRuntimeEffects {
+    fn resolve_current_document(&self, file: &Path, _source: &str) -> Result<String> {
+        std::fs::read_to_string(file)
+            .with_context(|| format!("test resolver read {}", file.display()))
+    }
+
+    fn write_current_document(&self, file: &Path, content: &str) -> Result<()> {
+        std::fs::write(file, content)
+            .with_context(|| format!("test writer write {}", file.display()))
+    }
+
     fn commit(&self, file: &Path) -> Result<bool> {
         Self::commit_file(file)
     }
@@ -505,7 +529,13 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> Result<()> {
-        agent_doc_capture_io::capture_response(file, response)?;
+        let current_content =
+            self.resolve_current_document(file, "sync_test_save_pending_capture")?;
+        agent_doc_capture_io::capture_response_with_current_content(
+            file,
+            response,
+            &current_content,
+        )?;
         let pending_path = agent_doc_fs::pending_response_path_for(file)?;
         if let Some(parent) = pending_path.parent() {
             std::fs::create_dir_all(parent)?;

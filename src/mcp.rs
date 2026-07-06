@@ -477,7 +477,13 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
             (false, "interrupted", message)
         }
     };
-    let continuation = agent_doc_queue_io::queue_continuation::detect(&file)?;
+    let continuation_content =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            &file,
+            "mcp_session_check_queue_continuation",
+        )?;
+    let continuation =
+        agent_doc_queue_io::queue_continuation::detect_for_content(&file, &continuation_content)?;
     let structured = json!({
         "ok": ok,
         "status": status,

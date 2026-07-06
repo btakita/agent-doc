@@ -129,6 +129,34 @@ pub fn supervisor_stale(base: &Path) -> bool {
     stale_marker_path(base).exists()
 }
 
+fn set_pane_title(pane: &str, title: &str) {
+    let tmux = tmux_router::Tmux::default_server();
+    if let Err(e) = tmux
+        .cmd()
+        .args(["select-pane", "-t", pane, "-T", title])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        // Best-effort UX surface — must never fail the turn.
+        eprintln!("[turn-status] warning: failed to set pane {pane} title: {e}");
+    }
+}
+
+/// Set a specific tmux pane's border title from turn/stale-supervisor state.
+/// Best-effort: tmux failures are logged and ignored.
+pub fn set_pane_title_for_status(base: &Path, pane: &str, active: bool) {
+    let title = pane_title_for_status(active, supervisor_stale(base));
+    set_pane_title(pane, &title);
+}
+
+/// Clear a specific pane's turn-active projection. This is for supervisors that
+/// have stronger idle evidence than a missed harness `Stop` hook.
+pub fn clear_turn_status_for_pane(base: &Path, pane: &str) -> Result<()> {
+    set_pane_title_for_status(base, pane, false);
+    clear_turn_active_marker(base)
+}
+
 /// Set the current tmux pane's border title to reflect the turn state. No-op
 /// (Ok) when not running inside a tmux pane so the hook never breaks the turn.
 pub fn run(active: bool) -> anyhow::Result<()> {
@@ -146,15 +174,7 @@ pub fn run(active: bool) -> anyhow::Result<()> {
         .map(|base| supervisor_stale(&base))
         .unwrap_or(false);
     let title = pane_title_for_status(active, stale);
-    let tmux = tmux_router::Tmux::default_server();
-    if let Err(e) = tmux
-        .cmd()
-        .args(["select-pane", "-t", &pane, "-T", &title])
-        .status()
-    {
-        // Best-effort UX surface — must never fail the turn.
-        eprintln!("[turn-status] warning: failed to set pane {pane} title: {e}");
-    }
+    set_pane_title(&pane, &title);
 
     // Also maintain the readable turn-state marker so route/supervisor can tell
     // the agent is mid-turn (the bridge to a future hard busy-lease). The hook

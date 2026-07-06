@@ -38,15 +38,12 @@ pub struct PreflightOptions {
 
 fn closeout_cycle_is_open(file: &Path) -> Result<bool> {
     let projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
-    if let Some(mut state) = agent_doc_cycle_state_io::load(file)? {
-        if let Some(projection) = projection.as_ref() {
-            if projection.matches_cycle(&state.cycle_id) {
-                agent_doc_cycle_state_io::apply_closeout_projection_to_cycle_state(
-                    &mut state, projection,
-                );
-            } else if projection.phase_is_open().unwrap_or(false) {
-                return Ok(true);
-            }
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+        if let Some(projection) = projection.as_ref()
+            && !projection.matches_cycle(&state.cycle_id)
+            && projection.phase_is_open().unwrap_or(false)
+        {
+            return Ok(true);
         }
         return Ok(state.is_open());
     }
@@ -1427,6 +1424,47 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn closeout_cycle_is_open_prefers_terminal_projection_over_stale_open_sidecar() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "---\nsession: test-session\n---\n\ncontent";
+        std::fs::write(&doc, content).unwrap();
+
+        let opened =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted,
+            "raw compatibility sidecar should remain stale-open for this regression"
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            opened.cycle_id
+        );
+        assert!(
+            !closeout_cycle_is_open(&doc).unwrap(),
+            "preflight should trust the terminal closeout projection before stale-open JSON"
+        );
+    }
 
     #[test]
     fn preflight_produces_valid_json() {

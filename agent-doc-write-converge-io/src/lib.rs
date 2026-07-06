@@ -2336,6 +2336,19 @@ pub fn try_ipc_full_content_with_mode(
     Ok(false)
 }
 
+fn write_converge_cycle_id_for_payload(file: &Path) -> Option<String> {
+    agent_doc_cycle_state_io::load_closeout_projection(file)
+        .ok()
+        .flatten()
+        .and_then(|projection| projection.cycle_id)
+        .or_else(|| {
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                .ok()
+                .flatten()
+                .map(|cycle| cycle.cycle_id)
+        })
+}
+
 /// `#exch-intermix`: auto-recover the `live_prompt_drift_after_preflight`
 /// closeout wedge by rebasing the missing agent response onto the realtime
 /// document. Returns the recovered file content on success (the caller must
@@ -2346,7 +2359,7 @@ pub fn try_auto_recover_live_prompt_drift(
     snapshot: &str,
     file_content: &str,
 ) -> Result<Option<String>> {
-    let Some(cycle) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(None);
     };
     if !cycle.ipc_snapshot_adoption_blocked {
@@ -2526,8 +2539,8 @@ pub fn try_editor_converge_live_prompt_drift(
     if let Some(frontmatter) = frontmatter {
         payload["frontmatter"] = serde_json::Value::String(frontmatter);
     }
-    if let Ok(Some(ref cycle)) = agent_doc_cycle_state_io::load(file) {
-        payload["cycle_id"] = serde_json::Value::String(cycle.cycle_id.clone());
+    if let Some(cycle_id) = write_converge_cycle_id_for_payload(file) {
+        payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
 
     agent_doc_ops_log_io::log_op(
@@ -4912,18 +4925,39 @@ fn classify_stale_snapshot_visible_rebase(
 }
 
 fn active_capture_response_removed(file: &Path, snapshot_doc: &str, current_doc: &str) -> bool {
-    let Ok(Some(state)) = agent_doc_cycle_state_io::load(file) else {
+    let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file) else {
         return false;
     };
     if !state.is_open() {
         return false;
     }
-    let Ok(Some(capture)) = agent_doc_capture_io::load_active(file) else {
+    let Some(response_body) = active_capture_response_body_for_converge(file, &state) else {
         return false;
     };
-    !capture.response_body.trim().is_empty()
-        && response_materialized_in_content(&capture.response_body, snapshot_doc)
-        && !response_materialized_in_content(&capture.response_body, current_doc)
+    !response_body.trim().is_empty()
+        && response_materialized_in_content(&response_body, snapshot_doc)
+        && !response_materialized_in_content(&response_body, current_doc)
+}
+
+fn active_capture_response_body_for_converge(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> Option<String> {
+    if let Some(capture_id) = state.capture_id.as_deref()
+        && let Ok(Some(projected)) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+        && projected.cycle_id == state.cycle_id
+        && state
+            .response_sha256
+            .as_deref()
+            .is_none_or(|sha| sha == projected.response_sha256)
+    {
+        return Some(projected.response_body);
+    }
+    agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .map(|capture| capture.response_body)
 }
 
 fn component_change_is_turn_independent(
@@ -4972,6 +5006,52 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn write_converge_payload_cycle_id_prefers_latest_projection_over_stale_sidecar() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test-session\n---\n\ncontent";
+        fs::write(&doc, content).unwrap();
+
+        let first =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_first_sidecar = fs::read(&sidecar_path).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        assert_ne!(first.cycle_id, second.cycle_id);
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        fs::write(&sidecar_path, stale_first_sidecar).unwrap();
+
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            first.cycle_id
+        );
+        assert_eq!(
+            write_converge_cycle_id_for_payload(&doc).as_deref(),
+            Some(second.cycle_id.as_str())
+        );
+    }
 
     #[test]
     fn ipc_ack_timeouts_degrade_current_session_to_file_ipc_retry() {
@@ -5044,6 +5124,27 @@ mod tests {
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body").unwrap();
         assert!(stale_supervisor_write_short_circuit(&file, "unit_test").is_none());
+    }
+
+    #[test]
+    fn active_capture_response_removed_uses_projection_without_capture_sidecar() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("plan.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nDone.\n";
+        std::fs::write(&file, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&file, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        assert!(active_capture_response_removed(
+            &file,
+            &format!("{base}\n{response}"),
+            base
+        ));
     }
 
     #[test]

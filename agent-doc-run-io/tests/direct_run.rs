@@ -115,7 +115,8 @@ use agent_doc_run_io::{
     ActiveQueuePromptState, AutoQueueContinuation, RunCycleOutcome, RunMode, acquire_doc_lock,
     active_queue_prompt_diff, active_queue_prompt_state, apply_template_response, build_prompt,
     direct_run_atomic_write, normalize_direct_run_prompt_prefixes, prompt_cache_routing_affinity,
-    run_stderr_redirect_harness, should_continue_auto_queue, start_run_cycle,
+    repair_document_frontmatter_on_disk, run_stderr_redirect_harness, should_continue_auto_queue,
+    start_run_cycle,
 };
 #[cfg(test)]
 use agent_doc_session_accretion::{SessionAccretionLevel, SessionAccretionReport};
@@ -141,6 +142,36 @@ mod tests {
             .find(|node| !node.item.struck)
             .expect("queue head should have a node key")
             .node_key
+    }
+
+    #[test]
+    fn repair_document_frontmatter_on_disk_repairs_tab_indentation() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let malformed = "---\nagent_doc_stream:\n\tinterval: 200\n---\n\nbody\n";
+        std::fs::write(&doc, malformed).unwrap();
+        assert!(
+            frontmatter::parse(malformed).is_err(),
+            "precondition: tab-indented YAML should be malformed"
+        );
+
+        assert!(repair_document_frontmatter_on_disk(&doc).unwrap());
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !repaired.contains('\t'),
+            "tabs should be repaired:\n{repaired}"
+        );
+        assert!(frontmatter::parse(&repaired).is_ok());
+    }
+
+    #[test]
+    fn repair_document_frontmatter_on_disk_missing_file_is_noop() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("missing.md");
+
+        assert!(!repair_document_frontmatter_on_disk(&doc).unwrap());
+        assert!(!doc.exists());
     }
 
     fn append_typed_selected_queue_head(

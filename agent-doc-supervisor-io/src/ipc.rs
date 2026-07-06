@@ -35,7 +35,7 @@
 //! to a caller-supplied handler function, keeping `ipc.rs` decoupled from
 //! `pty.rs` and `state.rs`.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -52,6 +52,11 @@ use interprocess::local_socket::{
 
 /// Subdirectory within `.agent-doc/` for supervisor sockets.
 const SUPERVISOR_DIR: &str = "supervisor";
+
+const SUPERVISOR_IPC_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const SUPERVISOR_IPC_ACCEPT_READ_TIMEOUT: Duration = Duration::from_secs(5);
+const SUPERVISOR_IPC_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
+const SUPERVISOR_IPC_MAX_INFLIGHT_HANDLERS: u64 = 64;
 
 /// Maximum byte length for a Unix domain socket path (`sun_path` is 108 bytes
 /// including the NUL terminator on Linux).
@@ -210,12 +215,15 @@ pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
         awareness_b64: &str,
     ) -> IpcResponse;
     fn handle_crdt_checkpoint(&self, file: &str, source: &str) -> IpcResponse;
+    fn handle_crdt_current_text(&self, file: &str, source: &str) -> IpcResponse;
 }
 
 pub trait SupervisorInjectDeliveryState {
     fn inject_pane_id(&self) -> Option<String>;
     fn harness_binary(&self) -> &str;
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String>;
+    fn begin_prompt_dispatch(&self, source: &str, bytes: &str) -> PromptDispatchAdmission;
+    fn clear_prompt_dispatch_on_failure(&self, key: &str);
 }
 
 pub trait SupervisorIpcLifecycleState {
@@ -242,6 +250,19 @@ where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
     state.transition_actor_busy("operator", "ipc_clear");
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptDispatchAdmission {
+    Accepted { key: String },
+    Duplicate { key: String },
+    Untracked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorInjectDeliveryOutcome {
+    Delivered,
+    DuplicateSuppressed,
 }
 
 pub fn request_supervisor_restart<S>(state: &S, mode: String)
@@ -275,13 +296,29 @@ where
     state.kill_child_for_ipc();
 }
 
-pub fn deliver_supervisor_inject<S>(state: &S, bytes: &str, diag_op: &str) -> Result<(), String>
+pub fn deliver_supervisor_inject<S>(
+    state: &S,
+    bytes: &str,
+    diag_op: &str,
+) -> Result<SupervisorInjectDeliveryOutcome, String>
 where
     S: SupervisorInjectDeliveryState + ?Sized,
 {
+    let admission = if diag_op == "ipc_inject" {
+        state.begin_prompt_dispatch(diag_op, bytes)
+    } else {
+        PromptDispatchAdmission::Untracked
+    };
+    let admission_key = match admission {
+        PromptDispatchAdmission::Accepted { key } => Some(key),
+        PromptDispatchAdmission::Duplicate { .. } => {
+            return Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed);
+        }
+        PromptDispatchAdmission::Untracked => None,
+    };
     let harness = state.harness_binary();
     let source = format!("supervisor.{diag_op}");
-    if let Some(pane_id) = state.inject_pane_id() {
+    let result = if let Some(pane_id) = state.inject_pane_id() {
         let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
@@ -314,6 +351,15 @@ where
             Some(harness),
         );
         state.write_child_pty(&normalized)
+    };
+    match result {
+        Ok(()) => Ok(SupervisorInjectDeliveryOutcome::Delivered),
+        Err(err) => {
+            if let Some(key) = admission_key.as_deref() {
+                state.clear_prompt_dispatch_on_failure(key);
+            }
+            Err(err)
+        }
     }
 }
 
@@ -364,17 +410,23 @@ where
         }
         IpcMethod::Inject { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_inject")
         {
-            Ok(()) => {
+            Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
                 mark_supervisor_inject_dispatched(state);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
+            Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed) => IpcResponse::ok(
+                serde_json::json!({ "n": 0, "duplicate": true, "reason": "prompt_dispatch_duplicate" }),
+            ),
             Err(err) => IpcResponse::err(err),
         },
         IpcMethod::Clear { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
-            Ok(()) => {
+            Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
                 mark_supervisor_clear_dispatched(state);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
+            Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed) => IpcResponse::ok(
+                serde_json::json!({ "n": 0, "duplicate": true, "reason": "prompt_dispatch_duplicate" }),
+            ),
             Err(err) => IpcResponse::err(err),
         },
         IpcMethod::Restart { mode } => {
@@ -413,6 +465,9 @@ where
             awareness_b64,
         } => state.handle_replica_awareness(&file, &identity, &awareness_b64),
         IpcMethod::CrdtCheckpoint { file, source } => state.handle_crdt_checkpoint(&file, &source),
+        IpcMethod::CrdtCurrentText { file, source } => {
+            state.handle_crdt_current_text(&file, &source)
+        }
     }
 }
 
@@ -436,6 +491,17 @@ impl Drop for InflightSupervisorGuard {
 /// Current number of in-flight supervisor-IPC handler threads (observability).
 pub fn inflight_supervisor_handler_count() -> u64 {
     INFLIGHT_SUPERVISOR_HANDLERS.load(Ordering::SeqCst)
+}
+
+fn supervisor_accept_error_is_resource_exhaustion(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(23 | 24))
+        || err.kind() == ErrorKind::OutOfMemory
+        || err.to_string().contains("Too many open files")
+}
+
+fn supervisor_read_error_is_timeout(err: &std::io::Error) -> bool {
+    matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
+        || err.to_string().contains("timed out")
 }
 
 /// Running supervisor IPC listener. Owns the accept thread and cleans up
@@ -500,12 +566,31 @@ impl SupervisorIpc {
         let handle = thread::Builder::new()
             .name("supervisor-ipc".into())
             .spawn(move || {
+                let mut resource_exhaustion_logged = false;
                 loop {
                     if stop_clone.load(Ordering::Relaxed) {
                         break;
                     }
                     match listener.accept() {
                         Ok(stream) => {
+                            resource_exhaustion_logged = false;
+                            let inflight =
+                                INFLIGHT_SUPERVISOR_HANDLERS.load(Ordering::SeqCst);
+                            if inflight >= SUPERVISOR_IPC_MAX_INFLIGHT_HANDLERS {
+                                eprintln!(
+                                    "[supervisor::ipc] warning: dropping connection because {inflight} handlers are already in flight"
+                                );
+                                drop(stream);
+                                thread::sleep(Duration::from_millis(10));
+                                continue;
+                            }
+                            if let Err(e) =
+                                stream.set_recv_timeout(Some(SUPERVISOR_IPC_ACCEPT_READ_TIMEOUT))
+                            {
+                                eprintln!(
+                                    "[supervisor::ipc] warning: failed to set connection read timeout ({e}); continuing"
+                                );
+                            }
                             // Handle each connection on its own short-lived thread
                             // so a slow/half-open client cannot wedge the accept
                             // loop and freeze all supervisor command dispatch.
@@ -533,7 +618,18 @@ impl SupervisorIpc {
                             if stop_clone.load(Ordering::Relaxed) {
                                 break;
                             }
-                            eprintln!("[supervisor::ipc] accept error: {e}");
+                            if supervisor_accept_error_is_resource_exhaustion(&e) {
+                                if !resource_exhaustion_logged {
+                                    eprintln!(
+                                        "[supervisor::ipc] accept resource exhaustion: {e}; backing off"
+                                    );
+                                    resource_exhaustion_logged = true;
+                                }
+                                thread::sleep(SUPERVISOR_IPC_RESOURCE_BACKOFF);
+                            } else {
+                                resource_exhaustion_logged = false;
+                                eprintln!("[supervisor::ipc] accept error: {e}");
+                            }
                         }
                     }
                 }
@@ -691,6 +787,9 @@ pub fn probe_socket(sock: &Path) -> SocketLiveness {
 #[allow(dead_code)] // API surface — used by tests and future IPC clients
 pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
     let stream = try_connect(sock)?;
+    stream
+        .set_recv_timeout(Some(SUPERVISOR_IPC_RESPONSE_TIMEOUT))
+        .context("failed to set supervisor response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
 
     // Send NDJSON
@@ -699,29 +798,22 @@ pub fn send_command(sock: &Path, method: &IpcMethod) -> Result<IpcResponse> {
     writer_half.write_all(msg.as_bytes())?;
     writer_half.flush()?;
 
-    // Read response with timeout
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(reader_half);
-        let mut line = String::new();
-        let result = reader.read_line(&mut line);
-        let _ = tx.send((result, line));
-    });
-
-    match rx.recv_timeout(Duration::from_secs(2)) {
-        Ok((Ok(0), _)) => anyhow::bail!("supervisor closed connection without responding"),
-        Ok((Ok(_), line)) => {
+    let mut reader = BufReader::new(reader_half);
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Ok(0) => anyhow::bail!("supervisor closed connection without responding"),
+        Ok(_) => {
             let resp: IpcResponse =
                 serde_json::from_str(line.trim()).context("failed to parse supervisor response")?;
             Ok(resp)
         }
-        Ok((Err(e), _)) => anyhow::bail!("supervisor read error: {e}"),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            anyhow::bail!("supervisor response timeout (2s)")
+        Err(e) if supervisor_read_error_is_timeout(&e) => {
+            anyhow::bail!(
+                "supervisor response timeout ({:.1}s)",
+                SUPERVISOR_IPC_RESPONSE_TIMEOUT.as_secs_f32()
+            )
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            anyhow::bail!("supervisor reader thread disconnected")
-        }
+        Err(e) => anyhow::bail!("supervisor read error: {e}"),
     }
 }
 
@@ -766,7 +858,8 @@ mod tests {
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .expect("start test handler")
     }

@@ -19,6 +19,10 @@ use std::path::Path;
 pub trait CloseoutEffects {
     fn commit(&self, file: &Path) -> Result<bool>;
 
+    fn commit_for_authority(&self, file: &Path, _force_disk: bool) -> Result<bool> {
+        self.commit(file)
+    }
+
     fn run_pending_maintenance(
         &self,
         file: &Path,
@@ -26,6 +30,10 @@ pub trait CloseoutEffects {
     ) -> Result<agent_doc_preflight_io::PendingMaintenanceReport>;
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()>;
+
+    fn enforce_clean_closeout_for_authority(&self, file: &Path, _force_disk: bool) -> Result<()> {
+        self.enforce_clean_closeout(file)
+    }
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<()>;
 
@@ -124,7 +132,7 @@ pub fn complete_required_closeout_with_options(
         );
     }
 
-    let mut did_commit = effects.commit(file)?;
+    let mut did_commit = effects.commit_for_authority(file, options.force_disk)?;
     // `#staleinmem` — record the just-committed on-disk content as the hub baseline
     // so a later out-of-band disk correction is detectable at the next commit
     // barrier (no-op under the Detached / headless path).
@@ -168,13 +176,16 @@ pub fn complete_required_closeout_with_options(
         &rc,
         &mut did_commit,
         &mut timer,
-        "git_commit_retry_snapshot",
-        "cycle_state_retry_snapshot",
+        RetrySnapshotHeadDriftOptions {
+            force_disk: options.force_disk,
+            commit_mark: "git_commit_retry_snapshot",
+            cycle_mark: "cycle_state_retry_snapshot",
+        },
     )?;
 
     if agent_doc_git_io::submodule::submodule_pointer_drift(file)?.is_some() {
         eprintln!("[commit] parent submodule pointer still stale after commit - retrying");
-        did_commit |= effects.commit(file)?;
+        did_commit |= effects.commit_for_authority(file, options.force_disk)?;
         rc.invalidate_head_content();
         rc.invalidate_snapshot_content();
         timer.mark("git_commit_retry_parent_pointer");
@@ -200,7 +211,7 @@ pub fn complete_required_closeout_with_options(
             file.display()
         );
     }
-    if let Err(err) = effects.enforce_clean_closeout(file) {
+    if let Err(err) = effects.enforce_clean_closeout_for_authority(file, options.force_disk) {
         log_closeout_guard_event(
             file,
             FlowStage::SessionCheck,
@@ -218,8 +229,11 @@ pub fn complete_required_closeout_with_options(
         &rc,
         &mut did_commit,
         &mut timer,
-        "git_commit_retry_terminal_snapshot",
-        "cycle_state_retry_terminal_snapshot",
+        RetrySnapshotHeadDriftOptions {
+            force_disk: options.force_disk,
+            commit_mark: "git_commit_retry_terminal_snapshot",
+            cycle_mark: "cycle_state_retry_terminal_snapshot",
+        },
     )?;
     record_terminal_closeout_proof(file, did_commit, effects, options)?;
     timer.mark("terminal_proof");
@@ -277,25 +291,17 @@ pub fn stuck_captured_cycle(file: &Path) -> Option<StuckCapturedCycleInfo> {
         return None;
     }
     let capture_id = state.capture_id.as_deref()?;
-    let capture = match agent_doc_capture_io::load_by_id(file, capture_id) {
+    let capture = match closeout_captured_response_for_state(file, Some(&state)) {
         Ok(Some(capture)) => capture,
         Ok(None) => return None,
         Err(err) => {
             eprintln!(
-                "[preflight] warning: failed to load capture {capture_id} for stuck-cycle detection on {}: {err}",
+                "[preflight] warning: failed to load captured response {capture_id} for stuck-cycle detection on {}: {err}",
                 file.display()
             );
             return None;
         }
     };
-    if capture.cycle_id != state.cycle_id {
-        return None;
-    }
-    if let Some(response_sha256) = state.response_sha256.as_deref()
-        && response_sha256 != capture.response_sha256
-    {
-        return None;
-    }
     if capture.response_body.trim().is_empty()
         || matches!(
             capture.state,
@@ -513,14 +519,19 @@ fn ensure_cycle_committed(file: &Path) -> Result<()> {
     Ok(())
 }
 
+struct RetrySnapshotHeadDriftOptions<'a> {
+    force_disk: bool,
+    commit_mark: &'a str,
+    cycle_mark: &'a str,
+}
+
 fn retry_snapshot_head_content_hash_drift(
     file: &Path,
     effects: &dyn CloseoutEffects,
     rc: &impl AgentDocContextExt,
     did_commit: &mut bool,
     timer: &mut CloseoutTimer<'_>,
-    commit_mark: &str,
-    cycle_mark: &str,
+    options: RetrySnapshotHeadDriftOptions<'_>,
 ) -> Result<()> {
     if !matches!(
         agent_doc_snapshot_io::verify_snapshot_head_content_hash(file)?,
@@ -536,12 +547,12 @@ fn retry_snapshot_head_content_hash_drift(
         FlowOutcome::Blocked,
         CloseoutGuardReason::SnapshotDiffersFromHead,
     );
-    *did_commit |= effects.commit(file)?;
+    *did_commit |= effects.commit_for_authority(file, options.force_disk)?;
     rc.invalidate_head_content();
     rc.invalidate_snapshot_content();
-    timer.mark(commit_mark);
+    timer.mark(options.commit_mark);
     ensure_cycle_committed(file)?;
-    timer.mark(cycle_mark);
+    timer.mark(options.cycle_mark);
     Ok(())
 }
 
@@ -722,7 +733,7 @@ fn open_cycle_recovery_command_input(file: &Path) -> Option<OpenCycleRecoveryCom
 
 enum CloseoutRecoveryCycleView {
     Sidecar(Box<agent_doc_cycle_state_io::CycleState>),
-    Projection(agent_doc_cycle_state_io::ProjectedCloseoutState),
+    Projection(Box<agent_doc_cycle_state_io::ProjectedCloseoutState>),
 }
 
 impl CloseoutRecoveryCycleView {
@@ -804,6 +815,7 @@ fn load_closeout_recovery_cycle_view(file: &Path) -> Result<Option<CloseoutRecov
     }
     Ok(agent_doc_cycle_state_io::load_closeout_projection(file)?
         .filter(|projection| projection.cycle_id.is_some() && projection.phase.is_some())
+        .map(Box::new)
         .map(CloseoutRecoveryCycleView::Projection))
 }
 
@@ -853,6 +865,18 @@ pub struct CloseoutCaptureEvidence {
     pub cycle_id: String,
     pub state: agent_doc_workflow::capture::CaptureState,
     pub response_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+struct CloseoutCapturedResponse {
+    capture_id: String,
+    cycle_id: String,
+    state: agent_doc_workflow::capture::CaptureState,
+    response_sha256: String,
+    response_body: String,
+    file_hash: Option<String>,
+    snapshot_hash: Option<String>,
+    has_sidecar_hashes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -922,7 +946,7 @@ pub fn gather_closeout_recovery_evidence(
         cycle_id: state.cycle_id.clone(),
         phase: state.phase,
     });
-    let capture = agent_doc_capture_io::load_active(file)?;
+    let capture = closeout_captured_response_for_state(file, cycle.as_ref())?;
     let active_capture = capture.as_ref().map(|capture| CloseoutCaptureEvidence {
         capture_id: capture.capture_id.clone(),
         cycle_id: capture.cycle_id.clone(),
@@ -1262,9 +1286,122 @@ fn capture_state_from_label(label: &str) -> Option<agent_doc_workflow::capture::
     }
 }
 
+fn capture_state_for_cycle_phase(
+    phase: agent_doc_turn::CyclePhase,
+) -> agent_doc_workflow::capture::CaptureState {
+    match phase {
+        agent_doc_turn::CyclePhase::PreflightStarted
+        | agent_doc_turn::CyclePhase::ResponseCaptured => {
+            agent_doc_workflow::capture::CaptureState::Captured
+        }
+        agent_doc_turn::CyclePhase::WriteApplied => {
+            agent_doc_workflow::capture::CaptureState::WriteApplied
+        }
+        agent_doc_turn::CyclePhase::Committed => {
+            agent_doc_workflow::capture::CaptureState::Committed
+        }
+        agent_doc_turn::CyclePhase::Abandoned => {
+            agent_doc_workflow::capture::CaptureState::Discarded
+        }
+    }
+}
+
+fn closeout_captured_response_for_state(
+    file: &Path,
+    state: Option<&agent_doc_cycle_state_io::CycleState>,
+) -> Result<Option<CloseoutCapturedResponse>> {
+    let Some(state) = state else {
+        return Ok(None);
+    };
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let projected = agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?;
+    let sidecar = closeout_matching_capture_sidecar(file, state)?;
+    if let Some(projected) = projected
+        && projected.cycle_id == state.cycle_id
+        && state
+            .response_sha256
+            .as_deref()
+            .is_none_or(|sha| sha == projected.response_sha256)
+    {
+        let projected_has_hashes = projected.file_hash.is_some();
+        let (capture_state, sidecar_file_hash, sidecar_snapshot_hash, has_sidecar_hashes) =
+            sidecar.as_ref().map_or(
+                (
+                    capture_state_for_cycle_phase(state.phase),
+                    None,
+                    None,
+                    false,
+                ),
+                |capture| {
+                    (
+                        capture.state,
+                        capture.file_hash.clone(),
+                        capture.snapshot_hash.clone(),
+                        true,
+                    )
+                },
+            );
+        let file_hash = projected.file_hash.or(sidecar_file_hash);
+        let snapshot_hash = if projected_has_hashes {
+            projected.snapshot_hash
+        } else {
+            sidecar_snapshot_hash
+        };
+        return Ok(Some(CloseoutCapturedResponse {
+            capture_id: projected.capture_id,
+            cycle_id: projected.cycle_id,
+            state: capture_state,
+            response_sha256: projected.response_sha256,
+            response_body: projected.response_body,
+            file_hash,
+            snapshot_hash,
+            has_sidecar_hashes: projected_has_hashes || has_sidecar_hashes,
+        }));
+    }
+    Ok(sidecar.map(closeout_captured_response_from_sidecar))
+}
+
+fn closeout_matching_capture_sidecar(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> Result<Option<agent_doc_capture_io::CaptureRecord>> {
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+        return Ok(None);
+    };
+    if capture.cycle_id != state.cycle_id {
+        return Ok(None);
+    }
+    if let Some(response_sha256) = state.response_sha256.as_deref()
+        && response_sha256 != capture.response_sha256
+    {
+        return Ok(None);
+    }
+    Ok(Some(capture))
+}
+
+fn closeout_captured_response_from_sidecar(
+    capture: agent_doc_capture_io::CaptureRecord,
+) -> CloseoutCapturedResponse {
+    CloseoutCapturedResponse {
+        capture_id: capture.capture_id,
+        cycle_id: capture.cycle_id,
+        state: capture.state,
+        response_sha256: capture.response_sha256,
+        response_body: capture.response_body,
+        file_hash: capture.file_hash,
+        snapshot_hash: capture.snapshot_hash,
+        has_sidecar_hashes: true,
+    }
+}
+
 fn closeout_response_body_evidence(
     visible: &str,
-    capture: Option<&agent_doc_capture_io::CaptureRecord>,
+    capture: Option<&CloseoutCapturedResponse>,
 ) -> CloseoutResponseBodyEvidence {
     let Some(capture) = capture else {
         return CloseoutResponseBodyEvidence::NoActiveCapture;
@@ -1303,13 +1440,19 @@ fn closeout_queue_only_drift_evidence(
     snapshot: Option<&str>,
     visible_hash: &str,
     snapshot_hash: Option<&str>,
-    capture: Option<&agent_doc_capture_io::CaptureRecord>,
+    capture: Option<&CloseoutCapturedResponse>,
 ) -> Result<Option<CloseoutQueueOnlyDriftEvidence>> {
     let Some(capture) = capture else {
         return Ok(None);
     };
+    if !capture.has_sidecar_hashes {
+        return Ok(None);
+    }
     let file_hash_mismatch = capture.file_hash.as_deref() != Some(visible_hash);
     let snapshot_hash_mismatch = capture.snapshot_hash.as_deref() != snapshot_hash;
+    if !file_hash_mismatch && !snapshot_hash_mismatch {
+        return Ok(None);
+    }
     let proven_queue_only = file_hash_mismatch
         && !snapshot_hash_mismatch
         && agent_doc_capture_io::live_drift_is_queue_only_against_snapshot(visible, snapshot)?;

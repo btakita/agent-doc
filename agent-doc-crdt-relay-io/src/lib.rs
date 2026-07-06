@@ -49,7 +49,9 @@
 //!   while any live target has unacknowledged delivery.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
@@ -73,6 +75,11 @@ const EDITOR_SYNC_SETTLE_MS: u64 = 75;
 const EDITOR_SYNC_TIMEOUT_MS: u64 = 150;
 const DOCUMENT_MODEL_ENSURE_POLL_MS: u64 = 25;
 const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 150;
+const DOCUMENT_MODEL_ENSURE_COOLDOWN_MS: u64 = 10_000;
+// `send_publish_live_buffer` can spend 3s connecting and 6s waiting for a
+// receipt. Keep the cross-process lock fresh across that whole window so a slow
+// or wedged editor listener cannot cause competing recovery attempts.
+const DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS: u64 = 12_000;
 
 /// Process-global per-document relay-hub registry, keyed by document hash.
 ///
@@ -194,8 +201,10 @@ pub fn current_text_for_file_with_authority(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica",
+                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica doc_hash={} process_pid={}",
                 file.display(),
+                hash,
+                std::process::id(),
             ),
         );
         return Ok(CurrentText::EditorAttachedMissingReplica);
@@ -249,13 +258,23 @@ pub fn current_text_for_file_with_authority(
 /// contract, not the pre-recovery observation.
 pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     let authority = authority_for_file(&file.display().to_string());
+    if authority.editor_attached()
+        && let Some(suppression) = existing_document_model_ensure_suppression(file, source)?
+    {
+        return suppressed_document_model_ensure_result(file, source, suppression);
+    }
     let first = current_text_for_file_with_authority(file, authority)?;
-    match first {
-        CurrentText::Detached | CurrentText::Current { .. } => return Ok(first),
-        CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {}
+    if matches!(first, CurrentText::Detached | CurrentText::Current { .. }) {
+        return Ok(first);
     }
 
     let first_label = current_text_label(&first);
+    let mut ensure_guard = match acquire_document_model_ensure_attempt(file, source, first_label)? {
+        DocumentModelEnsureAdmission::Run(guard) => guard,
+        DocumentModelEnsureAdmission::Suppressed(suppression) => {
+            return suppressed_document_model_ensure_result(file, source, suppression);
+        }
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -265,7 +284,10 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
             first_label,
         ),
     );
-    request_document_model_live_buffer_publish(file, source)?;
+    if let Err(err) = request_document_model_live_buffer_publish(file, source) {
+        ensure_guard.record_failure(first_label);
+        return Err(err);
+    }
 
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
@@ -283,6 +305,7 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
                     DOCUMENT_MODEL_ENSURE_TIMEOUT_MS,
                 ),
             );
+            ensure_guard.record_failure(last_label);
             anyhow::bail!(
                 "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; reload or save the editor buffer, then retry",
                 file.display()
@@ -304,6 +327,7 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
                         current_text_label(&current),
                     ),
                 );
+                ensure_guard.record_success();
                 return Ok(current);
             }
             CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {
@@ -311,6 +335,21 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
             }
         }
     }
+}
+
+/// Fail fast when another process recently attempted, or is actively attempting,
+/// document-model recovery for the same editor-attached document.
+///
+/// This is intentionally public for resolver entry points that would otherwise
+/// perform a noisy current-text probe before reaching [`ensure_document_model`].
+pub fn defer_if_document_model_ensure_suppressed(file: &Path, source: &str) -> Result<()> {
+    let authority = authority_for_file(&file.display().to_string());
+    if authority.editor_attached()
+        && let Some(suppression) = existing_document_model_ensure_suppression(file, source)?
+    {
+        suppressed_document_model_ensure_result(file, source, suppression)?;
+    }
+    Ok(())
 }
 
 fn current_text_label(current: &CurrentText) -> &'static str {
@@ -322,10 +361,199 @@ fn current_text_label(current: &CurrentText) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DocumentModelEnsurePaths {
+    lock_path: PathBuf,
+    cooldown_path: PathBuf,
+}
+
+struct DocumentModelEnsureGuard {
+    lock_path: PathBuf,
+    cooldown_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DocumentModelEnsureSuppression {
+    reason: &'static str,
+    state: &'static str,
+}
+
+impl DocumentModelEnsureGuard {
+    fn record_failure(&mut self, state: &str) {
+        let _ = std::fs::write(&self.cooldown_path, state);
+    }
+
+    fn record_success(&mut self) {
+        let _ = std::fs::remove_file(&self.cooldown_path);
+    }
+}
+
+impl Drop for DocumentModelEnsureGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+enum DocumentModelEnsureAdmission {
+    Run(DocumentModelEnsureGuard),
+    Suppressed(DocumentModelEnsureSuppression),
+}
+
+fn document_model_ensure_paths(file: &Path) -> Result<DocumentModelEnsurePaths> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
+    let dir = project_root
+        .join(".agent-doc")
+        .join("document-model-ensure");
+    std::fs::create_dir_all(&dir)?;
+    Ok(DocumentModelEnsurePaths {
+        lock_path: dir.join(format!("{hash}.lock")),
+        cooldown_path: dir.join(format!("{hash}.cooldown")),
+    })
+}
+
+fn existing_document_model_ensure_suppression(
+    file: &Path,
+    source: &str,
+) -> Result<Option<DocumentModelEnsureSuppression>> {
+    let paths = document_model_ensure_paths(file)?;
+    if let Some(state) =
+        fresh_document_model_ensure_marker(&paths.cooldown_path, DOCUMENT_MODEL_ENSURE_COOLDOWN_MS)
+    {
+        let suppression = DocumentModelEnsureSuppression {
+            reason: "recent_failure",
+            state,
+        };
+        log_document_model_ensure_suppressed(file, source, suppression);
+        return Ok(Some(suppression));
+    }
+    if let Some(state) =
+        fresh_document_model_ensure_marker(&paths.lock_path, DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS)
+    {
+        let suppression = DocumentModelEnsureSuppression {
+            reason: "in_progress",
+            state,
+        };
+        log_document_model_ensure_suppressed(file, source, suppression);
+        return Ok(Some(suppression));
+    }
+    Ok(None)
+}
+
+fn acquire_document_model_ensure_attempt(
+    file: &Path,
+    source: &str,
+    initial_state: &'static str,
+) -> Result<DocumentModelEnsureAdmission> {
+    let paths = document_model_ensure_paths(file)?;
+    if let Some(state) =
+        fresh_document_model_ensure_marker(&paths.cooldown_path, DOCUMENT_MODEL_ENSURE_COOLDOWN_MS)
+    {
+        let suppression = DocumentModelEnsureSuppression {
+            reason: "recent_failure",
+            state,
+        };
+        log_document_model_ensure_suppressed(file, source, suppression);
+        return Ok(DocumentModelEnsureAdmission::Suppressed(suppression));
+    }
+    for _ in 0..2 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&paths.lock_path)
+        {
+            Ok(mut lock) => {
+                let _ = lock.write_all(initial_state.as_bytes());
+                return Ok(DocumentModelEnsureAdmission::Run(
+                    DocumentModelEnsureGuard {
+                        lock_path: paths.lock_path,
+                        cooldown_path: paths.cooldown_path,
+                    },
+                ));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                if let Some(state) = fresh_document_model_ensure_marker(
+                    &paths.lock_path,
+                    DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS,
+                ) {
+                    let suppression = DocumentModelEnsureSuppression {
+                        reason: "in_progress",
+                        state,
+                    };
+                    log_document_model_ensure_suppressed(file, source, suppression);
+                    return Ok(DocumentModelEnsureAdmission::Suppressed(suppression));
+                }
+                let _ = std::fs::remove_file(&paths.lock_path);
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+    let state = "editor_attached_model_missing";
+    let suppression = DocumentModelEnsureSuppression {
+        reason: "lock_contention",
+        state,
+    };
+    log_document_model_ensure_suppressed(file, source, suppression);
+    Ok(DocumentModelEnsureAdmission::Suppressed(suppression))
+}
+
+fn fresh_document_model_ensure_marker(path: &Path, ttl_ms: u64) -> Option<&'static str> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let age = modified.elapsed().unwrap_or_default();
+    if age > std::time::Duration::from_millis(ttl_ms) {
+        return None;
+    }
+    let state = std::fs::read_to_string(path).unwrap_or_default();
+    Some(label_to_current_text_state(state.trim()))
+}
+
+fn label_to_current_text_state(label: &str) -> &'static str {
+    match label {
+        "editor_sync_pending" => "editor_sync_pending",
+        _ => "editor_attached_model_missing",
+    }
+}
+
+fn log_document_model_ensure_suppressed(
+    file: &Path,
+    source: &str,
+    suppression: DocumentModelEnsureSuppression,
+) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "document_model_ensure_suppressed file={} source={} reason={} state={} cooldown_ms={} lock_stale_ms={} recovery=retry_without_disk_write",
+            file.display(),
+            source,
+            suppression.reason,
+            suppression.state,
+            DOCUMENT_MODEL_ENSURE_COOLDOWN_MS,
+            DOCUMENT_MODEL_ENSURE_LOCK_STALE_MS,
+        ),
+    );
+}
+
+fn suppressed_document_model_ensure_result(
+    file: &Path,
+    source: &str,
+    suppression: DocumentModelEnsureSuppression,
+) -> Result<CurrentText> {
+    anyhow::bail!(
+        "document model startup/reconciliation for {} suppressed duplicate publish-live-buffer request from {source}; reason={}; editor authority stayed in {}; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; retry after the active recovery attempt finishes, or reload/save the editor buffer",
+        file.display(),
+        suppression.reason,
+        suppression.state,
+    );
+}
+
 fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Result<()> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let path_str = canonical.to_string_lossy().to_string();
+    let doc_hash =
+        agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|e| format!("hash_error:{e}"));
     let listener_active = agent_doc_ipc_io::is_listener_active(&project_root);
     let (transport, publish_result) = if listener_active {
         (
@@ -343,10 +571,15 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_requested file={} source={} transport={}",
+                    "document_model_ensure_publish_requested file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={}",
                     file.display(),
+                    canonical.display(),
                     source,
                     transport,
+                    project_root.display(),
+                    listener_active,
+                    doc_hash,
+                    std::process::id(),
                 ),
             );
             Ok(())
@@ -355,10 +588,15 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_unavailable file={} source={} transport={}",
+                    "document_model_ensure_publish_unavailable file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={}",
                     file.display(),
+                    canonical.display(),
                     source,
                     transport,
+                    project_root.display(),
+                    listener_active,
+                    doc_hash,
+                    std::process::id(),
                 ),
             );
             anyhow::bail!(
@@ -370,10 +608,15 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_error file={} source={} transport={} error={}",
+                    "document_model_ensure_publish_error file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} error={}",
                     file.display(),
+                    canonical.display(),
                     source,
                     transport,
+                    project_root.display(),
+                    listener_active,
+                    doc_hash,
+                    std::process::id(),
                     e,
                 ),
             );
@@ -683,6 +926,10 @@ pub enum DurableProjectionCheckpoint {
     /// No live editor owns the document. Git/disk authority is already durable and
     /// the relay projection is intentionally untouched.
     Detached,
+    /// The foreground path did not have a ready live model to checkpoint. A
+    /// background repair request was recorded; the turn/recycle hot path should
+    /// continue without treating the stale `.yrs` projection as authoritative.
+    Deferred { reason: String },
     /// A live editor relay was flushed to `.agent-doc/crdt/<hash>.yrs`.
     Checkpointed {
         bytes: usize,
@@ -705,6 +952,24 @@ pub fn checkpoint_durable_projection_for_file(
     file: &Path,
     source: &str,
 ) -> Result<DurableProjectionCheckpoint> {
+    checkpoint_durable_projection_for_file_with_mode(
+        file,
+        source,
+        DurableProjectionMode::Foreground,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurableProjectionMode {
+    Foreground,
+    Background,
+}
+
+fn checkpoint_durable_projection_for_file_with_mode(
+    file: &Path,
+    source: &str,
+    mode: DurableProjectionMode,
+) -> Result<DurableProjectionCheckpoint> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
@@ -718,7 +983,10 @@ pub fn checkpoint_durable_projection_for_file(
         return Ok(DurableProjectionCheckpoint::Detached);
     }
 
-    let current = ensure_document_model(file, source)?;
+    let current = match mode {
+        DurableProjectionMode::Foreground => current_text_for_file_with_authority(file, authority)?,
+        DurableProjectionMode::Background => ensure_document_model(file, source)?,
+    };
     let (live_editors, delivery_converged) = match current {
         CurrentText::Detached => {
             agent_doc_ops_log_io::log_op(
@@ -737,52 +1005,31 @@ pub fn checkpoint_durable_projection_for_file(
             ..
         } => (live_editors, delivery_converged),
         CurrentText::EditorAttachedMissingReplica | CurrentText::EditorSyncPending => {
-            agent_doc_ops_log_io::log_op(
+            return defer_or_fail_durable_projection_checkpoint(
                 file,
-                &format!(
-                    "crdt_durable_checkpoint_blocked file={} source={} reason={}",
-                    file.display(),
-                    source,
-                    current_text_label(&current),
-                ),
-            );
-            anyhow::bail!(
-                "CRDT durable checkpoint blocked for {} before {source}: {}",
-                file.display(),
-                current_text_label(&current)
+                source,
+                mode,
+                current_text_label(&current),
             );
         }
     };
     if !delivery_converged {
-        agent_doc_ops_log_io::log_op(
+        return defer_or_fail_durable_projection_checkpoint(
             file,
-            &format!(
-                "crdt_durable_checkpoint_blocked file={} source={} reason=delivery_not_converged live_editors={}",
-                file.display(),
-                source,
-                live_editors,
-            ),
-        );
-        anyhow::bail!(
-            "CRDT durable checkpoint blocked for {} before {source}: delivery not converged",
-            file.display()
+            source,
+            mode,
+            &format!("delivery_not_converged live_editors={live_editors}"),
         );
     }
 
     let Some((projection, canonical_text)) =
         with_existing_hub(file, |hub| (hub.projection_bytes(), hub.canonical_text()))?
     else {
-        agent_doc_ops_log_io::log_op(
+        return defer_or_fail_durable_projection_checkpoint(
             file,
-            &format!(
-                "crdt_durable_checkpoint_blocked file={} source={} reason=missing_hub_after_ensure",
-                file.display(),
-                source,
-            ),
-        );
-        anyhow::bail!(
-            "CRDT durable checkpoint blocked for {} before {source}: live hub missing after document-model ensure",
-            file.display()
+            source,
+            mode,
+            "missing_hub_after_ready_state",
         );
     };
     let path = agent_doc_fs::crdt_path_for(file)?;
@@ -814,6 +1061,224 @@ pub fn checkpoint_durable_projection_for_file(
         text_len,
         text_hash,
     })
+}
+
+fn defer_or_fail_durable_projection_checkpoint(
+    file: &Path,
+    source: &str,
+    mode: DurableProjectionMode,
+    reason: &str,
+) -> Result<DurableProjectionCheckpoint> {
+    match mode {
+        DurableProjectionMode::Foreground => {
+            defer_durable_projection_checkpoint(file, source, reason)?;
+            Ok(DurableProjectionCheckpoint::Deferred {
+                reason: reason.to_string(),
+            })
+        }
+        DurableProjectionMode::Background => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_durable_checkpoint_background_blocked file={} source={} reason={}",
+                    file.display(),
+                    source,
+                    reason,
+                ),
+            );
+            anyhow::bail!(
+                "CRDT durable checkpoint background repair blocked for {} before {source}: {reason}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DurableProjectionRepairPaths {
+    pending_path: PathBuf,
+    lock_path: PathBuf,
+}
+
+struct DurableProjectionRepairGuard {
+    lock_path: PathBuf,
+}
+
+impl Drop for DurableProjectionRepairGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
+}
+
+fn durable_projection_repair_paths(file: &Path) -> Result<DurableProjectionRepairPaths> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
+    let dir = project_root.join(".agent-doc").join("crdt-repair");
+    std::fs::create_dir_all(&dir)?;
+    Ok(DurableProjectionRepairPaths {
+        pending_path: dir.join(format!("{hash}.json")),
+        lock_path: dir.join(format!("{hash}.lock")),
+    })
+}
+
+fn defer_durable_projection_checkpoint(file: &Path, source: &str, reason: &str) -> Result<()> {
+    record_durable_projection_repair_request(file, source, reason)?;
+    spawn_durable_projection_repair(file, source, reason);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_durable_checkpoint_deferred file={} source={} reason={} recovery=background_yrs_repair",
+            file.display(),
+            source,
+            reason,
+        ),
+    );
+    Ok(())
+}
+
+fn record_durable_projection_repair_request(file: &Path, source: &str, reason: &str) -> Result<()> {
+    let paths = durable_projection_repair_paths(file)?;
+    let requested_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let body = format!(
+        "{{\"file\":\"{}\",\"source\":\"{}\",\"reason\":\"{}\",\"requested_at_secs\":{requested_at}}}",
+        json_string_escape(&file.display().to_string()),
+        json_string_escape(source),
+        json_string_escape(reason),
+    );
+    std::fs::write(&paths.pending_path, body).with_context(|| {
+        format!(
+            "failed to write CRDT durable projection repair request {}",
+            paths.pending_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn json_string_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn clear_durable_projection_repair_request(file: &Path) {
+    if let Ok(paths) = durable_projection_repair_paths(file) {
+        let _ = std::fs::remove_file(paths.pending_path);
+    }
+}
+
+fn acquire_durable_projection_repair_guard(
+    file: &Path,
+) -> Result<Option<DurableProjectionRepairGuard>> {
+    let paths = durable_projection_repair_paths(file)?;
+    const STALE_LOCK_MS: u64 = 30_000;
+    if let Some(metadata) = std::fs::metadata(&paths.lock_path).ok()
+        && let Ok(modified) = metadata.modified()
+        && modified.elapsed().unwrap_or_default() <= std::time::Duration::from_millis(STALE_LOCK_MS)
+    {
+        return Ok(None);
+    }
+    let _ = std::fs::remove_file(&paths.lock_path);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&paths.lock_path)
+    {
+        Ok(mut lock) => {
+            let _ = lock.write_all(std::process::id().to_string().as_bytes());
+            Ok(Some(DurableProjectionRepairGuard {
+                lock_path: paths.lock_path,
+            }))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn spawn_durable_projection_repair(file: &Path, source: &str, reason: &str) {
+    let file = file.to_path_buf();
+    let source = source.to_string();
+    let reason = reason.to_string();
+    let Some(guard) = acquire_durable_projection_repair_guard(&file)
+        .inspect_err(|err| {
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "crdt_durable_checkpoint_background_spawn_skipped file={} source={} reason={} error={:?}",
+                    file.display(),
+                    source,
+                    reason,
+                    err.to_string(),
+                ),
+            );
+        })
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("agent-doc-crdt-repair".to_string())
+        .spawn(move || {
+            let _guard = guard;
+            let background_source = format!("{source}:background");
+            match checkpoint_durable_projection_for_file_with_mode(
+                &file,
+                &background_source,
+                DurableProjectionMode::Background,
+            ) {
+                Ok(DurableProjectionCheckpoint::Checkpointed { .. })
+                | Ok(DurableProjectionCheckpoint::Detached) => {
+                    clear_durable_projection_repair_request(&file);
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "crdt_durable_checkpoint_background_repaired file={} source={} original_reason={}",
+                            file.display(),
+                            background_source,
+                            reason,
+                        ),
+                    );
+                }
+                Ok(DurableProjectionCheckpoint::Deferred { reason: deferred }) => {
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "crdt_durable_checkpoint_background_deferred file={} source={} original_reason={} deferred_reason={}",
+                            file.display(),
+                            background_source,
+                            reason,
+                            deferred,
+                        ),
+                    );
+                }
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "crdt_durable_checkpoint_background_failed file={} source={} original_reason={} error={:?}",
+                            file.display(),
+                            background_source,
+                            reason,
+                            err.to_string(),
+                        ),
+                    );
+                }
+            }
+        });
 }
 
 /// The **authority-gated commit barrier** at the live finalize commit point
@@ -1552,6 +2017,81 @@ mod tests {
         assert!(
             !err.contains("CRDT relay has no registered replica yet"),
             "raw missing-replica text should not be the final contract: {err}"
+        );
+        let repeat_err = ensure_document_model(&doc, "test_ensure_model_missing_repeat")
+            .expect_err("recent failed ensure should suppress duplicate publish/poll attempts")
+            .to_string();
+        assert!(
+            repeat_err.contains("recovery=retry_without_disk_write"),
+            "suppressed retry should preserve retry-class error: {repeat_err}"
+        );
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_suppressed")
+                && log.contains("reason=recent_failure"),
+            "immediate repeat should be cooldown-suppressed:\n{log}"
+        );
+        assert_eq!(
+            log.matches("document_model_ensure_start").count(),
+            1,
+            "cooldown suppression must not start another ensure loop:\n{log}"
+        );
+    }
+
+    #[test]
+    fn ensure_document_model_active_attempt_suppresses_duplicate_probe() {
+        let (_dir, doc) = temp_doc("ensure-model-in-progress.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let paths = document_model_ensure_paths(&doc).unwrap();
+        std::fs::write(&paths.lock_path, "editor_attached_model_missing").unwrap();
+
+        let err = ensure_document_model(&doc, "test_ensure_model_in_progress")
+            .expect_err("active ensure should suppress duplicate publish/poll attempts")
+            .to_string();
+        assert!(
+            err.contains("recovery=retry_without_disk_write"),
+            "suppressed active ensure should preserve retry-class error: {err}"
+        );
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_suppressed") && log.contains("reason=in_progress"),
+            "duplicate attempt should be in-progress-suppressed:\n{log}"
+        );
+        assert!(
+            !log.contains("document_model_ensure_start"),
+            "suppressed duplicate must not start an ensure loop:\n{log}"
+        );
+    }
+
+    #[test]
+    fn durable_checkpoint_defers_missing_model_to_background_repair() {
+        let (_dir, doc) = temp_doc("durable-checkpoint-deferred.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let repair_paths = durable_projection_repair_paths(&doc).unwrap();
+        std::fs::write(&repair_paths.lock_path, "test-held").unwrap();
+
+        let outcome = checkpoint_durable_projection_for_file(&doc, "test_recycle").unwrap();
+        match outcome {
+            DurableProjectionCheckpoint::Deferred { reason } => {
+                assert_eq!(reason, "editor_attached_model_missing");
+            }
+            other => panic!("expected deferred checkpoint, got {other:?}"),
+        }
+        assert!(
+            repair_paths.pending_path.exists(),
+            "foreground checkpoint should record a background repair marker"
+        );
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("crdt_durable_checkpoint_deferred")
+                && log.contains("recovery=background_yrs_repair"),
+            "foreground checkpoint should defer .yrs repair:\n{log}"
+        );
+        assert!(
+            !log.contains("document_model_ensure_start"),
+            "foreground checkpoint must not run the publish/poll ensure loop:\n{log}"
         );
     }
 

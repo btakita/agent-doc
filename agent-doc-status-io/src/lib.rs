@@ -10,6 +10,10 @@ use std::path::Path;
 
 /// Effects required by status writeback.
 pub trait StatusWriteEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -28,6 +32,14 @@ pub struct RuntimeStatusWriteEffects;
 pub static RUNTIME_STATUS_WRITE_EFFECTS: RuntimeStatusWriteEffects = RuntimeStatusWriteEffects;
 
 impl StatusWriteEffects for RuntimeStatusWriteEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    }
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -68,7 +80,12 @@ pub fn set_with_options<E: StatusWriteEffects + ?Sized>(
     text: &str,
     force_disk: bool,
 ) -> Result<()> {
-    let full_content = std::fs::read_to_string(file).context("failed to read document")?;
+    let full_content = if force_disk {
+        effects.force_disk_document_content(file, "status_set")
+    } else {
+        effects.current_document_content(file, "status_set")
+    }
+    .context("failed to read document")?;
     let new_doc =
         agent_doc_document::status_projection::replace_status_content(&full_content, text)?;
     if force_disk {
@@ -96,6 +113,12 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     struct TestEffects {
+        current_content: RefCell<Option<String>>,
+        disk_content: RefCell<Option<String>>,
+        previous: RefCell<Option<String>>,
+        updated: RefCell<Option<String>>,
+        current_reads: Cell<u32>,
+        disk_reads: Cell<u32>,
         converges: Cell<u32>,
         provenance: Cell<u32>,
         logs: RefCell<Vec<String>>,
@@ -104,22 +127,56 @@ mod tests {
     impl TestEffects {
         fn new() -> Self {
             Self {
+                current_content: RefCell::new(None),
+                disk_content: RefCell::new(None),
+                previous: RefCell::new(None),
+                updated: RefCell::new(None),
+                current_reads: Cell::new(0),
+                disk_reads: Cell::new(0),
                 converges: Cell::new(0),
                 provenance: Cell::new(0),
                 logs: RefCell::new(Vec::new()),
             }
         }
+
+        fn with_current_content(self, content: impl Into<String>) -> Self {
+            *self.current_content.borrow_mut() = Some(content.into());
+            self
+        }
+
+        fn with_disk_content(self, content: impl Into<String>) -> Self {
+            *self.disk_content.borrow_mut() = Some(content.into());
+            self
+        }
     }
 
     impl StatusWriteEffects for TestEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            self.current_reads.set(self.current_reads.get() + 1);
+            if let Some(content) = self.current_content.borrow().clone() {
+                return Ok(content);
+            }
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn force_disk_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            self.disk_reads.set(self.disk_reads.get() + 1);
+            if let Some(content) = self.disk_content.borrow().clone() {
+                return Ok(content);
+            }
+            Ok(std::fs::read_to_string(file)?)
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,
-            _previous: &str,
+            previous: &str,
             updated: &str,
             _phase: &str,
         ) -> Result<()> {
             self.converges.set(self.converges.get() + 1);
+            *self.previous.borrow_mut() = Some(previous.to_string());
+            *self.updated.borrow_mut() = Some(updated.to_string());
             std::fs::write(file, updated)?;
             Ok(())
         }
@@ -162,18 +219,57 @@ mod tests {
         assert_eq!(effects.converges.get(), 1);
         assert_eq!(effects.provenance.get(), 0);
         assert!(effects.logs.borrow().is_empty());
+        assert_eq!(effects.current_reads.get(), 1);
+        assert_eq!(effects.disk_reads.get(), 0);
+    }
+
+    #[test]
+    fn set_projects_from_current_document_not_stale_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = write_status_doc(&dir);
+        let current = concat!(
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "editor status\n",
+            "<!-- /agent:status -->\n",
+            "\noperator note\n",
+        );
+        let effects = TestEffects::new().with_current_content(current);
+
+        set(&effects, &doc, "new status").unwrap();
+
+        let previous = effects.previous.borrow().clone().unwrap();
+        assert!(previous.contains("editor status"));
+        assert!(previous.contains("operator note"));
+        let updated = effects.updated.borrow().clone().unwrap();
+        assert!(updated.contains("new status"));
+        assert!(updated.contains("operator note"));
+        assert!(!updated.contains("old status"));
+        assert_eq!(effects.current_reads.get(), 1);
+        assert_eq!(effects.disk_reads.get(), 0);
     }
 
     #[test]
     fn force_disk_writes_records_provenance_and_logs_hash() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = write_status_doc(&dir);
-        let effects = TestEffects::new();
+        let effects = TestEffects::new().with_disk_content(
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status patch=replace -->\n",
+                "disk status\n",
+                "<!-- /agent:status -->\n",
+            )
+            .to_string(),
+        );
 
         set_with_options(&effects, &doc, "new status", true).unwrap();
 
         let on_disk = std::fs::read_to_string(&doc).unwrap();
         assert!(on_disk.contains("new status"));
+        assert!(!on_disk.contains("disk status"));
+        assert_eq!(effects.current_reads.get(), 0);
+        assert_eq!(effects.disk_reads.get(), 1);
         assert_eq!(effects.converges.get(), 0);
         assert_eq!(effects.provenance.get(), 1);
         let logs = effects.logs.borrow();

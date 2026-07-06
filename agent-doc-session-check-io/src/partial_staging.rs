@@ -10,7 +10,7 @@ pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
 
@@ -19,8 +19,7 @@ pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
     let candidates = match agent_doc_turn::closeout_signal::partial_closeout_state_decision(
         agent_doc_turn::closeout_signal::PartialCloseoutStateEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state
-                == agent_doc_workflow::capture::CaptureState::Committed,
+            capture_committed: capture.capture_committed,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
             pending_done_ids: &state.pending_done_ids,

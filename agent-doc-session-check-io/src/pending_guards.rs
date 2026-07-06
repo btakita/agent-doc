@@ -26,10 +26,10 @@ pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<Gua
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != agent_doc_workflow::capture::CaptureState::Committed {
+    if !capture.capture_committed {
         return Ok(GuardResult::None);
     }
     if capture
@@ -141,10 +141,10 @@ pub fn check_pending_done_guard(file: &Path, rc: &CycleContext) -> Result<GuardR
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
-    if capture.state != agent_doc_workflow::capture::CaptureState::Committed {
+    if !capture.capture_committed {
         return Ok(GuardResult::None);
     }
 

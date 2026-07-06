@@ -91,6 +91,9 @@ pub fn post_response_hook_effects<Load, Memory, Lease, Stale>(
 }
 
 fn load_active_capture_for_hooks(file: &Path) -> Result<Option<PostResponseCapture>, String> {
+    if let Some(capture) = load_projected_active_capture_for_hooks(file)? {
+        return Ok(Some(capture));
+    }
     agent_doc_capture_io::load_active(file)
         .map(|capture| {
             capture.map(|capture| PostResponseCapture {
@@ -100,6 +103,38 @@ fn load_active_capture_for_hooks(file: &Path) -> Result<Option<PostResponseCaptu
             })
         })
         .map_err(|err| err.to_string())
+}
+
+fn load_projected_active_capture_for_hooks(
+    file: &Path,
+) -> Result<Option<PostResponseCapture>, String> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .map_err(|err| err.to_string())?
+    else {
+        return Ok(None);
+    };
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(projected) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+            .map_err(|err| err.to_string())?
+    else {
+        return Ok(None);
+    };
+    if projected.cycle_id != state.cycle_id
+        || state
+            .response_sha256
+            .as_deref()
+            .is_some_and(|sha| sha != projected.response_sha256)
+    {
+        return Ok(None);
+    }
+    Ok(Some(PostResponseCapture {
+        capture_id: projected.capture_id,
+        response_sha256: projected.response_sha256,
+        response_body: projected.response_body,
+    }))
 }
 
 fn capture_tsift_memory_closeout_for_hooks(file: &Path, response_body: &str) {
@@ -181,7 +216,10 @@ pub fn fire_doc_hooks(
 /// Best-effort: if frontmatter cannot be read or hooks are empty, silently
 /// returns.
 pub fn fire_doc_event(file: &Path, event: &str) {
-    let content = match std::fs::read_to_string(file) {
+    let content = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "hooks_fire_doc_event",
+    ) {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -487,6 +525,28 @@ mod tests {
         assert_eq!(data["patches"].as_u64(), Some(2));
         assert_eq!(data["capture_id"].as_str(), Some("cap-1"));
         assert_eq!(data["response_sha256"].as_str(), Some("sha-1"));
+    }
+
+    #[test]
+    fn load_active_capture_for_hooks_uses_projection_without_capture_sidecar() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("doc.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nDone.\n";
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        let projected = load_active_capture_for_hooks(&doc)
+            .unwrap()
+            .expect("projected active capture");
+        assert_eq!(projected.capture_id, capture.capture_id);
+        assert_eq!(projected.response_sha256, capture.response_sha256);
+        assert_eq!(projected.response_body, response);
     }
 
     #[test]

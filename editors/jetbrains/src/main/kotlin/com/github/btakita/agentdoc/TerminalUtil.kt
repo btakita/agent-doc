@@ -22,11 +22,12 @@ object TerminalUtil {
     private val LOG = Logger.getInstance(TerminalUtil::class.java)
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
+    internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 15L
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
     private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
     private const val SUPERVISOR_RESTART_REDIRECT_MARKER = "supervisor_restart_redirect"
-    internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 4
-    private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(2_000L, 4_000L, 8_000L)
+    internal const val STARTING_ACTOR_ROUTE_MAX_ATTEMPTS = 2
+    private val STARTING_ACTOR_ROUTE_RETRY_DELAYS_MILLIS = longArrayOf(500L)
     private val BUSY_CLEAR_REFUSAL_HEADER_REGEX = Regex(
         """session_clear refused for (.+?) because pane (\S+) is (?:alive-busy|active_agent_doc|busy)""",
         RegexOption.DOT_MATCHES_ALL,
@@ -360,18 +361,14 @@ object TerminalUtil {
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath binary=$agentDoc")
         attempt?.recordIfCurrent("route_prepare")
 
+        var replaceActiveRun = false
         if (!commandPreAcquired) {
             when (editorCommandRegistry.request(routeKey, EditorCommandKind.RUN_AGENT_DOC)) {
                 EditorCommandDecision.START_NOW -> Unit
-                EditorCommandDecision.DEDUPE_ACTIVE_RUN -> {
-                    LOG.warn("[state] Run Agent Doc already dispatching for $relativePath; keeping existing route alive")
-                    attempt?.finishIfCurrent(
-                        "route_already_in_flight",
-                        error = "existing Run Agent Doc route is still dispatching",
-                    )
-                    showHint(project, "Run Agent Doc is already dispatching for $relativePath")
-                    onComplete?.invoke()
-                    return
+                EditorCommandDecision.SUPERSEDE_ACTIVE_RUN -> {
+                    replaceActiveRun = true
+                    LOG.warn("[state] Run Agent Doc superseding older plugin route for $relativePath")
+                    attempt?.recordIfCurrent("route_supersede_active_run")
                 }
                 EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR -> {
                     val replaced = rememberRunAfterClear(
@@ -439,7 +436,13 @@ object TerminalUtil {
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
-            if (!inFlightRouteRegistry.startIfIdle(routeKey, handle)) {
+            val routeSlotAcquired = if (replaceActiveRun) {
+                inFlightRouteRegistry.replace(routeKey, handle)
+                true
+            } else {
+                inFlightRouteRegistry.startIfIdle(routeKey, handle)
+            }
+            if (!routeSlotAcquired) {
                 LOG.warn("[state] route process already alive for $relativePath; suppressing duplicate Run Agent Doc")
                 attempt?.finishIfCurrent(
                     "route_process_already_in_flight",
@@ -597,7 +600,9 @@ object TerminalUtil {
                     }
                     handle.markCompleted()
                     inFlightRouteRegistry.clearIfCurrent(routeKey, handle)
-                    editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
+                    if (finalStage != "route_superseded" && !handle.wasCanceled()) {
+                        editorCommandRegistry.complete(routeKey, EditorCommandKind.RUN_AGENT_DOC)
+                    }
                     onComplete?.invoke()
                 }
             }.start()
@@ -638,7 +643,7 @@ object TerminalUtil {
             "--debounce",
             "0",
             "--wait-for-ready",
-            "120",
+            RUN_ROUTE_WAIT_FOR_READY_SECONDS.toString(),
             relativePath,
         )
 
@@ -1156,7 +1161,7 @@ object TerminalUtil {
                         "routeCanceled=$canceled"
                 )
             }
-            EditorCommandDecision.DEDUPE_ACTIVE_RUN,
+            EditorCommandDecision.SUPERSEDE_ACTIVE_RUN,
             EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR,
             EditorCommandDecision.IGNORED -> {
                 onComplete?.invoke()

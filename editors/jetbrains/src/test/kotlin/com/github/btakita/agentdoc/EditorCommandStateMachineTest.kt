@@ -19,7 +19,7 @@ class EditorCommandStateMachineTest {
     }
 
     @Test
-    fun `duplicate run is deduped while route is active`() {
+    fun `duplicate run supersedes active route`() {
         val state = EditorCommandState(active = EditorCommandKind.RUN_AGENT_DOC)
 
         val (next, decision) = EditorCommandStateMachine.onRequest(
@@ -27,7 +27,7 @@ class EditorCommandStateMachineTest {
             EditorCommandKind.RUN_AGENT_DOC,
         )
 
-        assertEquals(EditorCommandDecision.DEDUPE_ACTIVE_RUN, decision)
+        assertEquals(EditorCommandDecision.SUPERSEDE_ACTIVE_RUN, decision)
         assertEquals(state, next)
     }
 
@@ -98,7 +98,7 @@ class EditorCommandStateMachineTest {
     }
 
     // --- Reactive-path coverage (`#lazilystatesync5` / `#6n5j`) ----------------
-    // The command state machine governs *dispatch* (start/dedupe/preempt), while
+    // The command state machine governs *dispatch* (start/supersede/preempt), while
     // the run readiness it gates is now derived from the reactive lazily mirror
     // (`#n529b` reactiveSummaryForFile) instead of a cold projection re-render.
     // These tests prove the editor-side run loop reacts to *applied FFI deltas*:
@@ -152,8 +152,8 @@ class EditorCommandStateMachineTest {
     }
 
     @Test
-    fun `duplicate run dedupe holds while the reactive mirror advances underneath`() {
-        val path = "/tmp/agent-doc-6n5j-cmd-dedupe-${System.nanoTime()}.md"
+    fun `duplicate run supersede holds while the reactive mirror advances underneath`() {
+        val path = "/tmp/agent-doc-6n5j-cmd-supersede-${System.nanoTime()}.md"
         try {
             StateProjectionBridge.seedMirrorMessageForTest(path, routeSnapshot(1, "dispatch_proven", "%2"))
 
@@ -161,7 +161,7 @@ class EditorCommandStateMachineTest {
             val active = EditorCommandState(active = EditorCommandKind.RUN_AGENT_DOC)
 
             // The mirror reacts to a transport delta while the run is active —
-            // the command machine must still dedupe a duplicate run request
+            // the command machine must still supersede a duplicate run request
             // regardless of the reactive state churn.
             StateProjectionBridge.seedMirrorMessageForTest(
                 path,
@@ -175,7 +175,7 @@ class EditorCommandStateMachineTest {
                 active,
                 EditorCommandKind.RUN_AGENT_DOC,
             )
-            assertEquals(EditorCommandDecision.DEDUPE_ACTIVE_RUN, decision)
+            assertEquals(EditorCommandDecision.SUPERSEDE_ACTIVE_RUN, decision)
             assertEquals(active, next)
         } finally {
             StateProjectionBridge.evictForFile(path)

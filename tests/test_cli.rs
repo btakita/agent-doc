@@ -2499,6 +2499,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
     for required in [
         "agent-doc-capture-io",
         "agent-doc-frontmatter",
+        "agent-doc-document-realtime-io",
         "agent-doc-lease-io",
         "agent-doc-memory-io",
         "agent-doc-model-tier",
@@ -2541,6 +2542,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         "pub struct StaleConsumerReapCounts",
         "agent_kit::hooks::{Event, HookRegistry}",
         "std::process::Command::new(\"sh\")",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(\n        file,\n        \"hooks_fire_doc_event\",",
         "agent_doc_frontmatter::frontmatter::parse",
         "agent_doc_model_tier::canonical_model_name",
         "fn capture_event_metadata(",
@@ -2550,6 +2552,10 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
             "agent-doc-hooks-io must own hook dispatch adapter: {required}"
         );
     }
+    assert!(
+        !hooks_io.contains("std::fs::read_to_string(file)"),
+        "agent-doc-hooks-io must not read the active session document directly for hook frontmatter"
+    );
 
     assert!(
         !manifest_dir
@@ -2575,6 +2581,7 @@ fn test_agent_doc_hooks_io_owns_hook_dispatch_adapters() {
         "pub fn post_response_hook_effects",
         "pub fn default_post_response_hook_effects",
         "impl<Load, Memory, Lease, Stale> PostResponseHookEffects",
+        "agent_doc_cycle_state_io::load_projected_captured_response",
         "agent_doc_capture_io::load_active(file)",
         "agent_doc_memory_io::closeout::capture_tsift_memory_closeout",
         "agent_doc_lease_io::local_model::reap_local_model_leases",
@@ -2720,6 +2727,12 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             && !observer_dependencies.contains_key("agent-doc-orchestration"),
         "state observer IO should adapt focused state backbone facts to ops-log output without depending on orchestration"
     );
+    let observer_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-state-observer-io/src/lib.rs")).unwrap();
+    assert!(
+        observer_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)"),
+        "state observer advisory closeout phase should use the projection-aware cycle view"
+    );
 
     let orchestration_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/Cargo.toml")).unwrap();
@@ -2791,6 +2804,21 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
             "{relative_path} must use agent_doc_state_backbone directly"
         );
     }
+}
+
+#[test]
+fn test_agent_doc_serve_active_cycle_reads_projection_aware_state() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let serve_source = fs::read_to_string(manifest_dir.join("src/serve.rs")).unwrap();
+
+    assert!(
+        serve_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(doc)?"),
+        "serve active response/write routing should use closeout projections before compatibility cycle sidecars"
+    );
+    assert!(
+        !serve_source.contains("agent_doc_cycle_state_io::load(doc)?"),
+        "serve active response/write routing must not use raw compatibility cycle sidecars"
+    );
 }
 
 #[test]
@@ -3410,6 +3438,10 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "pub fn repair_completed_backlog_items(",
         "pub fn repair_stale_preflight_started_cycle(",
         "pub fn cancel_preflight_cycle(",
+        "fn cycle_has_captured_response_projection_or_sidecar(",
+        "fn projected_committed_capture_response_body(",
+        "fn projected_committed_capture_response(",
+        "pub struct HistoricalCommittedCapture",
         "pub fn historical_committed_capture_replay(",
         "pub fn visible_response_patch_from_document(",
         "pub fn head_already_matches_current_doc(",
@@ -3440,7 +3472,12 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         "response_replay::response_already_applied(",
         "repair_adopt_existing_response file=",
         "agent_doc_workflow::capture::decide_stale_capture_retirement(",
-        "agent_doc_capture_io::replay_baseline_drifted(",
+        "agent_doc_capture_io::replay_baseline_drifted_with_current_content(",
+        "agent_doc_capture_io::validate_replay_with_current_content(",
+        "agent_doc_capture_io::mark_committed_with_current_content(",
+        "agent_doc_cycle_state_io::load_closeout_projection(file)?",
+        "agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?",
+        "projection.captured_response.is_some()",
         "agent_doc_template::strip_conversation_tail_outside_exchange(",
     ] {
         assert!(
@@ -3543,7 +3580,7 @@ fn test_agent_doc_repair_io_owns_repair_sidecars() {
         assert_source_mentions_all(
             &source,
             relative,
-            &["agent_doc_repair_io::pending::save_pending("],
+            &["agent_doc_repair_io::pending::save_pending"],
         );
         assert_source_omits_all(
             &source,
@@ -3670,7 +3707,8 @@ fn test_orchestration_write_uses_closeout_commit_adapter() {
     );
     assert!(
         !write.contains("fn commit_via_closeout_effects(")
-            && write.contains("agent_doc_flow_io::closeout::CloseoutEffects::commit(")
+            && write
+                .contains("agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(")
             && write.contains("&agent_doc_closeout_runtime_io::closeout_effects()"),
         "write.rs should route commit boundaries through the injected closeout effects adapter without a local helper facade"
     );
@@ -3919,10 +3957,12 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     }
     for required_snippet in [
         "pub fn detect_required_continuation_with(",
+        "pub fn detect_required_continuation_for_content_with(",
         "recycle_yield_pending(file)",
         "std::fs::read_to_string(file)",
         "let snapshot_content = load_snapshot(file)?",
         "queue_continuation::required_continuation(&content, snapshot_content.as_deref())",
+        "queue_continuation::required_continuation(content, snapshot_content.as_deref())",
     ] {
         assert!(
             queue_io_detect.contains(required_snippet),
@@ -3968,12 +4008,77 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     }
     assert!(
         queue_io_host.contains("crate::continuation_detect::detect_required_continuation_with")
+            && queue_io_host
+                .contains("crate::continuation_detect::detect_required_continuation_for_content_with")
+            && queue_io_host.contains("pub fn detect_for_content(")
             && queue_io_host.contains("agent_doc_snapshot_io::load")
             && queue_io_host.contains(
                 "agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file"
             ),
         "queue-io continuation host should inject snapshot/controller-projection recycle effects into the focused detector"
     );
+    let run_io = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
+    let session_check_command =
+        fs::read_to_string(manifest_dir.join("agent-doc-session-check-io/src/command.rs")).unwrap();
+    let route_authoritative =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
+    let mcp_source = fs::read_to_string(manifest_dir.join("src/mcp.rs")).unwrap();
+    let session_actor_cmd =
+        fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    for (relative, source) in [
+        ("agent-doc-run-io/src/lib.rs", run_io.as_str()),
+        (
+            "agent-doc-session-check-io/src/command.rs",
+            session_check_command.as_str(),
+        ),
+        (
+            "agent-doc-route-io/src/authoritative_dispatch.rs",
+            route_authoritative.as_str(),
+        ),
+        ("src/mcp.rs", mcp_source.as_str()),
+        ("src/session_actor_cmd.rs", session_actor_cmd.as_str()),
+    ] {
+        assert!(
+            source.contains("queue_continuation::detect_for_content(")
+                && !source.contains("queue_continuation::detect(file)")
+                && !source.contains("queue_continuation::detect(&file)")
+                && !source.contains("queue_continuation::detect(&ctx.canonical_file)"),
+            "{relative} should supply realtime-resolved content to queue continuation detection"
+        );
+    }
+    for (relative, source, marker) in [
+        (
+            "agent-doc-run-io/src/lib.rs",
+            run_io.as_str(),
+            "owned_pane_self_invocation_queue_continuation",
+        ),
+        (
+            "agent-doc-session-check-io/src/command.rs",
+            session_check_command.as_str(),
+            "session_check_queue_continuation",
+        ),
+        (
+            "agent-doc-route-io/src/authoritative_dispatch.rs",
+            route_authoritative.as_str(),
+            "detect_active_queue_continuation",
+        ),
+        (
+            "src/mcp.rs",
+            mcp_source.as_str(),
+            "mcp_session_check_queue_continuation",
+        ),
+        (
+            "src/session_actor_cmd.rs",
+            session_actor_cmd.as_str(),
+            "session_actor_busy_clear_queue_continuation",
+        ),
+    ] {
+        assert!(
+            source.contains(marker),
+            "{relative} should name the current-document authority source for queue continuation detection: {marker}"
+        );
+    }
     for relative in [
         "agent-doc-session-check-io/tests/session_check.rs",
         "agent-doc-route-io/src/authoritative_actor.rs",
@@ -4526,6 +4631,8 @@ fn test_agent_doc_queue_owns_queue_consumption_entry_policy() {
     assert!(
         queue_io_consume.contains("pub fn strike_answered_free_text_heads_at_commit_seam(")
             && queue_io_consume.contains("fn capture_response_body_for_commit(")
+            && queue_io_consume
+                .contains("agent_doc_cycle_state_io::load_projected_captured_response(")
             && queue_io_consume.contains("agent_doc_capture_io::load_by_id(")
             && orchestration_git_tests
                 .contains("queue_consume::strike_answered_free_text_heads_at_commit_seam(")
@@ -4780,6 +4887,21 @@ fn test_agent_doc_queue_owns_queue_prompt_echo_policy() {
         codex_hook.contains("agent_doc_queue::queue_response::format_consumed_prompt_echo")
             && !codex_hook.contains("crate::write::format_consumed_prompt_echo"),
         "codex_hook must call queue prompt echo policy through agent-doc-queue directly"
+    );
+    for required_snippet in [
+        "current_document_content(file, \"codex_stop_active_session_queue_head\")",
+        "current_document_content(file, \"codex_stop_repeated_queue_before_repair\")",
+        "current_document_content(file, \"codex_stop_auto_close_before_repair\")",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+    ] {
+        assert!(
+            codex_hook.contains(required_snippet),
+            "codex Stop queue paths should resolve current document content through realtime IO: {required_snippet}"
+        );
+    }
+    assert!(
+        !codex_hook.contains("std::fs::read_to_string(file)"),
+        "codex Stop queue paths must not use raw disk reads for active document content"
     );
 }
 
@@ -5074,8 +5196,11 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         response_guards
             .contains("agent_doc_turn::closeout_guard::committed_without_response_body_decision")
             && response_guards
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)?")
+            && !response_guards.contains("agent_doc_cycle_state_io::load(file)?")
+            && response_guards
                 .contains("agent_doc_turn::closeout_guard::exchange_has_assistant_response_body"),
-        "response_guards should call focused turn committed-response guard policy directly"
+        "response_guards should call focused turn committed-response guard policy directly and read cycle state through the projection-aware loader"
     );
     for required in [
         "pub enum CloseoutRecoveryState",
@@ -5210,6 +5335,16 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
         closeout_source.contains("closeout::closeout_latency_message"),
         "agent-doc-flow-io closeout should call focused flow latency formatting directly"
     );
+    for required in [
+        "let projected_has_hashes = projected.file_hash.is_some();",
+        "let file_hash = projected.file_hash.or(sidecar_file_hash);",
+        "has_sidecar_hashes: projected_has_hashes || has_sidecar_hashes",
+    ] {
+        assert!(
+            closeout_source.contains(required),
+            "agent-doc-flow-io closeout recovery should prefer projected response baseline hashes before capture sidecar hashes: {required}"
+        );
+    }
     for relative in [
         "agent-doc-commit-io/src/lib.rs",
         "agent-doc-repair-command-io/tests/repair.rs",
@@ -5959,6 +6094,19 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
                 .contains("use agent_doc_turn::response_replay::dedupe_responses;"),
         "write and repair runtime IO should import focused response replay policy directly from the owning module"
     );
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(\n        file,\n        \"recover_missing_committed_head_response\",",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(\n        file,\n        \"recover_dedupe_only_drift\",",
+    ] {
+        assert!(
+            repair_runtime_source.contains(required),
+            "repair runtime recovery should resolve current document content through realtime authority: {required}"
+        );
+    }
+    assert!(
+        !repair_runtime_source.contains("std::fs::read_to_string(file)"),
+        "repair runtime recovery must not read the active document directly"
+    );
     let response_replay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/src/lib.rs")).unwrap();
     for forbidden in [
@@ -5977,6 +6125,9 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     for required in [
         "use agent_doc_turn::response_replay::dedupe_responses;",
         "pub trait DedupeEffects",
+        "fn current_document_content(file: &Path) -> Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"response_replay_dedupe\"",
         "fn write_deduped_document(",
         "fn save_snapshot(",
         "agent_doc_fs::document_state_hash(file)",
@@ -5988,9 +6139,18 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
             "response replay IO should own dedupe file effects while calling focused policy: {required}"
         );
     }
+    assert!(
+        !response_replay_io.contains("std::fs::read_to_string(file)")
+            && !response_replay_io.contains("fs::read_to_string(file)"),
+        "response replay IO must not read the active document directly from disk"
+    );
     let response_replay_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-response-replay-io/Cargo.toml")).unwrap();
-    for required in ["agent-doc-turn", "agent-doc-fs"] {
+    for required in [
+        "agent-doc-document-realtime-io",
+        "agent-doc-turn",
+        "agent-doc-fs",
+    ] {
         assert!(
             response_replay_io_manifest.contains(required),
             "response replay IO should depend on focused dependency {required}"
@@ -6320,7 +6480,8 @@ fn test_agent_doc_turn_owns_session_check_ops_log_event_policy() {
         "pub fn latest_unclosed_write_completed_commit_missing(",
         "agent_doc_project_root_io::project_root_containing(",
         "agent_doc_frontmatter::frontmatter::parse(",
-        "agent_doc_cycle_state_io::load(",
+        "agent_doc_cycle_state_io::load_closeout_projection(file)",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
         "agent_doc_turn::op_log::{",
         "strip_timestamp_prefix",
         "IPC_PROOF_INSUFFICIENT_EVENT",
@@ -6522,6 +6683,16 @@ fn test_agent_doc_turn_owns_no_change_cycle_policy() {
         assert!(
             run_io_source.contains(required),
             "run IO should call focused no-change policy directly: {required}"
+        );
+    }
+    for required in [
+        "let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
+        "let open_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+        "let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+    ] {
+        assert!(
+            run_io_source.contains(required),
+            "run IO should use closeout projection facts before compatibility cycle sidecars for direct-run decisions: {required}"
         );
     }
 }
@@ -7243,7 +7414,15 @@ fn test_agent_doc_turn_cycle_phase_has_no_cycle_state_facade() {
     assert_source_mentions_all(
         &watch_source,
         "watch daemon",
-        &["agent_doc_turn", "cycle_phase_freshly_in_flight"],
+        &[
+            "agent_doc_turn",
+            "cycle_phase_freshly_in_flight",
+            "agent_doc_cycle_state_io::load_with_closeout_projection(path)",
+        ],
+    );
+    assert!(
+        !watch_source.contains("agent_doc_cycle_state_io::load(path)"),
+        "watch daemon should use closeout projections before compatibility cycle sidecars"
     );
     assert!(
         turn_source.contains("pub mod cycle_policy;"),
@@ -8061,6 +8240,255 @@ fn test_agent_doc_topic_owns_compact_summary_policy() {
 }
 
 #[test]
+fn test_cli_read_command_routes_active_document_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let read_source = fs::read_to_string(manifest_dir.join("src/read.rs")).unwrap();
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"read_command_document\"",
+        "agent_doc_element::element::parse(&content)",
+    ] {
+        assert!(
+            read_source.contains(required),
+            "agent-doc read should resolve active document content through realtime authority before printing/parsing: {required}"
+        );
+    }
+    assert!(
+        !read_source.contains("std::fs::read_to_string(file)")
+            && !read_source.contains("fs::read_to_string(file)"),
+        "agent-doc read must not read the active document directly from disk"
+    );
+}
+
+#[test]
+fn test_cli_outline_command_routes_active_document_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let outline_source = fs::read_to_string(manifest_dir.join("src/outline_cmd.rs")).unwrap();
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"outline_command_document\"",
+        "agent_doc_document::outline_projection::project_markdown_outline(body)",
+    ] {
+        assert!(
+            outline_source.contains(required),
+            "agent-doc outline should resolve active document content through realtime authority before projecting the outline: {required}"
+        );
+    }
+    assert!(
+        !outline_source.contains("std::fs::read_to_string(file)")
+            && !outline_source.contains("fs::read_to_string(file)"),
+        "agent-doc outline must not read the active document directly from disk"
+    );
+}
+
+#[test]
+fn test_read_only_root_command_adapters_route_active_document_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+
+    for (source_file, label) in [
+        ("src/auto_dag.rs", "auto_dag_command_document"),
+        ("src/cleanup_cmd.rs", "cleanup_fallback_document"),
+        ("src/layout.rs", "layout_command_document"),
+        ("src/parallel.rs", "parallel_command_document"),
+        ("src/plan.rs", "plan_command_document"),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(source_file)).unwrap();
+        for required in [
+            "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+            label,
+        ] {
+            assert!(
+                source.contains(required),
+                "{source_file} should resolve active document content through realtime authority: {required}"
+            );
+        }
+        assert!(
+            !source.contains("std::fs::read_to_string(file)")
+                && !source.contains("fs::read_to_string(file)"),
+            "{source_file} must not read the active document directly from disk"
+        );
+    }
+}
+
+#[test]
+fn test_root_mutation_command_adapters_route_active_document_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+
+    for (source_file, label) in [
+        ("src/convert.rs", "convert_command_document"),
+        ("src/exchange.rs", "exchange_command_document"),
+        ("src/migrate.rs", "migrate_command_document"),
+        ("src/mode.rs", "mode_command_document"),
+        ("src/patch.rs", "patch_command_document"),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(source_file)).unwrap();
+        for required in [
+            "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+            label,
+            "agent_doc_document_realtime_io::atomic_write_through_authority(",
+        ] {
+            assert!(
+                source.contains(required),
+                "{source_file} should route active document mutation through realtime authority: {required}"
+            );
+        }
+        for forbidden in [
+            "std::fs::read_to_string(file)",
+            "fs::read_to_string(file)",
+            "std::fs::write(file",
+            "fs::write(file",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_file} must not directly read/write active document content: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_queue_notify_history_commands_route_active_document_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+
+    let queue_dispatch = fs::read_to_string(manifest_dir.join("src/queue_dispatch.rs")).unwrap();
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"queue_dispatch_command_document\"",
+    ] {
+        assert!(
+            queue_dispatch.contains(required),
+            "queue_dispatch should resolve active document content through realtime authority: {required}"
+        );
+    }
+    assert!(
+        !queue_dispatch.contains("std::fs::read_to_string(file)")
+            && !queue_dispatch.contains("fs::read_to_string(file)"),
+        "queue_dispatch must not read active document context directly from disk"
+    );
+
+    for (source_file, label) in [
+        ("src/history.rs", "history_restore_command_document"),
+        ("src/notify.rs", "notify_command_document"),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(source_file)).unwrap();
+        for required in [
+            "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+            label,
+            "agent_doc_document_realtime_io::atomic_write_through_authority(",
+        ] {
+            assert!(
+                source.contains(required),
+                "{source_file} should route active document mutation through realtime authority: {required}"
+            );
+        }
+        for forbidden in [
+            "std::fs::read_to_string(file)",
+            "fs::read_to_string(file)",
+            "std::fs::write(file",
+            "fs::write(file",
+            "NamedTempFile::new_in(parent)",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_file} must not directly read/write active document content: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_reset_and_session_actor_route_active_document_reads_through_named_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let root: toml::Value = toml::from_str(&root_manifest).unwrap();
+    let root_dependencies = root["dependencies"].as_table().unwrap();
+
+    assert!(
+        root_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "root CLI crate should depend on realtime document authority"
+    );
+
+    let reset_source = fs::read_to_string(manifest_dir.join("src/reset.rs")).unwrap();
+    for required in [
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"reset_command_document\"",
+    ] {
+        assert!(
+            reset_source.contains(required),
+            "reset should split force-disk reads from active current-document reads through named authority helpers: {required}"
+        );
+    }
+    assert!(
+        !reset_source.contains("std::fs::read_to_string(file)")
+            && !reset_source.contains("fs::read_to_string(file)"),
+        "reset must not read active document content directly from disk"
+    );
+
+    let session_actor = fs::read_to_string(manifest_dir.join("src/session_actor_cmd.rs")).unwrap();
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"session_actor_dirty_check_document\"",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(doc_path)",
+    ] {
+        assert!(
+            session_actor.contains(required),
+            "session actor dirty-check should compare committed-cycle state against realtime document authority: {required}"
+        );
+    }
+    assert!(
+        !session_actor.contains("agent_doc_cycle_state_io::load(doc_path)"),
+        "session actor debug cycle phase should use closeout projections before compatibility cycle sidecars"
+    );
+    assert!(
+        !session_actor.contains("std::fs::read_to_string(file)")
+            && !session_actor.contains("fs::read_to_string(file)"),
+        "session_actor_cmd must not read the active document directly from disk"
+    );
+}
+
+#[test]
 fn test_agent_doc_response_toc_owns_live_toc_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -8112,12 +8540,21 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         "fn fetch_sections(",
         "agent_doc_response_toc::live_toc_entries",
         "agent_doc_sqlite::archive_index",
+        "fn current_document_content(file: &Path, source: &str) -> Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "current_document_content(file, \"response_toc_live_entries\")",
+        "current_document_content(file, \"response_fetch_live_sections\")",
     ] {
         assert!(
             io_source.contains(required_snippet),
             "agent-doc-response-toc-io must own response TOC file/archive adapter policy: {required_snippet}"
         );
     }
+    assert!(
+        !io_source.contains("std::fs::read_to_string(file)")
+            && !io_source.contains("fs::read_to_string(file)"),
+        "agent-doc-response-toc-io must not read the active document directly from disk"
+    );
 
     assert!(
         !manifest_dir
@@ -8188,7 +8625,12 @@ fn test_agent_doc_response_toc_owns_live_toc_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-response-toc-io/Cargo.toml")).unwrap();
     let io_parsed: toml::Value = toml::from_str(&io_manifest).unwrap();
     let io_dependencies = io_parsed["dependencies"].as_table().unwrap();
-    for required in ["agent-doc-response-toc", "agent-doc-sqlite", "serde_json"] {
+    for required in [
+        "agent-doc-document-realtime-io",
+        "agent-doc-response-toc",
+        "agent-doc-sqlite",
+        "serde_json",
+    ] {
         assert!(
             io_dependencies.contains_key(required),
             "agent-doc-response-toc-io should depend on {required} for response TOC adapters"
@@ -10077,6 +10519,12 @@ fn test_agent_doc_run_context_io_owns_lazily_document_context_graph() {
             "agent-doc-run-context-io must not route through orchestration or expose a facade: {forbidden}"
         );
     }
+    assert!(
+        run_context_source
+            .contains("agent_doc_cycle_state_io::load_with_closeout_projection(&path)")
+            && !run_context_source.contains("agent_doc_cycle_state_io::load(&path)"),
+        "run-context cycle_state slot should use closeout projections before compatibility cycle sidecars"
+    );
 
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -10174,6 +10622,8 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "pub fn detect_owned_pane_self_invocation_with_options",
         "pub fn recursive_codex_start_invocation_diagnostic",
         "pub fn run_dispatch_timeout_diagnostic",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired)",
         "PromptCacheBlocks::new",
         "agent_doc_controller_io::project_controller::load_state_event_ledger",
     ] {
@@ -10186,6 +10636,15 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         assert!(
             !run_io_source.contains(forbidden),
             "agent-doc-run-io must not route through orchestration command internals: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "std::fs::write(file, &repaired)",
+    ] {
+        assert!(
+            !run_io_source.contains(forbidden),
+            "agent-doc-run-io session-document hot paths must not use raw disk IO: {forbidden}"
         );
     }
 
@@ -11779,6 +12238,18 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
             && session_check.contains("realtime_steering_since_turn_baseline"),
         "session-check command IO should call the focused guard adapters directly"
     );
+    assert!(
+        session_check_command.contains("crate::resolve_current_document_content")
+            && session_check_command.contains("\"latest_head_response_missing\"")
+            && !session_check_command.contains("std::fs::read_to_string(file)"),
+        "session-check command should route committed-response visibility checks through current-document authority"
+    );
+    assert!(
+        session_check_command
+            .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)")
+            && !session_check_command.contains("agent_doc_cycle_state_io::load(file)?"),
+        "session-check command should read closeout phase/capture decisions through the projection-aware cycle loader"
+    );
 
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
@@ -11790,10 +12261,16 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         manifest_dir.join("agent-doc-session-check-io/src/write_pending_checks.rs"),
     )
     .unwrap();
+    let pending_write_checks_prod = pending_write_checks
+        .split("#[cfg(test)]")
+        .next()
+        .expect("write_pending_checks production section");
     for required in [
         "crate::resolve_pending_capture_mode_with_force_disk",
         "crate::resolve_pending_done_mode_with_force_disk",
         "crate::resolve_review_done_guard_mode",
+        "state.tracked_work_maintenance_required_at_preflight",
+        "agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)",
     ] {
         assert!(
             pending_write_checks.contains(required),
@@ -11804,6 +12281,11 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
         !pending_write_checks.contains("agent_doc_session_check_io::resolve_")
             && !pending_write_checks.contains("crate::session_check::resolve_"),
         "focused write pending checks must not route guard-mode resolvers through orchestration"
+    );
+    assert!(
+        !pending_write_checks_prod.contains("std::fs::read_to_string(file)")
+            && !pending_write_checks_prod.contains("fs::read_to_string(file)"),
+        "focused write pending checks must not probe the active session document on disk in production"
     );
 }
 
@@ -11905,12 +12387,53 @@ fn test_document_realtime_io_owns_pipeline_frontmatter_runtime_effects() {
         "pub struct RuntimePipelineFrontmatterEffects",
         "pub static RUNTIME_PIPELINE_FRONTMATTER_EFFECTS",
         "impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects",
+        "fn read_current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "try_resolve_current_document_content(file, source)",
     ] {
         assert!(
             document_realtime_io.contains(required),
             "document realtime IO must own pipeline-frontmatter runtime effects: {required}"
         );
     }
+
+    let pipeline_frontmatter = fs::read_to_string(
+        manifest_dir.join("agent-doc-cycle-state-io/src/pipeline_frontmatter.rs"),
+    )
+    .unwrap();
+    for required in [
+        "fn read_current_document_content(&self, file: &Path, source: &str) -> Result<String>;",
+        "effects.read_current_document_content(file, \"pipeline_mirror\")",
+        "effects.read_current_document_content(file, \"pipeline_clear\")",
+    ] {
+        assert!(
+            pipeline_frontmatter.contains(required),
+            "cycle-state pipeline frontmatter must read current content through the effects port: {required}"
+        );
+    }
+    for forbidden in ["std::fs::read_to_string(file)", "fs::read_to_string(file)"] {
+        assert!(
+            !pipeline_frontmatter.contains(forbidden),
+            "cycle-state pipeline frontmatter must not read the active document directly: {forbidden}"
+        );
+    }
+
+    let cycle_state_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-cycle-state-io/src/lib.rs")).unwrap();
+    let cycle_state_prod = cycle_state_io.split("#[cfg(test)]").next().unwrap();
+    for required in [
+        "append_phase_event_to_session_log(file, &state, file_content)",
+        "fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_content: Option<&str>)",
+    ] {
+        assert!(
+            cycle_state_prod.contains(required),
+            "cycle-state phase logging must use caller-supplied current content: {required}"
+        );
+    }
+    assert!(
+        !cycle_state_prod.contains("std::fs::read_to_string(file)")
+            && !cycle_state_prod.contains("fs::read_to_string(file)"),
+        "cycle-state production code must not read the active document directly for phase logging"
+    );
 
     fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
         if !dir.exists() {
@@ -12203,8 +12726,13 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             && workflow_io_doctor.contains("format_text_report")
             && workflow_io_doctor.contains("ops_log_facts_from_content")
             && workflow_io_doctor.contains("pub trait WorkflowDoctorEffects")
-            && workflow_io_doctor.contains("agent_doc_cycle_state_io::load(file)"),
+            && workflow_io_doctor
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)"),
         "workflow IO doctor should own fact IO and call focused doctor policy through injected live effects"
+    );
+    assert!(
+        !workflow_io_doctor.contains("agent_doc_cycle_state_io::load(file)"),
+        "workflow doctor cycle facts should use closeout projections before compatibility cycle sidecars"
     );
     assert!(
         workflow_io_doctor.contains("use agent_doc_workflow::doctor_json::{")
@@ -13857,6 +14385,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
     let lint_manifest: toml::Value = toml::from_str(&lint_manifest).unwrap();
     let lint_dependencies = lint_manifest["dependencies"].as_table().unwrap();
     for required in [
+        "agent-doc-document-realtime-io",
         "agent-doc-frontmatter",
         "agent-doc-project-config-io",
         "anyhow",
@@ -13899,10 +14428,23 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
             && lint_gate
                 .contains("resolve_mode_from_project_dialect(content, cli, project.lint.dialect)")
             && lint_gate.contains("resolve_lint_mode(content, cli, project_dialect)")
+            && lint_gate
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && lint_gate.contains("\"lint_gate_document\"")
+            && lint_gate.contains("pub fn run_force_disk_with_logger(")
+            && lint_gate
+                .contains("agent_doc_document_realtime_io::resolve_disk_current_document_content(")
+            && lint_gate.contains("\"lint_gate_document_force_disk\"")
+            && lint_gate.contains("fn run_on_content(")
             && lint_gate.contains("tagpath::lint::agent_doc")
             && lint_gate.contains("pub type OpsLogger")
             && lint_gate.contains("pub fn run_with_logger"),
         "agent-doc-lint-io should call focused frontmatter lint policy and own tagpath gate IO"
+    );
+    assert!(
+        !lint_gate.contains("std::fs::read_to_string(file)")
+            && !lint_gate.contains("fs::read_to_string(file)"),
+        "agent-doc-lint-io must not read the active session document directly from disk"
     );
 
     let orchestration_manifest =
@@ -13930,6 +14472,7 @@ fn test_agent_doc_frontmatter_owns_lint_mode_policy() {
         fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
     assert!(
         orchestration_write.contains("agent_doc_lint_io::run_with_logger")
+            && orchestration_write.contains("agent_doc_lint_io::run_force_disk_with_logger")
             && orchestration_write.contains("agent_doc_ops_log_io::log_op")
             && orchestration_stream.contains("agent_doc_lint_io::run_with_logger")
             && orchestration_stream.contains("agent_doc_ops_log_io::log_op"),
@@ -14387,8 +14930,16 @@ fn test_snapshot_state_paths_are_owned_by_agent_doc_fs() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup_harness.rs")).unwrap();
     assert!(
         route_startup_harness.contains("agent_doc_run_context_io::cycle_context")
+            && route_startup_harness
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && route_startup_harness.contains("\"route_startup_harness\"")
             && route_startup_harness.contains("HarnessConfig::from_context"),
         "agent-doc-route-io startup harness resolution should own frontmatter/global config adaptation"
+    );
+    assert!(
+        !route_startup_harness.contains("std::fs::read_to_string(file)")
+            && !route_startup_harness.contains("fs::read_to_string(file)"),
+        "route startup harness resolution must not read active documents directly from disk"
     );
     assert!(
         !route_startup_source.contains("fn resolve_harness_for_file("),
@@ -14592,6 +15143,12 @@ fn test_project_controller_has_no_sqlite_status_facade() {
     assert!(
         project_controller_source.contains("use state_store::{"),
         "project_controller.rs should import SQLite status/storage types privately"
+    );
+    assert!(
+        project_controller_source
+            .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)?")
+            && !project_controller_source.contains("agent_doc_cycle_state_io::load(file)?"),
+        "project_controller closeout persistence should use closeout projections before compatibility cycle sidecars"
     );
     assert!(
         sqlite_state_store.contains("pub fn session_actor_closeout_mutations"),
@@ -15913,6 +16470,28 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_runtime_effects_source.contains("pub fn route_cycle_ack_effects()"),
         "orchestration must not keep a route cycle-ack module after the route cycle acknowledgment graph moves to agent-doc-route-io"
     );
+    for (source, required, context) in [
+        (
+            route_cycle_ack_source.as_str(),
+            "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+            "route cycle-ack polling",
+        ),
+        (
+            route_pane_resolution_io_source.as_str(),
+            "agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
+            "route pane-resolution cycle baselines",
+        ),
+        (
+            route_startup_source.as_str(),
+            "agent_doc_cycle_state_io::load_with_closeout_projection(file).unwrap_or(None)",
+            "route startup cycle baseline",
+        ),
+    ] {
+        assert!(
+            source.contains(required),
+            "{context} should use closeout projection facts before compatibility cycle sidecars: {required}"
+        );
+    }
     assert!(
         !manifest_dir
             .join("agent-doc-orchestration/src/route/dispatch_only.rs")
@@ -18133,6 +18712,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/lib.rs")).unwrap();
     let orchestration_start_run =
         fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/run.rs")).unwrap();
+    let orchestration_start_idle_watch =
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
+            .unwrap();
     let start_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
@@ -18226,9 +18808,54 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         start_io_source.contains("agent_doc_supervisor::{")
             && start_io_source.contains("format_existing_pane_conflict_error_from_facts(")
             && start_io_source.contains("pub fn prepare_start_runtime(")
+            && start_io_source.contains(
+                "agent_doc_document_realtime_io::try_resolve_current_document_content("
+            )
+            && start_io_source.contains(
+                "agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated_content)"
+            )
+            && start_io_source.contains(
+                "agent_doc_document_realtime_io::atomic_write_through_authority(file, &merged)"
+            )
             && orchestration_start_run.contains("prepare_start_runtime(file, force, route_owned)?"),
         "agent-doc-start-io should own start admission/session-owner IO while start/run.rs calls it directly"
     );
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "std::fs::write(file, &updated_content)",
+        "std::fs::write(file, &merged)",
+    ] {
+        assert!(
+            !start_io_source.contains(forbidden),
+            "agent-doc-start-io session-document startup paths must not use raw disk IO: {forbidden}"
+        );
+    }
+    for required in [
+        "start_runtime_restart_frontmatter",
+        "idle_watch_editor_converged_to_head",
+        "idle_watch_active_queue_head",
+        "idle_watch_forced_context_reset_reason",
+    ] {
+        assert!(
+            orchestration_start_run.contains(required)
+                || orchestration_start_idle_watch.contains(required),
+            "start-runtime session-document helpers should resolve current document content through realtime IO: {required}"
+        );
+    }
+    for (source_name, source) in [
+        ("start-runtime run.rs", &orchestration_start_run),
+        (
+            "start-runtime idle_watch.rs",
+            &orchestration_start_idle_watch,
+        ),
+    ] {
+        for forbidden in ["std::fs::read_to_string(file)", "std::fs::write(file"] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_name} session-document helper paths must not use raw disk IO: {forbidden}"
+            );
+        }
+    }
     for required_snippet in [
         "pub enum AutoTriggerOutcome",
         "pub fn from_u8(value: u8) -> Self",
@@ -18914,17 +19541,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub struct RouteOwnedCompletionConfig",
         "pub fn route_owned_facts_from_cycle_state(",
         "pub fn route_owned_liveness_reason_for_file(",
+        "pub fn load_route_owned_cycle_state(",
         "pub fn spawn_route_owned_completion_thread",
         "route_owned_liveness_reason_for_content",
         "route_owned_reap_decision(",
         "route_owned_cycle_committed_since_start(",
         "RouteOwnedLivenessReason::AdapterFailure",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+        "load_route_owned_cycle_state(&file)",
     ] {
         assert!(
             supervisor_route_owned_completion.contains(required_snippet),
             "agent-doc-supervisor-process should own route-owned completion adapters and loop: {required_snippet}"
         );
     }
+    assert!(
+        !supervisor_route_owned_completion.contains("agent_doc_cycle_state_io::load(&file)"),
+        "route-owned completion should use closeout projections before compatibility cycle sidecars"
+    );
     assert!(
         start_source.contains(
             "impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionState"
@@ -20334,12 +20968,14 @@ fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph(
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-runtime-io/Cargo.toml")).unwrap();
     let orchestration_preflight =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/lib.rs")).unwrap();
+    let preflight_command_run =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();
 
     for required in [
         "pub fn recover_route_queue_snapshot_commit_boundary(",
         "pub fn detect_route_queue_snapshot_commit_boundary_recoverable(",
         "agent_doc_commit_io::commit(file)",
-        "agent_doc_cycle_state_io::load(file)?",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)?",
         "agent_doc_queue::route_dispatch::active_auto_route_queue_prompt_texts",
         "agent_doc_queue::route_dispatch::strip_route_queue_state_for_boundary_compare",
         "agent_doc_diff::classify_prompt_bearing_changes",
@@ -20379,6 +21015,17 @@ fn test_agent_doc_preflight_runtime_io_owns_route_queue_snapshot_recovery_graph(
     assert!(
         preflight_runtime.contains("recover_route_queue_snapshot_commit_boundary(file, rc)?"),
         "preflight runtime sequencing should call the focused route-queue snapshot recovery helper"
+    );
+    assert!(
+        !preflight_runtime.contains("agent_doc_cycle_state_io::load(file)?"),
+        "preflight route-queue recovery should use closeout projections before compatibility cycle sidecars"
+    );
+    assert!(
+        preflight_command_run.contains("fn closeout_cycle_is_open(file: &Path)")
+            && preflight_command_run
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)?")
+            && !preflight_command_run.contains("agent_doc_cycle_state_io::load(file)?"),
+        "preflight command open-cycle checks should read through the projection-aware cycle loader"
     );
 }
 
@@ -21109,10 +21756,14 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/Cargo.toml")).unwrap();
     let backlog_io_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/lib.rs")).unwrap();
+    let backlog_cmd =
+        fs::read_to_string(manifest_dir.join("agent-doc-element-backlog-io/src/backlog_cmd.rs"))
+            .unwrap();
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     let write_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     let route_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/tests/route.rs")).unwrap();
     let route_diagnostics =
@@ -21141,6 +21792,8 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
         "pub struct RuntimeBacklogCommandEffects",
         "pub static RUNTIME_BACKLOG_COMMAND_EFFECTS",
         "impl agent_doc_element_backlog_io::BacklogCommandEffects for RuntimeBacklogCommandEffects",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
         "agent_doc_write_converge_io::converge_or_disk_write(",
         "agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
         "agent_doc_document_realtime_io::record_document_write_provenance",
@@ -21148,6 +21801,18 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
         assert!(
             runtime_lib.contains(required),
             "agent-doc-element-backlog-runtime-io must own runtime backlog command effects: {required}"
+        );
+    }
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "fn read_command_document(file: &Path, source: &str) -> Result<String>",
+        "crate::current_document_content(file, source)",
+        "crate::force_disk_document_content(file, source)",
+    ] {
+        assert!(
+            backlog_io_lib.contains(required) || backlog_cmd.contains(required),
+            "agent-doc-element-backlog-io must route command document reads through injected authority effects: {required}"
         );
     }
     for forbidden in [
@@ -21158,6 +21823,16 @@ fn test_agent_doc_element_backlog_runtime_io_owns_runtime_backlog_command_effect
         assert!(
             !backlog_io_manifest.contains(forbidden) && !backlog_io_lib.contains(forbidden),
             "agent-doc-element-backlog-io must stay below runtime document authority dependencies: {forbidden}"
+        );
+    }
+    assert!(
+        !backlog_cmd.contains("std::fs::read_to_string(file)"),
+        "backlog command document reads must go through the injected authority effect"
+    );
+    for forbidden in ["CliBacklogCommandEffects", "CLI_BACKLOG_COMMAND_EFFECTS"] {
+        assert!(
+            !backlog_cmd.contains(forbidden) && !main_source.contains(forbidden),
+            "backlog command/runtime wiring must not bypass the realtime read authority boundary: {forbidden}"
         );
     }
     for forbidden in [
@@ -21675,8 +22350,10 @@ fn test_agent_doc_workflow_owns_capture_repairability_policy() {
     assert!(
         repair_io.contains("agent_doc_workflow::capture::decide_stale_capture_retirement(")
             && repair_io.contains("agent_doc_workflow::capture::StaleCaptureRetirementEvidence")
-            && repair_io.contains("agent_doc_capture_io::replay_baseline_drifted("),
-        "agent-doc-repair-io should gather stale-capture evidence and call workflow capture policy directly"
+            && repair_io
+                .contains("agent_doc_capture_io::replay_baseline_drifted_with_current_content(")
+            && repair_io.contains("agent_doc_capture_io::validate_replay_with_current_content("),
+        "agent-doc-repair-io should gather stale-capture evidence and call workflow capture policy directly from resolved current content"
     );
 }
 
@@ -22513,6 +23190,38 @@ fn test_agent_doc_tmux_owns_bare_shell_command_policy() {
 }
 
 #[test]
+fn test_agent_doc_prompt_io_routes_document_reads_through_realtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let prompt_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-io/Cargo.toml")).unwrap();
+    let parsed: toml::Value = toml::from_str(&prompt_manifest).unwrap();
+    let dependencies = parsed["dependencies"].as_table().unwrap();
+    let prompt_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-prompt-io/src/lib.rs")).unwrap();
+
+    assert!(
+        dependencies.contains_key("agent-doc-document-realtime-io"),
+        "prompt IO should depend on the realtime document authority for active document reads"
+    );
+    for required in [
+        "fn current_document_content(file: &Path, source: &str) -> Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "current_document_content(file, \"prompt_run_frontmatter\")",
+        "current_document_content(file, \"prompt_answer_frontmatter\")",
+    ] {
+        assert!(
+            prompt_source.contains(required),
+            "prompt IO should resolve prompt command frontmatter through realtime authority: {required}"
+        );
+    }
+    assert!(
+        !prompt_source.contains("std::fs::read_to_string(file)")
+            && !prompt_source.contains("fs::read_to_string(file)"),
+        "prompt IO must not read the active session document directly from disk"
+    );
+}
+
+#[test]
 fn test_agent_doc_turn_executor_tmux_owns_prompt_parser_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let tmux_executor_manifest =
@@ -23251,6 +23960,26 @@ fn test_agent_doc_capture_io_owns_response_capture_ledger() {
                 .contains("agent_doc_project_root_io::project_root_or_file_parent("),
         "agent-doc-capture-io should own the response capture ledger"
     );
+    for required in [
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(&self.file)",
+    ] {
+        assert!(
+            capture_io_source.contains(required),
+            "capture IO active cycle/capture readers should prefer closeout projections before compatibility cycle sidecars: {required}"
+        );
+    }
+    for forbidden in [
+        "let cycle_id = agent_doc_cycle_state_io::load(file)",
+        "let existing_cycle_id = agent_doc_cycle_state_io::load(file)?",
+        "let Some(state) = agent_doc_cycle_state_io::load(file)?",
+        "agent_doc_cycle_state_io::load(&self.file)?",
+    ] {
+        assert!(
+            !capture_io_source.contains(forbidden),
+            "capture IO production readers must not use raw compatibility cycle sidecars: {forbidden}"
+        );
+    }
 
     assert!(
         !manifest_dir
@@ -23882,8 +24611,11 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         ffi_source.contains("agent_doc_ipc_io::start_listener_with_logger(")
             && ffi_source.contains("agent_doc_ops_log_io::log_op")
             && ffi_source.contains("agent_doc_ipc_io::socket_path(")
+            && ffi_source.contains(
+                "agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))"
+            )
             && !ffi_source.contains("agent_doc_orchestration::ipc_socket"),
-        "FFI listener should call focused IPC IO directly while injecting the ops-log sink"
+        "FFI should call focused IPC IO directly, inject the ops-log sink, and use projection-aware cycle state for editor-facing turn projection"
     );
     for relative in [
         "agent-doc-preflight-runtime-io/src/lib.rs",
@@ -23993,6 +24725,8 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             .unwrap();
     let write_ipc_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/src/lib.rs")).unwrap();
+    let write_ipc_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/Cargo.toml")).unwrap();
     assert!(
         write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
             && write_ipc_transport_source
@@ -24044,6 +24778,59 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
                 .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor"),
         "agent-doc-write-ipc-io should own reposition IPC transport and payload synthesis imports"
     );
+    assert!(
+        write_ipc_io_manifest.contains("agent-doc-document-realtime-io")
+            && write_ipc_io_source
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content")
+            && write_ipc_io_source
+                .contains("agent_doc_document_realtime_io::resolve_disk_current_document_content")
+            && write_ipc_io_source.contains("pub(crate) fn ipc_document_content(")
+            && write_ipc_io_source.contains("\"write_ipc_build_patches_current\"")
+            && write_ipc_io_source.contains("\"write_ipc_build_patches_disk_fallback\"")
+            && write_ipc_io_source.contains("\"write_ipc_reposition_baseline_hash\"")
+            && write_ipc_io_source.contains("\"write_ipc_reposition_baseline_hash_disk_fallback\"")
+            && write_ipc_io_source.contains("\"write_ipc_reposition_working_doc\"")
+            && write_ipc_io_source.contains("\"write_ipc_reposition_working_doc_disk_fallback\"")
+            && write_ipc_transport_source.contains("\"try_ipc_before_content\"")
+            && write_ipc_transport_source.contains("\"try_ipc_before_content_disk_fallback\"")
+            && write_ipc_transport_source.contains("\"try_ipc_mid_turn_cycle_state_current\"")
+            && write_ipc_transport_source
+                .contains("\"try_ipc_mid_turn_cycle_state_disk_fallback\"")
+            && write_ipc_transport_source.contains("\"file_ipc_fallback_dedupe_current\"")
+            && write_ipc_transport_source.contains("\"file_ipc_fallback_dedupe_disk_fallback\"")
+            && write_ipc_transport_source.contains("\"write_ipc_poll_before_content\"")
+            && write_ipc_transport_source
+                .contains("\"write_ipc_poll_before_content_disk_fallback\""),
+        "agent-doc-write-ipc-io should route active document reads through named realtime and disk-fallback document authority"
+    );
+    assert!(
+        write_ipc_io_source.contains("pub(crate) fn projected_or_sidecar_cycle_id(")
+            && write_ipc_io_source
+                .contains("agent_doc_cycle_state_io::load_closeout_projection(file)")
+            && write_ipc_io_source
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)")
+            && write_ipc_transport_source.contains("projected_or_sidecar_cycle_id(file)"),
+        "agent-doc-write-ipc-io should tag IPC payloads from closeout projections before compatibility cycle sidecars"
+    );
+    for forbidden in ["agent_doc_cycle_state_io::load(file)"] {
+        assert!(
+            !write_ipc_io_source.contains(forbidden)
+                && !write_ipc_transport_source.contains(forbidden),
+            "agent-doc-write-ipc-io production payload/diagnostic cycle ids must not use raw compatibility sidecars: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "fs::read_to_string(file)",
+        "std::fs::read_to_string(doc_file)",
+        "fs::read_to_string(doc_file)",
+    ] {
+        assert!(
+            !write_ipc_io_source.contains(forbidden)
+                && !write_ipc_transport_source.contains(forbidden),
+            "agent-doc-write-ipc-io must not read the active document directly in production IPC flow: {forbidden}"
+        );
+    }
     for forbidden in [
         "pub enum FullContentIpcMode",
         "fn full_content_source_label(",
@@ -24356,14 +25143,20 @@ fn test_agent_doc_document_owns_status_projection_policy() {
         "pub trait StatusWriteEffects",
         "pub struct RuntimeStatusWriteEffects",
         "pub static RUNTIME_STATUS_WRITE_EFFECTS",
+        "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>",
         "pub fn set<E: StatusWriteEffects + ?Sized>",
         "pub fn set_with_runtime_options(",
         "pub fn set_with_options<E: StatusWriteEffects + ?Sized>",
         "agent_doc_document::status_projection::replace_status_content",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
         "agent_doc_write_converge_io::converge_or_disk_write(",
         "agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS",
         "agent_doc_document_realtime_io::record_document_write_provenance(file, updated)",
         "agent_doc_ops_log_io::log_op(file, message)",
+        "effects.current_document_content(file, \"status_set\")",
+        "effects.force_disk_document_content(file, \"status_set\")",
         "effects.converge_or_disk_write(file, &full_content, &new_doc, \"status_set\")",
         "effects.record_document_write_provenance(file, &new_doc)",
         "effects.log_op(",
@@ -24803,6 +25596,201 @@ fn test_agent_doc_snapshot_io_owns_model_baseline_sidecars() {
 }
 
 #[test]
+fn test_agent_doc_stream_io_routes_document_reads_through_runtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let stream_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-stream-io/src/lib.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let capture_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-capture-io/src/lib.rs")).unwrap();
+    let repair_pending_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/pending.rs")).unwrap();
+    let orchestrate_dispatch_source =
+        fs::read_to_string(manifest_dir.join("src/orchestrate/dispatch.rs")).unwrap();
+    let stream_impl_start = main_source
+        .find("impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects")
+        .expect("CLI stream effects implementation should exist");
+    let stream_impl_end = stream_impl_start
+        + main_source[stream_impl_start..]
+            .find("fn queue_command_consume_outcome")
+            .expect("queue command helper should follow stream effects implementation");
+    let stream_impl = &main_source[stream_impl_start..stream_impl_end];
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "effects.current_document_content(file, \"stream_run_initial\")",
+        "effects.atomic_write(file, &content_original)?",
+        "effects.current_document_content(file, \"stream_run_resume_update\")",
+        "effects\n                    .current_document_content(file, \"stream_content_ours_fallback\")",
+        "effects\n        .current_document_content(file, \"stream_flush_to_document\")",
+        "effects.current_document_content(file, \"stream_partial_response_checkpoint\")",
+        ".maybe_checkpoint_with_current_content(&checkpoint_text, &current_content)",
+    ] {
+        assert!(
+            stream_source.contains(required),
+            "agent-doc-stream-io should route document reads/writes through runtime authority effects: {required}"
+        );
+    }
+    for forbidden in [
+        "let raw_content = std::fs::read_to_string(file)",
+        "std::fs::write(file, &content_original)",
+        "let current = std::fs::read_to_string(file)",
+        "std::fs::read_to_string(file).unwrap_or_default()",
+        "let content_current = std::fs::read_to_string(file)",
+    ] {
+        assert!(
+            !stream_source.contains(forbidden),
+            "agent-doc-stream-io must not read/write the active document directly in production stream flow: {forbidden}"
+        );
+    }
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "stream_save_pending_capture",
+        "agent_doc_repair_io::pending::save_pending_with_current_content(",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, content)",
+    ] {
+        assert!(
+            stream_impl.contains(required),
+            "CLI stream effects must bind stream current-document authority to realtime IO: {required}"
+        );
+    }
+
+    for required in [
+        "pub fn capture_response_with_current_content(",
+        "capture_response_with_current_content(file, response, &file_content)",
+        "pub fn maybe_checkpoint_with_current_content(",
+        "checkpoint_partial_response_for_cycle_with_current_content(",
+    ] {
+        assert!(
+            capture_source.contains(required),
+            "capture IO should expose a caller-supplied current-content capture path: {required}"
+        );
+    }
+    for required in [
+        "orchestrate_partial_response_checkpoint",
+        "checkpoint_writer\n                    .maybe_checkpoint_with_current_content(&response, &current_content)",
+    ] {
+        assert!(
+            orchestrate_dispatch_source.contains(required),
+            "orchestrated stream checkpoints should pass resolved current content to capture IO: {required}"
+        );
+    }
+    assert!(
+        repair_pending_source.contains("pub fn save_pending_with_current_content(")
+            && repair_pending_source.contains(
+                "agent_doc_template_io::canonicalize_response_for_capture_with_current_content("
+            )
+            && repair_pending_source
+                .contains("agent_doc_capture_io::capture_response_with_current_content("),
+        "repair pending IO should let realtime callers save pending captures without capture IO rereading the active document"
+    );
+}
+
+#[test]
+fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_content() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commit_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-commit-io/src/lib.rs")).unwrap();
+    let post_commit_cleanup =
+        fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/post_commit_cleanup.rs"))
+            .unwrap();
+    let impl_start = commit_source
+        .find("impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects")
+        .expect("commit IO should implement post-commit cleanup effects");
+    let impl_end = impl_start
+        + commit_source[impl_start..]
+            .find("fn clear_queue_journal")
+            .expect("queue journal effect should follow capture effect");
+    let post_commit_impl = &commit_source[impl_start..impl_end];
+
+    for required in [
+        "fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()>",
+        "agent_doc_capture_io::mark_committed_with_current_content(file, current_content)",
+    ] {
+        assert!(
+            post_commit_impl.contains(required),
+            "commit IO should mark committed captures from already-resolved current content: {required}"
+        );
+    }
+    assert!(
+        !post_commit_impl.contains("agent_doc_capture_io::mark_committed(file)"),
+        "commit IO post-commit cleanup must not reread active document content through capture IO when current content is available"
+    );
+    assert!(
+        post_commit_impl.contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)")
+            && !post_commit_impl.contains("agent_doc_cycle_state_io::load(file)"),
+        "commit IO post-commit cleanup should use closeout projections before compatibility cycle sidecars"
+    );
+    for required in [
+        "fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()>",
+        "effects.mark_capture_committed(file, file_content)",
+        "capture-state update skipped: current document content unavailable",
+    ] {
+        assert!(
+            post_commit_cleanup.contains(required),
+            "git post-commit cleanup should thread resolved current content into capture commit state: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_compact_io_routes_document_reads_through_runtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let compact_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let compact_impl_start = main_source
+        .find("impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects")
+        .expect("CLI compact effects implementation should exist");
+    let compact_impl_end = compact_impl_start
+        + main_source[compact_impl_start..]
+            .find("static COMPACT_RUNTIME_EFFECTS")
+            .expect("compact runtime static should follow compact effects implementation");
+    let compact_impl = &main_source[compact_impl_start..compact_impl_end];
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "effects.current_document_content(file, \"compact_run_initial\")",
+        "effects.force_disk_document_content(file, \"compact_run_initial_force_disk\")",
+        "effects\n            .force_disk_document_content(file, \"compact_pre_commit_disk_flush_probe\")",
+        "effects\n        .force_disk_document_content(file, \"compact_post_write_disk_verify\")",
+        "effects\n        .force_disk_document_content(file, \"compact_editor_buffer_flush_disk_poll\")",
+    ] {
+        assert!(
+            compact_source.contains(required),
+            "agent-doc-compact-io should route document reads through named runtime authority effects: {required}"
+        );
+    }
+    for forbidden in [
+        "let content = std::fs::read_to_string(file)",
+        "let disk_is_pre_compact = std::fs::read_to_string(file)",
+        "let updated = std::fs::read_to_string(file)",
+        "std::fs::read_to_string(file).is_ok_and",
+    ] {
+        assert!(
+            !compact_source.contains(forbidden),
+            "agent-doc-compact-io must not read the active document directly in compact flow: {forbidden}"
+        );
+    }
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String>",
+        "fn force_disk_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, content)",
+    ] {
+        assert!(
+            compact_impl.contains(required),
+            "CLI compact effects must bind compact document authority to realtime/disk IO explicitly: {required}"
+        );
+    }
+}
+
+#[test]
 fn test_agent_doc_merge_io_owns_multinode_crdt_sidecar_adapters() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
@@ -24982,6 +25970,141 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
             && claim.contains("merge_default_template_component_config"),
         "claim.rs should call focused document claim scaffold policy directly"
     );
+}
+
+#[test]
+fn test_agent_doc_claim_io_routes_document_reads_through_runtime_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let claim_source = fs::read_to_string(manifest_dir.join("agent-doc-claim-io/src/lib.rs"))
+        .expect("agent-doc-claim-io source should exist");
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let claim_impl_start = main_source
+        .find("impl ClaimRuntimeEffects for CliClaimRuntimeEffects")
+        .expect("CLI claim effects implementation should exist");
+    let claim_impl_end = claim_impl_start
+        + main_source[claim_impl_start..]
+            .find("fn route_repair_closeout")
+            .expect("route repair helper should follow claim effects implementation");
+    let claim_impl = &main_source[claim_impl_start..claim_impl_end];
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
+        "fn atomic_write(&self, file: &Path, content: &str) -> Result<()>",
+        "effects.current_document_content(file, \"claim_empty_scaffold\")",
+        "effects.atomic_write(file, &scaffold)?",
+        "effects\n        .current_document_content(file, \"claim_ensure_session\")",
+        "effects\n            .atomic_write(file, &updated_content)",
+        "effects\n            .current_document_content(file, \"claim_default_format\")",
+        "effects.atomic_write(file, &updated).with_context(",
+        "effects\n            .current_document_content(file, \"claim_default_components\")",
+        "effects.atomic_write(file, &scaffolded).with_context(",
+    ] {
+        assert!(
+            claim_source.contains(required),
+            "agent-doc-claim-io should route active document reads/writes through runtime authority effects: {required}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "std::fs::write(file, &scaffold)",
+        "std::fs::write(file, &updated_content)",
+        "std::fs::write(file, &updated)",
+        "std::fs::write(file, &scaffolded)",
+    ] {
+        assert!(
+            !claim_source.contains(forbidden),
+            "agent-doc-claim-io must not read/write the active document directly during claim flow: {forbidden}"
+        );
+    }
+
+    for required in [
+        "fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String>",
+        "fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, content)",
+    ] {
+        assert!(
+            claim_impl.contains(required),
+            "CLI claim effects must bind claim document authority to realtime IO: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_agent_doc_repair_io_routes_force_disk_reads_through_document_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-repair-io/src/lib.rs")).unwrap();
+
+    for required in [
+        "fn repair_current_document_content(",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+    ] {
+        assert!(
+            repair_source.contains(required),
+            "repair IO should route current/force-disk document reads through named document authority helpers: {required}"
+        );
+    }
+    assert!(
+        !repair_source.contains("std::fs::read_to_string(file)"),
+        "repair IO must not read the active document directly, including force-disk repair overrides"
+    );
+}
+
+#[test]
+fn test_agent_doc_write_runtime_run_entry_routes_document_reads_through_document_authority() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let run_entry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/run_entry.rs"))
+            .expect("write runtime run_entry source should exist");
+
+    for required in [
+        "fn resolve_current_document_content(file: &Path, source: &str) -> Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String>",
+        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
+        "fn resolve_document_content_for_write_mode(",
+        "resolve_disk_document_content(file, disk_source)",
+        "resolve_current_document_content(file, current_source)",
+        "\"write_append_current_content\"",
+        "\"write_append_force_disk_current_content\"",
+        "\"write_append_merge_current_content\"",
+        "\"write_append_force_disk_merge_current_content\"",
+        "\"write_template_current_content\"",
+        "\"write_template_force_disk_current_content\"",
+        "\"write_template_merge_current_content\"",
+        "\"write_template_force_disk_merge_current_content\"",
+        "\"write_stream_current_content\"",
+        "\"write_stream_force_disk_current_content\"",
+        "\"write_stream_empty_patch_component_check\"",
+        "\"write_stream_force_disk_empty_patch_component_check\"",
+        "\"write_stream_merge_current_content\"",
+        "\"write_stream_force_disk_merge_current_content\"",
+        "resolve_current_document_content(file, \"write_ipc_current_content\")",
+        "resolve_current_document_content(file, \"write_explicit_file_ipc_consumed\")",
+        "resolve_current_document_content(file, \"apply_append_from_string\")",
+        "resolve_current_document_content(file, \"apply_append_from_string_current_content\")",
+        "\"apply_template_from_string\"",
+        "\"apply_template_from_string_force_disk_initial\"",
+        "\"apply_template_from_string_current_content\"",
+        "\"apply_template_from_string_force_disk_current_content\"",
+        "resolve_disk_document_content(file, \"write_file_ipc_payload_disk_reference\")",
+    ] {
+        assert!(
+            run_entry_source.contains(required),
+            "write-runtime run_entry should route document reads through the named current/disk document authority split: {required}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "agent_doc_document_realtime_io::try_resolve_current_doc_from_file(",
+    ] {
+        assert!(
+            !run_entry_source.contains(forbidden),
+            "write-runtime run_entry must not bypass the current/disk document authority helpers: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -26312,10 +27435,39 @@ fn test_agent_doc_element_boundary_owns_boundary_id_lookup() {
 
     let boundary_io =
         fs::read_to_string(manifest_dir.join("agent-doc-boundary-io/src/lib.rs")).unwrap();
+    let boundary_io_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-boundary-io/Cargo.toml")).unwrap();
+    let boundary_io_manifest: toml::Value = toml::from_str(&boundary_io_manifest).unwrap();
+    let boundary_io_dependencies = boundary_io_manifest["dependencies"].as_table().unwrap();
     assert!(
         boundary_io.contains("pub fn run(file: &Path, component: Option<&str>)"),
         "agent-doc-boundary-io should own the boundary CLI file-I/O path"
     );
+    assert!(
+        boundary_io_dependencies.contains_key("agent-doc-document-realtime-io"),
+        "boundary IO should depend on realtime document authority for active document mutation"
+    );
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"boundary_insert\"",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated)",
+    ] {
+        assert!(
+            boundary_io.contains(required),
+            "boundary IO should route active document mutation through realtime authority: {required}"
+        );
+    }
+    for forbidden in [
+        "std::fs::read_to_string(file)",
+        "std::fs::write(&tmp",
+        "std::fs::rename(&tmp",
+        "file.with_extension(\"boundary.tmp\")",
+    ] {
+        assert!(
+            !boundary_io.contains(forbidden),
+            "boundary IO must not directly read/write active document content: {forbidden}"
+        );
+    }
     assert!(
         !boundary_io.contains("agent_doc_orchestration::"),
         "boundary IO must not reach back through orchestration"
@@ -27751,13 +28903,21 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             && !template_io.contains("tmux_router"),
         "agent-doc-template-io response materialization adapters must stay free of orchestration effects"
     );
+    assert!(
+        template_io
+            .contains("agent_doc_document_realtime_io::try_resolve_current_document_content("),
+        "agent-doc-template-io template info should resolve current document content through realtime authority"
+    );
     for required_snippet in [
         "pub struct NormalizedTemplateResponse",
         "pub fn pending_replace_escape_hatch_enabled(",
         "pub fn enforce_no_replace_pending(",
         "pub fn normalize_backlog_patch_response(",
         "pub fn canonicalize_response_for_capture(",
+        "pub fn canonicalize_response_for_capture_with_current_content(",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content",
         "agent_doc_document_realtime_io::guard_visible_write_idle",
+        "agent_doc_document_realtime_io::atomic_write_through_authority",
         "agent_doc_cycle_state_io::mark_pending_mutations",
         "agent_doc_cycle_state_io::record_pending_done_ids",
     ] {
@@ -27772,6 +28932,25 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
             && !template_io_backlog.contains("tmux_router"),
         "agent-doc-template-io backlog normalization must stay free of orchestration/tmux facades"
     );
+    for (source, content) in [
+        ("agent-doc-template-io/src/lib.rs", template_io.as_str()),
+        (
+            "agent-doc-template-io/src/backlog_normalization.rs",
+            template_io_backlog.as_str(),
+        ),
+    ] {
+        for forbidden_snippet in [
+            "std::fs::read_to_string(file)",
+            "fs::read_to_string(file)",
+            "std::fs::write(file",
+            "fs::write(file",
+        ] {
+            assert!(
+                !content.contains(forbidden_snippet),
+                "{source} must not read or write active documents directly: {forbidden_snippet}"
+            );
+        }
+    }
 
     let write_materialize = fs::read_to_string(
         manifest_dir.join("agent-doc-template-io/src/response_materialization_io.rs"),
@@ -27841,6 +29020,13 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         write_materialize
             .contains("strip_partial_response_materialization_from_exchange(&current, response)"),
         "write materialization adapters should call the focused response materialization API directly"
+    );
+    assert!(
+        write_materialize
+            .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && !write_materialize.contains("std::fs::read_to_string(file)")
+            && !write_materialize.contains("fs::read_to_string(file)"),
+        "write materialization retry diagnostics should resolve active documents through realtime authority"
     );
 
     let write_ipc =
@@ -28127,10 +29313,7 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
             "agent-doc-queue-io queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
         );
     }
-    for required_snippet in [
-        "answered_free_text_head_node_keys",
-        "should_consume_queue_prompt_for_diff_content",
-    ] {
+    for required_snippet in ["answered_free_text_head_node_keys"] {
         assert!(
             queue_consume.contains(required_snippet),
             "agent-doc-queue-io queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
@@ -28253,21 +29436,39 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
 
     let queue_consume =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/queue_consume.rs")).unwrap();
+    let queue_consume_prod = queue_consume
+        .split("#[cfg(test)]")
+        .next()
+        .expect("queue_consume production section");
+    let run_io = fs::read_to_string(manifest_dir.join("agent-doc-run-io/src/lib.rs")).unwrap();
+    let write_runtime =
+        fs::read_to_string(manifest_dir.join("agent-doc-write-runtime-io/src/lib.rs")).unwrap();
     for forbidden_snippet in [
         "pub(crate) fn active_queue_head_text(",
         "pub(crate) fn queue_skip_diagnostic_for_content(",
         "pub(crate) fn queue_head_has_explicit_completion_signal(",
         "pub(crate) fn explicit_queue_completion_ids(",
         "pub(crate) fn queue_head_matches_done_ids(",
+        "pub fn queue_skip_diagnostic_for_file(",
+        "pub fn should_consume_queue_prompt_for_diff(",
+        "pub fn response_explicitly_targets_active_queue_head(",
+        "std::fs::read_to_string(file)",
     ] {
         assert!(
-            !queue_consume.contains(forbidden_snippet),
-            "queue_consume must not re-own or facade active queue-head policy: {forbidden_snippet}"
+            !queue_consume_prod.contains(forbidden_snippet),
+            "queue_consume must not re-own, facade, or raw-read active queue-head policy: {forbidden_snippet}"
         );
     }
     assert!(
-        queue_consume.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content"),
-        "queue_consume should keep only the file-reading adapter for skip diagnostics"
+        run_io.contains("direct_run_queue_guard")
+            && run_io.contains(
+                "agent_doc_queue::queue_consume::should_consume_queue_prompt_for_diff_content"
+            )
+            && run_io.contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content")
+            && write_runtime.contains("fn queue_skip_diagnostic_for_current_document(")
+            && write_runtime
+                .contains("agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content"),
+        "runtime callers should resolve current document content before queue skip/diff diagnostics"
     );
 
     let queue_cmd =
@@ -28600,6 +29801,22 @@ fn test_agent_doc_queue_owns_route_dispatch_queue_policy() {
                 .contains("agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source"),
         "route/preflight should call route-dispatch queue policy through focused effect adapters and agent-doc-queue directly"
     );
+    for required in [
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(",
+        "\"route_dispatch_queue_enqueue\"",
+        "\"route_inactive_queue_head\"",
+        "\"route_queue_activation\"",
+    ] {
+        assert!(
+            route_queue_dispatch.contains(required),
+            "route queue dispatch should resolve active document content through realtime authority: {required}"
+        );
+    }
+    assert!(
+        !route_queue_dispatch.contains("std::fs::read_to_string(file)")
+            && !route_queue_dispatch.contains("fs::read_to_string(file)"),
+        "route queue dispatch must not read active documents directly from disk"
+    );
 }
 
 #[test]
@@ -28634,6 +29851,9 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
         document_prep.contains("pub struct RouteDocumentPrepEffects")
             && document_prep.contains("pub struct RouteDocumentPreparation")
             && document_prep.contains("pub fn prepare_route_document(")
+            && document_prep
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && document_prep.contains("\"route_document_prep\"")
             && document_prep.contains("pub fn scrub_duplicate_prompt_comments_for_route(")
             && document_prep
                 .contains("agent_doc_frontmatter_io::session::require_agent_doc_document")
@@ -28649,6 +29869,11 @@ fn test_agent_doc_route_io_owns_route_document_prep() {
             && route_command.contains("prepare_route_document(file, effects.document_prep_effects)")
             && runtime_effects.contains("document_prep_effects: route_document_prep_effects()"),
         "route document preparation should live in agent-doc-route-io and be assembled by focused runtime effects"
+    );
+    assert!(
+        !document_prep.contains("std::fs::read_to_string(file)")
+            && !document_prep.contains("fs::read_to_string(file)"),
+        "route document preparation must not read active documents directly from disk"
     );
 }
 
@@ -28803,13 +30028,22 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
             && closeout_drain.contains("pub struct RouteCloseoutDrainEffects")
             && closeout_drain.contains("pub fn drain_open_closeout_before_routed_dispatch(")
             && closeout_drain.contains("pub fn classify_route_closeout_block(")
-            && closeout_drain.contains("agent_doc_cycle_state_io::load(file)")
+            && closeout_drain
+                .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)")
+            && closeout_drain
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && closeout_drain.contains("\"route_closeout_block_active_queue_head\"")
             && closeout_drain.contains("dispatch_drain_retry_decision(")
             && closeout_drain.contains("classify_closeout_block_dispatch(")
             && closeout_drain.contains("agent_doc_ops_log_io::log_op")
             && closeout_drain
                 .contains("agent_doc_queue::queue_continuation::live_continuation_head"),
         "route closeout drain and block classification should live in agent-doc-route-io while orchestration injects only runtime closeout effects"
+    );
+    assert!(
+        !closeout_drain.contains("std::fs::read_to_string(file)")
+            && !closeout_drain.contains("fs::read_to_string(file)"),
+        "route closeout drain must not read active documents directly from disk"
     );
 }
 
@@ -28822,6 +30056,9 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/lib.rs")).unwrap();
     let authoritative_dispatch =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_dispatch.rs"))
+            .unwrap();
+    let authoritative_actor =
+        fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/authoritative_actor.rs"))
             .unwrap();
     let pane_resolution =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/pane_resolution.rs")).unwrap();
@@ -28853,9 +30090,20 @@ fn test_agent_doc_route_io_owns_authoritative_dispatch_loop() {
             && authoritative_dispatch.contains("require_routed_cycle_ack(")
             && authoritative_dispatch.contains("dispatch_only_send_reopen(")
             && authoritative_dispatch.contains("activate_existing_route_queue_head(")
+            && authoritative_actor.contains("pub fn managed_capability_proof_status(")
+            && authoritative_actor.contains("fn document_declares_expected_harness(")
+            && authoritative_actor
+                .contains("agent_doc_document_realtime_io::try_resolve_current_document_content(")
+            && authoritative_actor.contains("\"route_managed_capability_proof_status\"")
+            && authoritative_actor.contains("\"route_authoritative_expected_harness\"")
             && pane_resolution.contains("RouteAuthoritativeActorEffects")
             && pane_resolution.contains("route_via_authoritative_actor("),
         "agent-doc-route-io authoritative_dispatch should own authoritative actor reroute decisions and pane resolution should call it directly"
+    );
+    assert!(
+        !authoritative_actor.contains("std::fs::read_to_string(file)")
+            && !authoritative_actor.contains("fs::read_to_string(file)"),
+        "route authoritative actor helpers must not read active documents directly from disk"
     );
 }
 
@@ -29027,6 +30275,10 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn schedule_stale_supervisor_pcp_recycle",
         "pub trait EditorConvergenceEffects",
         "pub fn try_auto_recover_live_prompt_drift",
+        "fn write_converge_cycle_id_for_payload(",
+        "agent_doc_cycle_state_io::load_closeout_projection(file)",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+        "write_converge_cycle_id_for_payload(file)",
         "pub fn try_editor_converge(",
         "pub fn converge_document_or_disk(",
         "pub fn converge_or_disk_write(",
@@ -29063,6 +30315,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
     for forbidden_snippet in [
         "pub fn read_ack_content_sidecar",
         "pub fn poll_ack_content_sidecar",
+        "agent_doc_cycle_state_io::load(file)",
     ] {
         assert!(
             !write_converge_io.contains(forbidden_snippet),
@@ -29444,6 +30697,10 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
         "pub fn write_sync_status_with(",
         "pub fn surface_frontmatter_status_with(",
         "pub fn clear_frontmatter_status_with(",
+        "fn resolve_current_document(&self, file: &Path, source: &str) -> Result<String>;",
+        "fn write_current_document(&self, file: &Path, content: &str) -> Result<()>;",
+        "resolve_current_document(file, \"sync_status_document\")",
+        "write_current_document(file, &updated)",
         "agent_doc_project_root_io::project_root_containing(",
         "agent_doc_sync::sync_frontmatter_status_message",
         "agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX",
@@ -29453,6 +30710,69 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             "agent-doc-sync-io must own sync lock/process/status IO directly: {required_snippet}"
         );
     }
+    let sync_io_prod = sync_io_source.split("#[cfg(test)]").next().unwrap();
+    for forbidden in [
+        "let doc = std::fs::read_to_string(file)",
+        "let doc = match std::fs::read_to_string(file)",
+        "std::fs::write(file, &updated)",
+    ] {
+        assert!(
+            !sync_io_prod.contains(forbidden),
+            "sync status production IO must route active document reads/writes through runtime document authority: {forbidden}"
+        );
+    }
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    for required in [
+        "fn resolve_current_document(&self, file: &Path, source: &str) -> anyhow::Result<String>",
+        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "fn write_current_document(&self, file: &Path, content: &str) -> anyhow::Result<()>",
+        "agent_doc_document_realtime_io::atomic_write_through_authority(file, content)",
+    ] {
+        assert!(
+            main_source.contains(required),
+            "CLI sync runtime effects should bind sync status document IO to realtime authority: {required}"
+        );
+    }
+    let sync_resync_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
+    for required in [
+        "fn finish_turn_current_document_hash(file: &Path) -> Option<String>",
+        "resolve_current_document(file, \"resync_finish_turn_document\")",
+    ] {
+        assert!(
+            sync_resync_source.contains(required),
+            "resync finish-turn progress checks should read through sync runtime document authority: {required}"
+        );
+    }
+    assert!(
+        !sync_resync_source.contains("std::fs::read_to_string(file)")
+            && !sync_resync_source.contains("fs::read_to_string(file)"),
+        "resync production helpers must not read the active session document directly"
+    );
+    let sync_pane_repair_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/pane_repair.rs")).unwrap();
+    for required in [
+        "resolve_current_document(file, \"sync_harness_document\")",
+        "rc.set_doc_content(content)",
+        "agent_doc_cycle_state_io::load_with_closeout_projection(file)",
+    ] {
+        assert!(
+            sync_pane_repair_source.contains(required),
+            "sync pane-repair harness resolution should read through sync runtime document authority: {required}"
+        );
+    }
+    assert!(
+        !sync_pane_repair_source.contains("std::fs::read_to_string(file)")
+            && !sync_pane_repair_source.contains("fs::read_to_string(file)"),
+        "sync pane-repair production helpers must not read the active session document directly"
+    );
+    let sync_registry_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync/registry.rs")).unwrap();
+    assert!(
+        sync_registry_source
+            .contains("agent_doc_cycle_state_io::load_with_closeout_projection(file)"),
+        "sync registry cycle phase labels should use the projection-aware cycle view"
+    );
     let process_owner_io_manifest =
         fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/Cargo.toml")).unwrap();
     let process_owner_io: toml::Value = toml::from_str(&process_owner_io_manifest).unwrap();

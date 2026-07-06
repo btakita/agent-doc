@@ -10,7 +10,7 @@
 //! - Optional `max_entries` in component config trims to the last N non-empty lines after append/prepend.
 //! - `pre_patch` shell hook: content piped to stdin, transformed stdout replaces the replacement string before writing. Receives `COMPONENT` and `FILE` env vars.
 //! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
-//! - After patching, the document is written to disk and a snapshot is saved relative to the project root (`.agent-doc/snapshots/`). Falls back to CWD-relative snapshot if no project root is found.
+//! - After patching, the document is written through document authority and a snapshot is saved relative to the project root (`.agent-doc/snapshots/`). Falls back to CWD-relative snapshot if no project root is found.
 //! - `run` reads replacement content from the `content` argument or stdin when `None`.
 //!
 //! ## Agentic Contracts
@@ -91,8 +91,11 @@ pub fn run(
     }
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "patch_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
 
     let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
@@ -174,7 +177,7 @@ pub fn run(
 
     let new_doc = comp.replace_content(&doc, &final_content);
 
-    std::fs::write(file, &new_doc)
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
     // Save snapshot relative to project root (not CWD) for thread safety

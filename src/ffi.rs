@@ -886,7 +886,7 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
     };
     // No cycle state (or an unreadable one) means no turn is in flight → idle.
-    let phase = agent_doc_cycle_state_io::load(std::path::Path::new(path))
+    let phase = agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))
         .ok()
         .flatten()
         .map(|state| state.phase)
@@ -2908,6 +2908,47 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_projection_prefers_terminal_projection_over_stale_open_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = "---\nagent_doc_session: session-1\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = std::fs::read_dir(tmp.path().join(".agent-doc/state/cycles"))
+            .unwrap()
+            .next()
+            .expect("cycle state sidecar")
+            .unwrap()
+            .path();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let doc_c = CString::new(doc.to_string_lossy().as_ref()).unwrap();
+        let projection_ptr = unsafe { agent_doc_turn_projection(doc_c.as_ptr()) };
+        let projection = unsafe { CStr::from_ptr(projection_ptr) }
+            .to_str()
+            .unwrap()
+            .to_string();
+        drop(unsafe { CString::from_raw(projection_ptr) });
+        let projection: serde_json::Value = serde_json::from_str(&projection).unwrap();
+
+        assert_eq!(projection["turn_in_flight"], false);
+        assert_eq!(projection["state"], "idle");
+    }
 
     #[test]
     fn state_projection_ffi_round_trip() {

@@ -98,6 +98,8 @@ pub enum StateFact {
         cycle_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tracked_work_maintenance_required: Option<bool>,
     },
     BaselineSaved {
         document_hash: String,
@@ -294,6 +296,12 @@ pub enum StateFact {
         cycle_id: String,
         capture_id: String,
         response_sha256: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response_body: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_hash: Option<String>,
     },
     /// The currently durable pending response body for an open closeout cycle.
     ///
@@ -1112,22 +1120,48 @@ impl DocumentStateProjection {
             StateFact::PreflightStarted {
                 cycle_id,
                 session_id,
+                tracked_work_maintenance_required,
                 ..
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::StartPreflight);
                 self.closeout.session_id = session_id.clone();
+                self.closeout.tracked_work_maintenance_required =
+                    *tracked_work_maintenance_required;
             }
             StateFact::ResponseCaptured {
                 cycle_id,
                 capture_id,
                 response_sha256,
+                response_body,
+                file_hash,
+                snapshot_hash,
                 ..
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::ResponseCaptured);
                 self.closeout.capture_id = Some(capture_id.clone());
                 self.closeout.response_sha256 = Some(response_sha256.clone());
+                if file_hash.is_some() {
+                    self.closeout.response_file_hash = file_hash.clone();
+                }
+                if snapshot_hash.is_some() {
+                    self.closeout.response_snapshot_hash = snapshot_hash.clone();
+                }
+                if let Some(response_body) = response_body {
+                    self.closeout.captured_response = Some(CapturedResponseProjection {
+                        cycle_id: cycle_id.clone(),
+                        capture_id: capture_id.clone(),
+                        response_sha256: response_sha256.clone(),
+                        response_body: response_body.clone(),
+                        file_hash: file_hash
+                            .clone()
+                            .or_else(|| self.closeout.response_file_hash.clone()),
+                        snapshot_hash: snapshot_hash
+                            .clone()
+                            .or_else(|| self.closeout.response_snapshot_hash.clone()),
+                    });
+                }
             }
             StateFact::PendingResponseCaptured {
                 cycle_id,
@@ -2254,11 +2288,19 @@ pub struct CloseoutProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_file_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_response: Option<CapturedResponseProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     #[serde(default)]
     pub session_check_passed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_work_maintenance_required: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abandoned_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2280,6 +2322,9 @@ impl CloseoutProjection {
             self.cycle_id = Some(cycle_id.to_string());
             self.phase = Some(CyclePhase::PreflightStarted);
             self.session_check_passed = false;
+            self.response_file_hash = None;
+            self.response_snapshot_hash = None;
+            self.captured_response = None;
             self.pending_semantic_merge_acks.clear();
         }
         let current = self.phase.unwrap_or(CyclePhase::PreflightStarted);
@@ -2339,6 +2384,18 @@ pub struct PendingResponseProjection {
     pub capture_id: String,
     pub response_sha256: String,
     pub response_body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturedResponseProjection {
+    pub cycle_id: String,
+    pub capture_id: String,
+    pub response_sha256: String,
+    pub response_body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3945,6 +4002,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 session_id: Some("session-1".into()),
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -3981,6 +4039,61 @@ mod tests {
     }
 
     #[test]
+    fn response_captured_projection_keeps_guard_payload_after_commit() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "r1",
+            StateFact::PreflightStarted {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                session_id: Some("session-1".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+        ledger.append(state_event(
+            "r2",
+            StateFact::ResponseCaptured {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                capture_id: "capture-1".into(),
+                response_sha256: "sha-response".into(),
+                response_body: Some("### Re: topic - gpt-5\n\nDone.\n".into()),
+                file_hash: Some("file-sha".into()),
+                snapshot_hash: Some("snapshot-sha".into()),
+            },
+        ));
+        ledger.append(state_event(
+            "r3",
+            StateFact::WriteApplied {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                patch_id: Some("patch-1".into()),
+            },
+        ));
+        ledger.append(state_event(
+            "r4",
+            StateFact::CommitObserved {
+                document_hash: "doc-a".into(),
+                cycle_id: "cycle-1".into(),
+                commit: "head-sha".into(),
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.closeout.phase, Some(CyclePhase::Committed));
+        let captured = projected
+            .closeout
+            .captured_response
+            .expect("captured response projection");
+        assert_eq!(captured.cycle_id, "cycle-1");
+        assert_eq!(captured.capture_id, "capture-1");
+        assert_eq!(captured.response_sha256, "sha-response");
+        assert_eq!(captured.response_body, "### Re: topic - gpt-5\n\nDone.\n");
+        assert_eq!(captured.file_hash.as_deref(), Some("file-sha"));
+        assert_eq!(captured.snapshot_hash.as_deref(), Some("snapshot-sha"));
+    }
+
+    #[test]
     fn pending_response_clear_projection_survives_without_capture_event() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
@@ -3989,6 +4102,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 session_id: Some("session-1".into()),
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -4034,6 +4148,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 session_id: None,
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -4058,6 +4173,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-2".into(),
                 session_id: None,
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -4085,6 +4201,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-3".into(),
                 session_id: None,
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();
@@ -4100,6 +4217,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 session_id: None,
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -4256,6 +4374,7 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 session_id: Some("session-1".into()),
+                tracked_work_maintenance_required: Some(false),
             },
         ));
         ledger.append(state_event(
@@ -4293,6 +4412,9 @@ mod tests {
                 cycle_id: "cycle-1".into(),
                 capture_id: "capture-1".into(),
                 response_sha256: "sha-response".into(),
+                response_body: None,
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         ledger.append(state_event(

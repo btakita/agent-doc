@@ -263,18 +263,94 @@ fn record_session_startup_miss(
 
 mod idle_watch;
 
-fn turn_active_for_owned_pane(file: &Path, shared: &SupervisorShared) -> bool {
-    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
-        return false;
-    };
-    let owned_pane = shared.inject_pane.as_deref().or_else(|| {
+fn owned_pane_id(shared: &SupervisorShared) -> Option<&str> {
+    shared.inject_pane.as_deref().or_else(|| {
         shared
             .actor_runtime
             .as_ref()
             .map(|runtime| runtime.pane_id.as_str())
-    });
-    match owned_pane {
-        Some(pane) => marker.pane == pane,
+    })
+}
+
+fn clear_matching_turn_status_projection(
+    file: &Path,
+    shared: &SupervisorShared,
+    reason: &str,
+    session_log: &mut Option<std::fs::File>,
+) -> bool {
+    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
+        return false;
+    };
+    let Some(pane) = owned_pane_id(shared) else {
+        return false;
+    };
+    if marker.pane != pane {
+        return false;
+    }
+    let Some(base) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    match agent_doc_turn_status_io::clear_turn_status_for_pane(&base, pane) {
+        Ok(()) => {
+            log_event(
+                session_log,
+                &format!("turn_status_projection_repaired pane={pane} reason={reason}"),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "turn_status_projection_repaired file={} pane={} reason={}",
+                    file.display(),
+                    pane,
+                    reason
+                ),
+            );
+            true
+        }
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: failed to clear stale turn-status projection for {} pane {}: {err:#}",
+                file.display(),
+                pane
+            );
+            false
+        }
+    }
+}
+
+fn clear_turn_status_title_for_owned_pane(file: &Path, shared: &SupervisorShared) {
+    let Some(pane) = owned_pane_id(shared) else {
+        return;
+    };
+    let Some(base) = agent_doc_project_root_io::project_root_containing(file) else {
+        return;
+    };
+    agent_doc_turn_status_io::set_pane_title_for_status(&base, pane, false);
+}
+
+fn turn_active_for_owned_pane_with_idle_evidence(
+    file: &Path,
+    shared: &SupervisorShared,
+    prompt_visible: bool,
+    session_log: &mut Option<std::fs::File>,
+) -> bool {
+    let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
+        return false;
+    };
+    match owned_pane_id(shared) {
+        Some(pane) if marker.pane == pane => {
+            if prompt_visible && actor_state_is_ready(shared) {
+                clear_matching_turn_status_projection(
+                    file,
+                    shared,
+                    "ready_prompt_visible",
+                    session_log,
+                );
+                return false;
+            }
+            true
+        }
+        Some(_) => false,
         None => true,
     }
 }
@@ -563,6 +639,14 @@ fn auto_trigger_inject_command(
         eprintln!("[agent-doc] auto-trigger gated: {reason}");
         return AutoTriggerOutcome::SendFailed;
     }
+    let projection_key = match shared.begin_prompt_dispatch_projection("auto_trigger", trigger_cmd)
+    {
+        agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key } => Some(key),
+        agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Duplicate { .. } => {
+            return AutoTriggerOutcome::Sent;
+        }
+        agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Untracked => None,
+    };
     shared.transition_actor_state(
         agent_doc_sqlite::state_store::ActorState::Busy,
         "dispatch",
@@ -583,17 +667,29 @@ fn auto_trigger_inject_command(
             profile.transform(),
             profile.submit_key(),
         );
-        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
+        let outcome =
+            match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary) {
+                Ok(()) => AutoTriggerOutcome::Sent,
+                Err(_) => AutoTriggerOutcome::SendFailed,
+            };
+        if outcome != AutoTriggerOutcome::Sent
+            && let Some(key) = projection_key.as_deref()
         {
-            Ok(()) => AutoTriggerOutcome::Sent,
-            Err(_) => AutoTriggerOutcome::SendFailed,
-        };
+            shared.clear_prompt_dispatch_projection_on_failure(key);
+        }
+        return outcome;
     }
 
     let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
+        if let Some(key) = projection_key.as_deref() {
+            shared.clear_prompt_dispatch_projection_on_failure(key);
+        }
         return AutoTriggerOutcome::SendFailed;
     };
     if stop.load(Ordering::Relaxed) {
+        if let Some(key) = projection_key.as_deref() {
+            shared.clear_prompt_dispatch_projection_on_failure(key);
+        }
         return AutoTriggerOutcome::Cancelled;
     }
 
@@ -609,18 +705,30 @@ fn auto_trigger_inject_command(
     );
 
     let Some(mut writer) = lock_writer_interruptibly(&writer_arc, stop) else {
+        if let Some(key) = projection_key.as_deref() {
+            shared.clear_prompt_dispatch_projection_on_failure(key);
+        }
         return AutoTriggerOutcome::Cancelled;
     };
     if stop.load(Ordering::Relaxed) {
+        if let Some(key) = projection_key.as_deref() {
+            shared.clear_prompt_dispatch_projection_on_failure(key);
+        }
         return AutoTriggerOutcome::Cancelled;
     }
-    match writer.write_all_interruptibly(&payload, stop) {
+    let outcome = match writer.write_all_interruptibly(&payload, stop) {
         Ok(()) => AutoTriggerOutcome::Sent,
         Err(err) if err.kind() == io::ErrorKind::Interrupted && stop.load(Ordering::Relaxed) => {
             AutoTriggerOutcome::Cancelled
         }
         Err(_) => AutoTriggerOutcome::SendFailed,
+    };
+    if outcome != AutoTriggerOutcome::Sent
+        && let Some(key) = projection_key.as_deref()
+    {
+        shared.clear_prompt_dispatch_projection_on_failure(key);
     }
+    outcome
 }
 
 fn auto_trigger_clear_command(
@@ -1382,6 +1490,11 @@ impl SessionActorRuntime {
     }
 }
 
+#[derive(Debug, Clone)]
+struct PromptDispatchProjection {
+    key: String,
+}
+
 /// Shared state between the main supervisor loop and the IPC handler thread.
 pub(crate) struct SupervisorShared {
     /// Current supervisor state for IPC `state` queries.
@@ -1394,6 +1507,10 @@ pub(crate) struct SupervisorShared {
     supervisor_pid: u32,
     /// Stable identity for this supervisor process across child restarts.
     supervisor_instance_id: String,
+    /// Binary identity captured when this supervisor process started. Restart IPC
+    /// refreshes against this snapshot so a stale supervisor does not wait for the
+    /// idle watch before choosing the hot-reexec path.
+    launch_binary_identity: Option<agent_doc_controller::status::ControllerBinaryIdentity>,
     /// Current restart count.
     restart_count: AtomicU32,
     /// Whether a child is currently running.
@@ -1404,6 +1521,10 @@ pub(crate) struct SupervisorShared {
     harness_binary: String,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
+    /// In-memory advisory projection of the prompt currently admitted for this
+    /// actor generation. The controller's durable dispatch receipt remains
+    /// authoritative; this only prevents a local duplicate write before Ready.
+    prompt_dispatch_projection: Mutex<Option<PromptDispatchProjection>>,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
     inject_pane: Option<String>,
     /// Filtered output and visible terminal projection for the current child process.
@@ -1458,6 +1579,7 @@ impl SupervisorShared {
         Self::with_actor_runtime(
             cwd_source,
             supervisor_instance_id,
+            None,
             "claude",
             None,
             None,
@@ -1468,6 +1590,7 @@ impl SupervisorShared {
     fn with_actor_runtime(
         cwd_source: &'static str,
         supervisor_instance_id: String,
+        launch_binary_identity: Option<agent_doc_controller::status::ControllerBinaryIdentity>,
         harness_binary: &str,
         actor_runtime: Option<SessionActorRuntime>,
         actor_state: Option<agent_doc_sqlite::state_store::ActorState>,
@@ -1479,11 +1602,13 @@ impl SupervisorShared {
             actor_state: Mutex::new(actor_state),
             supervisor_pid: std::process::id(),
             supervisor_instance_id,
+            launch_binary_identity,
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
             harness_binary: harness_binary.to_string(),
             inject_writer: Mutex::new(None),
+            prompt_dispatch_projection: Mutex::new(None),
             inject_pane,
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),
@@ -1523,6 +1648,71 @@ impl SupervisorShared {
 
     fn capability_proof_epoch_current(&self, epoch: u64) -> bool {
         self.capability_proof_epoch.load(Ordering::Relaxed) == epoch
+    }
+
+    fn prompt_dispatch_projection_key(&self, source: &str, bytes: &str) -> Option<String> {
+        let runtime = self.actor_runtime.as_ref()?;
+        let submitted =
+            agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(bytes);
+        Some(format!(
+            "{source}:{}:{}:{}:{}",
+            runtime.session_id,
+            runtime.generation,
+            runtime.pane_id,
+            agent_doc_hash::content_hash(submitted)
+        ))
+    }
+
+    fn begin_prompt_dispatch_projection(
+        &self,
+        source: &str,
+        bytes: &str,
+    ) -> agent_doc_supervisor_io::ipc::PromptDispatchAdmission {
+        let Some(key) = self.prompt_dispatch_projection_key(source, bytes) else {
+            return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Untracked;
+        };
+        let mut projection = self.prompt_dispatch_projection.lock().unwrap();
+        if projection
+            .as_ref()
+            .is_some_and(|current| current.key == key)
+        {
+            return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Duplicate { key };
+        }
+        *projection = Some(PromptDispatchProjection { key: key.clone() });
+        agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key }
+    }
+
+    fn clear_prompt_dispatch_projection_on_failure(&self, key: &str) {
+        let mut projection = self.prompt_dispatch_projection.lock().unwrap();
+        if projection
+            .as_ref()
+            .is_some_and(|current| current.key == key)
+        {
+            *projection = None;
+        }
+    }
+
+    fn refresh_binary_stale(&self) -> bool {
+        let Some(current) =
+            agent_doc_controller_io::project_controller::current_binary_identity().ok()
+        else {
+            return self.binary_stale.load(Ordering::Relaxed);
+        };
+        let identity_stale = agent_doc_controller::status::process_binary_is_stale(
+            self.launch_binary_identity.as_ref(),
+            Some(&current),
+        );
+        let inode_stale = agent_doc_fs::inode_of_path(&current.path)
+            .map(|installed_inode| {
+                agent_doc_supervisor::config::host_supervisor_is_stale(
+                    agent_doc_fs::running_exe_inode_for_pid(self.supervisor_pid),
+                    installed_inode,
+                )
+            })
+            .unwrap_or(false);
+        let stale = identity_stale || inode_stale;
+        self.binary_stale.store(stale, Ordering::Relaxed);
+        stale
     }
 
     fn set_capability_proof_gate_for_epoch(
@@ -1575,6 +1765,9 @@ impl SupervisorShared {
         match runtime.transition(state, caller, reason) {
             Ok(record) => {
                 *self.actor_state.lock().unwrap() = Some(record.state);
+                if record.state == agent_doc_sqlite::state_store::ActorState::Ready {
+                    *self.prompt_dispatch_projection.lock().unwrap() = None;
+                }
             }
             Err(err) => {
                 eprintln!(
@@ -1819,6 +2012,7 @@ mod th {
             pending_gated_ids: Vec::new(),
             pending_added_this_cycle: false,
             pending_added_ids: Vec::new(),
+            tracked_work_maintenance_required_at_preflight: Some(false),
             ipc_snapshot_adoption_blocked: false,
             dropped_exchange_prompts: Vec::new(),
             dropped_queue_prompts: Vec::new(),
@@ -2287,16 +2481,123 @@ mod tests {
         let shared = SupervisorShared::with_actor_runtime(
             "test",
             "test-instance".to_string(),
+            None,
             "claude",
             None,
             Some(agent_doc_sqlite::state_store::ActorState::Ready),
             Some("%owner".to_string()),
         );
-        assert!(!turn_active_for_owned_pane(&doc, &shared));
+        let mut session_log = None;
+        assert!(!turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            false,
+            &mut session_log,
+        ));
 
         agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
-        assert!(turn_active_for_owned_pane(&doc, &shared));
+        assert!(turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            false,
+            &mut session_log,
+        ));
     }
+
+    #[test]
+    fn idle_queue_turn_active_gate_repairs_ready_prompt_marker_for_owned_pane() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "doc").unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "codex",
+            None,
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        let mut session_log = None;
+
+        assert!(!turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            true,
+            &mut session_log,
+        ));
+        assert!(
+            agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_none(),
+            "ready prompt evidence should remove the stale owned marker"
+        );
+    }
+
+    #[test]
+    fn idle_queue_turn_active_gate_keeps_marker_without_ready_prompt_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "doc").unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%owner").unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "codex",
+            None,
+            Some(agent_doc_sqlite::state_store::ActorState::Busy),
+            Some("%owner".to_string()),
+        );
+        let mut session_log = None;
+
+        assert!(turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            true,
+            &mut session_log,
+        ));
+        assert!(
+            agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_some(),
+            "busy actor evidence must not clear a possibly real active turn"
+        );
+    }
+
+    #[test]
+    fn idle_queue_turn_active_gate_does_not_repair_foreign_pane_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(&doc, "doc").unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker(dir.path(), "%other").unwrap();
+
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "codex",
+            None,
+            Some(agent_doc_sqlite::state_store::ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        let mut session_log = None;
+
+        assert!(!turn_active_for_owned_pane_with_idle_evidence(
+            &doc,
+            &shared,
+            true,
+            &mut session_log,
+        ));
+        assert_eq!(
+            agent_doc_turn_status_io::read_turn_active_marker(dir.path()).map(|marker| marker.pane),
+            Some("%other".to_string()),
+            "ready evidence for one pane must not clear another pane's marker"
+        );
+    }
+
     #[test]
     fn idle_queue_drain_defers_to_real_lease_file_then_resumes_on_expiry() {
         // End-to-end over the actual lease sidecar the supervisor reads: a fresh

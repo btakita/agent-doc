@@ -5,6 +5,10 @@ use std::path::Path;
 
 const DEFAULT_TOC_LIMIT: usize = 6;
 
+fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum TocSource {
@@ -189,8 +193,7 @@ fn build_toc_entries(
     query: Option<&str>,
     limit: usize,
 ) -> Result<Vec<TocEntry>> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = current_document_content(file, "response_toc_live_entries")?;
     let mut entries = agent_doc_response_toc::live_toc_entries(&content, backlog_id, query, limit)
         .unwrap_or_default()
         .into_iter()
@@ -237,8 +240,7 @@ fn fetch_sections(
         let ordinal: usize = live
             .parse()
             .with_context(|| format!("invalid live locator '{}'", locator))?;
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let content = current_document_content(file, "response_fetch_live_sections")?;
         let sections = live_sections(&content)?;
         return Ok(live_section_window(&sections, ordinal, before, after)?
             .iter()

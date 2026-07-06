@@ -27,7 +27,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
     file: &Path,
     effects: RouteCloseoutDrainEffects,
 ) -> Result<RouteCloseoutDrainOutcome> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
     };
     if !state.is_open() {
@@ -99,7 +99,7 @@ pub fn drain_open_closeout_before_routed_dispatch(
         };
 
         // Concurrent-finalize detection: re-read the cycle after the failed check.
-        let reloaded = agent_doc_cycle_state_io::load(file)?;
+        let reloaded = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
         let decision = dispatch_drain_retry_decision(
             &state.cycle_id,
             state.phase,
@@ -172,9 +172,12 @@ pub fn classify_route_closeout_block(
     let active_queue_head = if recovery_queues_prompt_for_after_closeout {
         None
     } else {
-        std::fs::read_to_string(file).ok().and_then(|content| {
-            agent_doc_queue::queue_continuation::live_continuation_head(&content)
-        })
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "route_closeout_block_active_queue_head",
+        )
+        .ok()
+        .and_then(|content| agent_doc_queue::queue_continuation::live_continuation_head(&content))
     };
     let dispatch_decision = classify_closeout_block_dispatch(CloseoutBlockDispatchFacts {
         recovery_queues_prompt_for_after_closeout,

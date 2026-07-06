@@ -57,8 +57,11 @@ pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
             continue;
         }
 
-        let content = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "migrate_command_document",
+        )
+        .with_context(|| format!("failed to resolve {}", file.display()))?;
 
         let result = migrate_content(&content);
 

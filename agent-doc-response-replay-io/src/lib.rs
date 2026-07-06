@@ -6,7 +6,7 @@
 //! update the injected snapshot store, and remove stale patch sidecars.
 
 use agent_doc_turn::response_replay::dedupe_responses;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 /// Effects required by the response-dedupe command.
@@ -15,10 +15,16 @@ pub trait DedupeEffects {
     fn save_snapshot(&self, file: &Path, deduped: &str) -> Result<()>;
 }
 
+fn current_document_content(file: &Path) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "response_replay_dedupe",
+    )
+}
+
 /// Detect and remove duplicate consecutive response blocks from a document.
 pub fn run<E: DedupeEffects + ?Sized>(effects: &E, file: &Path) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = current_document_content(file)?;
 
     let result = dedupe_responses(&content);
 

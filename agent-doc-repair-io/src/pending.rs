@@ -20,8 +20,34 @@ pub(crate) enum PendingResponseState {
 pub fn save_pending(file: &Path, response: &str) -> Result<()> {
     let response = agent_doc_template_io::canonicalize_response_for_capture(file, response)?;
     let capture = agent_doc_capture_io::capture_response(file, &response)?;
-    append_pending_response_captured(file, &capture)?;
-    if let Err(err) = write_pending_projection_file(file, &response) {
+    save_pending_after_capture(file, &response, &capture)
+}
+
+pub fn save_pending_with_current_content(
+    file: &Path,
+    response: &str,
+    current_content: &str,
+) -> Result<()> {
+    let response = agent_doc_template_io::canonicalize_response_for_capture_with_current_content(
+        file,
+        response,
+        current_content,
+    )?;
+    let capture = agent_doc_capture_io::capture_response_with_current_content(
+        file,
+        &response,
+        current_content,
+    )?;
+    save_pending_after_capture(file, &response, &capture)
+}
+
+fn save_pending_after_capture(
+    file: &Path,
+    response: &str,
+    capture: &agent_doc_capture_io::CaptureRecord,
+) -> Result<()> {
+    append_pending_response_captured(file, capture)?;
+    if let Err(err) = write_pending_projection_file(file, response) {
         eprintln!("[repair] warning: failed to update pending response backup projection: {err}");
     }
     Ok(())

@@ -112,6 +112,14 @@ use std::time::Duration;
 struct CliClaimRuntimeEffects;
 
 impl ClaimRuntimeEffects for CliClaimRuntimeEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
         agent_doc_commit_io::commit(file)
     }
@@ -192,6 +200,14 @@ static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
 struct CliSyncRuntimeEffects;
 
 impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
+    fn resolve_current_document(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn write_current_document(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
         agent_doc_commit_io::commit(file)
     }
@@ -222,7 +238,12 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
-        agent_doc_repair_io::pending::save_pending(file, response)
+        let current_content = self.resolve_current_document(file, "sync_save_pending_capture")?;
+        agent_doc_repair_io::pending::save_pending_with_current_content(
+            file,
+            response,
+            &current_content,
+        )
     }
 
     fn session_check_inspect(
@@ -268,6 +289,14 @@ static SYNC_RUNTIME_EFFECTS: CliSyncRuntimeEffects = CliSyncRuntimeEffects;
 struct CliCompactRuntimeEffects;
 
 impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    }
+
     fn commit_with_outcome(
         &self,
         file: &Path,
@@ -703,32 +732,6 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
 
 struct CliQueueCommandEffects;
 
-struct CliBacklogCommandEffects;
-
-static CLI_BACKLOG_COMMAND_EFFECTS: CliBacklogCommandEffects = CliBacklogCommandEffects;
-
-impl agent_doc_element_backlog_io::BacklogCommandEffects for CliBacklogCommandEffects {
-    fn converge_or_disk_write(
-        &self,
-        file: &Path,
-        current_content: &str,
-        target_content: &str,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        agent_doc_write_converge_io::converge_or_disk_write(
-            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
-            file,
-            current_content,
-            target_content,
-            reason,
-        )
-    }
-
-    fn record_document_write_provenance(&self, file: &Path, content: &str) {
-        agent_doc_document_realtime_io::record_document_write_provenance(file, content);
-    }
-}
-
 pub(crate) struct CliStreamRuntimeEffects;
 
 pub(crate) static CLI_STREAM_RUNTIME_EFFECTS: CliStreamRuntimeEffects = CliStreamRuntimeEffects;
@@ -741,6 +744,10 @@ pub(crate) static CLI_QUEUE_CONSUME_WRITE_EFFECTS: CliQueueConsumeWriteEffects =
 impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueConsumeWriteEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
@@ -769,12 +776,21 @@ fn cli_stream_effects() -> Arc<dyn agent_doc_stream_io::StreamRuntimeEffects> {
 }
 
 impl agent_doc_stream_io::StreamRuntimeEffects for CliStreamRuntimeEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
     fn commit(&self, file: &Path) -> anyhow::Result<bool> {
         agent_doc_commit_io::commit(file)
     }
 
     fn save_pending(&self, file: &Path, response: &str) -> anyhow::Result<()> {
-        agent_doc_repair_io::pending::save_pending(file, response)
+        let current_content = self.current_document_content(file, "stream_save_pending_capture")?;
+        agent_doc_repair_io::pending::save_pending_with_current_content(
+            file,
+            response,
+            &current_content,
+        )
     }
 
     fn clear_pending(&self, file: &Path) -> anyhow::Result<()> {
@@ -4890,7 +4906,7 @@ fn try_main() -> anyhow::Result<()> {
             force_disk,
             action,
         } => agent_doc_element_backlog_io::with_backlog_command_effects(
-            &CLI_BACKLOG_COMMAND_EFFECTS,
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
             || {
                 agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
                     force_disk,
@@ -4956,7 +4972,7 @@ fn try_main() -> anyhow::Result<()> {
             force_disk,
             action,
         } => agent_doc_element_backlog_io::with_backlog_command_effects(
-            &CLI_BACKLOG_COMMAND_EFFECTS,
+            &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
             || {
                 agent_doc_element_backlog_io::backlog_cmd::with_force_disk_pending_writes(
                     force_disk,
@@ -5024,7 +5040,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Review { action } => match action {
             ReviewAction::UngateTasks { file } => {
                 let report = agent_doc_element_backlog_io::with_backlog_command_effects(
-                    &CLI_BACKLOG_COMMAND_EFFECTS,
+                    &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
                     || {
                         agent_doc_element_backlog_io::backlog_cmd::add_ungate_tasks_for_review(
                             &file,
@@ -5055,8 +5071,10 @@ fn try_main() -> anyhow::Result<()> {
                         None
                     },
                 };
-                let items =
-                    agent_doc_element_backlog_io::backlog_cmd::list_review_items(&file, &filter)?;
+                let items = agent_doc_element_backlog_io::with_backlog_command_effects(
+                    &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+                    || agent_doc_element_backlog_io::backlog_cmd::list_review_items(&file, &filter),
+                )?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&items)?);
                 } else if items.is_empty() {

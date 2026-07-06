@@ -210,6 +210,11 @@ impl SimWorld {
                     self.coverage.record_block(&err.to_string());
                 }
             }
+            SimCommand::RecoverControllerDispatchMarkers => {
+                if let Err(err) = self.recover_controller_dispatch_markers() {
+                    self.coverage.record_block(&err.to_string());
+                }
+            }
             SimCommand::SessionClear => {
                 if let Err(err) = self.clear_session_context() {
                     self.coverage.record_block(&err.to_string());
@@ -2031,6 +2036,21 @@ impl SimWorld {
             "route_dispatch_direct_pane_blocked pane={} harness={} protected_input={} draft_preview={:?}",
             pane_id, harness.binary, reason, draft_preview
         ));
+        Ok(())
+    }
+
+    pub(crate) fn recover_controller_dispatch_markers(&mut self) -> Result<()> {
+        let Some(receipt) = self.route.pending_dispatch.as_ref() else {
+            bail!("controller recovery has no open dispatch receipt to reconcile");
+        };
+        let key = format!(
+            "dispatch_receipt_reconcile:{}:{}:{}",
+            receipt.generation, receipt.session_id, receipt.pane_id
+        );
+        if !self.route.recovery_marker_keys.insert(key.clone()) {
+            self.coverage.recovery_marker_upsert_dedupes += 1;
+        }
+        self.record_ops_proof(format!("crash_recovery_marker_upsert key={key}"));
         Ok(())
     }
 

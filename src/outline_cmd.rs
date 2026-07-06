@@ -6,7 +6,10 @@ pub fn run_outline(file: &Path, json: bool) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "outline_command_document",
+    )?;
     let (_fm, body) = agent_doc_frontmatter::frontmatter::parse(&content)?;
     let sections = agent_doc_document::outline_projection::project_markdown_outline(body);
 

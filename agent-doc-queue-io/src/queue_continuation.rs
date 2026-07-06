@@ -69,6 +69,22 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     )
 }
 
+/// Detect queue continuation against caller-supplied current document content.
+///
+/// Runtime callers that already resolved the active document through realtime
+/// authority should use this instead of asking queue IO to read the file again.
+pub fn detect_for_content(
+    file: &Path,
+    current_content: &str,
+) -> Result<Option<queue_policy::QueueContinuation>> {
+    crate::continuation_detect::detect_required_continuation_for_content_with(
+        file,
+        current_content,
+        agent_doc_snapshot_io::load,
+        agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file,
+    )
+}
+
 /// Reconcile the durable continuation marker for `file` after a successful
 /// closeout: write it when a continuation is required, clear it otherwise
 /// (queue drained, `auto` removed, `queue_active` false, or head advanced).

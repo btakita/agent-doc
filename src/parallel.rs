@@ -91,8 +91,11 @@ pub fn run(file: &Path, config: ParallelConfig) -> Result<()> {
     })?;
 
     // Step 2: Read frontmatter for agent_doc_session
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "parallel_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let (fm, _body) = frontmatter::parse(&content)?;
 
     // tmux_session frontmatter field is deprecated — use current tmux session

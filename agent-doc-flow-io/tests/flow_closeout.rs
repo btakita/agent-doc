@@ -69,6 +69,10 @@ mod tests {
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         for TestPipelineFrontmatterEffects
     {
+        fn read_current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,
@@ -333,6 +337,36 @@ mod tests {
     }
 
     #[test]
+    fn stuck_captured_cycle_uses_projection_when_capture_sidecar_is_missing() {
+        let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        let info =
+            stuck_captured_cycle(&doc).expect("projected missing HEAD response should be detected");
+        assert_eq!(info.cycle_id, state.cycle_id);
+        assert_eq!(info.capture_id, capture.capture_id);
+        assert_eq!(info.response_body_len, response.len());
+        assert_eq!(info.capture_state, "committed");
+    }
+
+    #[test]
     fn stuck_captured_cycle_ignores_queue_prompt_echo_inserted_in_head() {
         // #stuck-capture-queue-echo-false-positive: when a queue head is consumed,
         // the binary inserts a `> **Queue prompt:**` echo blockquote between the
@@ -574,6 +608,38 @@ mod tests {
     }
 
     #[test]
+    fn recovery_evidence_uses_captured_response_projection_without_capture_sidecar() {
+        let base = "---\nsession: test\n---\n\n## Exchange\n\nUser prompt\n";
+        let response = "### Re: user prompt — gpt-5\n\nCaptured but not visible.\n";
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        let state =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+
+        let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
+        assert_eq!(
+            evidence.active_capture,
+            Some(CloseoutCaptureEvidence {
+                capture_id: capture.capture_id.clone(),
+                cycle_id: state.cycle_id,
+                state: agent_doc_workflow::capture::CaptureState::Captured,
+                response_sha256: capture.response_sha256.clone(),
+            })
+        );
+        assert_eq!(
+            evidence.response_body,
+            CloseoutResponseBodyEvidence::MissingFromVisible {
+                capture_id: capture.capture_id,
+            }
+        );
+        assert_eq!(evidence.queue_only_drift, None);
+    }
+
+    #[test]
     fn recovery_evidence_proves_queue_only_drift() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -588,9 +654,13 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        agent_doc_capture_io::capture_response(
+        let capture = agent_doc_capture_io::capture_response(
             &doc,
             "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
         )
         .unwrap();
         let current = base.replace(

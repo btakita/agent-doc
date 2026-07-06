@@ -30,8 +30,10 @@ pub fn prepare_route_document(
     file: &Path,
     effects: RouteDocumentPrepEffects,
 ) -> Result<RouteDocumentPreparation> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_document_prep",
+    )?;
     agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
     let (mut updated_content, session_id) =
         agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;

@@ -296,8 +296,11 @@ static FORCE_DISK_QUEUE_CONSUME_WRITEBACK_EFFECTS: ForceDiskQueueConsumeWritebac
 
 impl QueueConsumeWriteEffects for ForceDiskQueueConsumeWritebackEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
-        std::fs::read_to_string(file)
-            .with_context(|| format!("{source}: failed to read {}", file.display()))
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    }
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
@@ -327,6 +330,15 @@ fn queue_consume_writeback_effects(force_disk: bool) -> &'static dyn QueueConsum
     } else {
         &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS
     }
+}
+
+fn queue_skip_diagnostic_for_current_document(file: &Path, force_disk: bool) -> Result<String> {
+    let content = if force_disk {
+        resolve_force_disk_document(file, "queue_skip_diagnostic")?.into_content()
+    } else {
+        resolve_current_document(file, "queue_skip_diagnostic")?.into_content()
+    };
+    agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(&content)
 }
 
 pub struct RuntimeRepairReplayWriteEffects;
@@ -1302,11 +1314,19 @@ fn run_command_inner(
             },
         )?;
         if commit_mode != CommitMode::None {
-            agent_doc_lint_io::run_with_logger(
-                file,
-                options.lint_override,
-                agent_doc_ops_log_io::log_op,
-            )?;
+            if options.force_disk {
+                agent_doc_lint_io::run_force_disk_with_logger(
+                    file,
+                    options.lint_override,
+                    agent_doc_ops_log_io::log_op,
+                )?;
+            } else {
+                agent_doc_lint_io::run_with_logger(
+                    file,
+                    options.lint_override,
+                    agent_doc_ops_log_io::log_op,
+                )?;
+            }
         }
         return finalize_commit(file, commit_mode, options.force_disk);
     }
@@ -1557,11 +1577,19 @@ fn run_command_inner(
     // > frontmatter `agent_doc_lint_dialect` > workspace `.agent-doc/
     // config.toml` `[lint] dialect` > default (`warn`).
     if write_result.is_ok() && commit_mode != CommitMode::None {
-        agent_doc_lint_io::run_with_logger(
-            file,
-            options.lint_override,
-            agent_doc_ops_log_io::log_op,
-        )?;
+        if options.force_disk {
+            agent_doc_lint_io::run_force_disk_with_logger(
+                file,
+                options.lint_override,
+                agent_doc_ops_log_io::log_op,
+            )?;
+        } else {
+            agent_doc_lint_io::run_with_logger(
+                file,
+                options.lint_override,
+                agent_doc_ops_log_io::log_op,
+            )?;
+        }
     }
 
     // Phase 3c: consume queue prompt after all other strict closeout gates
@@ -1575,9 +1603,7 @@ fn run_command_inner(
     // an identical decision. Unproven IPC retries fail before this phase and do
     // not advance the queue.
     if write_result.is_ok() {
-        let response_body = agent_doc_capture_io::load_active(file)?
-            .map(|capture| capture.response_body)
-            .unwrap_or_default();
+        let response_body = active_capture_response_body_for_write(file)?;
         let refreshed_current_content;
         let current_content_for_queue = match current_content.as_deref() {
             Some(content) => content,
@@ -1645,7 +1671,13 @@ fn run_command_inner(
                         queue_consume_writeback_effects(options.force_disk),
                     ) {
                         Ok(0) => {
-                            eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?)
+                            eprintln!(
+                                "{}",
+                                queue_skip_diagnostic_for_current_document(
+                                    file,
+                                    options.force_disk
+                                )?
+                            )
                         }
                         Ok(_) => {}
                         Err(e) => eprintln!("[queue] warning: done-id marking failed: {}", e),
@@ -1673,7 +1705,10 @@ fn run_command_inner(
                         queue_consume_writeback_effects(options.force_disk),
                     )?;
                     if marked == 0 {
-                        eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
+                        eprintln!(
+                            "{}",
+                            queue_skip_diagnostic_for_current_document(file, options.force_disk)?
+                        );
                     }
                 }
             }
@@ -1749,8 +1784,9 @@ fn run_command_inner(
         && commit_mode == CommitMode::None
         && is_session_document_with_force_disk(file, options.force_disk)?
     {
-        agent_doc_session_check_io::enforce_clean_closeout(
+        agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
             file,
+            options.force_disk,
             &agent_doc_closeout_runtime_io::session_check_effects(),
         )
         .context(
@@ -1777,6 +1813,24 @@ fn run_command_inner(
             Err(write_err.context(format!("{commit_err}\n{boundary_err}")))
         }
     }
+}
+
+fn active_capture_response_body_for_write(file: &Path) -> Result<String> {
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        && let Some(capture_id) = state.capture_id.as_deref()
+        && let Some(projected) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        && projected.cycle_id == state.cycle_id
+        && state
+            .response_sha256
+            .as_deref()
+            .is_none_or(|sha| sha == projected.response_sha256)
+    {
+        return Ok(projected.response_body);
+    }
+    Ok(agent_doc_capture_io::load_active(file)?
+        .map(|capture| capture.response_body)
+        .unwrap_or_default())
 }
 
 fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Result<()> {
@@ -1815,9 +1869,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                     }
                     return Ok(());
                 }
-                match agent_doc_flow_io::closeout::CloseoutEffects::commit(
+                match agent_doc_flow_io::closeout::CloseoutEffects::commit_for_authority(
                     &agent_doc_closeout_runtime_io::closeout_effects(),
                     file,
+                    force_disk,
                 ) {
                     // `#staleinmem` — record what we just committed so a later
                     // out-of-band disk correction is detectable at the next barrier.
@@ -1832,8 +1887,9 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                         }
                     }
                 }
-                agent_doc_session_check_io::enforce_clean_closeout(
+                agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
                     file,
+                    force_disk,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
             } else {
@@ -2296,6 +2352,24 @@ mod tests {
         fn strike_recovered_free_text_queue_head(&self, _file: &Path) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn active_capture_response_body_for_write_uses_projection_without_capture_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nDone.\n";
+        fs::write(&doc, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            active_capture_response_body_for_write(&doc).unwrap(),
+            response
+        );
     }
 
     fn record_test_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {

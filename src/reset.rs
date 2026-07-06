@@ -50,7 +50,17 @@ pub fn run(
         anyhow::bail!("--preserve-session requires --from-current");
     }
 
-    let content = std::fs::read_to_string(file)?;
+    let content = if force_disk {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "reset_command_document",
+        )?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "reset_command_document",
+        )?
+    };
     if preserve_session {
         rebuild_sidecars_from_current(file, &content, true)?;
         eprintln!(

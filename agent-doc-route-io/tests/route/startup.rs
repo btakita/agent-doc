@@ -797,7 +797,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -947,7 +948,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
         agent_doc_supervisor_io::startup_miss::record_startup_miss(
@@ -1078,7 +1080,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -1245,7 +1248,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -1413,7 +1417,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -1688,7 +1693,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -1834,7 +1840,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -1983,7 +1990,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2124,7 +2132,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2234,7 +2243,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     | IpcMethod::ReplicaPull { .. }
                     | IpcMethod::ReplicaAck { .. }
                     | IpcMethod::ReplicaAwareness { .. }
-                    | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                    | IpcMethod::CrdtCheckpoint { .. }
+                    | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
                 })
                 .unwrap();
 
@@ -2352,7 +2362,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2502,7 +2513,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2642,7 +2654,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2756,7 +2769,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2892,7 +2906,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 
@@ -2984,7 +2999,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_prompt_io"
 
 [dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.67" }

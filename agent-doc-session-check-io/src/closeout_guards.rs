@@ -25,7 +25,7 @@ pub fn check_blocked_closeout_followup_guard(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
     let doc = crate::resolve_current_document(file, "blocked_closeout_followup_guard")?;
@@ -39,8 +39,7 @@ pub fn check_blocked_closeout_followup_guard(
     let unresolved = match agent_doc_turn::closeout_signal::blocked_closeout_followup_decision(
         agent_doc_turn::closeout_signal::BlockedCloseoutFollowupEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state
-                == agent_doc_workflow::capture::CaptureState::Committed,
+            capture_committed: capture.capture_committed,
             pending_added_this_cycle: state.pending_added_this_cycle,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
@@ -95,7 +94,7 @@ pub fn check_gated_phase_split_guard(file: &Path, rc: &CycleContext) -> Result<G
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
 
@@ -127,8 +126,7 @@ pub fn check_gated_phase_split_guard(file: &Path, rc: &CycleContext) -> Result<G
     let flagged = match agent_doc_turn::closeout_signal::gated_phase_split_decision(
         agent_doc_turn::closeout_signal::GatedPhaseSplitEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state
-                == agent_doc_workflow::capture::CaptureState::Committed,
+            capture_committed: capture.capture_committed,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
             pending_kept_open_ids: &state.pending_kept_open_ids,
@@ -179,14 +177,13 @@ pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardRe
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
     match agent_doc_turn::closeout_signal::queue_audit_partial_completion_decision(
         agent_doc_turn::closeout_signal::QueueAuditPartialCompletionEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state
-                == agent_doc_workflow::capture::CaptureState::Committed,
+            capture_committed: capture.capture_committed,
             response_body: &capture.response_body,
         },
     ) {
@@ -352,6 +349,13 @@ pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
     Ok(agent_doc_turn::document_drift::detect_bypassed_response_write_between(&snapshot, &current))
 }
 
+pub fn detect_bypassed_response_write_with_force_disk(
+    file: &Path,
+    force_disk: bool,
+) -> Result<Option<String>> {
+    crate::with_force_disk_resolution(force_disk, || detect_bypassed_response_write(file))
+}
+
 /// `#prompt-preempts-auto-queue`: snapshot-independent detection of a live
 /// unresolved user prompt in `agent:exchange`. A prompt is unresolved when there
 /// is user-authored, non-comment text after the latest `agent:boundary` marker
@@ -393,7 +397,7 @@ mod tests {
             .expect("cycle state path");
         let stale_open_sidecar = fs::read(&sidecar_path).unwrap();
         let response = "### Re: which queue items are complete?\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.";
-        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_applied",
@@ -408,7 +412,9 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, content).unwrap();
+        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
+            .unwrap();
         fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
@@ -418,7 +424,7 @@ mod tests {
         let result = check_queue_audit_partial_completion_guard(&doc).unwrap();
         assert!(
             matches!(result, GuardResult::Warn(_)),
-            "lazily committed projection should make the guard evaluate despite stale open JSON: {result:?}"
+            "lazily committed projection should make the guard evaluate despite stale open JSON and missing capture JSON: {result:?}"
         );
     }
 }

@@ -33,8 +33,11 @@ fn read_stdin() -> Result<String> {
 
 /// `agent-doc exchange list <FILE>` — print the exchange nodes as JSON.
 pub fn list(file: &Path) -> Result<()> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "exchange_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let comp = exchange_component(&doc)?;
     let nodes = exchange_tree::list_exchange_nodes(comp.content(&doc));
     let out = serde_json::json!({
@@ -51,12 +54,15 @@ pub fn list(file: &Path) -> Result<()> {
 /// Apply a pure `inner -> inner` transform to the exchange body, write it back, and
 /// re-baseline the snapshot + CRDT (session preserved).
 fn mutate(file: &Path, transform: impl FnOnce(&str) -> Result<String>) -> Result<()> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "exchange_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let comp = exchange_component(&doc)?;
     let new_inner = transform(comp.content(&doc))?;
     let new_doc = comp.replace_content(&doc, &new_inner);
-    std::fs::write(file, &new_doc)
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
         .with_context(|| format!("failed to write {}", file.display()))?;
     // Re-baseline snapshot + CRDT from the mutated document, preserving the session
     // (from_current = true, preserve_session = true, force_disk = true).

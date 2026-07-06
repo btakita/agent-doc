@@ -36,7 +36,7 @@ pub trait PostCommitCleanupEffects {
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<()>;
-    fn mark_capture_committed(&self, file: &Path) -> Result<()>;
+    fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()>;
     fn clear_queue_journal(&self, file: &Path);
     fn reconcile_queue_continuation(
         &self,
@@ -122,8 +122,14 @@ pub fn finalize_successful_commit(
     ) {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
-    if let Err(e) = effects.mark_capture_committed(file) {
-        eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+    if let Some(file_content) = file_content.as_deref() {
+        if let Err(e) = effects.mark_capture_committed(file, file_content) {
+            eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+        }
+    } else {
+        eprintln!(
+            "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
+        );
     }
     effects.clear_queue_journal(file);
     if let Some(continuation) = effects.reconcile_queue_continuation(file, "commit") {
@@ -236,8 +242,14 @@ pub fn finalize_already_committed_noop(
     if let Err(e) = effects.mark_pipeline_committed(file, event, snapshot_content, file_content) {
         eprintln!("[commit] cycle-state update failed: {} (non-fatal)", e);
     }
-    if let Err(e) = effects.mark_capture_committed(file) {
-        eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+    if let Some(file_content) = file_content {
+        if let Err(e) = effects.mark_capture_committed(file, file_content) {
+            eprintln!("[commit] capture-state update failed: {} (non-fatal)", e);
+        }
+    } else {
+        eprintln!(
+            "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
+        );
     }
     let _ = effects.reconcile_queue_continuation(file, "commit_already_current");
 }

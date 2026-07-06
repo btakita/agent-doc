@@ -40,8 +40,10 @@ pub fn enqueue_route_dispatch_prompt(
     effects: RouteQueueEffects,
 ) -> Result<RouteQueueEnqueueOutcome> {
     let _lock = acquire_route_queue_lock(file)?;
-    let original = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_dispatch_queue_enqueue",
+    )?;
     let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
         &original,
         prompt_text,
@@ -130,11 +132,13 @@ pub fn enqueue_exchange_slash_command_for_idle_drain(
 }
 
 pub fn inactive_route_queue_head(file: &Path) -> Result<Option<String>> {
-    let content = match std::fs::read_to_string(file) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(err.into()),
-    };
+    if !file.exists() {
+        return Ok(None);
+    }
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_inactive_queue_head",
+    )?;
     inactive_route_queue_head_in_content(file, &content)
 }
 
@@ -188,8 +192,10 @@ pub fn activate_existing_route_queue_head(
     effects: RouteQueueEffects,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
     let _lock = acquire_route_queue_lock(file)?;
-    let original = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_queue_activation",
+    )?;
     let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
         return Ok(None);
     };

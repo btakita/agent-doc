@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_response_toc_io"
 
 [dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-response-toc = { path = "../agent-doc-response-toc", version = "0.34.67" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.67" }
 anyhow = "1"

@@ -119,6 +119,8 @@ pub struct CompactCommitOutcome {
 }
 
 pub trait CompactRuntimeEffects: Sync {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>;
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome>;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn try_editor_converge(
@@ -160,6 +162,14 @@ struct TestCompactRuntimeEffects;
 
 #[cfg(test)]
 impl CompactRuntimeEffects for TestCompactRuntimeEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    }
+
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
         let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
         Ok(CompactCommitOutcome {
@@ -215,6 +225,10 @@ pub(crate) const PIPELINE_FRONTMATTER_EFFECTS: PipelineFrontmatterEffects =
 impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
     for PipelineFrontmatterEffects
 {
+    fn read_current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+        std::fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))
+    }
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -291,8 +305,13 @@ pub fn run(
         eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
     }
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let effects = runtime_effects()?;
+    let content = (if force_disk {
+        effects.force_disk_document_content(file, "compact_run_initial_force_disk")
+    } else {
+        effects.current_document_content(file, "compact_run_initial")
+    })
+    .with_context(|| format!("failed to read {}", file.display()))?;
 
     let (fm, body) = frontmatter::parse(&content)?;
 
@@ -391,11 +410,12 @@ pub fn run(
     // cannot flush, `commit_compacted_authoritative` / `compact_dirty` still stage
     // the authoritative snapshot and verify HEAD.
     if commit && !force_disk {
-        let disk_is_pre_compact = std::fs::read_to_string(file)
+        let disk_is_pre_compact = effects
+            .force_disk_document_content(file, "compact_pre_commit_disk_flush_probe")
             .map(|disk| disk == content)
             .unwrap_or(false);
         if disk_is_pre_compact {
-            flush_editor_buffer_to_disk_after_compact(file, &authoritative);
+            flush_editor_buffer_to_disk_after_compact(file, &authoritative, effects);
         }
     }
 
@@ -403,7 +423,8 @@ pub fn run(
         agent_doc_session_accretion_io::record_recent_exchange_compaction(file)?;
     }
 
-    let updated = std::fs::read_to_string(file)
+    let updated = effects
+        .force_disk_document_content(file, "compact_post_write_disk_verify")
         .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
     // `#compactdropitem`: re-verify against the document actually on disk so a
     // concurrent stale-supervisor CRDT merge that interleaved over the written
@@ -548,7 +569,11 @@ fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Resu
 /// Returns `true` once disk matches the compacted content. Fail-open:
 /// `commit_compacted_authoritative` still verifies HEAD after the commit and fails
 /// closed if the compacted content did not land.
-fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str) -> bool {
+fn flush_editor_buffer_to_disk_after_compact(
+    file: &Path,
+    expected_content: &str,
+    effects: &dyn CompactRuntimeEffects,
+) -> bool {
     let canonical = match file.canonicalize() {
         Ok(canonical) => canonical,
         Err(e) => {
@@ -563,7 +588,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
     let path_str = canonical.to_string_lossy().to_string();
     let patch_id = format!("compact-flush-{}", uuid::Uuid::new_v4());
 
-    if compact_disk_matches_expected(&canonical, expected_content) {
+    if compact_disk_matches_expected(&canonical, expected_content, effects) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -599,7 +624,7 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
     // asynchronously, so poll the working tree until the flush lands (or time out).
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
-        if compact_disk_matches_expected(&canonical, expected_content) {
+        if compact_disk_matches_expected(&canonical, expected_content, effects) {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -621,13 +646,19 @@ fn flush_editor_buffer_to_disk_after_compact(file: &Path, expected_content: &str
     }
 }
 
-fn compact_disk_matches_expected(file: &Path, expected_content: &str) -> bool {
-    std::fs::read_to_string(file).is_ok_and(|disk| {
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&disk)
-            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                expected_content,
-            )
-    })
+fn compact_disk_matches_expected(
+    file: &Path,
+    expected_content: &str,
+    effects: &dyn CompactRuntimeEffects,
+) -> bool {
+    effects
+        .force_disk_document_content(file, "compact_editor_buffer_flush_disk_poll")
+        .is_ok_and(|disk| {
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&disk)
+                == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                    expected_content,
+                )
+        })
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {

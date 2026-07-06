@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 
+use agent_doc_document::queue_projection::strip_priority_markers;
 use agent_doc_element::element;
 use agent_doc_element_backlog::backlog;
 
@@ -243,27 +244,33 @@ pub fn free_text_queue_head_provenance_decision(
     let mut completed_residue = Vec::new();
 
     for head in active_free_text_queue_heads {
+        let head = strip_priority_markers(head);
         let normalized = head.trim().to_ascii_lowercase();
         if normalized.is_empty() {
             continue;
         }
-        if queue_heads::free_text_queue_head_is_completed_residue(content, &exchange_text, head) {
-            completed_residue.push(head.clone());
-            continue;
-        }
-        if queue_continuation::is_recurring_imperative_head(head) {
-            continue;
-        }
-        if queue_heads::committed_queue_contains_free_text_head(content, head) {
-            continue;
-        }
-        if queue_response::free_text_head_answered_by_response(&exchange_text, head)
-            || response_head_plausibly_answers(&exchange_text, head)
+        if queue_heads::is_do_directive(&head)
+            || !queue_response::queue_prompt_text_is_free_text(content, &head)
         {
-            response_proven_removed.push(head.clone());
             continue;
         }
-        unresolved.push(head.clone());
+        if queue_heads::free_text_queue_head_is_completed_residue(content, &exchange_text, &head) {
+            completed_residue.push(head);
+            continue;
+        }
+        if queue_continuation::is_recurring_imperative_head(&head) {
+            continue;
+        }
+        if queue_heads::committed_queue_contains_free_text_head(content, &head) {
+            continue;
+        }
+        if queue_response::free_text_head_answered_by_response(&exchange_text, &head)
+            || response_head_plausibly_answers(&exchange_text, &head)
+        {
+            response_proven_removed.push(head);
+            continue;
+        }
+        unresolved.push(head);
     }
 
     Some(FreeTextQueueHeadProvenanceDecision {
@@ -489,6 +496,22 @@ mod tests {
             ]
         );
         assert_eq!(decision.unresolved, vec!["missing response".to_string()]);
+    }
+
+    #[test]
+    fn free_text_queue_head_provenance_decision_ignores_decorated_id_backed_state() {
+        let content = doc("- [#sy71]\n", "");
+        let heads = vec![
+            "🚧 [#sy71]".to_string(),
+            "🚧 do [#build]".to_string(),
+            "🚧 missing response".to_string(),
+        ];
+
+        let decision = free_text_queue_head_provenance_decision(&heads, &content).unwrap();
+
+        assert_eq!(decision.unresolved, vec!["missing response".to_string()]);
+        assert!(decision.response_proven_removed.is_empty());
+        assert!(decision.completed_residue.is_empty());
     }
 
     #[test]

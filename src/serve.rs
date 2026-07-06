@@ -877,7 +877,7 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
 fn active_partial_response(
     doc: &Path,
 ) -> Result<Option<agent_doc_capture_io::PartialCaptureRecord>> {
-    let Some(state) = agent_doc_cycle_state_io::load(doc)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(doc)? else {
         return Ok(None);
     };
     if !state.is_open() {
@@ -1142,7 +1142,10 @@ fn handle_save(
 }
 
 fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
-    Ok(agent_doc_cycle_state_io::load(doc)?.is_some_and(|state| state.is_open()))
+    Ok(
+        agent_doc_cycle_state_io::load_with_closeout_projection(doc)?
+            .is_some_and(|state| state.is_open()),
+    )
 }
 
 fn write_and_close_active_cycle(doc: &Path, body: &str) -> Result<()> {
@@ -1423,6 +1426,42 @@ mod tests {
         )
         .unwrap();
         assert!(!active_cycle_in_scope(&doc).unwrap());
+    }
+
+    #[test]
+    fn serve_active_cycle_scope_prefers_terminal_projection_over_stale_open_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("# Session\n"), Some("# Session\n"))
+            .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        assert!(active_cycle_in_scope(&doc).unwrap());
+
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "test",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
+        assert!(
+            !active_cycle_in_scope(&doc).unwrap(),
+            "serve write routing should honor terminal closeout projections before sidecars"
+        );
     }
 
     #[test]

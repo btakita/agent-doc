@@ -6,9 +6,9 @@
 //!   the exchange (truncated to 72 chars).  Reports "(no exchange component)" or "(file not
 //!   available)" when the component is absent or the git show fails.
 //! - `restore(file, commit)`: verifies the commit exists, extracts its `exchange` content, prepends
-//!   it to the current document's exchange (separated by `---\n\n`), writes atomically via
-//!   `tempfile::NamedTempFile`, and updates the snapshot.  If the current exchange is empty, no
-//!   separator is inserted.
+//!   it to the current document's exchange (separated by `---\n\n`), writes through document
+//!   authority, and updates the snapshot.  If the current exchange is empty, no separator is
+//!   inserted.
 //! - Both functions require the file to be inside a git repository; `list` on a non-git file
 //!   returns `Err`.
 //!
@@ -218,9 +218,12 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
         bail!("exchange component is empty in commit {}", commit);
     }
 
-    // Read current file
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    // Resolve current file content from the active document authority.
+    let current_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "history_restore_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
 
     // Parse current document to find exchange component
     let components =
@@ -243,13 +246,8 @@ pub fn restore(file: &Path, commit: &str) -> Result<()> {
     // Replace exchange content in document
     let new_doc = exchange.replace_content(&current_content, &new_exchange);
 
-    // Atomic write: tempfile + rename
-    let parent = file.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, new_doc.as_bytes()).context("failed to write temp file")?;
-    tmp.persist(file)
-        .with_context(|| format!("failed to persist to {}", file.display()))?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
+        .with_context(|| format!("failed to write {}", file.display()))?;
 
     // Update snapshot (best-effort — may fail in environments without .agent-doc/)
     if let Err(e) = agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op) {

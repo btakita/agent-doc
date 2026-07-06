@@ -18,9 +18,10 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
+const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // Storage types (moved from agent-doc-orchestration::session_actor).
@@ -348,6 +349,7 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     }
     let conn =
         Connection::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
     initialize_state_db(&conn)?;
     Ok(conn)
 }
@@ -355,9 +357,9 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
-        PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA busy_timeout = 5000;
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+PRAGMA busy_timeout = 30000;
 
         CREATE TABLE IF NOT EXISTS documents (
             document_id TEXT PRIMARY KEY,
@@ -500,6 +502,7 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS crash_recovery_markers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             marker_kind TEXT NOT NULL,
+            dedupe_key TEXT,
             document_id TEXT,
             generation INTEGER,
             status TEXT NOT NULL,
@@ -517,6 +520,7 @@ pub fn initialize_state_db(conn: &Connection) -> Result<()> {
     ensure_dispatch_attempt_receipt_columns(conn)?;
     ensure_projection_diagnostic_columns(conn)?;
     ensure_queue_head_columns(conn)?;
+    ensure_crash_recovery_marker_columns(conn)?;
     Ok(())
 }
 
@@ -595,6 +599,23 @@ fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
         "queue_heads",
         "priority",
         "priority INTEGER NOT NULL DEFAULT 0",
+    )?;
+    Ok(())
+}
+
+fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "crash_recovery_markers",
+        "dedupe_key",
+        "dedupe_key TEXT",
+    )?;
+    conn.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS crash_recovery_markers_dedupe_key
+        ON crash_recovery_markers(marker_kind, dedupe_key)
+        WHERE dedupe_key IS NOT NULL;
+        "#,
     )?;
     Ok(())
 }
@@ -2029,6 +2050,92 @@ pub fn insert_crash_recovery_marker_in_db(
     Ok(())
 }
 
+pub fn upsert_crash_recovery_marker_in_db(
+    conn: &Connection,
+    marker_kind: &str,
+    dedupe_key: &str,
+    document_id: Option<&str>,
+    generation: Option<u64>,
+    status: &str,
+    diagnostic_payload: Option<&str>,
+) -> Result<()> {
+    let generation = generation
+        .map(|value| sqlite_i64(value, "crash recovery marker generation"))
+        .transpose()?;
+    let timestamp = sqlite_i64(timestamp_secs(), "crash recovery marker timestamp")?;
+    let updated = conn.execute(
+        r#"
+        UPDATE crash_recovery_markers
+        SET document_id = ?3,
+            generation = ?4,
+            status = ?5,
+            diagnostic_payload = ?6,
+            timestamp = ?7
+        WHERE marker_kind = ?1
+          AND dedupe_key = ?2
+        "#,
+        params![
+            marker_kind,
+            dedupe_key,
+            document_id,
+            generation,
+            status,
+            diagnostic_payload,
+            timestamp
+        ],
+    )?;
+    if updated > 0 {
+        return Ok(());
+    }
+    let inserted = conn.execute(
+        r#"
+        INSERT OR IGNORE INTO crash_recovery_markers (
+            marker_kind,
+            dedupe_key,
+            document_id,
+            generation,
+            status,
+            diagnostic_payload,
+            timestamp
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![
+            marker_kind,
+            dedupe_key,
+            document_id,
+            generation,
+            status,
+            diagnostic_payload,
+            timestamp
+        ],
+    )?;
+    if inserted == 0 {
+        conn.execute(
+            r#"
+            UPDATE crash_recovery_markers
+            SET document_id = ?3,
+                generation = ?4,
+                status = ?5,
+                diagnostic_payload = ?6,
+                timestamp = ?7
+            WHERE marker_kind = ?1
+              AND dedupe_key = ?2
+            "#,
+            params![
+                marker_kind,
+                dedupe_key,
+                document_id,
+                generation,
+                status,
+                diagnostic_payload,
+                timestamp
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Layout state.
 // ---------------------------------------------------------------------------
@@ -2147,6 +2254,37 @@ mod tests {
             "intended_hash",
             "intended_hash TEXT",
         )
+    }
+
+    #[test]
+    fn crash_recovery_marker_upsert_dedupes_by_marker_kind_and_key() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        upsert_crash_recovery_marker_in_db(
+            &conn,
+            "dispatch_receipt_reconcile",
+            "receipt:1",
+            Some("tasks/doc.md"),
+            Some(1),
+            "retryable",
+            Some("first"),
+        )?;
+        upsert_crash_recovery_marker_in_db(
+            &conn,
+            "dispatch_receipt_reconcile",
+            "receipt:1",
+            Some("tasks/doc.md"),
+            Some(2),
+            "blocked",
+            Some("second"),
+        )?;
+        let row: (i64, i64, String, String) = conn.query_row(
+            "SELECT COUNT(*), MAX(generation), MAX(status), MAX(diagnostic_payload) FROM crash_recovery_markers WHERE marker_kind = 'dispatch_receipt_reconcile'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        assert_eq!(row, (1, 2, "blocked".to_string(), "second".to_string()));
+        Ok(())
     }
 
     #[test]

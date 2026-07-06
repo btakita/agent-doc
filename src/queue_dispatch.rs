@@ -64,8 +64,11 @@ pub struct DispatchContext {
 impl DispatchContext {
     /// Build dispatch context from a document file path.
     pub fn from_file(file: &Path) -> Result<Self> {
-        let doc = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "queue_dispatch_command_document",
+        )
+        .with_context(|| format!("failed to resolve {}", file.display()))?;
         let (fm, _) = frontmatter::parse(&doc)?;
         let project_root = agent_doc_fs::find_project_root(file);
 
@@ -453,7 +456,8 @@ mod tests {
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();
@@ -520,7 +524,8 @@ mod tests {
                 | IpcMethod::ReplicaPull { .. }
                 | IpcMethod::ReplicaAck { .. }
                 | IpcMethod::ReplicaAwareness { .. }
-                | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+                | IpcMethod::CrdtCheckpoint { .. }
+                | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
             },
         )
         .unwrap();

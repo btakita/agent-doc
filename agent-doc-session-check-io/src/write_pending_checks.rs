@@ -47,7 +47,10 @@ pub fn precommit_pending_capture_check_with_force_disk(
         return Ok(());
     }
 
-    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(());
+    };
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(());
     };
     if capture
@@ -459,7 +462,10 @@ pub fn precommit_pending_done_check_with_options(
         return Ok(());
     };
 
-    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(());
+    };
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(());
     };
     if agent_doc_turn::closeout_signal::pending_done_suppressed(&capture.response_body) {
@@ -814,15 +820,19 @@ pub fn run_closeout_pending_maintenance(
 }
 
 fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Result<bool> {
-    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
-        && (state.had_pending_mutations
+    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+        if state.had_pending_mutations
             || state.pending_added_this_cycle
             || !state.pending_done_ids.is_empty()
             || !state.reaped_pending_ids.is_empty()
             || !state.pending_gated_ids.is_empty()
-            || !state.pending_added_ids.is_empty())
-    {
-        return Ok(true);
+            || !state.pending_added_ids.is_empty()
+        {
+            return Ok(true);
+        }
+        if let Some(required) = state.tracked_work_maintenance_required_at_preflight {
+            return Ok(required);
+        }
     }
 
     let content = match crate::resolve_current_document_content_with_force_disk(
@@ -832,12 +842,6 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
     ) {
         Ok(content) => content,
         Err(err) if !force_disk && editor_authority_resolution_unavailable(&err) => {
-            let Ok(disk_content) = std::fs::read_to_string(file) else {
-                return Err(err);
-            };
-            if !content_requires_closeout_pending_maintenance(&disk_content) {
-                return Ok(false);
-            }
             let reason = editor_authority_resolution_reason(&err);
             agent_doc_ops_log_io::log_op(
                 file,
@@ -863,18 +867,7 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
 }
 
 fn content_requires_closeout_pending_maintenance(content: &str) -> bool {
-    let Ok(components) = agent_doc_element::element::parse(content) else {
-        return false;
-    };
-
-    components
-        .iter()
-        .filter(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
-        .any(|component| {
-            let (_, items, _) =
-                agent_doc_element_backlog::backlog::parse_items(component.content(content));
-            items.iter().any(|item| item.is_done())
-        })
+    agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
 }
 
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
@@ -911,6 +904,18 @@ mod precommit_pending_capture_tests {
     static TEST_BACKLOG_COMMAND_EFFECTS: TestBacklogCommandEffects = TestBacklogCommandEffects;
 
     impl agent_doc_element_backlog_io::BacklogCommandEffects for TestBacklogCommandEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> anyhow::Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
+        fn force_disk_document_content(
+            &self,
+            file: &Path,
+            _source: &str,
+        ) -> anyhow::Result<String> {
+            Ok(fs::read_to_string(file)?)
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,

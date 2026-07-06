@@ -154,8 +154,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "plan_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 

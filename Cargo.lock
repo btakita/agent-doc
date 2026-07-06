@@ -206,6 +206,7 @@ dependencies = [
 name = "agent-doc-boundary-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-document-realtime-io",
  "agent-doc-element-boundary",
  "agent-doc-fs",
  "anyhow",
@@ -1002,6 +1003,8 @@ name = "agent-doc-hooks-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-capture-io",
+ "agent-doc-cycle-state-io",
+ "agent-doc-document-realtime-io",
  "agent-doc-frontmatter",
  "agent-doc-lease-io",
  "agent-doc-memory-io",
@@ -1062,6 +1065,7 @@ dependencies = [
 name = "agent-doc-lint-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-registry",
  "agent-doc-frontmatter",
@@ -1199,6 +1203,7 @@ name = "agent-doc-plugin-owner"
 version = "0.34.67"
 dependencies = [
  "agent-doc-document-realtime",
+ "agent-doc-fs",
  "agent-doc-lease",
  "agent-doc-merge",
  "libc",
@@ -1448,6 +1453,7 @@ dependencies = [
 name = "agent-doc-prompt-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-document-realtime-io",
  "agent-doc-frontmatter",
  "agent-doc-ops-log-io",
  "agent-doc-session-registry-io",
@@ -1611,6 +1617,7 @@ dependencies = [
 name = "agent-doc-response-replay-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-document-realtime-io",
  "agent-doc-fs",
  "agent-doc-turn",
  "anyhow",
@@ -1629,6 +1636,7 @@ dependencies = [
 name = "agent-doc-response-toc-io"
 version = "0.34.67"
 dependencies = [
+ "agent-doc-document-realtime-io",
  "agent-doc-response-toc",
  "agent-doc-sqlite",
  "anyhow",
@@ -1971,6 +1979,8 @@ dependencies = [
  "agent-doc-config",
  "agent-doc-controller",
  "agent-doc-controller-io",
+ "agent-doc-crdt-relay-io",
+ "agent-doc-document-realtime-io",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
  "agent-doc-harness",
@@ -1978,6 +1988,7 @@ dependencies = [
  "agent-doc-log-time",
  "agent-doc-model-tier",
  "agent-doc-ops-log-io",
+ "agent-doc-plugin-owner",
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
  "agent-doc-queue",
@@ -2170,6 +2181,7 @@ version = "0.34.67"
 dependencies = [
  "agent-doc-crdt-relay-io",
  "agent-doc-document-realtime",
+ "agent-doc-hash",
  "agent-doc-supervisor",
  "base64 0.22.1",
  "serde_json",
@@ -2597,6 +2609,7 @@ dependencies = [
  "agent-doc-cycle-state-io",
  "agent-doc-document",
  "agent-doc-document-realtime",
+ "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-element-boundary",
  "agent-doc-element-exchange",

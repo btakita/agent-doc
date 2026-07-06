@@ -80,10 +80,16 @@ fn try_log_op(file: &Path, message: &str) -> Option<()> {
     let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
     let doc_stem = file.file_stem().and_then(|n| n.to_str());
     let session = cached_session_id(file);
-    let turn = agent_doc_cycle_state_io::load(file)
+    let turn = agent_doc_cycle_state_io::load_closeout_projection(file)
         .ok()
         .flatten()
-        .map(|cs| cs.cycle_id);
+        .and_then(|projection| projection.cycle_id)
+        .or_else(|| {
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)
+                .ok()
+                .flatten()
+                .map(|cs| cs.cycle_id)
+        });
     append_ops_log_at_project(
         &project_root,
         message,
@@ -422,6 +428,61 @@ mod tests {
             .map(|(ts, _)| ts)
             .expect("bracketed timestamp");
         assert!(agent_doc_log_time::parse_log_timestamp(inner).is_some());
+    }
+
+    #[test]
+    fn log_op_turn_tracking_prefers_latest_projection_over_stale_cycle_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = "---\nagent_doc_session: session-1\n---\n\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let first =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let sidecar_path = std::fs::read_dir(tmp.path().join(".agent-doc/state/cycles"))
+            .unwrap()
+            .next()
+            .expect("cycle state sidecar")
+            .unwrap()
+            .path();
+        let stale_first_sidecar = std::fs::read(&sidecar_path).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        assert_ne!(first.cycle_id, second.cycle_id);
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_first_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            first.cycle_id
+        );
+
+        log_op(&doc, "projection_turn_event");
+
+        let content = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let line = content
+            .lines()
+            .find(|line| line.contains("projection_turn_event"))
+            .expect("ops-log event");
+        assert!(line.contains(&format!("turn={}", second.cycle_id)));
     }
 
     #[test]

@@ -30,6 +30,17 @@ use agent_doc_turn_executor_tmux::prompt::{
 use serde::Serialize;
 use tmux_router::{Registry as SessionRegistry, Tmux};
 
+fn current_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source).with_context(
+        || {
+            format!(
+                "{source}: failed to resolve current document {}",
+                file.display()
+            )
+        },
+    )
+}
+
 pub fn run(file: &Path) -> Result<()> {
     run_with_tmux(file, &Tmux::default_server())
 }
@@ -39,8 +50,7 @@ pub fn run_with_tmux(file: &Path, tmux: &Tmux) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = current_document_content(file, "prompt_run_frontmatter")?;
     let (_updated, session_id) = frontmatter::ensure_session(&content)?;
 
     let pane = agent_doc_session_registry_io::lookup(&session_id)?;
@@ -159,8 +169,7 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = current_document_content(file, "prompt_answer_frontmatter")?;
     let (_updated, session_id) = frontmatter::ensure_session(&content)?;
 
     let pane = agent_doc_session_registry_io::lookup(&session_id)?;

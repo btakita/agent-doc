@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_response_replay_io"
 
 [dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.67" }
 anyhow = "1"

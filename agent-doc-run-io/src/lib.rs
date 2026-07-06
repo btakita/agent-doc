@@ -139,10 +139,14 @@ pub enum ActiveQueuePromptState {
     Empty,
 }
 
-/// Basic-repair a document's malformed frontmatter ON DISK before startup so a
-/// recoverable formatting slip does not prevent the supervisor from opening.
+/// Basic-repair a document's malformed frontmatter from the detached-disk
+/// authority before startup so a recoverable formatting slip does not prevent
+/// the supervisor from opening.
 pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
-    let content = match std::fs::read_to_string(file) {
+    let content = match agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        "repair_document_frontmatter_on_disk",
+    ) {
         Ok(c) => c,
         Err(_) => return Ok(false),
     };
@@ -156,7 +160,7 @@ pub fn repair_document_frontmatter_on_disk(file: &Path) -> Result<bool> {
         return Ok(false);
     };
     let repaired = content.replacen(&bad, &good, 1);
-    std::fs::write(file, &repaired)
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &repaired)
         .with_context(|| format!("failed to persist repaired frontmatter {}", file.display()))?;
     eprintln!(
         "[agent-doc] repaired malformed frontmatter in {} (tabs/stray fence) before startup",
@@ -272,7 +276,7 @@ pub fn run_once(
     eprintln!("[run] starting for {}", file.display());
 
     let Some((the_diff, queue_synthetic_diff)) = compute_run_diff(file)? else {
-        let cycle_state = agent_doc_cycle_state_io::load(file)?;
+        let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
         let no_change_input = cycle_state.as_ref().map(|state| NoChangeCycleStateInput {
             cycle_id: &state.cycle_id,
             file: &state.file,
@@ -331,7 +335,8 @@ pub fn run_once(
             .or(config.default_agent.as_deref())
             .unwrap_or("claude");
         if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, early_agent_name)
-            && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
+            && let Some(continuation) =
+                agent_doc_queue_io::queue_continuation::detect_for_content(file, &content_original)?
             && !queue_synthetic_diff
             && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
         {
@@ -465,7 +470,8 @@ pub fn run_once(
     }
 
     if let Some(detail) = owned_pane_self_invocation_detail(file, &session_id, agent_name)
-        && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
+        && let Some(continuation) =
+            agent_doc_queue_io::queue_continuation::detect_for_content(file, &content_original)?
     {
         if !queue_synthetic_diff
             && owner_pane_queue_edit_should_defer_until_closeout(file, &the_diff, &content_original)
@@ -632,8 +638,17 @@ pub fn run_once(
     let mut queue_consumption = None;
     if !no_git {
         let _heartbeat = RunHeartbeat::start(file, "commit_closeout", agent_name, None);
+        let queue_guard_content =
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "direct_run_queue_guard",
+            )?;
         if queue_synthetic_diff
-            || queue_consume::should_consume_queue_prompt_for_diff(file, Some(&the_diff))?
+            || agent_doc_queue::queue_consume::should_consume_queue_prompt_for_diff_content(
+                file,
+                &queue_guard_content,
+                Some(&the_diff),
+            )?
         {
             let queue_completion_ids = queue_diff_completion_id
                 .clone()
@@ -645,7 +660,12 @@ pub fn run_once(
                 force_disk,
             )?;
         } else {
-            eprintln!("{}", queue_consume::queue_skip_diagnostic_for_file(file)?);
+            eprintln!(
+                "{}",
+                agent_doc_queue::queue_heads::queue_skip_diagnostic_for_content(
+                    &queue_guard_content
+                )?
+            );
         }
         effects.complete_required_closeout(file)?;
     }
@@ -1283,7 +1303,13 @@ pub fn detect_owned_pane_self_invocation_with_options(
         )));
     }
     if !options.suppress_active_queue_head
-        && let Some(continuation) = agent_doc_queue_io::queue_continuation::detect(file)?
+        && let Some(continuation) = {
+            let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "owned_pane_self_invocation_queue_continuation",
+            )?;
+            agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)?
+        }
     {
         return Ok(Some(build_owned_pane_self_invocation(
             OwnedPaneSelfInvocationInput {
@@ -1306,7 +1332,7 @@ pub fn owner_pane_queue_edit_should_defer_until_closeout(
     diff_text: &str,
     current_content: &str,
 ) -> bool {
-    let open_cycle = agent_doc_cycle_state_io::load(file)
+    let open_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
         .flatten()
         .is_some_and(|state| state.is_open());
@@ -1390,7 +1416,9 @@ pub fn recursive_codex_start_invocation_diagnostic(
 }
 
 pub fn run_dispatch_timeout_diagnostic(file: &Path, agent_name: &str) -> String {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten();
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten();
     let actor = actor_record_for_file(file).ok().flatten();
     let tmux = tmux_router::Tmux::default_server();
     let current_pane = agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux);

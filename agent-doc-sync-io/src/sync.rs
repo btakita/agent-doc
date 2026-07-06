@@ -4483,6 +4483,11 @@ mod tests {
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         for TestPipelineFrontmatterEffects
     {
+        fn read_current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,

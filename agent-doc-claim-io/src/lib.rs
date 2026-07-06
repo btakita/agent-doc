@@ -116,6 +116,8 @@ use agent_doc_project_config_io as project_config_io;
 use agent_doc_session_registry_io::registration as sessions;
 
 pub trait ClaimRuntimeEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn commit(&self, file: &Path) -> Result<bool>;
 
     fn provision_pane(
@@ -287,20 +289,21 @@ pub fn run(
     // ensure_session only writes agent_doc_session — it doesn't set agent_doc_format
     // or add components. Empty files need the full template in one step.
     {
-        let raw = std::fs::read_to_string(file).unwrap_or_default();
+        let raw = effects.current_document_content(file, "claim_empty_scaffold")?;
         let extension = file.extension().and_then(std::ffi::OsStr::to_str);
         if should_scaffold_empty_markdown(&raw, extension) {
             eprintln!("[claim] auto-scaffolding empty file: {}", file.display());
             let session_id = uuid::Uuid::new_v4();
             let scaffold = render_empty_template_scaffold(&session_id.to_string());
-            std::fs::write(file, &scaffold)?;
+            effects.atomic_write(file, &scaffold)?;
             agent_doc_snapshot_io::save(file, &scaffold, agent_doc_ops_log_io::log_op)?;
             effects.commit(file).ok(); // best-effort commit
         }
     }
 
     // Read file content and extract/generate session UUID (in memory only — no disk write yet)
-    let content = std::fs::read_to_string(file)
+    let content = effects
+        .current_document_content(file, "claim_ensure_session")
         .with_context(|| format!("failed to read {}", file.display()))?;
     let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
 
@@ -381,17 +384,19 @@ pub fn run(
 
     // Pane validated — now safe to modify files
     if updated_content != content {
-        std::fs::write(file, &updated_content)
+        effects
+            .atomic_write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("Generated session UUID: {}", session_id);
     }
 
     // Default to template+crdt if neither format nor write_mode nor legacy mode is set
     {
-        let content = std::fs::read_to_string(file)
+        let content = effects
+            .current_document_content(file, "claim_default_format")
             .with_context(|| format!("failed to read {}", file.display()))?;
         if let Some(updated) = default_format_and_write_content(&content)? {
-            std::fs::write(file, &updated).with_context(|| {
+            effects.atomic_write(file, &updated).with_context(|| {
                 format!(
                     "failed to write agent_doc_format/write to {}",
                     file.display()
@@ -406,11 +411,12 @@ pub fn run(
 
     // Scaffold default components for template documents
     {
-        let content = std::fs::read_to_string(file)
+        let content = effects
+            .current_document_content(file, "claim_default_components")
             .with_context(|| format!("failed to read {}", file.display()))?;
         let is_template = uses_template_format(&content)?;
         if let Some(scaffolded) = scaffold_default_template_components(&content)? {
-            std::fs::write(file, &scaffolded).with_context(|| {
+            effects.atomic_write(file, &scaffolded).with_context(|| {
                 format!(
                     "failed to write component scaffolding to {}",
                     file.display()

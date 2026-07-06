@@ -1188,9 +1188,7 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
         return Ok(());
     }
     for _ in 0..4 {
-        let before = std::fs::read_to_string(file)
-            .ok()
-            .map(|c| agent_doc_hash::content_hash(&c));
+        let before = finish_turn_current_document_hash(file);
         // Always attempt repair: it is a no-op on a clean document, and a stranded
         // pending response does not necessarily register as a session-check
         // interruption (no open cycle yet). `repair` bails on an interruption that
@@ -1205,9 +1203,7 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
         ) {
             return Ok(());
         }
-        let after = std::fs::read_to_string(file)
-            .ok()
-            .map(|c| agent_doc_hash::content_hash(&c));
+        let after = finish_turn_current_document_hash(file);
         if before == after {
             break; // no progress this pass and still not clean — stop looping
         }
@@ -1218,6 +1214,14 @@ fn finish_unfinished_turn(file: &Path) -> Result<()> {
         eprintln!("[fix] document still has an unfinished turn after finish-turn passes: {msg}");
     }
     Ok(())
+}
+
+fn finish_turn_current_document_hash(file: &Path) -> Option<String> {
+    crate::runtime_effects()
+        .ok()?
+        .resolve_current_document(file, "resync_finish_turn_document")
+        .ok()
+        .map(|content| agent_doc_hash::content_hash(&content))
 }
 
 /// `target_file`: when `Some(file)`, scope detection and mutations to that single

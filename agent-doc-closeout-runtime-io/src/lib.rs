@@ -137,6 +137,10 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         agent_doc_commit_io::commit(file)
     }
 
+    fn commit_for_authority(&self, file: &Path, force_disk: bool) -> Result<bool> {
+        agent_doc_commit_io::commit_for_authority(file, force_disk)
+    }
+
     fn run_pending_maintenance(
         &self,
         file: &Path,
@@ -157,6 +161,14 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
 
     fn enforce_clean_closeout(&self, file: &Path) -> Result<()> {
         agent_doc_session_check_io::enforce_clean_closeout(file, &session_check_effects())
+    }
+
+    fn enforce_clean_closeout_for_authority(&self, file: &Path, force_disk: bool) -> Result<()> {
+        agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
+            file,
+            force_disk,
+            &session_check_effects(),
+        )
     }
 
     fn cancel_preflight_cycle(&self, file: &Path) -> Result<()> {

@@ -37,7 +37,7 @@ pub fn wait_for_start_ack(
     let poll = Duration::from_millis(200);
 
     while start.elapsed() < timeout {
-        if let Ok(Some(state)) = agent_doc_cycle_state_io::load(file)
+        if let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
             && cycle_state_advances_start_ack(
                 CycleAckState {
                     cycle_id: &state.cycle_id,
@@ -479,6 +479,14 @@ mod tests {
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         for TestPipelineFrontmatterEffects
     {
+        fn read_current_document_content(
+            &self,
+            file: &Path,
+            _source: &str,
+        ) -> anyhow::Result<String> {
+            Ok(std::fs::read_to_string(file)?)
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,
@@ -522,6 +530,41 @@ mod tests {
             agent_doc_turn::CyclePhase::PreflightStarted
         );
     }
+
+    #[test]
+    fn wait_for_start_ack_prefers_terminal_projection_over_stale_open_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("route-stale-open-projection.md");
+        let content = "# Session\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let baseline =
+            agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250))
+            .expect("projected terminal phase should advance the open route-start baseline");
+        assert_eq!(ack.cycle_id, baseline.cycle_id);
+        assert_eq!(ack.phase, agent_doc_turn::CyclePhase::Committed);
+    }
+
     #[test]
     fn wait_for_start_ack_detects_new_committed_cycle_after_prior_commit() {
         let dir = tempfile::tempdir().unwrap();

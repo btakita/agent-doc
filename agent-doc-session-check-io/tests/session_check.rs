@@ -248,7 +248,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, &current).unwrap();
         doc
     }
     // #codex-final-response-not-written: a committed turn that ran binary-owned
@@ -403,7 +403,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, &current).unwrap();
         doc
     }
     // `#blocked-closeout-followup-capture`: a directed `do [#id]` cycle that
@@ -485,7 +485,7 @@ mod tests {
             Some(&current),
         )
         .unwrap();
-        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, &current).unwrap();
         doc
     }
     const BLOCKED_RESPONSE: &str = "### Re: do #374n — gpt-5\n\nFound a blocker: Merchant Center still has 17 active legacy rows for #374n. Next steps to complete: remove/expire the rows, deliberately delete them through an approved path, or get approval that they are safe blanks.\n";
@@ -812,7 +812,7 @@ mod tests {
             Some(&content),
         )
         .unwrap();
-        agent_doc_capture_io::mark_committed(doc).unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(doc, &content).unwrap();
     }
     // `#manual-queue-head-loss` — a fixture mirroring the sampleorders repro:
     // backlog keeps `#shipstationaudit` open; the committed queue does NOT contain

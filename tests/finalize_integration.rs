@@ -494,9 +494,11 @@ fn write_commit_force_disk_replays_pending_crdt_response_with_editor_owner() {
         "jetbrains-test-owner",
         std::process::id(),
     );
-    agent_doc_repair_io::pending::save_pending(
+    let current_content = fs::read_to_string(&doc).unwrap();
+    agent_doc_repair_io::pending::save_pending_with_current_content(
         &doc,
         "<!-- patch:exchange -->\n### Re: retained response — gpt-5\nRecovered through force disk.\n<!-- /patch:exchange -->\n",
+        &current_content,
     )
     .unwrap();
     let crdt_lock_path = crdt_path(tmp.path(), &doc).with_extension("yrs.lock");

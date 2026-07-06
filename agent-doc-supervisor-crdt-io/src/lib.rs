@@ -179,6 +179,52 @@ pub fn handle_crdt_checkpoint(file: &str, source: &str) -> IpcResponse {
             "text_len": text_len,
             "text_hash": text_hash,
         })),
+        Ok(agent_doc_crdt_relay_io::DurableProjectionCheckpoint::Deferred { reason }) => {
+            IpcResponse::ok(serde_json::json!({
+                "status": "deferred",
+                "reason": reason,
+                "recovery": "background_yrs_repair",
+            }))
+        }
         Err(e) => IpcResponse::err(format!("crdt durable checkpoint failed: {e}")),
+    }
+}
+
+pub fn handle_crdt_current_text(file: &str, source: &str) -> IpcResponse {
+    match agent_doc_crdt_relay_io::ensure_document_model(Path::new(file), source) {
+        Ok(current) => IpcResponse::ok(current_text_response(current)),
+        Err(e) => IpcResponse::err(format!("crdt current text failed: {e}")),
+    }
+}
+
+fn current_text_response(current: agent_doc_crdt_relay_io::CurrentText) -> serde_json::Value {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => {
+            serde_json::json!({
+                "status": "detached",
+            })
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            serde_json::json!({
+                "status": "editor_attached_model_missing",
+            })
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            serde_json::json!({
+                "status": "editor_sync_pending",
+            })
+        }
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged,
+        } => serde_json::json!({
+            "status": "current",
+            "text_len": text.len(),
+            "text_hash": agent_doc_hash::content_hash(&text),
+            "text": text,
+            "live_editors": live_editors,
+            "delivery_converged": delivery_converged,
+        }),
     }
 }

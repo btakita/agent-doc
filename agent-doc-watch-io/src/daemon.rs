@@ -850,7 +850,7 @@ pub fn status() -> Result<()> {
 /// crashed/stuck cycle still lets the watch proceed to preflight, which repairs
 /// stale cycles.
 pub fn cycle_freshly_in_flight(path: &std::path::Path, now_secs: u64) -> bool {
-    match agent_doc_cycle_state_io::load(path) {
+    match agent_doc_cycle_state_io::load_with_closeout_projection(path) {
         Ok(Some(cs)) => cycle_phase_freshly_in_flight(cs.phase, cs.updated_at, now_secs),
         _ => false,
     }
@@ -883,6 +883,13 @@ mod tests {
         let cs =
             agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(cs.is_open());
+        let sidecar_path = std::fs::read_dir(dir.path().join(".agent-doc/state/cycles"))
+            .unwrap()
+            .next()
+            .expect("cycle state sidecar")
+            .unwrap()
+            .path();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         assert!(cycle_freshly_in_flight(&doc, now));
         assert!(cycle_freshly_in_flight(&doc, now + 60));
 
@@ -892,6 +899,20 @@ mod tests {
             &doc,
             now + agent_doc_turn::WATCH_CYCLE_IN_FLIGHT_MAX_SECS + 1
         ));
+
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("snap"), Some("body")).unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
+        assert!(
+            !cycle_freshly_in_flight(&doc, now + 60),
+            "watch should honor terminal closeout projections before stale sidecars"
+        );
     }
 
     #[test]

@@ -230,6 +230,10 @@ enum SimCommand {
     /// `#qfocsup`: the freshly dispatched agent has drained the active head and
     /// materialized a response.
     FreshAgentDrainActiveHead,
+    /// Model controller restart recovery over durable open dispatch receipts. The
+    /// recovery marker is keyed by receipt identity, so replaying recovery updates
+    /// the same marker instead of appending one marker per restart.
+    RecoverControllerDispatchMarkers,
     /// A later `cargo install` made the supervisor's launch binary stale.
     MarkSupervisorBinaryStale,
     /// `#midturn-recycle-resume`: set whether an agent-doc cycle is OPEN — preflight
@@ -640,6 +644,7 @@ struct RouteModel {
     pending_dispatch: Option<DispatchReceipt>,
     starting_timeout: Option<(u64, String)>,
     queue_control: QueueControlState,
+    recovery_marker_keys: BTreeSet<String>,
     supervisor_lease_generation: Option<u64>,
     /// `#jbdisprecycle`: the project supervisor is mid-`execve` recycle right now
     /// (lib-install auto-recycle / operator restart). Models the project-scoped
@@ -661,6 +666,7 @@ impl RouteModel {
             pending_dispatch: None,
             starting_timeout: None,
             queue_control: QueueControlState::Resumed,
+            recovery_marker_keys: BTreeSet::new(),
             supervisor_lease_generation: Some(1),
             recycle_inflight: false,
             socket: SupervisorSocket::Live,
@@ -1010,6 +1016,9 @@ struct Coverage {
     /// reachable tmux target) and the actionable message was surfaced instead of a
     /// raw ECONNREFUSED, leaving the supervisor `Dead`.
     dead_supervisor_guidance_refusals: usize,
+    /// Controller restart recovery observed an already-keyed open dispatch marker
+    /// and updated it instead of appending a duplicate marker row.
+    recovery_marker_upsert_dedupes: usize,
 }
 
 impl Coverage {
@@ -1174,6 +1183,7 @@ impl Coverage {
         self.supervisor_deaths += other.supervisor_deaths;
         self.dead_supervisor_cold_starts += other.dead_supervisor_cold_starts;
         self.dead_supervisor_guidance_refusals += other.dead_supervisor_guidance_refusals;
+        self.recovery_marker_upsert_dedupes += other.recovery_marker_upsert_dedupes;
     }
 }
 
@@ -3003,6 +3013,29 @@ fn qflood_coalesces_in_flight_auto_redispatch_and_releases_after_proof() {
         "a dispatch after the prior is consumed must be admitted, not coalesced"
     );
     assert_eq!(world.coverage.route_dispatch_coalesced, 2);
+}
+
+#[test]
+fn controller_recovery_upserts_open_dispatch_marker_instead_of_flooding() {
+    let mut world = SimWorld::new(2_208);
+    world.apply(SimCommand::SupervisorReady).unwrap();
+    world.apply(SimCommand::DispatchRoutePrompt).unwrap();
+    assert_eq!(world.coverage.route_dispatch_acceptances, 1);
+
+    world
+        .apply(SimCommand::RecoverControllerDispatchMarkers)
+        .unwrap();
+    assert_eq!(world.route.recovery_marker_keys.len(), 1);
+
+    world
+        .apply(SimCommand::RecoverControllerDispatchMarkers)
+        .unwrap();
+    assert_eq!(
+        world.route.recovery_marker_keys.len(),
+        1,
+        "replaying controller restart recovery for the same open receipt must update one marker key, not append another"
+    );
+    assert_eq!(world.coverage.recovery_marker_upsert_dedupes, 1);
 }
 
 #[test]
@@ -6090,22 +6123,25 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
 
     // A halt response that names the head with a trailing modifier must NOT
     // register as targeting the head (exact-topic match only).
+    let active_head = agent_doc_queue::queue_heads::active_queue_head_text(content)
+        .unwrap()
+        .unwrap();
     let halt = "### Re: do [#alpha] halt — opus-4-8\n\nBacklog left intact; not executing.\n";
     assert!(
-        !agent_doc_queue_io::queue_consume::response_explicitly_targets_active_queue_head(
-            &doc, halt,
-        )
-        .unwrap(),
+        !agent_doc_queue::queue_response::response_explicitly_targets_queue_head(
+            halt,
+            &active_head,
+        ),
         "halt heading must not target the queue head"
     );
     // An exact-topic heading still registers, preserving the Codex auto-loop on a
     // clean completion that titles the response with the head prompt verbatim.
     let exact = "### Re: do [#alpha] — opus-4-8\n\nDone.\n";
     assert!(
-        agent_doc_queue_io::queue_consume::response_explicitly_targets_active_queue_head(
-            &doc, exact,
-        )
-        .unwrap(),
+        agent_doc_queue::queue_response::response_explicitly_targets_queue_head(
+            exact,
+            &active_head,
+        ),
         "exact-topic heading should still target the queue head"
     );
 

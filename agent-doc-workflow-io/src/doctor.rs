@@ -198,7 +198,7 @@ fn merge_live_session_check(
 }
 
 fn read_cycle_state(file: &Path, warnings: &mut Vec<String>) -> CycleStateDoctorFacts {
-    match agent_doc_cycle_state_io::load(file) {
+    match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(Some(state)) => {
             let open = state.is_open();
             CycleStateDoctorFacts {

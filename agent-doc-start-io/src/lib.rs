@@ -29,6 +29,7 @@ pub struct StartRuntime {
     pub pane_id: String,
     pub supervisor_instance_id: String,
     pub actor_record: agent_doc_sqlite::state_store::ActorRecord,
+    pub post_start_document_model_ensure: bool,
 }
 
 pub fn log_event(log: &mut Option<std::fs::File>, msg: &str) {
@@ -93,20 +94,116 @@ impl SupervisorLaunchLog for StartAdmissionLaunchLog<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartAdmissionReadAuthority {
+    CurrentDocument,
+    DiskMetadataBootstrapEditorModelUnavailable,
+}
+
+impl StartAdmissionReadAuthority {
+    fn needs_post_start_document_model_ensure(self) -> bool {
+        matches!(
+            self,
+            StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
+        )
+    }
+}
+
+struct StartAdmissionDocument {
+    content: String,
+    authority: StartAdmissionReadAuthority,
+}
+
+fn start_admission_fallback_for_current_text(
+    current: &agent_doc_crdt_relay_io::CurrentText,
+) -> Option<StartAdmissionReadAuthority> {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            Some(StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable)
+        }
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => None,
+    }
+}
+
+fn current_text_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            "editor_attached_model_missing"
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
+        agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current",
+    }
+}
+
+fn resolve_start_admission_document(file: &Path) -> Result<StartAdmissionDocument> {
+    match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "prepare_start_runtime",
+    ) {
+        Ok(content) => Ok(StartAdmissionDocument {
+            content,
+            authority: StartAdmissionReadAuthority::CurrentDocument,
+        }),
+        Err(resolve_err) => {
+            let current = agent_doc_crdt_relay_io::current_text_for_file(file);
+            let Ok(current) = current else {
+                return Err(resolve_err);
+            };
+            let Some(authority) = start_admission_fallback_for_current_text(&current) else {
+                return Err(resolve_err);
+            };
+            let original_error = format!("{resolve_err:#}");
+            let content = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                file,
+                "prepare_start_runtime_metadata_bootstrap",
+            )
+            .with_context(|| {
+                format!(
+                    "prepare_start_runtime: failed to read disk metadata bootstrap {}",
+                    file.display()
+                )
+            })?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "start_admission_disk_metadata_bootstrap file={} current_state={} original_error={}",
+                    file.display(),
+                    current_text_label(&current),
+                    original_error.replace('\n', "\\n")
+                ),
+            );
+            Ok(StartAdmissionDocument { content, authority })
+        }
+    }
+}
+
 pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Result<StartRuntime> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
 
     let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
-    let content = std::fs::read_to_string(file)
+    let start_document = resolve_start_admission_document(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
+    let post_start_document_model_ensure = start_document
+        .authority
+        .needs_post_start_document_model_ensure();
+    let content = start_document.content;
     agent_doc_frontmatter_io::session::require_agent_doc_document(&content, file)?;
     let (updated_content, session_id) =
         agent_doc_frontmatter_io::session::ensure_session_for_file(&content, file)?;
     let generated_session_uuid = updated_content != content;
+    if generated_session_uuid && post_start_document_model_ensure {
+        anyhow::bail!(
+            "cannot generate a session UUID for {} while editor authority is attached but the live document model is unavailable; save or reload the editor buffer, then retry start",
+            file.display()
+        );
+    }
     if updated_content != content {
-        std::fs::write(file, &updated_content)
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
     }
 
@@ -322,6 +419,7 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         pane_id,
         supervisor_instance_id,
         actor_record,
+        post_start_document_model_ensure,
     })
 }
 
@@ -340,7 +438,9 @@ fn replay_missing_operator_queue_items(file: &Path, updated_content: String) -> 
     );
     match agent_doc_queue::queue_journal::merge_missing_into_content(&missing, &updated_content) {
         Ok(Some(merged)) => {
-            if let Err(err) = std::fs::write(file, &merged) {
+            if let Err(err) =
+                agent_doc_document_realtime_io::atomic_write_through_authority(file, &merged)
+            {
                 eprintln!(
                     "[agent-doc] queue_journal: failed to write replayed queue items to {} ({err:#})",
                     file.display()
@@ -768,6 +868,7 @@ fn fire_session_start_hooks(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn start_console_status_suppresses_route_owned_stderr_by_default() {
@@ -785,5 +886,65 @@ mod tests {
             "{content}"
         );
         assert!(content.contains("[start] harness resolved: binary=codex"));
+    }
+
+    #[test]
+    fn start_admission_fallback_is_limited_to_editor_model_unavailable() {
+        assert_eq!(
+            start_admission_fallback_for_current_text(
+                &agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            ),
+            Some(StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable)
+        );
+        assert_eq!(
+            start_admission_fallback_for_current_text(
+                &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+            ),
+            Some(StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable)
+        );
+        assert_eq!(
+            start_admission_fallback_for_current_text(
+                &agent_doc_crdt_relay_io::CurrentText::Detached
+            ),
+            None
+        );
+        assert_eq!(
+            start_admission_fallback_for_current_text(
+                &agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: "live".to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                }
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn start_admission_bootstraps_metadata_from_disk_when_editor_model_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nsession: start-admission-test\n---\n\n# Session\n";
+        let mut handle = std::fs::File::create(&file).unwrap();
+        handle.write_all(disk.as_bytes()).unwrap();
+        drop(handle);
+
+        let file_str = file.to_string_lossy().to_string();
+        let pid = std::process::id();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &file_str,
+            &format!("test-editor-{pid}"),
+            pid
+        ));
+
+        let document = resolve_start_admission_document(&file).unwrap();
+
+        assert_eq!(document.content, disk);
+        assert_eq!(
+            document.authority,
+            StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
+        );
+        assert!(document.authority.needs_post_start_document_model_ensure());
     }
 }

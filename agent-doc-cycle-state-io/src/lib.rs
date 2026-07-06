@@ -197,6 +197,12 @@ pub struct CycleState {
     /// brand-new same-cycle add from a pre-existing item.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_added_ids: Vec<String>,
+    /// True when the preflight-current document already had completed tracked
+    /// work that closeout pending maintenance should reap. This lets closeout
+    /// distinguish status-only cycles from tracked-work cycles without reading
+    /// a non-authoritative disk replica when editor authority is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracked_work_maintenance_required_at_preflight: Option<bool>,
     #[serde(default)]
     pub ipc_snapshot_adoption_blocked: bool,
     /// `#exchange-prompt-dropped-on-merge`: user-authored exchange prompt lines
@@ -341,11 +347,23 @@ pub struct ProjectedCloseoutState {
     pub phase: Option<CyclePhase>,
     pub capture_id: Option<String>,
     pub response_sha256: Option<String>,
+    pub captured_response: Option<ProjectedCapturedResponse>,
     pub patch_id: Option<String>,
     pub commit: Option<String>,
     pub session_check_passed: bool,
+    pub tracked_work_maintenance_required: Option<bool>,
     pub abandoned_reason: Option<String>,
     pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedCapturedResponse {
+    pub cycle_id: String,
+    pub capture_id: String,
+    pub response_sha256: String,
+    pub response_body: String,
+    pub file_hash: Option<String>,
+    pub snapshot_hash: Option<String>,
 }
 
 impl ProjectedCloseoutState {
@@ -394,9 +412,20 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
             phase: projection.phase,
             capture_id: projection.capture_id,
             response_sha256: projection.response_sha256,
+            captured_response: projection.captured_response.map(|capture| {
+                ProjectedCapturedResponse {
+                    cycle_id: capture.cycle_id,
+                    capture_id: capture.capture_id,
+                    response_sha256: capture.response_sha256,
+                    response_body: capture.response_body,
+                    file_hash: capture.file_hash,
+                    snapshot_hash: capture.snapshot_hash,
+                }
+            }),
             patch_id: projection.patch_id,
             commit: projection.commit,
             session_check_passed: projection.session_check_passed,
+            tracked_work_maintenance_required: projection.tracked_work_maintenance_required,
             abandoned_reason: projection.abandoned_reason,
             pending_semantic_merge_acks: projection
                 .pending_semantic_merge_acks
@@ -417,6 +446,15 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
 pub fn load_closeout_projection(file: &Path) -> Result<Option<ProjectedCloseoutState>> {
     Ok(load_document_projection(file)?
         .map(|document| ProjectedCloseoutState::from(document.closeout)))
+}
+
+pub fn load_projected_captured_response(
+    file: &Path,
+    capture_id: &str,
+) -> Result<Option<ProjectedCapturedResponse>> {
+    Ok(load_closeout_projection(file)?
+        .and_then(|projection| projection.captured_response)
+        .filter(|capture| capture.capture_id == capture_id))
 }
 
 fn load_document_projection(
@@ -459,15 +497,21 @@ pub fn apply_closeout_projection_to_cycle_state(
         return false;
     }
 
+    let preserve_noop_commit_event = state.phase == projected_phase
+        && agent_doc_turn::cycle_policy::is_noop_commit_event(&state.last_event);
     let changed = state.phase != projected_phase;
     state.phase = projected_phase;
-    state.last_event = projection.event_label(projected_phase);
+    if !preserve_noop_commit_event {
+        state.last_event = projection.event_label(projected_phase);
+    }
     if state.capture_id.is_none() {
         state.capture_id = projection.capture_id.clone();
     }
     if state.response_sha256.is_none() {
         state.response_sha256 = projection.response_sha256.clone();
     }
+    state.tracked_work_maintenance_required_at_preflight =
+        projection.tracked_work_maintenance_required;
     changed
 }
 
@@ -643,7 +687,7 @@ fn semantic_merge_acks_to_carry(file: &Path) -> Result<Vec<PendingSemanticMergeA
 }
 
 enum SemanticMergeAckQueueSource {
-    Projection(ProjectedCloseoutState),
+    Projection(Box<ProjectedCloseoutState>),
     Cycle(Box<CycleState>),
 }
 
@@ -672,14 +716,18 @@ fn load_semantic_merge_ack_queue_source(
         return Ok(raw.map(|state| SemanticMergeAckQueueSource::Cycle(Box::new(state))));
     };
     if !projection.pending_semantic_merge_acks.is_empty() {
-        return Ok(Some(SemanticMergeAckQueueSource::Projection(projection)));
+        return Ok(Some(SemanticMergeAckQueueSource::Projection(Box::new(
+            projection,
+        ))));
     }
     if let Some(raw) = raw
         && projection.matches_cycle(&raw.cycle_id)
     {
         return Ok(Some(SemanticMergeAckQueueSource::Cycle(Box::new(raw))));
     }
-    Ok(Some(SemanticMergeAckQueueSource::Projection(projection)))
+    Ok(Some(SemanticMergeAckQueueSource::Projection(Box::new(
+        projection,
+    ))))
 }
 
 fn carry_forward_unsurfaced_semantic_merge_acks(
@@ -806,6 +854,8 @@ pub fn start_preflight_with_task(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        tracked_work_maintenance_required_at_preflight: file_content
+            .map(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
@@ -825,7 +875,7 @@ pub fn start_preflight_with_task(
         &state.cycle_id,
         &state.pending_semantic_merge_acks,
     )?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
 }
 
@@ -983,7 +1033,7 @@ pub fn mark_write_applied(
     state.normalized_file_hash = file_content.map(replay_content_hash);
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::WriteApplied)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
 }
 
@@ -1013,7 +1063,7 @@ pub fn mark_response_captured(
     state.response_sha256 = Some(response_sha256.to_string());
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, file_content);
     // NB: intentionally do NOT mirror the pipeline block here. `response_captured`
     // can fire mid-stream (partial checkpoints), and a naive read-modify-write of
     // the document would race the streaming write-back loop and clobber it. The
@@ -1319,7 +1369,7 @@ pub fn mark_recoverable_preflight_timeout(file: &Path, event: &str) -> Result<Op
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     save(file, &state)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, None);
     Ok(Some(state))
 }
 
@@ -1333,7 +1383,7 @@ pub fn record_open_cycle_progress(file: &Path, event: &str) -> Result<Option<Cyc
     state.last_event = event.to_string();
     state.updated_at = now_secs();
     save(file, &state)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, None);
     Ok(Some(state))
 }
 
@@ -1523,7 +1573,7 @@ pub fn record_editor_convergence_required(
         state.blocked_closeout = Some(blocked);
         state.updated_at = now_secs();
         save(file, &state)?;
-        append_phase_event_to_session_log(file, &state);
+        append_phase_event_to_session_log(file, &state, None);
     }
     Ok(Some(state))
 }
@@ -1564,7 +1614,7 @@ pub fn mark_committed(
     }
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
 }
 
@@ -1599,15 +1649,15 @@ pub fn mark_abandoned(
     }
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Abandoned)?;
-    append_phase_event_to_session_log(file, &state);
+    append_phase_event_to_session_log(file, &state, file_content);
     Ok(state)
 }
 
-fn append_phase_event_to_session_log(file: &Path, state: &CycleState) {
-    let Ok(content) = std::fs::read_to_string(file) else {
+fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_content: Option<&str>) {
+    let Some(content) = file_content else {
         return;
     };
-    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content) else {
+    let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
         return;
     };
     let Some(session_id) = fm
@@ -1664,6 +1714,8 @@ fn append_closeout_projection_event(
                 document_hash: document_hash.clone(),
                 cycle_id: state.cycle_id.clone(),
                 session_id: None,
+                tracked_work_maintenance_required: state
+                    .tracked_work_maintenance_required_at_preflight,
             }
         }
         CloseoutProjectionEvent::ResponseCaptured => {
@@ -1678,6 +1730,9 @@ fn append_closeout_projection_event(
                 cycle_id: state.cycle_id.clone(),
                 capture_id,
                 response_sha256,
+                response_body: None,
+                file_hash: None,
+                snapshot_hash: None,
             }
         }
         CloseoutProjectionEvent::WriteApplied => {
@@ -1704,6 +1759,36 @@ fn append_closeout_projection_event(
     };
     let event_id = closeout_projection_event_id(&document_hash, state, event);
     append_state_fact(file, event_id, fact)
+}
+
+pub fn append_response_captured_body(
+    file: &Path,
+    cycle_id: &str,
+    capture_id: &str,
+    response_sha256: &str,
+    response_body: &str,
+    file_hash: Option<&str>,
+    snapshot_hash: Option<&str>,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id = format!(
+        "closeout-response-captured-body:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}"
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::ResponseCaptured {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            capture_id: capture_id.to_string(),
+            response_sha256: response_sha256.to_string(),
+            response_body: Some(response_body.to_string()),
+            file_hash: file_hash.map(str::to_string),
+            snapshot_hash: snapshot_hash.map(str::to_string),
+        },
+    )
 }
 
 fn append_state_fact(
@@ -1892,6 +1977,7 @@ fn synthetic_state_with_id(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
+        tracked_work_maintenance_required_at_preflight: Some(false),
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
@@ -2528,6 +2614,76 @@ mod tests {
     }
 
     #[test]
+    fn preflight_tracks_pending_maintenance_need_in_closeout_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#done1] Reap me\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let started = start_preflight(&doc, Some(content), Some(content)).unwrap();
+        assert_eq!(
+            started.tracked_work_maintenance_required_at_preflight,
+            Some(true)
+        );
+
+        let projected = load_closeout_projection(&doc)
+            .unwrap()
+            .expect("preflight should feed closeout projection");
+        assert_eq!(projected.tracked_work_maintenance_required, Some(true));
+
+        let loaded = load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state should load");
+        assert_eq!(
+            loaded.tracked_work_maintenance_required_at_preflight,
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn response_capture_body_feeds_closeout_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+
+        append_response_captured_body(
+            &doc,
+            &started.cycle_id,
+            &started.cycle_id,
+            "response-sha",
+            "### Re: topic - gpt-5\n\nDone.\n",
+            Some("file-sha"),
+            Some("snapshot-sha"),
+        )
+        .unwrap();
+
+        let projected = load_projected_captured_response(&doc, &started.cycle_id)
+            .unwrap()
+            .expect("captured response projection");
+        assert_eq!(projected.cycle_id, started.cycle_id);
+        assert_eq!(projected.capture_id, started.cycle_id);
+        assert_eq!(projected.response_sha256, "response-sha");
+        assert_eq!(projected.file_hash.as_deref(), Some("file-sha"));
+        assert_eq!(projected.snapshot_hash.as_deref(), Some("snapshot-sha"));
+        assert_eq!(projected.response_body, "### Re: topic - gpt-5\n\nDone.\n");
+    }
+
+    #[test]
     fn terminal_closeout_proof_feeds_state_backbone_projection() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
@@ -2728,6 +2884,21 @@ mod tests {
                 .last_event
                 .contains("state_backbone_commit_observed")
         );
+    }
+
+    #[test]
+    fn load_with_closeout_projection_preserves_noop_commit_event_on_matching_phase() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_already_current", Some("body"), Some("body")).unwrap();
+
+        let projected = load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(projected.phase, CyclePhase::Committed);
+        assert_eq!(projected.last_event, "commit_already_current");
     }
 
     #[test]
@@ -2937,21 +3108,24 @@ mod tests {
     fn cycle_phase_transitions_append_to_session_log() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
-        fs::write(&doc, "---\nagent_doc_session: sess-123\n---\n\nbody\n").unwrap();
+        let doc_content = "---\nagent_doc_session: sess-123\n---\n\nbody\n";
+        fs::write(&doc, doc_content).unwrap();
 
-        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some(doc_content)).unwrap();
         let captured = mark_response_captured(
             &doc,
             "response_captured",
             Some("snap"),
-            Some("body"),
+            Some(doc_content),
             "abc123",
             Some(&started.cycle_id),
         )
         .unwrap();
         let written =
-            mark_write_applied(&doc, "write_template", Some("body"), Some("body")).unwrap();
-        let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+            mark_write_applied(&doc, "write_template", Some(doc_content), Some(doc_content))
+                .unwrap();
+        let committed =
+            mark_committed(&doc, "commit_success", Some(doc_content), Some(doc_content)).unwrap();
 
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/sess-123.log")).unwrap();
         assert!(log.contains(&format!(

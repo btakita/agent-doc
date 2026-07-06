@@ -93,6 +93,12 @@ pub fn route_owned_liveness_reason_for_file(
     route_owned_liveness_reason_for_content(&content, facts.committed_file_hash.as_deref())
 }
 
+pub fn load_route_owned_cycle_state(
+    file: &Path,
+) -> anyhow::Result<Option<agent_doc_cycle_state_io::CycleState>> {
+    agent_doc_cycle_state_io::load_with_closeout_projection(file)
+}
+
 pub fn spawn_route_owned_completion_thread<S>(
     state: Arc<S>,
     config: RouteOwnedCompletionConfig,
@@ -121,7 +127,7 @@ where
             let mut ready_busy_key: Option<(String, String)> = None;
             let mut ready_busy_logged_key: Option<(String, String)> = None;
             while !stop.load(Ordering::Relaxed) && !completed.load(Ordering::Relaxed) {
-                if let Ok(Some(cycle_state)) = agent_doc_cycle_state_io::load(&file) {
+                if let Ok(Some(cycle_state)) = load_route_owned_cycle_state(&file) {
                     let facts = route_owned_facts_from_cycle_state(&cycle_state);
                     if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
                         if !sleep_with_stop(&stop, poll_interval) {
@@ -259,5 +265,38 @@ mod tests {
             reason,
             RouteOwnedLivenessReason::AdapterFailure(reason) if reason.starts_with("read_failed:")
         ));
+    }
+
+    #[test]
+    fn route_owned_cycle_state_prefers_terminal_projection_over_stale_open_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "body").unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        let sidecar_path = std::fs::read_dir(dir.path().join(".agent-doc/state/cycles"))
+            .unwrap()
+            .next()
+            .expect("cycle state sidecar")
+            .unwrap()
+            .path();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
+        let state = load_route_owned_cycle_state(&doc)
+            .unwrap()
+            .expect("projection-aware state");
+        assert!(
+            !state.is_open(),
+            "route-owned completion should honor terminal closeout projections before sidecars"
+        );
     }
 }

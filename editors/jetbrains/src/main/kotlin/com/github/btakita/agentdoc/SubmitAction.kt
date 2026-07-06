@@ -12,7 +12,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
  * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings).
  * Only enabled when the active editor has a .md file open.
  *
- * Waits for active typing to settle, then saves the document and routes.
+ * Saves the active document and routes immediately.
  * Manual Run stays intentionally stateless so the editor does not try to infer
  * whether the tmux session is "already running" or otherwise mid-recovery.
  */
@@ -26,20 +26,7 @@ class SubmitAction : AnAction() {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
-        // Coalesce a rapid re-fire (auto-loop tick racing a manual click, or a
-        // double key-chord) so a second `/agent-doc` keystroke for this same
-        // document doesn't stack up at the terminal layer (#9adk).
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
-        val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
-        if (!InvocationCoalescer.shouldProceed(
-                InvocationCoalescer.key("run", routeKey),
-                System.currentTimeMillis(),
-            )
-        ) {
-            LOG.warn("[run] coalesced duplicate Run Agent Doc for ${file.name} (invocation already pending)")
-            return
-        }
-
         LOG.warn("[run] actionPerformed: ${file.name}")
         val attempt = RunAgentDocAttemptLedger.begin(
             cwd = cwd,
@@ -48,22 +35,26 @@ class SubmitAction : AnAction() {
             focusedFile = file.path,
         )
 
-        Thread {
-            attempt.recordIfCurrent("await_typing_idle")
-            val idle = TypingTracker.awaitIdle(file.path)
-            if (!idle) {
-                LOG.warn("[run] typing debounce timed out; deferring route until typing settles for ${file.name}")
-                attempt.finishIfCurrent("typing_idle_timeout", error = "mtime did not settle")
-                return@Thread
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed || !file.isValid) {
+                attempt.finishIfCurrent("document_unavailable", error = "project disposed or file invalid")
+                return@invokeLater
             }
-            attempt.recordIfCurrent("typing_idle")
-            ApplicationManager.getApplication().invokeLater {
-                FileDocumentManager.getInstance().saveAllDocuments()
-                attempt.recordIfCurrent("documents_saved")
-                LOG.warn("[run] invoking sendToTerminal after typing idle: ${file.name}")
-                TerminalUtil.sendToTerminal(project, file, attempt = attempt)
+            if (!attempt.isCurrent()) {
+                return@invokeLater
             }
-        }.start()
+            val fdm = FileDocumentManager.getInstance()
+            val document = fdm.getDocument(file)
+            if (document != null) {
+                attempt.recordIfCurrent("save_active_document")
+                fdm.saveDocument(document)
+                attempt.recordIfCurrent("active_document_saved")
+            } else {
+                attempt.recordIfCurrent("document_not_loaded")
+            }
+            LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
+            TerminalUtil.sendToTerminal(project, file, attempt = attempt)
+        }
     }
 
     override fun update(e: AnActionEvent) {

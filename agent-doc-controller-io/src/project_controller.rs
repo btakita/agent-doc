@@ -63,13 +63,20 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
+#[cfg(not(any(test, feature = "test-support")))]
+const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
+#[cfg(any(test, feature = "test-support"))]
+const LAUNCH_CONNECT_WAIT: Duration = Duration::from_millis(500);
 const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current holder to finish before
-/// giving up. Sized above `CONNECT_WAIT` so a waiter outlasts the holder's full
-/// `launch_detached` + `wait_for_controller` window and can then adopt the
+/// giving up. Sized above `LAUNCH_CONNECT_WAIT` so a waiter outlasts the holder's
+/// full `launch_detached` + `wait_for_controller_after_launch` window and can adopt the
 /// controller the holder published instead of failing the start (#suprecyclelock).
-const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(8);
+#[cfg(not(any(test, feature = "test-support")))]
+const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(50);
+#[cfg(any(test, feature = "test-support"))]
+const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(1);
 const LAUNCH_LOCK_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
@@ -529,9 +536,10 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
     }
 
     let conn = open_state_db(project_root)?;
-    state_store::insert_crash_recovery_marker_in_db(
+    state_store::upsert_crash_recovery_marker_in_db(
         &conn,
         "controller_restart_reconcile",
+        "controller_restart_reconcile:project",
         None,
         None,
         "completed",
@@ -568,9 +576,14 @@ fn reconcile_supervisor_leases_after_restart(
             lease.runtime_state.as_deref(),
             lease.last_heartbeat,
         );
-        state_store::insert_crash_recovery_marker_in_db(
+        let dedupe_key = format!(
+            "supervisor_lease_reconcile:{}:{}",
+            record.document_id, record.generation
+        );
+        state_store::upsert_crash_recovery_marker_in_db(
             conn,
             "supervisor_lease_reconcile",
+            &dedupe_key,
             Some(&record.document_id),
             Some(record.generation),
             marker_status,
@@ -584,39 +597,58 @@ fn reconcile_open_dispatch_receipts_after_restart(
     conn: &Connection,
     stats: &mut CrashRecoveryStats,
 ) -> Result<()> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT id, document_id, generation, command_kind, result_status, proof_scope, dispatch_start_proven
-        FROM dispatch_attempts
-        WHERE failed_stage IS NULL
-          AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
-          AND (COALESCE(proof_scope, '') = 'accepted_only' OR dispatch_start_proven = 0)
-        "#,
-    )?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let receipt_id: i64 = row.get("id")?;
-        let document_id: String = row.get("document_id")?;
-        let generation: i64 = row.get("generation")?;
-        let command_kind: String = row.get("command_kind")?;
-        let result_status: Option<String> = row.get("result_status")?;
-        let proof_scope: Option<String> = row.get("proof_scope")?;
-        let dispatch_start_proven: i64 = row.get("dispatch_start_proven")?;
-        let dispatch_start_proven = dispatch_start_proven != 0;
+    let receipts = {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, document_id, generation, command_kind, result_status, proof_scope, dispatch_start_proven
+            FROM dispatch_attempts
+            WHERE failed_stage IS NULL
+              AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
+              AND (COALESCE(proof_scope, '') = 'accepted_only' OR dispatch_start_proven = 0)
+            "#,
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut receipts = Vec::new();
+        while let Some(row) = rows.next()? {
+            receipts.push((
+                row.get::<_, i64>("id")?,
+                row.get::<_, String>("document_id")?,
+                row.get::<_, i64>("generation")?,
+                row.get::<_, String>("command_kind")?,
+                row.get::<_, Option<String>>("result_status")?,
+                row.get::<_, Option<String>>("proof_scope")?,
+                row.get::<_, i64>("dispatch_start_proven")?,
+            ));
+        }
+        receipts
+    };
+    for (
+        receipt_id,
+        document_id,
+        generation,
+        command_kind,
+        result_status,
+        proof_scope,
+        dispatch_start_proven,
+    ) in &receipts
+    {
+        let dispatch_start_proven = *dispatch_start_proven != 0;
         let marker_status = stats.record_dispatch_receipt_reconcile(dispatch_start_proven);
-        let receipt_id = state_store::sqlite_u64(receipt_id, "dispatch receipt id")?;
-        let generation = state_store::sqlite_u64(generation, "dispatch generation")?;
+        let receipt_id = state_store::sqlite_u64(*receipt_id, "dispatch receipt id")?;
+        let generation = state_store::sqlite_u64(*generation, "dispatch generation")?;
         let marker_payload = status::dispatch_receipt_reconcile_payload(
             receipt_id,
-            &command_kind,
+            command_kind.as_str(),
             result_status.as_deref(),
             proof_scope.as_deref(),
             dispatch_start_proven,
         );
-        state_store::insert_crash_recovery_marker_in_db(
+        let dedupe_key = format!("dispatch_receipt_reconcile:receipt:{receipt_id}");
+        state_store::upsert_crash_recovery_marker_in_db(
             conn,
             "dispatch_receipt_reconcile",
-            Some(&document_id),
+            &dedupe_key,
+            Some(document_id.as_str()),
             Some(generation),
             marker_status,
             Some(&marker_payload),
@@ -629,26 +661,39 @@ fn preserve_open_closeout_cycles_after_restart(
     conn: &Connection,
     stats: &mut CrashRecoveryStats,
 ) -> Result<()> {
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT document_id, cycle_id, state, queue_head_id
-        FROM document_cycles
-        WHERE state NOT IN ('committed', 'abandoned')
-        "#,
-    )?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let document_id: String = row.get("document_id")?;
-        let cycle_id: String = row.get("cycle_id")?;
-        let state: String = row.get("state")?;
-        let queue_head_id: Option<String> = row.get("queue_head_id")?;
+    let cycles = {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT document_id, cycle_id, state, queue_head_id
+            FROM document_cycles
+            WHERE state NOT IN ('committed', 'abandoned')
+            "#,
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut cycles = Vec::new();
+        while let Some(row) = rows.next()? {
+            cycles.push((
+                row.get::<_, String>("document_id")?,
+                row.get::<_, String>("cycle_id")?,
+                row.get::<_, String>("state")?,
+                row.get::<_, Option<String>>("queue_head_id")?,
+            ));
+        }
+        cycles
+    };
+    for (document_id, cycle_id, state, queue_head_id) in &cycles {
         let marker_status = stats.record_open_closeout_preserved();
-        let marker_payload =
-            status::open_closeout_preserved_payload(&cycle_id, &state, queue_head_id.as_deref());
-        state_store::insert_crash_recovery_marker_in_db(
+        let marker_payload = status::open_closeout_preserved_payload(
+            cycle_id.as_str(),
+            state.as_str(),
+            queue_head_id.as_deref(),
+        );
+        let dedupe_key = format!("open_closeout_preserved:{document_id}:{cycle_id}");
+        state_store::upsert_crash_recovery_marker_in_db(
             conn,
             "open_closeout_preserved",
-            Some(&document_id),
+            &dedupe_key,
+            Some(document_id.as_str()),
             None,
             marker_status,
             Some(&marker_payload),
@@ -1196,7 +1241,7 @@ fn insert_admin_operation_record(
 }
 
 pub fn persist_session_actor_closeout(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
@@ -2519,6 +2564,11 @@ mod tests {
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         for TestPipelineFrontmatterEffects
     {
+        fn read_current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            std::fs::read_to_string(file)
+                .with_context(|| format!("failed to read {}", file.display()))
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,
@@ -2628,7 +2678,7 @@ mod tests {
     }
 
     #[test]
-    fn crdt_checkpoint_blocks_editor_attached_actor_with_dead_supervisor_socket() {
+    fn crdt_checkpoint_defers_editor_attached_actor_with_dead_supervisor_socket() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/editor.md");
@@ -2654,13 +2704,52 @@ mod tests {
         .unwrap();
 
         let summary = checkpoint_supervisors_for_project(dir.path(), "test_recycle").unwrap();
-        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.failed, 0);
         assert_eq!(summary.detached, 0);
+        assert_eq!(summary.skipped, 1);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("supervisor_crdt_checkpoint_reconcile"));
         assert!(ops_log.contains("reason=dead_supervisor_socket"));
         assert!(ops_log.contains("action=local_document_model_checkpoint"));
-        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback_failed"));
+        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback"));
+        assert!(ops_log.contains("status=deferred"));
+        assert!(ops_log.contains("recovery=background_yrs_repair"));
+    }
+
+    #[test]
+    fn recycle_controller_continues_when_checkpoint_lacks_editor_model() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/recycle-editor.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &document_id,
+            "jetbrains-test",
+            std::process::id()
+        ));
+        let mut record = actor_record(&document_id, "%41", "@1");
+        record.state = agent_doc_sqlite::state_store::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &record).unwrap();
+        let missing_socket = dir.path().join(".agent-doc/supervisor/missing.sock");
+        upsert_supervisor_lease(
+            dir.path(),
+            &record,
+            Some(std::process::id()),
+            missing_socket.to_str(),
+            "ready",
+        )
+        .unwrap();
+
+        let recycled = recycle_controller_force(dir.path(), false).unwrap();
+
+        assert!(!recycled, "no live controller was present to recycle");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("supervisor_crdt_checkpoint_reconcile"));
+        assert!(ops_log.contains("supervisor_crdt_checkpoint_fallback"));
+        assert!(ops_log.contains("status=deferred"));
+        assert!(ops_log.contains("recovery=background_yrs_repair"));
     }
 
     #[test]
@@ -5488,6 +5577,8 @@ agent:queue\n\
             .unwrap();
         agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["stale-item".to_string()])
             .unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -5496,6 +5587,14 @@ agent:queue\n\
             Some(content),
         )
         .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .is_open(),
+            "fixture should leave compatibility sidecar stale and open"
+        );
 
         assert!(persist_session_actor_closeout(&doc).unwrap());
 
@@ -5651,7 +5750,7 @@ agent:queue\n\
         assert_eq!(marker_count("open_closeout_preserved", "preserved"), 1);
         assert_eq!(marker_count("controller_restart_reconcile", "completed"), 1);
         let cycle_state: String = conn
-            .query_row(
+        .query_row(
                 "SELECT state FROM document_cycles WHERE document_id = ?1 AND cycle_id = 'cycle-restart'",
                 params![document_id],
                 |row| row.get(0),
@@ -5659,6 +5758,95 @@ agent:queue\n\
             .unwrap();
         assert_eq!(cycle_state, "preflight_started");
     }
+
+    #[test]
+    fn controller_restart_recovery_upserts_open_dispatch_markers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/restart-flood.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-restart-flood\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            dir.path(),
+            &doc.to_string_lossy(),
+        );
+        let mut conn = open_state_db(dir.path()).unwrap();
+        let record = agent_doc_sqlite::state_store::ActorRecord {
+            document_id: document_id.clone(),
+            session_id: "session-restart-flood".to_string(),
+            generation: 1,
+            pane_id: "%88".to_string(),
+            window_id: "@8".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "seed".to_string(),
+                timestamp: 1,
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        store_actor_record(dir.path(), None, &record).unwrap();
+        let receipt_count = 5_i64;
+        for index in 0..receipt_count {
+            state_store::insert_dispatch_attempt_in_db(
+                &conn,
+                &state_store::DispatchAttemptInsert {
+                    document_id: &document_id,
+                    generation: 1,
+                    command_kind: "session_restart",
+                    accepted_stage: Some("operator_starting"),
+                    failed_stage: None,
+                    diagnostic_payload: "",
+                    result_status: "accepted",
+                    proof_scope: "accepted_only",
+                    dispatch_start_proven: false,
+                },
+            )
+            .unwrap_or_else(|err| panic!("insert open dispatch attempt {index}: {err}"));
+        }
+        drop(conn);
+
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_generation = 2;
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
+        let memory_record = runtime.actor_record(&document_id).unwrap().unwrap();
+        assert_eq!(memory_record.pane_id, "%88");
+
+        conn = open_state_db(dir.path()).unwrap();
+        let marker_count = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM crash_recovery_markers WHERE marker_kind = 'dispatch_receipt_reconcile'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(marker_count(&conn), receipt_count);
+        let dedupe_key_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT dedupe_key) FROM crash_recovery_markers WHERE marker_kind = 'dispatch_receipt_reconcile'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(dedupe_key_count, receipt_count);
+        drop(conn);
+
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.controller_generation = 3;
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
+        assert!(runtime.actor_record(&document_id).unwrap().is_some());
+
+        conn = open_state_db(dir.path()).unwrap();
+        assert_eq!(marker_count(&conn), receipt_count);
+    }
+
     #[test]
     fn controller_session_recovery_commands_accept_closed_actor_generation() {
         let dir = tempfile::TempDir::new().unwrap();

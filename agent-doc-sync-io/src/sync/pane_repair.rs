@@ -32,7 +32,9 @@ pub(crate) type ProtectedRegisteredPaneState = agent_doc_sync::ProtectedRegister
 pub(crate) type OpenCycleProtectedPaneState = agent_doc_sync::OpenCycleProtectedPaneState;
 
 pub(crate) fn resolve_harness_for_sync(file: &Path) -> agent_doc_harness::HarnessConfig {
-    let content = std::fs::read_to_string(file).unwrap_or_default();
+    let content = crate::runtime_effects()
+        .and_then(|effects| effects.resolve_current_document(file, "sync_harness_document"))
+        .unwrap_or_default();
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     rc.set_doc_content(content);
     let fm = rc.frontmatter();
@@ -77,7 +79,9 @@ pub(crate) fn protected_registered_pane_state_from_capture(
 }
 
 pub(crate) fn open_cycle_protected_file_state(file: &Path) -> Option<OpenCycleProtectedPaneState> {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()?;
     agent_doc_sync::open_cycle_protected_file_state_from_phase(file, state.phase)
 }
 
@@ -161,7 +165,7 @@ pub(crate) fn recover_missing_pane_closeout(
     Option<agent_doc_turn::repair::RepairOutcome>,
     Option<String>,
 ) {
-    let state = match agent_doc_cycle_state_io::load(file) {
+    let state = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
         Ok(state) => state,
         Err(err) => {
             return (
@@ -179,10 +183,7 @@ pub(crate) fn recover_missing_pane_closeout(
         agent_doc_turn::CyclePhase::WriteApplied => "write_applied",
         _ => return (None, None, None),
     };
-    let capture_present = agent_doc_capture_io::load_active(file)
-        .ok()
-        .flatten()
-        .is_some();
+    let capture_present = durable_capture_present_for_missing_pane_recovery(file, &state);
     let _ = agent_doc_supervisor_io::startup_miss::append_session_log_event(
         file,
         session_id,
@@ -220,8 +221,31 @@ pub(crate) fn recover_missing_pane_closeout(
     }
 }
 
+fn durable_capture_present_for_missing_pane_recovery(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> bool {
+    if let Some(capture_id) = state.capture_id.as_deref()
+        && let Ok(Some(projected)) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)
+        && projected.cycle_id == state.cycle_id
+        && state
+            .response_sha256
+            .as_deref()
+            .is_none_or(|sha| sha == projected.response_sha256)
+    {
+        return true;
+    }
+    agent_doc_capture_io::load_active(file)
+        .ok()
+        .flatten()
+        .is_some()
+}
+
 pub(crate) fn pending_missing_pane_repair_phase(file: &Path) -> Option<&'static str> {
-    let state = agent_doc_cycle_state_io::load(file).ok().flatten()?;
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        .ok()
+        .flatten()?;
     match state.phase {
         agent_doc_turn::CyclePhase::PreflightStarted => Some("preflight_started"),
         agent_doc_turn::CyclePhase::ResponseCaptured => Some("response_captured"),
@@ -320,6 +344,82 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn durable_capture_present_uses_projection_without_capture_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = tmp.path().join("doc.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        let response = "### Re: hello — gpt-5\n\nDone.\n";
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        std::fs::remove_file(
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
+        )
+        .unwrap();
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+
+        assert!(durable_capture_present_for_missing_pane_recovery(
+            &doc, &state
+        ));
+    }
+
+    #[test]
+    fn pending_missing_pane_repair_phase_prefers_terminal_projection_over_stale_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("doc.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(base), Some(base))
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", Some(base), Some(base))
+            .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        assert_eq!(pending_missing_pane_repair_phase(&doc), None);
+    }
+
+    #[test]
+    fn sync_cycle_status_helpers_prefer_terminal_projection_over_stale_sidecar() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("doc.md");
+        let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(base), Some(base))
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", Some(base), Some(base))
+            .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        assert_eq!(cycle_phase_label(&doc).as_deref(), Some("committed"));
+        assert_eq!(open_cycle_protected_file_state(&doc), None);
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_proof_cache_reuses_actor_lookup_within_one_sync_cycle() {

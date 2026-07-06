@@ -142,7 +142,9 @@ pub fn recover_empty_response_for_strict_closeout<
     if strict_closeout {
         let outcome =
             run_with_queue_completion_ids_and_force_disk(effects, file, &[], force_disk_override)?;
-        if (effects.recover_missing_committed_head_response)(file)? {
+        if force_disk_override != Some(true)
+            && (effects.recover_missing_committed_head_response)(file)?
+        {
             return Ok(true);
         }
         if outcome.repaired() {
@@ -317,7 +319,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
             );
     if response_already_present {
         if let Some(ref capture) = capture {
-            agent_doc_capture_io::validate_replay(&canonical, capture)?;
+            agent_doc_capture_io::validate_replay_with_current_content(
+                &canonical,
+                capture,
+                &doc_content,
+            )?;
         }
         eprintln!(
             "[repair] Response already present in document; skipping apply, cleaning up pending file"
@@ -386,7 +392,11 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         )? {
             return Ok(RepairOutcome::StaleCaptureRetired);
         }
-        agent_doc_capture_io::validate_replay(&canonical, capture)?;
+        agent_doc_capture_io::validate_replay_with_current_content(
+            &canonical,
+            capture,
+            &doc_content,
+        )?;
     }
 
     replay_orphaned_response(
@@ -409,7 +419,7 @@ fn repair_current_document_content(
     force_disk_override: Option<bool>,
 ) -> Result<String> {
     if force_disk_override == Some(true) {
-        return std::fs::read_to_string(file)
+        return agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
             .with_context(|| format!("{source}: failed to read {}", file.display()));
     }
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
@@ -1074,10 +1084,37 @@ fn repair_answered_stale_boundary_if_safe(
 pub fn historical_committed_capture_replay(
     file: &Path,
     doc_content: &str,
-) -> Result<Option<agent_doc_capture_io::CaptureRecord>> {
+) -> Result<Option<HistoricalCommittedCapture>> {
+    if let Some(capture) = projected_committed_capture_response(file)? {
+        return historical_committed_capture_replay_candidate(file, doc_content, capture);
+    }
+
     let Some(capture) = agent_doc_capture_io::latest_committed(file)? else {
         return Ok(None);
     };
+    historical_committed_capture_replay_candidate(
+        file,
+        doc_content,
+        HistoricalCommittedCapture {
+            capture_id: capture.capture_id,
+            response_sha256: capture.response_sha256,
+            response_body: capture.response_body,
+        },
+    )
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoricalCommittedCapture {
+    capture_id: String,
+    response_sha256: String,
+    response_body: String,
+}
+
+fn historical_committed_capture_replay_candidate(
+    file: &Path,
+    doc_content: &str,
+    capture: HistoricalCommittedCapture,
+) -> Result<Option<HistoricalCommittedCapture>> {
     if agent_doc_turn::response_replay::response_already_applied(
         doc_content,
         &capture.response_body,
@@ -1098,9 +1135,10 @@ pub fn historical_committed_capture_replay(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "repair_replay_committed_capture file={} capture_id={}",
+            "repair_replay_committed_capture file={} capture_id={} response_sha256={}",
             file.display(),
-            capture.capture_id
+            capture.capture_id,
+            capture.response_sha256
         ),
     );
     Ok(Some(capture))
@@ -1187,7 +1225,12 @@ pub fn retire_stale_capture_if_drifted(
     let decision = agent_doc_workflow::capture::decide_stale_capture_retirement(
         agent_doc_workflow::capture::StaleCaptureRetirementEvidence {
             state: capture.state,
-            replay_baseline_drifted: agent_doc_capture_io::replay_baseline_drifted(file, capture)?,
+            replay_baseline_drifted:
+                agent_doc_capture_io::replay_baseline_drifted_with_current_content(
+                    file,
+                    capture,
+                    doc_content,
+                )?,
             captured_response_body_missing,
             captured_response_heading_answered,
         },
@@ -1298,7 +1341,7 @@ pub fn cancel_preflight_cycle(
     if !matches!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
-    if agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some() {
+    if cycle_has_captured_response_projection_or_sidecar(file, &state)? {
         return Ok(agent_doc_turn::repair::CancelOutcome::Protected);
     }
     let snapshot_content = agent_doc_snapshot_io::load(file)?;
@@ -1416,7 +1459,7 @@ pub fn repair_stale_preflight_started_cycle(
             repaired_snapshot.as_deref(),
             Some(&file_content),
         )?;
-        agent_doc_capture_io::mark_committed(file)?;
+        agent_doc_capture_io::mark_committed_with_current_content(file, &file_content)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1455,7 +1498,7 @@ pub fn repair_stale_preflight_started_cycle(
         );
     }
 
-    let cycle_capture_exists = agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some();
+    let cycle_capture_exists = cycle_has_captured_response_projection_or_sidecar(file, &state)?;
     let age_secs = agent_doc_turn::closeout_recovery::stale_preflight_cycle_age_secs(
         state.started_at,
         state.updated_at,
@@ -1550,6 +1593,30 @@ pub fn repair_stale_preflight_started_cycle(
     }
 
     Ok(agent_doc_turn::repair::RepairOutcome::Noop)
+}
+
+fn cycle_has_captured_response_projection_or_sidecar(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+) -> Result<bool> {
+    if let Some(projection) = agent_doc_cycle_state_io::load_closeout_projection(file)?
+        && projection.matches_cycle(&state.cycle_id)
+        && (projection.captured_response.is_some()
+            || (projection.capture_id.is_some() && projection.response_sha256.is_some()))
+    {
+        return Ok(true);
+    }
+
+    let capture_id = state.capture_id.as_deref().unwrap_or(&state.cycle_id);
+    if agent_doc_capture_io::load_by_id(file, capture_id)?.is_some() {
+        return Ok(true);
+    }
+    if capture_id != state.cycle_id
+        && agent_doc_capture_io::load_by_id(file, &state.cycle_id)?.is_some()
+    {
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<&'static str>> {
@@ -1674,6 +1741,32 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
 }
 
 fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) -> bool {
+    match projected_committed_capture_response_body(file) {
+        Ok(Some(response_body)) => {
+            return !response_body.trim().is_empty()
+                && agent_doc_turn::response_replay::response_materialized_in_content(
+                    &response_body,
+                    head_doc,
+                );
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!(
+                "[repair] committed-capture projection warning for {}: {}",
+                file.display(),
+                e
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair_committed_capture_projection_warning file={} err={}",
+                    file.display(),
+                    e
+                ),
+            );
+        }
+    }
+
     let capture = match agent_doc_capture_io::latest_committed(file) {
         Ok(Some(capture)) => capture,
         Ok(None) => return false,
@@ -1699,6 +1792,37 @@ fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) 
             &capture.response_body,
             head_doc,
         )
+}
+
+fn projected_committed_capture_response_body(file: &Path) -> Result<Option<String>> {
+    Ok(projected_committed_capture_response(file)?.map(|capture| capture.response_body))
+}
+
+fn projected_committed_capture_response(file: &Path) -> Result<Option<HistoricalCommittedCapture>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if state.phase != agent_doc_turn::CyclePhase::Committed {
+        return Ok(None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(projected) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    else {
+        return Ok(None);
+    };
+    if state.cycle_id != projected.cycle_id
+        || state.response_sha256.as_deref() != Some(projected.response_sha256.as_str())
+    {
+        return Ok(None);
+    }
+    Ok(Some(HistoricalCommittedCapture {
+        capture_id: projected.capture_id,
+        response_sha256: projected.response_sha256,
+        response_body: projected.response_body,
+    }))
 }
 
 pub fn recover_missing_commit_boundary(
@@ -1763,7 +1887,7 @@ pub fn recover_missing_commit_boundary(
         repaired_snapshot.as_deref(),
         Some(&current_doc),
     )?;
-    agent_doc_capture_io::mark_committed(file)?;
+    agent_doc_capture_io::mark_committed_with_current_content(file, &current_doc)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2046,6 +2170,78 @@ mod tests {
             "stale open JSON must not trigger stale-preflight repair after lazily commit"
         );
         assert_eq!(effects.abandoned_calls.get(), 0);
+    }
+
+    #[test]
+    fn captured_response_projection_protects_stale_preflight_when_capture_sidecar_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        let capture =
+            agent_doc_capture_io::capture_response(&doc, "### Re: do - opus-4-8\n\nDone.\n")
+                .unwrap();
+        let capture_path =
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap();
+        std::fs::remove_file(capture_path).unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+
+        let stale_state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            stale_state.phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+        assert!(
+            cycle_has_captured_response_projection_or_sidecar(&doc, &stale_state).unwrap(),
+            "captured-response projection must prove capture when JSON sidecar is missing"
+        );
+
+        let effects = TestRepairIoEffects::default();
+        let outcome = cancel_preflight_cycle(&effects, &doc).unwrap();
+        assert_eq!(outcome, agent_doc_turn::repair::CancelOutcome::Protected);
+        assert_eq!(effects.abandoned_calls.get(), 0);
+    }
+
+    #[test]
+    fn committed_capture_materialization_prefers_projection_when_capture_sidecar_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let doc = root.join("task.md");
+        let content = "---\nagent_doc_session: test\n---\n\n## User\n\nDo the thing\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let response = "### Re: do - opus-4-8\n\nDone.\n";
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let capture_path =
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap();
+        std::fs::remove_file(capture_path).unwrap();
+
+        let head_doc = format!("{content}\n{response}");
+        assert!(
+            committed_capture_response_materialized_in_head(&doc, &head_doc),
+            "committed captured-response projection must prove materialization without capture JSON"
+        );
     }
 
     #[test]

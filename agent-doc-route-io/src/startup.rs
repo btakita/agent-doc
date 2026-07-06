@@ -448,7 +448,8 @@ pub fn auto_start_in_session_with_lock_mode(
         &session_id[..std::cmp::min(8, session_id.len())]
     );
 
-    let cycle_baseline = agent_doc_cycle_state_io::load(file).unwrap_or(None);
+    let cycle_baseline =
+        agent_doc_cycle_state_io::load_with_closeout_projection(file).unwrap_or(None);
 
     if skip_wait {
         eprintln!(

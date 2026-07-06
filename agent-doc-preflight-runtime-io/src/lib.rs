@@ -424,7 +424,7 @@ pub fn detect_route_queue_snapshot_commit_boundary_recoverable(
     file: &Path,
     rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if state.is_open() {

@@ -22,7 +22,7 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &CycleContext) -> Result
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(GuardResult::None);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
         return Ok(GuardResult::None);
     };
 
@@ -33,8 +33,7 @@ pub fn check_expect_done_or_gate_guard(file: &Path, rc: &CycleContext) -> Result
     let unresolved = match agent_doc_turn::closeout_signal::expect_done_or_gate_decision(
         agent_doc_turn::closeout_signal::ExpectDoneOrGateEvidence {
             cycle_open: state.is_open(),
-            capture_committed: capture.state
-                == agent_doc_workflow::capture::CaptureState::Committed,
+            capture_committed: capture.capture_committed,
             response_body: &capture.response_body,
             directed_ids: &state.expect_done_or_gate_ids,
             pending_done_ids: &state.pending_done_ids,
@@ -293,6 +292,7 @@ pub fn check_free_text_queue_head_provenance(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use std::{fs, path::PathBuf};
 
     struct NoopPipelineFrontmatterEffects;
@@ -300,6 +300,10 @@ mod tests {
     impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         for NoopPipelineFrontmatterEffects
     {
+        fn read_current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))
+        }
+
         fn converge_or_disk_write(
             &self,
             file: &Path,

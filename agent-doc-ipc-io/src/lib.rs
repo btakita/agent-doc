@@ -47,8 +47,10 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
-use std::io::{BufRead, BufReader, Write};
+use std::collections::HashSet;
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 pub mod editor_target;
@@ -85,6 +87,8 @@ const IPC_CONNECT_TIMEOUT_SECS: u64 = 3;
 /// thread (and its fd) forever. A recv timeout converts the stalled read into a
 /// clean EOF-style handler exit that releases the inflight slot.
 const IPC_LISTENER_READ_TIMEOUT_SECS: u64 = 30;
+const IPC_LISTENER_MAX_INFLIGHT_HANDLERS: u64 = 64;
+const IPC_LISTENER_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
 
 /// Early-receipt opt-in for the sender (`#ipc-early-receipt` / `#saev`, Phase 2).
 ///
@@ -200,6 +204,9 @@ pub fn send_message_with_timeout(
     if let Err(e) = stream.set_send_timeout(Some(receipt_timeout)) {
         eprintln!("[ipc-socket] warning: failed to set IPC send timeout: {e}");
     }
+    if let Err(e) = stream.set_recv_timeout(Some(receipt_timeout)) {
+        eprintln!("[ipc-socket] warning: failed to set IPC receipt timeout: {e}");
+    }
 
     // interprocess Stream implements Read + Write via halves
     let (reader_half, mut writer_half) = stream.split();
@@ -214,45 +221,21 @@ pub fn send_message_with_timeout(
     writer_half.write_all(msg.as_bytes())?;
     writer_half.flush()?;
 
-    // Read receipt(s) (with manual timeout via thread). The listener may send
-    // an early `accepted` receipt (liveness only) before the terminal receipt,
-    // so the reader thread loops until it yields a non-pending line.
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(reader_half);
-        loop {
-            let mut receipt_line = String::new();
-            let result = reader.read_line(&mut receipt_line);
-            let stop = match &result {
-                Ok(0) => true,
-                Ok(_) => {
-                    classify_socket_receipt(receipt_line.trim())
-                        != SocketReceiptClassification::Pending
-                }
-                Err(_) => true,
-            };
-            if tx.send((result, receipt_line)).is_err() {
-                break;
-            }
-            if stop {
-                break;
-            }
-        }
-    });
-
     // Each phase gets its own receipt-timeout budget: an early `accepted`
     // receipt proves liveness and lets the binary keep waiting for the terminal
     // receipt instead of declaring a false timeout while the plugin is still
     // applying.
+    let mut reader = BufReader::new(reader_half);
     loop {
-        match rx.recv_timeout(receipt_timeout) {
-            Ok((Ok(0), _)) => {
+        let mut receipt_line = String::new();
+        match reader.read_line(&mut receipt_line) {
+            Ok(0) => {
                 return Err(anyhow::anyhow!(
                     "IPC receipt: plugin closed connection without responding"
                 ));
             }
-            Ok((Ok(_), line)) => {
-                let receipt = line.trim().to_string();
+            Ok(_) => {
+                let receipt = receipt_line.trim().to_string();
                 match classify_socket_receipt(&receipt) {
                     // Liveness-only: listener received the patch but has not yet
                     // applied it. Keep waiting for the terminal receipt.
@@ -272,16 +255,13 @@ pub fn send_message_with_timeout(
                     }
                 }
             }
-            Ok((Err(e), _)) => return Err(anyhow::anyhow!("IPC receipt read error: {}", e)),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(e) if ipc_read_error_is_timeout(&e) => {
                 return Err(anyhow::anyhow!(
                     "IPC receipt timeout ({}ms)",
                     receipt_timeout.as_millis()
                 ));
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(anyhow::anyhow!("IPC reader thread disconnected"));
-            }
+            Err(e) => return Err(anyhow::anyhow!("IPC receipt read error: {}", e)),
         }
     }
 }
@@ -302,6 +282,7 @@ pub fn probe_listener_receipt(project_root: &Path, timeout: Duration) -> Result<
 /// without a backlog.
 static INFLIGHT_CONNECTION_HANDLERS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
+static INFLIGHT_PUBLISH_LIVE_BUFFER: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 /// RAII guard decrements [`INFLIGHT_CONNECTION_HANDLERS`] on drop so a
 /// panicking handler still releases its slot.
@@ -318,6 +299,77 @@ impl Drop for InflightConnectionGuard {
 /// concurrent state (rather than only asserting wall-clock timing).
 pub fn inflight_connection_handlers() -> u64 {
     INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+enum PublishLiveBufferAdmission {
+    Admitted(Option<PublishLiveBufferGuard>),
+    Duplicate { key: String },
+}
+
+struct PublishLiveBufferGuard {
+    key: String,
+}
+
+impl Drop for PublishLiveBufferGuard {
+    fn drop(&mut self) {
+        if let Some(projection) = INFLIGHT_PUBLISH_LIVE_BUFFER.get()
+            && let Ok(mut keys) = projection.lock()
+        {
+            keys.remove(&self.key);
+        }
+    }
+}
+
+fn publish_live_buffer_projection() -> &'static Mutex<HashSet<String>> {
+    INFLIGHT_PUBLISH_LIVE_BUFFER.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn publish_live_buffer_projection_key(project_root: &Path, message: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
+    if parsed.get("type").and_then(|value| value.as_str()) != Some("publish_live_buffer") {
+        return None;
+    }
+    let file = parsed.get("file").and_then(|value| value.as_str())?;
+    Some(format!("{}::{file}", project_root.display()))
+}
+
+fn begin_publish_live_buffer_projection(
+    project_root: &Path,
+    message: &str,
+) -> PublishLiveBufferAdmission {
+    let Some(key) = publish_live_buffer_projection_key(project_root, message) else {
+        return PublishLiveBufferAdmission::Admitted(None);
+    };
+    let mut keys = publish_live_buffer_projection()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if keys.contains(&key) {
+        PublishLiveBufferAdmission::Duplicate { key }
+    } else {
+        keys.insert(key.clone());
+        PublishLiveBufferAdmission::Admitted(Some(PublishLiveBufferGuard { key }))
+    }
+}
+
+fn duplicate_publish_live_buffer_receipt() -> String {
+    serde_json::json!({
+        "type": "receipt",
+        "status": "applied",
+        "duplicate": true,
+        "reason": "publish_live_buffer_duplicate"
+    })
+    .to_string()
+}
+
+fn ipc_read_error_is_timeout(err: &std::io::Error) -> bool {
+    matches!(err.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock)
+        || err.to_string().contains("timed out")
+}
+
+fn ipc_accept_error_is_resource_exhaustion(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(23 | 24))
+        || err.kind() == ErrorKind::OutOfMemory
+        || err.to_string().contains("Too many open files")
 }
 
 /// Send a patch message to the plugin.
@@ -570,9 +622,22 @@ where
     let handler = std::sync::Arc::new(handler);
     let root_buf = project_root.to_path_buf();
 
+    let mut resource_exhaustion_logged = false;
     loop {
         match listener.accept() {
             Ok(stream) => {
+                resource_exhaustion_logged = false;
+                let current_inflight =
+                    INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst);
+                if current_inflight >= IPC_LISTENER_MAX_INFLIGHT_HANDLERS {
+                    ops_logger(
+                        &root_buf,
+                        &format!("ipc_accept_dropped_inflight_limit inflight={current_inflight}"),
+                    );
+                    drop(stream);
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
                 // #af88 B/D: bound the per-connection read so a half-open client
                 // that connects but never sends a request line cannot park its
                 // handler thread (and fd) forever. Set before `split()` since the
@@ -588,63 +653,132 @@ where
                     );
                 }
                 let handler = std::sync::Arc::clone(&handler);
-                let root_buf = root_buf.clone();
+                let handler_root_buf = root_buf.clone();
                 // #jbacceptwedge: count and log the fresh handler thread
                 // BEFORE spawning, so the inflight count reported in the
                 // marker reflects the post-increment state of this accept.
                 let inflight = INFLIGHT_CONNECTION_HANDLERS
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                     + 1;
-                ops_logger(&root_buf, &ipc_accept_thread_ops_marker(inflight));
-                std::thread::spawn(move || {
-                    let _inflight_guard = InflightConnectionGuard;
-                    let (reader_half, mut writer_half) = stream.split();
-                    let mut reader = BufReader::new(reader_half);
-                    let mut line = String::new();
+                ops_logger(&handler_root_buf, &ipc_accept_thread_ops_marker(inflight));
+                if let Err(e) = std::thread::Builder::new()
+                    .name("agent-doc-ipc-conn".to_string())
+                    .spawn(move || {
+                        let _inflight_guard = InflightConnectionGuard;
+                        let (reader_half, mut writer_half) = stream.split();
+                        let mut reader = BufReader::new(reader_half);
+                        let mut line = String::new();
 
-                    while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() {
-                            // Early receipt: if the sender opted in, emit an `accepted`
-                            // receipt before the blocking apply handler runs, so the
-                            // sender's liveness probe is decoupled from apply latency.
-                            // The terminal receipt still follows.
-                            if message_requests_early_receipt(trimmed) {
-                                let mut early = early_receipt_line().to_string();
-                                early.push('\n');
-                                if let Err(e) = writer_half.write_all(early.as_bytes()) {
-                                    eprintln!("[ipc-socket] early receipt write error: {}", e);
-                                } else if let Err(e) = writer_half.flush() {
-                                    eprintln!("[ipc-socket] early receipt flush error: {}", e);
-                                } else {
-                                    // #saev prove/disprove: a successful early receipt emit
-                                    // must leave grep-able proof that the `accepted` receipt
-                                    // went out before the blocking apply.
-                                    eprintln!(
-                                        "[ipc-socket] early receipt accepted emitted before apply"
-                                    );
-                                    // Also record the marker to ops.log (derived from the
-                                    // listener's project root) so the #saev gate is provable.
-                                    ops_logger(&root_buf, early_receipt_ops_marker());
+                        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                match begin_publish_live_buffer_projection(
+                                    &handler_root_buf,
+                                    trimmed,
+                                ) {
+                                    PublishLiveBufferAdmission::Duplicate { key } => {
+                                        ops_logger(
+                                            &handler_root_buf,
+                                            &format!(
+                                                "ipc_publish_live_buffer_duplicate_suppressed key={key}"
+                                            ),
+                                        );
+                                        let mut resp = duplicate_publish_live_buffer_receipt();
+                                        resp.push('\n');
+                                        if let Err(e) = writer_half.write_all(resp.as_bytes()) {
+                                            eprintln!(
+                                                "[ipc-socket] duplicate receipt write error: {}",
+                                                e
+                                            );
+                                        }
+                                        if let Err(e) = writer_half.flush() {
+                                            eprintln!(
+                                                "[ipc-socket] duplicate receipt flush error: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                    PublishLiveBufferAdmission::Admitted(_publish_guard) => {
+                                        // Early receipt: if the sender opted in, emit an `accepted`
+                                        // receipt before the blocking apply handler runs, so the
+                                        // sender's liveness probe is decoupled from apply latency.
+                                        // The terminal receipt still follows.
+                                        if message_requests_early_receipt(trimmed) {
+                                            let mut early = early_receipt_line().to_string();
+                                            early.push('\n');
+                                            if let Err(e) =
+                                                writer_half.write_all(early.as_bytes())
+                                            {
+                                                eprintln!(
+                                                    "[ipc-socket] early receipt write error: {}",
+                                                    e
+                                                );
+                                            } else if let Err(e) = writer_half.flush() {
+                                                eprintln!(
+                                                    "[ipc-socket] early receipt flush error: {}",
+                                                    e
+                                                );
+                                            } else {
+                                                // #saev prove/disprove: a successful early receipt emit
+                                                // must leave grep-able proof that the `accepted` receipt
+                                                // went out before the blocking apply.
+                                                eprintln!(
+                                                    "[ipc-socket] early receipt accepted emitted before apply"
+                                                );
+                                                // Also record the marker to ops.log (derived from the
+                                                // listener's project root) so the #saev gate is provable.
+                                                ops_logger(
+                                                    &handler_root_buf,
+                                                    early_receipt_ops_marker(),
+                                                );
+                                            }
+                                        }
+                                        if let Some(response) = handler(trimmed) {
+                                            let mut resp = response;
+                                            resp.push('\n');
+                                            if let Err(e) = writer_half.write_all(resp.as_bytes()) {
+                                                eprintln!(
+                                                    "[ipc-socket] handler write error: {}",
+                                                    e
+                                                );
+                                            }
+                                            if let Err(e) = writer_half.flush() {
+                                                eprintln!(
+                                                    "[ipc-socket] handler flush error: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            if let Some(response) = handler(trimmed) {
-                                let mut resp = response;
-                                resp.push('\n');
-                                if let Err(e) = writer_half.write_all(resp.as_bytes()) {
-                                    eprintln!("[ipc-socket] handler write error: {}", e);
-                                }
-                                if let Err(e) = writer_half.flush() {
-                                    eprintln!("[ipc-socket] handler flush error: {}", e);
-                                }
-                            }
+                            line.clear();
                         }
-                        line.clear();
-                    }
-                });
+                    })
+                {
+                    INFLIGHT_CONNECTION_HANDLERS
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    ops_logger(
+                        &root_buf,
+                        &format!("ipc_accept_thread_spawn_failed error={e}"),
+                    );
+                }
             }
             Err(e) => {
-                eprintln!("[ipc-socket] accept error: {}", e);
+                if ipc_accept_error_is_resource_exhaustion(&e) {
+                    if !resource_exhaustion_logged {
+                        eprintln!("[ipc-socket] accept resource exhaustion: {e}; backing off");
+                        ops_logger(
+                            &root_buf,
+                            &format!("ipc_accept_resource_exhaustion error={e}"),
+                        );
+                        resource_exhaustion_logged = true;
+                    }
+                    std::thread::sleep(IPC_LISTENER_RESOURCE_BACKOFF);
+                } else {
+                    resource_exhaustion_logged = false;
+                    eprintln!("[ipc-socket] accept error: {}", e);
+                }
             }
         }
     }
@@ -729,6 +863,91 @@ mod tests {
              old single-threaded loop could never exceed 1), observed peak={}",
             peak_inflight
         );
+
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
+
+    #[test]
+    fn listener_suppresses_duplicate_publish_live_buffer_while_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("plan.md").to_string_lossy().to_string();
+
+        let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let release =
+            std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+
+        let root_clone = root.clone();
+        let file_for_listener = file.clone();
+        let handler_calls_for_listener = handler_calls.clone();
+        let release_for_listener = release.clone();
+        let server = thread::spawn(move || {
+            start_listener(&root_clone, move |msg| {
+                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+                if v.get("type").and_then(|value| value.as_str()) != Some("publish_live_buffer") {
+                    return Some(
+                        serde_json::json!({"type":"receipt","status":"rejected"}).to_string(),
+                    );
+                }
+                assert_eq!(v["file"], file_for_listener);
+                handler_calls_for_listener.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = started_tx.send(());
+
+                let (lock, condvar) = &*release_for_listener;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    let wait = condvar
+                        .wait_timeout(released, Duration::from_secs(2))
+                        .unwrap();
+                    released = wait.0;
+                    if wait.1.timed_out() {
+                        return Some(
+                            serde_json::json!({
+                                "type":"receipt",
+                                "status":"rejected",
+                                "reason":"test_timeout"
+                            })
+                            .to_string(),
+                        );
+                    }
+                }
+                Some(serde_json::json!({"type":"receipt","status":"applied"}).to_string())
+            })
+            .ok()
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let root_for_first = root.clone();
+        let file_for_first = file.clone();
+        let first =
+            thread::spawn(move || send_publish_live_buffer(&root_for_first, &file_for_first));
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first publish should enter the handler and hold the projection");
+
+        let second = send_message_with_timeout(
+            &root,
+            &publish_live_buffer_message(&file),
+            Duration::from_secs(1),
+        )
+        .expect("duplicate publish should receive a synthetic applied receipt")
+        .expect("duplicate publish should return a receipt");
+        let second_receipt: serde_json::Value = serde_json::from_str(&second).unwrap();
+        assert_eq!(second_receipt["status"], "applied");
+        assert_eq!(second_receipt["duplicate"], true);
+        assert_eq!(
+            handler_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "duplicate publish_live_buffer should not invoke the plugin handler"
+        );
+
+        let (lock, condvar) = &*release;
+        *lock.lock().unwrap() = true;
+        condvar.notify_all();
+        assert!(first.join().unwrap().unwrap());
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);

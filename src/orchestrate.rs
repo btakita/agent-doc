@@ -297,7 +297,7 @@ impl FreshAgentRunner for CliAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<String> {
-        let content = std::fs::read_to_string(file)?;
+        let content = resolve_orchestrate_current_document(file, "orchestrate_fresh_agent")?;
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
         let backend = agent::resolve_for_file(agent_name, agent_config, env, file, &fm)?;
         let response = send_fresh_response(backend.as_ref(), prompt, model)?;
@@ -313,7 +313,7 @@ impl FreshAgentRunner for CliAgentRunner {
         env: Vec<(String, Option<String>)>,
         model: Option<&str>,
     ) -> Result<Option<Box<dyn Iterator<Item = Result<StreamChunk>>>>> {
-        let content = std::fs::read_to_string(file)?;
+        let content = resolve_orchestrate_current_document(file, "orchestrate_streaming_agent")?;
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content)?;
         let Some(backend) =
             agent::resolve_streaming_for_file(agent_name, agent_config, env, file, &fm)?
@@ -504,8 +504,7 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     }
 
     if config.from_exchange {
-        let doc = fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let doc = resolve_orchestrate_current_document(file, "orchestrate_from_exchange")?;
         let full_exchange = exchange_text(&doc)?;
         let scoped = scope_exchange_for_tasks(full_exchange, file);
         let mut exchange_batch = ResolvedTaskBatch::default();
@@ -520,8 +519,7 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     }
 
     if config.from_queue {
-        let doc = fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let doc = resolve_orchestrate_current_document(file, "orchestrate_from_queue")?;
         merge_task_batch(&mut batch, queue_task_batch(file, &doc)?);
     }
 
@@ -533,6 +531,10 @@ fn resolve_task_batch(file: &Path, config: &OrchestrateConfig) -> Result<Resolve
     Ok(batch)
 }
 
+fn resolve_orchestrate_current_document(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+}
+
 fn canonicalize_prompt_preset_requests(
     file: &Path,
     requested_presets: &mut Vec<String>,
@@ -540,8 +542,7 @@ fn canonicalize_prompt_preset_requests(
     if requested_presets.is_empty() {
         return Ok(());
     }
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = resolve_orchestrate_current_document(file, "orchestrate_prompt_presets")?;
     let (fm, _) = frontmatter::parse(&doc)?;
     let mut canonical = Vec::new();
     for preset_name in requested_presets.drain(..) {
@@ -664,8 +665,7 @@ fn exchange_task_source_changed(
     file: &Path,
     original: &ExchangeTaskSourceFingerprint,
 ) -> Result<bool> {
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = resolve_orchestrate_current_document(file, "orchestrate_exchange_source_changed")?;
     let exchange = exchange_text(&doc)?;
     Ok(match find_exchange_task_source(exchange, original) {
         Some(current) => current != *original,
@@ -695,8 +695,7 @@ fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result
         return Ok(None);
     }
 
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = resolve_orchestrate_current_document(file, "orchestrate_prompt_preset_block")?;
     let (fm, _) = frontmatter::parse(&doc)?;
     let mut block = String::new();
 
@@ -831,8 +830,7 @@ fn finalize_orchestration_batch_changed(
         completed_steps, total_steps
     );
     lifecycle.admit(file)?;
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = resolve_orchestrate_current_document(file, "orchestrate_batch_changed")?;
     let (fm, _) = frontmatter::parse(&doc)?;
     let response = format!(
         "<!-- patch:exchange -->\n\
@@ -856,8 +854,7 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
 }
 
 fn inject_prompt(file: &Path, task: &str) -> Result<()> {
-    let doc =
-        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = resolve_orchestrate_current_document(file, "orchestrate_inject_prompt")?;
     let prompt_line = format!("❯ {}", normalize_task(task));
     let updated =
         agent_doc_element_exchange::insert_prompt_line_before_boundary(&doc, &prompt_line)?;

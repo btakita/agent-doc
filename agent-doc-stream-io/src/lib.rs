@@ -85,6 +85,7 @@ use agent_doc_agent_io::agent;
 use agent_doc_run_context_io::AgentDocContextExt;
 
 pub trait StreamRuntimeEffects: Send + Sync {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
     fn commit(&self, file: &Path) -> Result<bool>;
     fn save_pending(&self, file: &Path, response: &str) -> Result<()>;
     fn clear_pending(&self, file: &Path) -> Result<()>;
@@ -132,7 +133,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     }
 
     // Validate mode — requires CRDT write strategy
-    let raw_content = std::fs::read_to_string(file)?;
+    let raw_content = effects.current_document_content(file, "stream_run_initial")?;
     let (fm, _body) = frontmatter::parse(&raw_content)?;
     let resolved = fm.resolve_mode();
     if !resolved.is_crdt() {
@@ -183,7 +184,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     // Ensure session UUID
     let (content_original, _session_id) = frontmatter::ensure_session(&raw_content)?;
     if content_original != raw_content {
-        std::fs::write(file, &content_original)?;
+        effects.atomic_write(file, &content_original)?;
     }
     let (fm, _body) = frontmatter::parse(&content_original)?;
 
@@ -276,7 +277,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
 
     // Update resume ID if we got a session_id
     if let Some(ref sid) = result.session_id {
-        let current = std::fs::read_to_string(file)?;
+        let current = effects.current_document_content(file, "stream_run_resume_update")?;
         let updated = frontmatter::set_resume_id(&current, sid)?;
         effects.atomic_write(file, &updated)?;
         agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
@@ -457,7 +458,10 @@ fn stream_loop(
                 buf.clone()
             };
             if !chunk.is_final {
-                checkpoint_writer.maybe_checkpoint(&checkpoint_text)?;
+                let current_content =
+                    effects.current_document_content(file, "stream_partial_response_checkpoint")?;
+                checkpoint_writer
+                    .maybe_checkpoint_with_current_content(&checkpoint_text, &current_content)?;
             }
             chunk_count += 1;
         }
@@ -517,7 +521,11 @@ fn stream_loop(
                 &mode_overrides,
                 Some(rc.project_config()),
             )
-            .unwrap_or_else(|_| std::fs::read_to_string(file).unwrap_or_default())
+            .unwrap_or_else(|_| {
+                effects
+                    .current_document_content(file, "stream_content_ours_fallback")
+                    .unwrap_or_default()
+            })
         };
         agent_doc_snapshot_io::save(file, &content_ours, agent_doc_ops_log_io::log_op)?;
         let doc = crdt::CrdtDoc::from_text(&content_ours);
@@ -599,7 +607,8 @@ pub fn flush_to_document(
     fs2::FileExt::lock_exclusive(&lock_file)?;
 
     // Read current file content
-    let content_current = std::fs::read_to_string(file)
+    let content_current = effects
+        .current_document_content(file, "stream_flush_to_document")
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     // Apply patches with replace override for stream target
@@ -656,12 +665,24 @@ mod tests {
     }
 
     impl StreamRuntimeEffects for TestStreamRuntimeEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            let document_path = file;
+            std::fs::read_to_string(document_path)
+                .with_context(|| format!("failed to read {}", document_path.display()))
+        }
+
         fn commit(&self, _file: &Path) -> Result<bool> {
             Ok(false)
         }
 
         fn save_pending(&self, file: &Path, response: &str) -> Result<()> {
-            agent_doc_capture_io::capture_response(file, response)?;
+            let current_content =
+                self.current_document_content(file, "stream_test_save_pending_capture")?;
+            agent_doc_capture_io::capture_response_with_current_content(
+                file,
+                response,
+                &current_content,
+            )?;
             let pending_path = agent_doc_fs::pending_response_path_for(file)?;
             if let Some(parent) = pending_path.parent() {
                 std::fs::create_dir_all(parent)?;

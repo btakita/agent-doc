@@ -5,8 +5,8 @@
 //! - Notification format is a `> **[NOTIFY from <source>]** (<timestamp>)` blockquote.
 //! - Appends before the boundary marker if one exists, otherwise at the end of the
 //!   exchange component content.
-//! - After appending, writes the document atomically, updates the snapshot, and
-//!   optionally commits.
+//! - After appending, writes the document through document authority, updates
+//!   the snapshot, and optionally commits.
 //! - `--backlog-add` / `--backlog-add-gated` adds items to the document's
 //!   `agent:backlog` component. Auto-creates the component if absent (after
 //!   exchange close tag). Legacy aliases: `--pending-add` /
@@ -94,8 +94,11 @@ fn format_notification(message: &str, source: Option<&str>, affects: Option<&str
 /// Returns `Ok(true)` if a component was created, `Ok(false)` if it already existed.
 /// Under `no_create`, returns `Err` if absent.
 fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "notify_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
@@ -117,7 +120,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
     new_doc.push_str(pending_block);
     new_doc.push_str(&doc[insert_pos..]);
 
-    std::fs::write(file, &new_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)?;
     eprintln!(
         "[notify] auto-created agent:backlog component in {}",
         file.display()
@@ -194,8 +197,11 @@ pub fn run(
     // --- Exchange notification (skip in backlog-only mode) ---
     if pending_only {
         // Still update snapshot and commit
-        let doc = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "notify_command_document",
+        )
+        .with_context(|| format!("failed to resolve {}", file.display()))?;
         save_snapshot(file, &doc, &rc)?;
 
         if commit {
@@ -207,8 +213,11 @@ pub fn run(
     let message = message
         .ok_or_else(|| anyhow::anyhow!("message is required when --backlog-add is not used"))?;
 
-    let doc = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let doc = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "notify_command_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
 
     let components = element::parse(&doc)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
@@ -251,14 +260,8 @@ pub fn run(
         exchange.replace_content(&doc, &new_content)
     };
 
-    // Atomic write
-    let parent = file.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, new_doc.as_bytes())
-        .with_context(|| "failed to write temp file")?;
-    tmp.persist(file)
-        .with_context(|| format!("failed to rename temp file to {}", file.display()))?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
+        .with_context(|| format!("failed to write {}", file.display()))?;
 
     save_snapshot(file, &new_doc, &rc)?;
 
@@ -278,7 +281,11 @@ pub fn run(
 /// Add a single backlog item to a document's backlog component.
 /// Returns the assigned hash ID on success.
 fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Result<String> {
-    let content = std::fs::read_to_string(file).context("failed to read document")?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "notify_command_document",
+    )
+    .context("failed to resolve document")?;
     let components = element::parse(&content).context("failed to parse components")?;
     let comp = components
         .into_iter()
@@ -287,7 +294,7 @@ fn add_pending_item(file: &Path, item: &str, doc_id: &str, gated: bool) -> Resul
     let existing = &content[comp.open_end..comp.close_start];
     let (new_content, id) = backlog::op_add(existing, item, doc_id, gated)?;
     let new_doc = comp.replace_content(&content, &new_content);
-    std::fs::write(file, &new_doc)?;
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)?;
     Ok(id)
 }
 

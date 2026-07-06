@@ -13,6 +13,8 @@ name = "agent_doc_start_io"
 agent-doc-config = { path = "../agent-doc-config", version = "0.34.67" }
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.67" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.67" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
@@ -42,4 +44,5 @@ tmux-router = { path = "../../tmux-router", version = "0.3.13" }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.67" }
 tempfile = "3"

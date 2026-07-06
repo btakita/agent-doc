@@ -27,6 +27,21 @@ pub fn detect_required_continuation_with(
     queue_continuation::required_continuation(&content, snapshot_content.as_deref())
 }
 
+/// Detect whether already-resolved current document content requires queue
+/// continuation.
+pub fn detect_required_continuation_for_content_with(
+    file: &Path,
+    content: &str,
+    load_snapshot: impl FnOnce(&Path) -> Result<Option<String>>,
+    recycle_yield_pending: impl FnOnce(&Path) -> bool,
+) -> Result<Option<QueueContinuation>> {
+    if recycle_yield_pending(file) {
+        return Ok(None);
+    }
+    let snapshot_content = load_snapshot(file)?;
+    queue_continuation::required_continuation(content, snapshot_content.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

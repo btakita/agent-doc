@@ -11,6 +11,8 @@ name = "agent_doc_hooks_io"
 
 [dependencies]
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.67" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-lease-io = { path = "../agent-doc-lease-io", version = "0.34.67" }
 agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.34.67" }

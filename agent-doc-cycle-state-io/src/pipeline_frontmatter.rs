@@ -2,6 +2,8 @@ use anyhow::Result;
 use std::path::Path;
 
 pub trait PipelineFrontmatterEffects {
+    fn read_current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
     fn converge_or_disk_write(
         &self,
         file: &Path,
@@ -26,7 +28,7 @@ pub fn mirror_pipeline_frontmatter(
     state: &crate::CycleState,
 ) {
     if let Err(e) = (|| -> Result<()> {
-        let content = std::fs::read_to_string(file)?;
+        let content = effects.read_current_document_content(file, "pipeline_mirror")?;
         let updated = agent_doc_frontmatter::frontmatter::splice_pipeline_block(
             &content,
             &state.to_pipeline(),
@@ -47,7 +49,7 @@ pub fn mirror_pipeline_frontmatter(
 /// cycle transition through the injected editor-aware document convergence port.
 pub fn clear_pipeline_frontmatter(effects: &impl PipelineFrontmatterEffects, file: &Path) {
     if let Err(e) = (|| -> Result<()> {
-        let content = std::fs::read_to_string(file)?;
+        let content = effects.read_current_document_content(file, "pipeline_clear")?;
         if !content.contains("agent_doc_pipeline:") {
             return Ok(());
         }

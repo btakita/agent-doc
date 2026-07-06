@@ -31,6 +31,27 @@ use agent_doc_write_ipc_io::build_ipc_patches_json;
 // `content_ours_drops_operator_text` and `agent_doc_fs::preserve_dropped_operator_buffer`
 // remain available for diagnostics.
 
+fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+}
+
+fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+}
+
+fn resolve_document_content_for_write_mode(
+    file: &Path,
+    force_disk: bool,
+    current_source: &str,
+    disk_source: &str,
+) -> Result<String> {
+    if force_disk {
+        resolve_disk_document_content(file, disk_source)
+    } else {
+        resolve_current_document_content(file, current_source)
+    }
+}
+
 fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
         recover(
@@ -76,8 +97,13 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current_content = resolve_document_content_for_write_mode(
+        file,
+        flags.force_disk,
+        "write_append_current_content",
+        "write_append_force_disk_current_content",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
@@ -87,7 +113,11 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending_with_current_content(
+        file,
+        &response,
+        &current_content,
+    )?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -113,16 +143,13 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     // an editor is active, the CRDT relay owns the current text and disk is not
     // used as a substitute.
     let force_disk_editor_attached = flags.force_disk && editor_crdt_authority_attached(file);
-    let content_current = if force_disk_editor_attached {
-        std::fs::read_to_string(file).with_context(|| {
-            format!(
-                "force-disk editor-attached write failed to read current file {}",
-                file.display()
-            )
-        })?
-    } else {
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
-    };
+    let content_current = resolve_document_content_for_write_mode(
+        file,
+        flags.force_disk,
+        "write_append_merge_current_content",
+        "write_append_force_disk_merge_current_content",
+    )
+    .with_context(|| format!("failed to read current file {}", file.display()))?;
 
     let final_content = if content_current == base {
         // No edits — use our version directly
@@ -263,8 +290,13 @@ pub(crate) fn run_template(
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current_content = resolve_document_content_for_write_mode(
+        file,
+        flags.force_disk,
+        "write_template_current_content",
+        "write_template_force_disk_current_content",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     guard_stale_snapshot_recovery_only(
         file,
@@ -333,7 +365,11 @@ pub(crate) fn run_template(
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending_with_current_content(
+        file,
+        &response,
+        &current_content,
+    )?;
 
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
@@ -372,16 +408,13 @@ pub(crate) fn run_template(
     // use disk as the fallback replica. An explicit force-disk write against an
     // attached editor is the deliberate recovery bypass and reads the visible file
     // instead of asking the relay to prove the editor model first.
-    let content_current = if force_disk_editor_attached {
-        std::fs::read_to_string(file).with_context(|| {
-            format!(
-                "force-disk editor-attached write failed to read current file {}",
-                file.display()
-            )
-        })?
-    } else {
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
-    };
+    let content_current = resolve_document_content_for_write_mode(
+        file,
+        flags.force_disk,
+        "write_template_merge_current_content",
+        "write_template_force_disk_merge_current_content",
+    )
+    .with_context(|| format!("failed to read current file {}", file.display()))?;
 
     // Recompute the merged + normalized content for a given on-disk `current`.
     // Factored so the reconcile loop below can re-merge against a fresh disk
@@ -618,8 +651,13 @@ pub(crate) fn run_stream(
         anyhow::bail!(EMPTY_RESPONSE_ERROR);
     }
 
-    let current_content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let current_content = resolve_document_content_for_write_mode(
+        file,
+        force_disk,
+        "write_stream_current_content",
+        "write_stream_force_disk_current_content",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
     if guard_stale_snapshot_recovery_only(
         file,
@@ -742,12 +780,21 @@ pub(crate) fn run_stream(
     }
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending_with_current_content(
+        file,
+        &response,
+        &current_content,
+    )?;
 
     // Warn when patches target a file with no template components
     if patches.is_empty() && !unmatched.trim().is_empty() {
-        let current = std::fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
+        let current = resolve_document_content_for_write_mode(
+            file,
+            force_disk,
+            "write_stream_empty_patch_component_check",
+            "write_stream_force_disk_empty_patch_component_check",
+        )
+        .with_context(|| format!("failed to read {}", file.display()))?;
         let comps = agent_doc_element::element::parse(&current).unwrap_or_default();
         if comps.is_empty() {
             eprintln!(
@@ -1074,16 +1121,13 @@ pub(crate) fn run_stream(
     // use disk as the fallback replica. An explicit force-disk write against an
     // attached editor is the deliberate recovery bypass and reads the visible file
     // instead of asking the relay to prove the editor model first.
-    let content_current = if force_disk_editor_attached {
-        std::fs::read_to_string(file).with_context(|| {
-            format!(
-                "force-disk editor-attached write failed to read current file {}",
-                file.display()
-            )
-        })?
-    } else {
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content
-    };
+    let content_current = resolve_document_content_for_write_mode(
+        file,
+        force_disk,
+        "write_stream_merge_current_content",
+        "write_stream_force_disk_merge_current_content",
+    )
+    .with_context(|| format!("failed to read current file {}", file.display()))?;
 
     // Recompute the CRDT-merged + normalized content (and its encoded state)
     // for a given on-disk `current`. Factored so the reconcile loop below can
@@ -1437,10 +1481,9 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     // #rtwwire rung 3b: the IPC write path normalizes/parses patches against the
     // authoritative current document. If an editor is active, source it from the
     // CRDT relay; if no editor is active, use disk as the fallback replica.
-    let current_content = match agent_doc_document_realtime_io::try_resolve_current_doc_from_file(
-        file,
-    ) {
-        Ok(current) => current.content,
+    let current_content = match resolve_current_document_content(file, "write_ipc_current_content")
+    {
+        Ok(current) => current,
         Err(resolve_err) => {
             if let Err(retain_err) =
                 retain_ipc_patch_for_editor_authority_retry(file, baseline, &response)
@@ -1501,7 +1544,11 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     let unmatched = normalized.unmatched;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending(file, &response)?;
+    agent_doc_repair_io::pending::save_pending_with_current_content(
+        file,
+        &response,
+        &current_content,
+    )?;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.
     template_io::enforce_no_replace_pending(&patches, flags.allow_replace_pending)?;
@@ -1633,8 +1680,9 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     while start.elapsed() < timeout {
         if !patch_file.exists() {
             // Plugin consumed the patch — update snapshot from current file
-            let content = std::fs::read_to_string(file)
-                .with_context(|| format!("failed to read {} after IPC", file.display()))?;
+            let content =
+                resolve_current_document_content(file, "write_explicit_file_ipc_consumed")
+                    .with_context(|| format!("failed to read {} after IPC", file.display()))?;
             let expected_response =
                 agent_doc_template::response_materialization::response_materialization_probe(
                     &patches, &unmatched,
@@ -1851,7 +1899,19 @@ pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
         anyhow::bail!("no patch blocks or content found in response");
     }
 
-    agent_doc_repair_io::pending::save_pending(file, &retained_response)?;
+    if let Err(err) = agent_doc_repair_io::pending::save_pending(file, &retained_response) {
+        eprintln!(
+            "[write] warning: failed to save pending response for editor-authority retry: {err}"
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_retry_pending_save_failed file={} error={} recovery=retain_patch",
+                file.display(),
+                err
+            ),
+        );
+    }
 
     let canonical = file.canonicalize()?;
     let hash = agent_doc_fs::document_state_hash(file)?;
@@ -1866,7 +1926,9 @@ pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
     } else {
         unmatched.trim()
     };
-    let disk_reference = std::fs::read_to_string(file).unwrap_or_default();
+    let disk_reference =
+        resolve_disk_document_content(file, "write_file_ipc_payload_disk_reference")
+            .unwrap_or_default();
     let mut payload = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "patches": ipc_patches,
@@ -2087,7 +2149,7 @@ fn strip_exchange_boundary_lines(content: &str) -> String {
 /// Used by `repair` to apply orphaned responses.
 pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let response = agent_doc_turn::response_text::strip_assistant_heading(response);
-    let content = std::fs::read_to_string(file)
+    let content = resolve_current_document_content(file, "apply_append_from_string")
         .with_context(|| format!("failed to read {}", file.display()))?;
     let use_crdt = content_uses_crdt_write(&content);
 
@@ -2105,7 +2167,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     let doc_lock = acquire_doc_lock(file)?;
 
     let content_current =
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
+        resolve_current_document_content(file, "apply_append_from_string_current_content")?;
 
     let final_content = merge_recovery_content(
         file,
@@ -2142,8 +2204,13 @@ pub fn apply_template_from_string_with_options(
     response: &str,
     options: TemplateApplyOptions,
 ) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = resolve_document_content_for_write_mode(
+        file,
+        options.force_disk,
+        "apply_template_from_string",
+        "apply_template_from_string_force_disk_initial",
+    )
+    .with_context(|| format!("failed to read {}", file.display()))?;
     let use_crdt = content_uses_crdt_write(&content);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let mut response = response.to_string();
@@ -2188,8 +2255,12 @@ pub fn apply_template_from_string_with_options(
 
     let doc_lock = acquire_doc_lock(file)?;
 
-    let content_current =
-        agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content;
+    let content_current = resolve_document_content_for_write_mode(
+        file,
+        options.force_disk,
+        "apply_template_from_string_current_content",
+        "apply_template_from_string_force_disk_current_content",
+    )?;
 
     let final_content = if let Some(repaired_current) = adopt_current_response_without_duplication(
         file,

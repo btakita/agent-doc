@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_lint_io"
 
 [dependencies]
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.67" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
 agent-doc-element-registry = { path = "../agent-doc-element-registry", version = "0.34.67" }

@@ -61,6 +61,21 @@ pub fn open_tracked_work_ids(content: &str) -> Vec<String> {
     agent_doc_element_backlog::backlog::open_tracked_work_ids_in_content(content)
 }
 
+pub fn tracked_work_maintenance_required(content: &str) -> bool {
+    let Ok(components) = element::parse(content) else {
+        return false;
+    };
+
+    components
+        .iter()
+        .filter(|component| is_tracked_work_component(&component.name))
+        .any(|component| {
+            let (_, items, _) =
+                agent_doc_element_backlog::backlog::parse_items(component.content(content));
+            items.iter().any(|item| item.is_done())
+        })
+}
+
 /// Open (`[ ]`/gated, not done) ids that live specifically in the live
 /// `agent:backlog` component.
 pub fn open_backlog_ids(content: &str) -> Vec<String> {

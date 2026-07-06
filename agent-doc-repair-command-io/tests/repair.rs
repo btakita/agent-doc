@@ -1877,6 +1877,50 @@ mod tests {
     }
 
     #[test]
+    fn recover_replays_projected_committed_capture_when_capture_sidecar_missing() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted.*\n\n",
+            "❯ #code-review\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: projected code review - gpt-5\n\n",
+            "Recovered from projection.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(content),
+            Some(content),
+        )
+        .unwrap();
+        let capture_path =
+            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap();
+        std::fs::remove_file(capture_path).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("❯ #code-review"));
+        assert!(result.contains("### Re: projected code review - gpt-5"));
+        assert!(result.contains("Recovered from projection."));
+    }
+
+    #[test]
     fn recover_repairs_escaped_exchange_tail_when_response_already_present() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

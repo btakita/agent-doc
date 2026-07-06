@@ -3,8 +3,10 @@ use std::path::Path;
 
 /// Print the full document or a single named component's body to stdout.
 pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "read_command_document",
+    )?;
 
     match component {
         None => {
@@ -62,6 +64,6 @@ mod tests {
     #[test]
     fn read_missing_file_errors() {
         let err = run(Path::new("/tmp/does-not-exist-read-test.md"), None).unwrap_err();
-        assert!(err.to_string().contains("failed to read"));
+        assert!(err.to_string().contains("read_command_document"));
     }
 }

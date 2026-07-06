@@ -1,6 +1,9 @@
 //! Write IPC transport: socket-first delivery with durable file-IPC fallback.
 
-use crate::{IpcResult, build_ipc_patches_json, patch_response_headings_already_in_head};
+use crate::{
+    IpcResult, build_ipc_patches_json, ipc_document_content,
+    patch_response_headings_already_in_head, projected_or_sidecar_cycle_id,
+};
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
@@ -123,11 +126,7 @@ fn log_exchange_write_diagnostic(
         .unwrap_or(0);
     let normalized_prefix_delta = after_prefix_count.saturating_sub(before_prefix_count);
     let prompt_text_normalized = normalized_prefix_delta > 0;
-    let cycle_id = agent_doc_cycle_state_io::load(file)
-        .ok()
-        .flatten()
-        .map(|state| state.cycle_id)
-        .unwrap_or_else(|| "-".to_string());
+    let cycle_id = projected_or_sidecar_cycle_id(file).unwrap_or_else(|| "-".to_string());
     let writer_pid = std::process::id();
     let writer_exe = std::env::current_exe()
         .ok()
@@ -203,7 +202,12 @@ fn try_ipc_inner(
     let patch_id = reuse_patch_id
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let ipc_before_content = std::fs::read_to_string(file).ok();
+    let ipc_before_content = ipc_document_content(
+        file,
+        "try_ipc_before_content",
+        "try_ipc_before_content_disk_fallback",
+    )
+    .ok();
 
     // `#turnsaferecycle` Goal 3 — shared stale-supervisor short-circuit. Before any
     // proof-retry work, if the hosting supervisor is running a stale binary, skip the
@@ -250,7 +254,12 @@ fn try_ipc_inner(
                 ),
             );
             let snapshot_content = agent_doc_snapshot_io::load(file)?;
-            let file_content_for_state = std::fs::read_to_string(file).ok();
+            let file_content_for_state = ipc_document_content(
+                file,
+                "try_ipc_mid_turn_cycle_state_current",
+                "try_ipc_mid_turn_cycle_state_disk_fallback",
+            )
+            .ok();
             let _ = agent_doc_cycle_state_io::start_preflight(
                 file,
                 snapshot_content.as_deref(),
@@ -355,8 +364,8 @@ fn try_ipc_inner(
                 ));
         }
         socket_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-        if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
-            socket_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+        if let Some(cycle_id) = projected_or_sidecar_cycle_id(file) {
+            socket_payload["cycle_id"] = serde_json::Value::String(cycle_id);
         }
         if let Some(yaml) = frontmatter_yaml {
             socket_payload["frontmatter"] = serde_json::Value::String(yaml.to_string());
@@ -894,8 +903,8 @@ fn try_ipc_inner(
             ));
     }
     ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    if let Ok(Some(ref cs)) = agent_doc_cycle_state_io::load(file) {
-        ipc_payload["cycle_id"] = serde_json::Value::String(cs.cycle_id.clone());
+    if let Some(cycle_id) = projected_or_sidecar_cycle_id(file) {
+        ipc_payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
 
     if let Some(yaml) = frontmatter_yaml {
@@ -989,7 +998,11 @@ fn try_ipc_inner(
         && patches
             .iter()
             .any(|patch| patch.content.contains("### Re:"))
-        && let Ok(current) = std::fs::read_to_string(file)
+        && let Ok(current) = ipc_document_content(
+            file,
+            "file_ipc_fallback_dedupe_current",
+            "file_ipc_fallback_dedupe_disk_fallback",
+        )
         && let Ok(after_apply) = agent_doc_template_io::apply_patches(&current, patches, "", file)
         && strip_boundary_for_dedup(&after_apply) == strip_boundary_for_dedup(&current)
     {
@@ -1051,7 +1064,12 @@ pub(crate) fn write_ipc_and_poll(
     patch_count: usize,
     options: IpcPollOptions<'_>,
 ) -> Result<bool> {
-    let before_content = std::fs::read_to_string(doc_file).ok();
+    let before_content = ipc_document_content(
+        doc_file,
+        "write_ipc_poll_before_content",
+        "write_ipc_poll_before_content_disk_fallback",
+    )
+    .ok();
     let delivered = agent_doc_write_converge_io::write_file_ipc_and_poll_delivery(
         effects,
         patch_file,

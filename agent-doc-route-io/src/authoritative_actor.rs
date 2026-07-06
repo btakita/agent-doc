@@ -1,6 +1,6 @@
 //! Authoritative actor dispatch target and controller authorization I/O.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -137,8 +137,10 @@ pub fn managed_capability_proof_status(
     session_id: &str,
     harness: &HarnessConfig,
 ) -> Result<ManagedCapabilityProofStatus> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_managed_capability_proof_status",
+    )?;
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let fm = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
@@ -389,7 +391,10 @@ pub fn load_authoritative_actor_binding(
 }
 
 fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bool {
-    let Ok(content) = std::fs::read_to_string(file) else {
+    let Ok(content) = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "route_authoritative_expected_harness",
+    ) else {
         return false;
     };
     let Ok((fm, _)) = agent_doc_frontmatter::frontmatter::parse(&content) else {
@@ -1207,7 +1212,8 @@ mod tests {
             | IpcMethod::ReplicaPull { .. }
             | IpcMethod::ReplicaAck { .. }
             | IpcMethod::ReplicaAwareness { .. }
-            | IpcMethod::CrdtCheckpoint { .. } => IpcResponse::ok_empty(),
+            | IpcMethod::CrdtCheckpoint { .. }
+            | IpcMethod::CrdtCurrentText { .. } => IpcResponse::ok_empty(),
         })
         .unwrap();
 

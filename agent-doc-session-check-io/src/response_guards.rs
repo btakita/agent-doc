@@ -297,12 +297,7 @@ pub fn check_committed_without_response_body_guard(
     let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(GuardResult::None);
     };
-    let raw_state = agent_doc_cycle_state_io::load(file)?;
-    let detail_last_event = raw_state
-        .as_ref()
-        .filter(|raw| raw.cycle_id == state.cycle_id && raw.phase == state.phase)
-        .map(|raw| raw.last_event.as_str())
-        .unwrap_or(state.last_event.as_str());
+    let detail_last_event = state.last_event.as_str();
     let committed_exchange_has_body = committed_exchange_has_response_body(file)?;
     let decision = agent_doc_turn::closeout_guard::committed_without_response_body_decision(
         agent_doc_turn::closeout_guard::CommittedWithoutResponseBodyEvidence {

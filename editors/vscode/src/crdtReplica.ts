@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 import { NativeReplicaNode } from './native';
@@ -47,7 +46,7 @@ export interface ReplicaDocumentSnapshot {
     text: string;
 }
 
-interface SupervisorResponse {
+interface ControllerResponse {
     ok: boolean;
     data?: unknown;
     error?: string;
@@ -103,7 +102,7 @@ export function shouldApplyRemoteUpdate(update: ReplicaRemoteUpdate, clientId: n
     return update.origin !== clientId;
 }
 
-export function parseRegisterResponse(response: SupervisorResponse): ReplicaRegisterAck | null {
+export function parseRegisterResponse(response: ControllerResponse): ReplicaRegisterAck | null {
     if (!response.ok || !isRecord(response.data)) return null;
     const clientId = asNumber(response.data.client_id);
     if (clientId == null) return null;
@@ -113,7 +112,7 @@ export function parseRegisterResponse(response: SupervisorResponse): ReplicaRegi
     };
 }
 
-export function parsePullResponse(response: SupervisorResponse): ReplicaRemoteUpdate[] {
+export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUpdate[] {
     if (!response.ok || !isRecord(response.data) || !Array.isArray(response.data.updates)) return [];
     return response.data.updates.flatMap((entry): ReplicaRemoteUpdate[] => {
         if (!isRecord(entry)) return [];
@@ -130,7 +129,7 @@ export function parsePullResponse(response: SupervisorResponse): ReplicaRemoteUp
 /**
  * D2: the outcome of a `replica_pull` — a normal additive-delta batch, or a
  * **replace** delivery (out-of-band deletion re-bootstrap) whose text the editor
- * installs into its buffer wholesale instead of CRDT-merging. The supervisor
+ * installs into its buffer wholesale instead of CRDT-merging. The controller
  * decides which (FFI-first); the plugin is a thin consumer. Mirrors the JetBrains
  * `ReplicaPullDelivery` (specs/14-realtime-workflow.md § Editor Parity Requirement).
  */
@@ -138,7 +137,7 @@ export type ReplicaPullDelivery =
     | { kind: 'deltas'; updates: ReplicaRemoteUpdate[] }
     | { kind: 'replace'; text: string };
 
-export function parsePullDelivery(response: SupervisorResponse): ReplicaPullDelivery {
+export function parsePullDelivery(response: ControllerResponse): ReplicaPullDelivery {
     if (
         response.ok &&
         isRecord(response.data) &&
@@ -150,47 +149,30 @@ export function parsePullDelivery(response: SupervisorResponse): ReplicaPullDeli
     return { kind: 'deltas', updates: parsePullResponse(response) };
 }
 
-export class SupervisorSocketReplicaTransport implements ReplicaTransport {
-    private cachedSocket: string | null = null;
-
+export class ControllerSocketReplicaTransport implements ReplicaTransport {
     constructor(
         private readonly projectRoot: string,
         private readonly logger: ReplicaLogger = noopLogger,
     ) {}
 
     async register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null> {
-        const response = await this.send({
-            method: 'replica_register',
-            file: filePath,
-            identity,
-        });
+        const response = await this.send(this.controllerRequest('replica_register', filePath, identity));
         return response ? parseRegisterResponse(response) : null;
     }
 
     async broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void> {
-        await this.send({
-            method: 'replica_update',
-            file: filePath,
-            identity,
+        await this.send(this.controllerRequest('replica_update', filePath, identity, {
             update_b64: Buffer.from(update).toString('base64'),
-        });
+        }));
     }
 
     async pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]> {
-        const response = await this.send({
-            method: 'replica_pull',
-            file: filePath,
-            identity,
-        });
+        const response = await this.send(this.controllerRequest('replica_pull', filePath, identity));
         return response ? parsePullResponse(response) : [];
     }
 
     async pullDelivery(filePath: string, identity: string): Promise<ReplicaPullDelivery> {
-        const response = await this.send({
-            method: 'replica_pull',
-            file: filePath,
-            identity,
-        });
+        const response = await this.send(this.controllerRequest('replica_pull', filePath, identity));
         return response ? parsePullDelivery(response) : { kind: 'deltas', updates: [] };
     }
 
@@ -200,61 +182,57 @@ export class SupervisorSocketReplicaTransport implements ReplicaTransport {
         patchId: string,
         generation: number,
     ): Promise<boolean> {
-        const response = await this.send({
-            method: 'replica_ack',
-            file: filePath,
-            identity,
+        const response = await this.send(this.controllerRequest('replica_ack', filePath, identity, {
             patch_id: patchId,
             generation,
-        });
+        }));
         return !!(response?.ok && isRecord(response.data) && response.data.acknowledged === true);
     }
 
     async deregister(filePath: string, identity: string): Promise<void> {
-        await this.send({
-            method: 'replica_deregister',
+        await this.send(this.controllerRequest('replica_deregister', filePath, identity));
+    }
+
+    private controllerRequest(
+        method: string,
+        filePath: string,
+        identity: string,
+        fields: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+        return {
+            command: 'crdt_replica',
             file: filePath,
-            identity,
-        });
+            diagnostic_payload: JSON.stringify({
+                method,
+                identity,
+                source: 'vscode_plugin',
+                ...fields,
+            }),
+        };
     }
 
-    private async send(request: Record<string, unknown>): Promise<SupervisorResponse | null> {
-        for (const socketPath of this.socketCandidates()) {
-            try {
-                const response = await this.sendToSocket(socketPath, request);
-                this.cachedSocket = socketPath;
-                return response;
-            } catch (e: any) {
-                if (socketPath === this.cachedSocket) this.cachedSocket = null;
-                this.logger.debug(`[crdt-replica] supervisor socket ${socketPath} unavailable: ${e?.message ?? e}`);
-            }
-        }
-        return null;
-    }
-
-    private socketCandidates(): string[] {
-        const dir = path.join(this.projectRoot, '.agent-doc', 'supervisor');
-        let discovered: string[] = [];
+    private async send(request: Record<string, unknown>): Promise<ControllerResponse | null> {
+        const socketPath = this.controllerSocket();
         try {
-            discovered = fs.readdirSync(dir)
-                .filter((name) => name.endsWith('.sock'))
-                .map((name) => path.join(dir, name))
-                .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-        } catch {
-            discovered = [];
+            return await this.sendToSocket(socketPath, request);
+        } catch (e: any) {
+            this.logger.debug(`[crdt-replica] controller socket ${socketPath} unavailable: ${e?.message ?? e}`);
+            return null;
         }
-        const cached = this.cachedSocket && fs.existsSync(this.cachedSocket) ? this.cachedSocket : null;
-        return cached ? [cached, ...discovered.filter((candidate) => candidate !== cached)] : discovered;
     }
 
-    private sendToSocket(socketPath: string, request: Record<string, unknown>): Promise<SupervisorResponse> {
+    private controllerSocket(): string {
+        return path.join(this.projectRoot, '.agent-doc', 'controller.sock');
+    }
+
+    private sendToSocket(socketPath: string, request: Record<string, unknown>): Promise<ControllerResponse> {
         return new Promise((resolve, reject) => {
             const socket = net.createConnection(socketPath);
             let buffer = '';
             let settled = false;
             let timeout: ReturnType<typeof setTimeout> | undefined;
 
-            const finish = (err: Error | null, response?: SupervisorResponse) => {
+            const finish = (err: Error | null, response?: ControllerResponse) => {
                 if (settled) return;
                 settled = true;
                 if (timeout) clearTimeout(timeout);
@@ -270,13 +248,13 @@ export class SupervisorSocketReplicaTransport implements ReplicaTransport {
                     return;
                 }
                 try {
-                    finish(null, JSON.parse(line) as SupervisorResponse);
+                    finish(null, JSON.parse(line) as ControllerResponse);
                 } catch (e: any) {
-                    finish(new Error(`invalid supervisor response: ${e?.message ?? e}`));
+                    finish(new Error(`invalid controller response: ${e?.message ?? e}`));
                 }
             };
 
-            timeout = setTimeout(() => finish(new Error('timeout waiting for supervisor response')), 1_000);
+            timeout = setTimeout(() => finish(new Error('timeout waiting for controller response')), 1_000);
             socket.setEncoding('utf8');
             socket.once('connect', () => {
                 socket.write(`${JSON.stringify(request)}\n`);
@@ -385,7 +363,7 @@ export class CrdtReplicaManager {
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
         this.logger = options.logger ?? noopLogger;
-        this.transport = options.transport ?? new SupervisorSocketReplicaTransport(options.projectRoot, this.logger);
+        this.transport = options.transport ?? new ControllerSocketReplicaTransport(options.projectRoot, this.logger);
         this.nodeFactory = options.nodeFactory ?? (() => new NativeReplicaNode(options.projectRoot));
     }
 

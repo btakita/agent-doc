@@ -291,7 +291,7 @@ pub fn debug(file: Option<&Path>, json: bool) -> Result<()> {
     let mut rows: Vec<serde_json::Value> = Vec::with_capacity(store.len());
     for (document_id, record) in &store {
         let doc_path = Path::new(document_id);
-        let cycle_phase = agent_doc_cycle_state_io::load(doc_path)
+        let cycle_phase = agent_doc_cycle_state_io::load_with_closeout_projection(doc_path)
             .ok()
             .flatten()
             .map(|s| phase_str(s.phase));
@@ -849,8 +849,19 @@ fn reconcile_idle_projection_before_clear(
             // defer the clear to the next inter-iteration idle gap instead of
             // killing the in-flight turn. A busy pane with no active loop keeps
             // the existing fail-closed block — there is nothing to preempt.
-            let queue_active = agent_doc_queue_io::queue_continuation::detect(&ctx.canonical_file)
-                .unwrap_or(None)
+            let queue_active =
+                agent_doc_document_realtime_io::try_resolve_current_document_content(
+                    &ctx.canonical_file,
+                    "session_actor_busy_clear_queue_continuation",
+                )
+                .ok()
+                .and_then(|content| {
+                    agent_doc_queue_io::queue_continuation::detect_for_content(
+                        &ctx.canonical_file,
+                        &content,
+                    )
+                    .unwrap_or(None)
+                })
                 .is_some();
             let deferred_clear_pending =
                 agent_doc_controller_io::project_controller::queue_context_clear_deferred_operator_for_file(
@@ -1116,7 +1127,7 @@ fn supervisor_runtime_applies_to_record(ctx: &SessionContext) -> bool {
 }
 
 fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load(file)? else {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
         return Ok(false);
     };
     if state.phase != agent_doc_turn::CyclePhase::Committed {
@@ -1125,8 +1136,11 @@ fn document_dirty_after_committed_cycle(file: &Path) -> Result<bool> {
     let Some(hash) = state.file_hash.as_deref() else {
         return Ok(false);
     };
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "session_actor_dirty_check_document",
+    )
+    .with_context(|| format!("failed to resolve {}", file.display()))?;
     Ok(agent_doc_hash::content_hash(&content) != hash)
 }
 
@@ -4363,6 +4377,35 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         std::fs::write(&doc, format!("{committed}\nnew prompt\n")).unwrap();
 
         assert!(document_dirty_after_committed_cycle(&doc).unwrap());
+    }
+
+    #[test]
+    fn document_dirty_after_committed_cycle_prefers_terminal_projection_over_stale_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/doc.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let committed = "---\nagent_doc_session: session-1\n---\n\nDone.\n";
+        std::fs::write(&doc, committed).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
+        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
+            .unwrap()
+            .expect("cycle state path");
+        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
+
+        assert!(!document_dirty_after_committed_cycle(&doc).unwrap());
     }
 
     #[test]

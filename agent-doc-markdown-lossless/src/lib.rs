@@ -26,7 +26,72 @@
 //! did. A semantic AST that dropped or normalized bytes could not pass this.
 
 use agent_doc_markdown_ast::overlay::{Component, components};
-use lazily::{LeafKind, LosslessTreeCrdt, NodeSeed, TreeNodeId};
+use lazily::{LeafKind, LosslessTreeCrdt, NodeSeed, TreeNodeId, TreeUpdate, TreeVersionFrontier};
+use serde::{Deserialize, Serialize};
+
+/// The peer id every agent-doc projection replica is built under. A durable
+/// projection is a single-replica record, so the peer is fixed; cross-replica
+/// identity is negotiated later at the editor/relay layer.
+const PROJECTION_PEER: u64 = 1;
+
+/// A durable, serde-serializable projection of a session document as a lossless
+/// tree (`#lzlosstree` Phase 3). It carries the full op-stream (so the tree — and
+/// therefore the exact document text — can be rebuilt) plus the SHA-256 of the
+/// rendered text, which is the cheap staleness proof: a projection may only be
+/// trusted to reconstruct current text when its `rendered_sha256` still matches the
+/// editor-visible document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LosslessProjection {
+    /// Every op the projected tree holds — a full snapshot, replayable onto a fresh
+    /// replica. `diff` against the empty frontier yields all ops.
+    pub ops: TreeUpdate,
+    /// SHA-256 of `render(tree)` == the source document, for staleness proof.
+    pub rendered_sha256: String,
+    /// Byte length of the rendered document (cheap pre-check before hashing).
+    pub rendered_len: usize,
+}
+
+impl LosslessProjection {
+    /// Whether this projection still describes `visible_text` — the frontier/hash
+    /// proof the rollout plan requires before a projection may reconstruct current
+    /// document text. A stale projection (hash mismatch) must never override the
+    /// editor-visible document.
+    pub fn is_current_for(&self, visible_text: &str) -> bool {
+        self.rendered_len == visible_text.len()
+            && self.rendered_sha256 == agent_doc_hash::content_hash(visible_text)
+    }
+}
+
+/// Build a durable projection of `doc`: parse it losslessly, snapshot the full
+/// op-stream, and record the rendered-text hash. `restore(project(doc)) == doc` by
+/// construction, since the tree renders back to the source.
+pub fn project(doc: &str) -> LosslessProjection {
+    let tree = parse(doc);
+    LosslessProjection {
+        ops: tree.diff(&TreeVersionFrontier::default()),
+        rendered_sha256: agent_doc_hash::content_hash(doc),
+        rendered_len: doc.len(),
+    }
+}
+
+/// Rebuild the document text from a durable projection by replaying its op-stream
+/// onto a fresh replica and rendering. This is the Phase 3 recovery path: current
+/// text can be reconstructed from the projection alone.
+pub fn restore(projection: &LosslessProjection) -> String {
+    let mut tree = LosslessTreeCrdt::new(PROJECTION_PEER);
+    tree.apply_update(&projection.ops);
+    tree.render()
+}
+
+/// Serialize a projection to durable JSON bytes for on-disk storage.
+pub fn projection_to_bytes(projection: &LosslessProjection) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(projection)
+}
+
+/// Parse a projection from durable JSON bytes.
+pub fn projection_from_bytes(bytes: &[u8]) -> Result<LosslessProjection, serde_json::Error> {
+    serde_json::from_slice(bytes)
+}
 
 fn leaf(kind: LeafKind, text: &str) -> NodeSeed {
     NodeSeed::Leaf {
@@ -717,6 +782,50 @@ mod tests {
                 "lossless-tree merge diverged from merge_by_component\nours={ours:?}\ntheirs={theirs:?}"
             );
         }
+    }
+
+    #[test]
+    fn projection_round_trips_the_corpus_and_survives_serialization() {
+        for (name, doc) in corpus() {
+            let projection = project(doc);
+            // Recovery rebuilds the exact document text from the projection alone.
+            assert_eq!(restore(&projection), doc, "{name}: restore != source");
+            // The projection proves it describes the current document.
+            assert!(projection.is_current_for(doc), "{name}: should be current");
+            // Durable bytes round-trip losslessly, and still reconstruct the doc.
+            let bytes = projection_to_bytes(&projection).expect("serialize");
+            let restored = projection_from_bytes(&bytes).expect("deserialize");
+            assert_eq!(
+                restored.rendered_sha256, projection.rendered_sha256,
+                "{name}: hash"
+            );
+            assert_eq!(
+                restored.rendered_len, projection.rendered_len,
+                "{name}: len"
+            );
+            assert_eq!(restore(&restored), doc, "{name}: restore after serde");
+        }
+    }
+
+    #[test]
+    fn projection_staleness_guard_rejects_a_moved_on_document() {
+        let doc = "<!-- agent:status -->\noriginal\n<!-- /agent:status -->\n";
+        let projection = project(doc);
+        assert!(projection.is_current_for(doc));
+        // The editor-visible document moved forward: the projection is now stale and
+        // must not be trusted to override the visible text.
+        let moved_on = "<!-- agent:status -->\nedited by operator\n<!-- /agent:status -->\n";
+        assert!(
+            !projection.is_current_for(moved_on),
+            "stale projection must not claim to describe moved-on text"
+        );
+        // A same-length but different edit is also caught by the hash (not just len).
+        let same_len_diff = "<!-- agent:status -->\noriginaL\n<!-- /agent:status -->\n";
+        assert_eq!(same_len_diff.len(), doc.len());
+        assert!(
+            !projection.is_current_for(same_len_diff),
+            "hash must catch same-len edits"
+        );
     }
 
     #[test]

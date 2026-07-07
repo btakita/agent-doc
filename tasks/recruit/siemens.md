@@ -54,8 +54,10 @@ Created `resume/profiles/siemens.toml` and built **`resume/BrianTakita-siemens.p
 - **honk.com** — reframed as a large-scale production auto-buyer portal (USAA + WSJ)
 - **Milyoni** — real-time video social events: concerts at high concurrency + VOD
 
-12/12 resume tests pass. Committed to the `resume` submodule locally (not pushed). Note: `search-index.json` is stale for the new strings — the installed `agent-resume` is old and lacks the `search-index` subcommand; the GitHub Pages Action regenerates it (and the PDFs) on push.
-<!-- agent:boundary:6338dc2d -->
+12/12 resume tests pass. Committed to the `resume` submodule locally (not pushed). Note: `search-index.json` is stale for the new strings — the installed `agent-resume` is old and lacks the `search-index` subcommand; the GitHub Pages Actio
+
+Please draft a short linkedin reply to accept.n regenerates it (and the PDFs) on push.
+<!-- agent:boundary:dd765735 -->
 <!-- /agent:exchange -->
 
 ## Queue

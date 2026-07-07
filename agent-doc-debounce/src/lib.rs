@@ -314,9 +314,21 @@ pub enum LosslessTreeNegotiation {
 }
 
 impl LosslessTreeNegotiation {
-    /// Whether tree update frames may be used as the live authority.
+    /// Whether tree update frames may be used as the live authority (Phase 5). The
+    /// write path sends the editor a tree projection frame (rendered via the plugin's
+    /// `losslessTreeRender`) instead of a text/component patch only when this is true.
     pub fn tree_frames_allowed(self) -> bool {
         matches!(self, LosslessTreeNegotiation::Supported)
+    }
+
+    /// Whether the flat text-CRDT relay projection is still required for this session
+    /// (Phase 6). The flat relay may be retired **only** for a session whose editor is
+    /// tree-capable and therefore live-authoritative through frames; every other
+    /// session (unsupported editor, or none) still needs the flat projection as the
+    /// compatibility / detached-recovery path. This is the deprecation gate, kept
+    /// conservative: `Supported` is the sole case that can skip the flat relay.
+    pub fn flat_relay_required(self) -> bool {
+        !self.tree_frames_allowed()
     }
 }
 
@@ -1649,6 +1661,14 @@ mod tests {
             LosslessTreeNegotiation::Supported
         );
         assert!(LosslessTreeNegotiation::Supported.tree_frames_allowed());
+
+        // Phase 5/6 gates: only a Supported session is live-authoritative through
+        // frames and may retire the flat relay; every other case keeps it.
+        assert!(!LosslessTreeNegotiation::Supported.flat_relay_required());
+        assert!(LosslessTreeNegotiation::UnsupportedEditor.flat_relay_required());
+        assert!(LosslessTreeNegotiation::NoEditor.flat_relay_required());
+        assert!(!LosslessTreeNegotiation::UnsupportedEditor.tree_frames_allowed());
+        assert!(!LosslessTreeNegotiation::NoEditor.tree_frames_allowed());
     }
 
     fn wait_for_typing_indicator(file: &str, debounce_ms: u64) {

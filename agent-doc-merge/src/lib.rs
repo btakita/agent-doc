@@ -20,6 +20,16 @@ pub use document_cell::{
 };
 pub use frontmatter_crdt::merge_contents_crdt;
 
+/// Re-exports of the lossless-tree durable projection surface (`#lzlosstree`), so
+/// the root crate's FFI layer — which already depends on `agent-doc-merge` but not
+/// on `agent-doc-markdown-lossless` directly — can expose tree-frame exchange to
+/// editor plugins without a new direct dependency.
+pub mod lossless_tree {
+    pub use agent_doc_markdown_lossless::{
+        LosslessProjection, project, projection_from_bytes, projection_to_bytes, restore,
+    };
+}
+
 use document_cell_merge::AckRequest;
 
 /// Merge implementation to use for a pure three-way merge.

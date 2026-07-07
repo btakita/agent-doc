@@ -162,6 +162,10 @@ function resetBindings(): void {
     _admin_handoff_json = null;
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
+    _lossless_tree_capability = null;
+    _lossless_tree_project = null;
+    _lossless_tree_render = null;
+    _lossless_tree_projection_current = null;
     _document_changed = null;
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
@@ -195,9 +199,14 @@ const EDITOR_PLUGIN_KIND = 'vscode';
 const EDITOR_PLUGIN_VERSION = '0.2.40';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
+// #lzlosstree Phase 4: advertise that this plugin can exchange lossless-tree frames
+// (it binds losslessTreeRender/Project). Kept in sync with the binary-side
+// agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY.
+const LOSSLESS_TREE_CRDT_CAPABILITY = 'lossless_tree_crdt_v1';
 const EDITOR_CAPABILITIES = [
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
     LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+    LOSSLESS_TREE_CRDT_CAPABILITY,
 ].join(',');
 
 function findLibrary(projectRoot?: string): string | null {
@@ -338,6 +347,11 @@ let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
+// #lzlosstree Phase 4: lossless-tree frame exchange.
+let _lossless_tree_capability: any = null;
+let _lossless_tree_project: any = null;
+let _lossless_tree_render: any = null;
+let _lossless_tree_projection_current: any = null;
 let _document_changed: any = null;
 let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
@@ -441,6 +455,10 @@ function bindFunctions(): void {
         _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
+    _lossless_tree_capability = lib.func('agent_doc_lossless_tree_capability', 'char*', []);
+    _lossless_tree_project = lib.func('agent_doc_lossless_tree_project', 'char*', ['str']);
+    _lossless_tree_render = lib.func('agent_doc_lossless_tree_render', 'char*', ['str']);
+    _lossless_tree_projection_current = lib.func('agent_doc_lossless_tree_projection_current', 'int', ['str', 'str']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
@@ -1554,6 +1572,55 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
     } finally {
         if (ptr) _free_string(ptr);
     }
+}
+
+// ── #lzlosstree Phase 4: lossless-tree frame exchange ──
+
+/** Render a durable tree projection JSON back to document text, or null on failure. */
+export function losslessTreeRender(projectionJson: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    const ptr = _lossless_tree_render(projectionJson);
+    try {
+        return ptr ? koffi.decode(ptr, 'char', -1) : null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/** Project buffer text into a durable tree projection JSON, or null on failure. */
+export function losslessTreeProject(docText: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    const ptr = _lossless_tree_project(docText);
+    try {
+        return ptr ? koffi.decode(ptr, 'char', -1) : null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * Whether `projectionJson` still describes `visibleText` — the frontier/hash proof
+ * required before a projection may overwrite the editor-visible buffer. Fails closed.
+ */
+export function losslessTreeProjectionCurrent(
+    projectionJson: string,
+    visibleText: string,
+    projectRoot?: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    return _lossless_tree_projection_current(projectionJson, visibleText) === 1;
+}
+
+/** The advertised capability token, or null if the native library is unavailable. */
+export function losslessTreeCapability(projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    // Borrowed static C string — must NOT be freed.
+    const ptr = _lossless_tree_capability();
+    return ptr ? koffi.decode(ptr, 'char', -1) : null;
 }
 
 /**

@@ -507,7 +507,7 @@ fn try_cell_merge_text(
 ///   whole-document [`merge`] for the entire document, logged, never silently.
 /// - A document with no `agent:*` components (inline mode) delegates directly to
 ///   [`merge`] with the original base state, preserving legacy behavior exactly.
-pub fn merge_by_component(
+fn merge_by_component_authoritative(
     base_state: Option<&[u8]>,
     ours_text: &str,
     theirs_text: &str,
@@ -662,6 +662,45 @@ pub fn merge_by_component(
     }
 
     Ok(merged)
+}
+
+/// Public per-component 3-way merge. Delegates to the authoritative yrs-backed
+/// implementation and, as a **non-authoritative shadow** (`#lzlosstree`), also
+/// runs the lossless-tree merge over the same inputs and logs whether the two
+/// agree. The lossless-tree result is never returned; this only gathers the live
+/// byte-parity evidence the merge-layer replacement needs before any authority
+/// flip. Pure measurement — it cannot change the merge outcome.
+pub fn merge_by_component(
+    base_state: Option<&[u8]>,
+    ours_text: &str,
+    theirs_text: &str,
+) -> Result<String> {
+    let authoritative = merge_by_component_authoritative(base_state, ours_text, theirs_text);
+    if let Ok(authoritative_text) = &authoritative {
+        let base_text = match base_state {
+            Some(bytes) => CrdtDoc::decode_state(bytes)
+                .map(|d| d.to_text())
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        let result = match agent_doc_markdown_lossless::merge_via_lossless_tree(
+            &base_text,
+            ours_text,
+            theirs_text,
+        ) {
+            Some(tree_text) if &tree_text == authoritative_text => "match",
+            Some(_) => "mismatch",
+            None => "declined",
+        };
+        eprintln!(
+            "[crdt] lossless_merge_parity result={result} base_len={} ours_len={} theirs_len={} merged_len={}",
+            base_text.len(),
+            ours_text.len(),
+            theirs_text.len(),
+            authoritative_text.len(),
+        );
+    }
+    authoritative
 }
 
 /// Merge aligned `ours`/`theirs` node vectors (same component-name sequence),

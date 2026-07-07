@@ -14,3 +14,6 @@ lazily = { version = "0.21", features = ["lossless-tree"] }
 # Cross-check the tree's bounded component-body replace against the real element
 # parser's replace_content, proving byte-parity for the drop-in (#lzlosstree Phase 2).
 agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+# Cross-check the tree's 3-way merge against the authoritative yrs-backed
+# merge_by_component on clean, non-conflicting cases (#lzlosstree merge layer).
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.67" }

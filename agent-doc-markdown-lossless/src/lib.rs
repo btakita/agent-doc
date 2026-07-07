@@ -296,6 +296,127 @@ pub fn replace_component_inner(doc: &str, name: &str, new_inner: &str) -> Option
     Some(tree.render())
 }
 
+/// The full rendered text of `node`'s subtree (a leaf's own text, or the in-order
+/// concatenation of its descendants' text). Mirrors [`LosslessTreeCrdt::render`]
+/// scoped to one node.
+fn render_node(tree: &LosslessTreeCrdt, node: TreeNodeId) -> String {
+    if let Ok(text) = tree.leaf_text(node) {
+        return text;
+    }
+    tree.children(node)
+        .into_iter()
+        .map(|c| render_node(tree, c))
+        .collect()
+}
+
+/// One top-level structural slot of a document: either literal framing (trivia,
+/// prose, frontmatter — text that must match across merge sides) or a component
+/// whose body may be independently merged. Two documents are "frame-compatible"
+/// when their `Struct` sequences are equal — only component bodies then differ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Struct {
+    Lit(String),
+    Comp {
+        name: String,
+        open: String,
+        close: String,
+    },
+}
+
+/// Split a document into its top-level structure and the ordered component body
+/// texts. Returns `None` if any component is opaque/malformed (no clean marker
+/// tokens), so a merge over it degrades to the legacy path rather than guessing.
+fn decompose(doc: &str) -> Option<(Vec<Struct>, Vec<String>)> {
+    let tree = parse(doc);
+    let mut structure = Vec::new();
+    let mut bodies = Vec::new();
+    for child in tree.children(TreeNodeId::ROOT) {
+        match tree.element_kind(child) {
+            // `frontmatter` is framing, not a mergeable agent component: treat its
+            // whole subtree as an opaque literal so a frontmatter change fails the
+            // frame-compatibility check and falls back to the legacy merge.
+            Some(kind) if kind != "frontmatter" => {
+                let kids = tree.children(child);
+                let open = *kids.first()?;
+                let close = *kids.last()?;
+                if tree.leaf_kind(open) != Some(LeafKind::Token)
+                    || tree.leaf_kind(close) != Some(LeafKind::Token)
+                {
+                    return None;
+                }
+                let body = kids
+                    .iter()
+                    .copied()
+                    .find(|&k| tree.leaf_kind(k) == Some(LeafKind::Raw))
+                    .map(|k| tree.leaf_text(k).unwrap_or_default())
+                    .unwrap_or_default();
+                structure.push(Struct::Comp {
+                    name: kind.to_string(),
+                    open: tree.leaf_text(open).ok()?,
+                    close: tree.leaf_text(close).ok()?,
+                });
+                bodies.push(body);
+            }
+            _ => structure.push(Struct::Lit(render_node(&tree, child))),
+        }
+    }
+    Some((structure, bodies))
+}
+
+/// Conservative per-component 3-way merge over the lossless tree
+/// (`#lzlosstree` / `#qcellmerge1`). Returns the merged document when the three
+/// sides share identical framing (same literal slots and component markers, in
+/// order) and every component body merges unambiguously; otherwise `None`, so the
+/// caller keeps the authoritative legacy `merge_by_component` result.
+///
+/// Per component the rule is the standard 3-way: take the side that changed the
+/// body, or either when both made the *same* change, and bail (`None`) on a true
+/// both-sides-diverged conflict. The result is reconstructed from the shared
+/// framing, so it is lossless by construction. NOT an authority path yet — wired
+/// as a parity shadow beside the existing merge until proven on live merges.
+pub fn merge_via_lossless_tree(base: &str, ours: &str, theirs: &str) -> Option<String> {
+    if ours == theirs {
+        return Some(ours.to_string());
+    }
+    let (base_struct, base_bodies) = decompose(base)?;
+    let (ours_struct, ours_bodies) = decompose(ours)?;
+    let (theirs_struct, theirs_bodies) = decompose(theirs)?;
+    // Framing (literals + markers + component order) must be identical on all three
+    // sides; only component bodies may differ. Anything else → legacy merge.
+    if base_struct != ours_struct || base_struct != theirs_struct {
+        return None;
+    }
+    debug_assert_eq!(base_bodies.len(), ours_bodies.len());
+    debug_assert_eq!(base_bodies.len(), theirs_bodies.len());
+    let mut merged_bodies = Vec::with_capacity(base_bodies.len());
+    for ((b, o), t) in base_bodies.iter().zip(&ours_bodies).zip(&theirs_bodies) {
+        let merged = if o == b {
+            t
+        } else if t == b || o == t {
+            // theirs unchanged, or both sides made the identical edit.
+            o
+        } else {
+            return None; // genuine conflict — let the legacy CRDT resolve it
+        };
+        merged_bodies.push(merged.clone());
+    }
+    // Reconstruct from the shared framing with the merged bodies.
+    let mut out = String::new();
+    let mut ci = 0;
+    for item in &base_struct {
+        match item {
+            Struct::Lit(text) => out.push_str(text),
+            Struct::Comp { open, close, .. } => {
+                out.push_str(open);
+                out.push_str(&merged_bodies[ci]);
+                out.push_str(close);
+                ci += 1;
+            }
+        }
+    }
+    Some(out)
+}
+
 fn first_diff(a: &[u8], b: &[u8]) -> Option<usize> {
     let n = a.len().min(b.len());
     for i in 0..n {
@@ -505,6 +626,97 @@ mod tests {
             ),
             None
         );
+    }
+
+    // A base doc with two independent components either side can edit.
+    const MERGE_BASE: &str = "---\ntitle: t\n---\n\n<!-- agent:status -->\nbase status\n<!-- /agent:status -->\n\nprose\n\n<!-- agent:log -->\nbase log\n<!-- /agent:log -->\n";
+
+    #[test]
+    fn merge_via_lossless_tree_merges_disjoint_component_edits() {
+        // ours edits status, theirs edits log → both changes land, framing intact.
+        let ours = MERGE_BASE.replace("base status", "our status");
+        let theirs = MERGE_BASE.replace("base log", "their log");
+        let merged = merge_via_lossless_tree(MERGE_BASE, &ours, &theirs).expect("clean merge");
+        assert!(merged.contains("our status"), "{merged}");
+        assert!(merged.contains("their log"), "{merged}");
+        assert!(!merged.contains("base status"), "{merged}");
+        assert!(!merged.contains("base log"), "{merged}");
+        assert_eq!(parse(&merged).render(), merged); // lossless
+    }
+
+    #[test]
+    fn merge_via_lossless_tree_one_sided_and_identical() {
+        let ours = MERGE_BASE.replace("base status", "our status");
+        // theirs == base → result is ours.
+        assert_eq!(
+            merge_via_lossless_tree(MERGE_BASE, &ours, MERGE_BASE).as_deref(),
+            Some(ours.as_str())
+        );
+        // ours == base → result is theirs.
+        assert_eq!(
+            merge_via_lossless_tree(MERGE_BASE, MERGE_BASE, &ours).as_deref(),
+            Some(ours.as_str())
+        );
+        // both made the SAME edit → that edit (no conflict).
+        assert_eq!(
+            merge_via_lossless_tree(MERGE_BASE, &ours, &ours).as_deref(),
+            Some(ours.as_str())
+        );
+    }
+
+    #[test]
+    fn merge_via_lossless_tree_declines_conflict_and_reframe() {
+        // Both sides edit the SAME component differently → genuine conflict → None.
+        let ours = MERGE_BASE.replace("base status", "our status");
+        let theirs = MERGE_BASE.replace("base status", "their status");
+        assert_eq!(merge_via_lossless_tree(MERGE_BASE, &ours, &theirs), None);
+        // A framing change (a component added) → None (legacy handles structure).
+        let reframed =
+            format!("{MERGE_BASE}\n<!-- agent:queue -->\ndo [#x]\n<!-- /agent:queue -->\n");
+        assert_eq!(
+            merge_via_lossless_tree(MERGE_BASE, &reframed, MERGE_BASE),
+            None
+        );
+        // Frontmatter change → None (frontmatter is framing).
+        let fm_changed = MERGE_BASE.replace("title: t", "title: changed");
+        assert_eq!(
+            merge_via_lossless_tree(MERGE_BASE, &fm_changed, MERGE_BASE),
+            None
+        );
+    }
+
+    /// Byte-parity cross-check against the real yrs-backed `merge_by_component`:
+    /// where the lossless-tree merge returns `Some`, it must equal the authoritative
+    /// result for these clean, non-conflicting cases. This is the evidence the
+    /// merge-layer shadow needs before any authority flip (#lzlosstree).
+    #[test]
+    fn merge_via_lossless_tree_matches_merge_by_component_on_clean_cases() {
+        use agent_doc_merge::crdt::{CrdtDoc, merge_by_component};
+        let base_state = CrdtDoc::from_text(MERGE_BASE).encode_state();
+        let cases = [
+            // (ours, theirs)
+            (
+                MERGE_BASE.replace("base status", "our status"),
+                MERGE_BASE.replace("base log", "their log"),
+            ),
+            (
+                MERGE_BASE.replace("base status", "our status"),
+                MERGE_BASE.to_string(),
+            ),
+            (
+                MERGE_BASE.to_string(),
+                MERGE_BASE.replace("base log", "their log"),
+            ),
+        ];
+        for (ours, theirs) in cases {
+            let legacy = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            let tree = merge_via_lossless_tree(MERGE_BASE, &ours, &theirs)
+                .expect("clean case should merge");
+            assert_eq!(
+                tree, legacy,
+                "lossless-tree merge diverged from merge_by_component\nours={ours:?}\ntheirs={theirs:?}"
+            );
+        }
     }
 
     #[test]

@@ -427,14 +427,28 @@ ON) *before* the yrs whole-doc path. So the merge layer has two tree-ish models 
 `LosslessTreeCrdt` (`#lzlosstree`, currently Phase 0-2). The lossless-tree merge-layer
 replacement must reconcile with, not ignore, the existing `document_cell` cutover.
 
-Concrete next step (not yet started — **conviction gate**): a lossless-tree 3-way merge
-(`merge_via_lossless_tree(base, ours, theirs)`) mirroring `try_cell_merge_text`'s per-cell
-reconcile, wired as a **shadow** beside `try_cell_merge_text` at the `merge_by_component`
-seam and logging parity vs the authoritative result. This is deep crown-jewel hot-path work
-with frontmatter / unique-name / inter-component-trivia edge cases; it must be spiked and
-**byte-parity cross-checked against the real `merge_by_component`** (heavy yrs dep) before
-any wiring, and it needs a full `make check` — currently blocked by the concurrent session's
-`rpc.rs` WIP. Hand-rolling it unverified would be the big-bang/refactor-spiral antipattern.
+**Merge-layer replacement STARTED (`e274f191`).** `merge_via_lossless_tree(base, ours,
+theirs)` is a conservative per-component 3-way merge over the lossless tree: it requires
+identical framing across all three sides, merges each component body with the standard
+3-way rule, and returns `None` on conflict / structural or frontmatter divergence / opaque
+markers so the authoritative CRDT keeps those. `merge_by_component` is now a thin wrapper
+over the unchanged authoritative yrs implementation (`merge_by_component_authoritative`)
+that ALSO runs the tree merge and logs `lossless_merge_parity result=match|mismatch|declined`
+— pure measurement, the tree result is never returned, merge outcome unchanged.
+
+Verified properly (not hand-reasoned): a byte-parity test cross-checks the tree merge against
+the real `merge_by_component` on clean disjoint/one-sided cases; conflict/reframe/frontmatter
+decline to `None`. The isolated-worktree gate passed in full — **7305 workspace tests green,
+`cargo clippy --workspace -- -D warnings` clean** — resolving the earlier "can't full
+`make check`" blocker by verifying at clean HEAD in the worktree rather than the contaminated
+main tree. The markdown-lossless↔merge dev-dependency cycle (test-only) is allowed.
+
+Remaining merge-layer work (still ahead): extend the tree merge to reconcile *with* the
+existing `document_cell` (`#qcellmerge1`) per-cell path rather than duplicate it; collect live
+`lossless_merge_parity=match` evidence across real sessions; then flip authority (return the
+tree result when it agrees / is confidently correct, legacy otherwise). The authority flip and
+the wire/persistence model (Phases 3+) plus editor-capability (Phases 4-6) remain gated on
+live proof.
 
 - **Phases 4-6 — operator-gated.** Editor plugin capability, tree as live authority, and
   flat-relay deprecation require live editor/plugin capability proof and are

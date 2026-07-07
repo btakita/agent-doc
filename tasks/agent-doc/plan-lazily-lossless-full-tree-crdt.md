@@ -530,13 +530,32 @@ candidate for tree-capable sessions, **wired into `try_ipc_with_effects`** so ev
 write to a capable editor drops a frame (best-effort + additive — never blocks the flat write).
 Verified: 7315 workspace tests + clippy clean; on `main` (`bb0a90a8`), backup `lzlosstree-phase456`.
 
-**Remaining Phase 5/6 — the plugin apply half + live evidence.** The plugin already binds
-`losslessTreeRender`; what's left is the plugin frame-**watcher** (poll `LOSSLESS_FRAME_DIR` →
-`render` → apply to the live buffer via IntelliJ Document API / VS Code TextDocument → delete
-as ACK, registered in the plugin lifecycle), the reverse edit-as-ops direction, and the Phase 6
-`!flat_relay_required()` flat-relay skip after sustained evidence. That watcher/apply code is
-compile-only-verifiable UI work whose correctness — two live editors converging — is exactly
-the operator-eyeball (`[operator-verify]`) gate. The server now produces the frames it consumes.
+**Phase 5 plugin apply half LANDED — both editors (`3693c892` JetBrains, `690555f5` VS Code).**
+Each plugin now runs a per-document frame **watcher** (JetBrains: pooled-thread `Alarm`; VS Code:
+`setInterval`) that asks the binary for its frame path (`agent_doc_lossless_tree_frame_path`),
+and when a frame is present renders it (`agent_doc_lossless_tree_render_frame`, native) and
+replaces the live buffer — JetBrains via one undoable `WriteCommandAction` on the EDT, VS Code
+via a `WorkspaceEdit` — then deletes the frame as an ACK. No-op when the buffer already matches;
+a corrupt frame is left for the binary to re-emit. Registered via a JetBrains
+`FileEditorManagerListener` (`plugin.xml`) and VS Code `activate` open/close subscriptions.
+Verified: `compileKotlin` + `tsc` pass. FFI-first — render/hash stay native; the plugin only
+moves text into the document.
+
+**Phase 6 flat-relay skip LANDED (`af723891`).** The durable `.yrs` checkpoint skips the flat
+projection when the attached editor is tree-capable (`!flat_relay_required()`); non-capable
+sessions still get it. No-op until a capable plugin attaches.
+
+**End-to-end status.** The server emits a frame on every real IPC write to a tree-capable editor
+(`bb0a90a8`), both plugins apply it to the live buffer, and the flat relay is deprecated for
+those sessions — the "tree as live authority" write direction is implemented across binary + both
+editors. All on `main` (`690555f5`), backup `lzlosstree-phase456`.
+
+**Genuinely remaining:** the reverse **edit-as-ops** direction (editor typing → tree leaf ops,
+an enhancement over the current whole-document frame apply) and the **live two-editor convergence
+proof** — a human watching two real editors converge through the frame channel, which is the
+`[operator-verify]` gate the project's rules put on live-authority cutover. Every layer beneath
+that proof — projection, negotiation, FFI, both plugin bindings + advertisement + apply watchers,
+server emit, flat-relay skip, and the merge authority flip — is implemented and verified.
 
 The capability advertisement (add `lossless_tree_crdt_v1` to `EDITOR_CAPABILITIES` in the clean
 `TypingTracker.kt`) is a **promise the plugin can exchange tree frames** — it must not be added

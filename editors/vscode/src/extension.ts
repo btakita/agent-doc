@@ -8,6 +8,7 @@ import * as native from './native';
 import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
+import { activateLosslessFrameWatchers } from './losslessFrameWatcher';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
 import { parseSaveDocumentSignal } from './saveSignal';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
@@ -3164,6 +3165,9 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export function activate(context: vscode.ExtensionContext): void {
+    // #lzlosstree Phase 5: apply lossless-tree frames the binary emits for tree-capable
+    // sessions to the live buffer (no-op unless a frame is actually dropped).
+    activateLosslessFrameWatchers(context);
     // Goal 1: coordinate the CPC turn state into the status bar. Refresh on active
     // editor changes and turn-scope file events so the plugin reflects the CPC's
     // authoritative turn phase without a fixed polling interval.

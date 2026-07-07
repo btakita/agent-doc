@@ -166,6 +166,8 @@ function resetBindings(): void {
     _lossless_tree_project = null;
     _lossless_tree_render = null;
     _lossless_tree_projection_current = null;
+    _lossless_tree_frame_path = null;
+    _lossless_tree_render_frame = null;
     _document_changed = null;
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
@@ -352,6 +354,8 @@ let _lossless_tree_capability: any = null;
 let _lossless_tree_project: any = null;
 let _lossless_tree_render: any = null;
 let _lossless_tree_projection_current: any = null;
+let _lossless_tree_frame_path: any = null;
+let _lossless_tree_render_frame: any = null;
 let _document_changed: any = null;
 let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
@@ -459,6 +463,8 @@ function bindFunctions(): void {
     _lossless_tree_project = lib.func('agent_doc_lossless_tree_project', 'char*', ['str']);
     _lossless_tree_render = lib.func('agent_doc_lossless_tree_render', 'char*', ['str']);
     _lossless_tree_projection_current = lib.func('agent_doc_lossless_tree_projection_current', 'int', ['str', 'str']);
+    _lossless_tree_frame_path = lib.func('agent_doc_lossless_tree_frame_path', 'char*', ['str']);
+    _lossless_tree_render_frame = lib.func('agent_doc_lossless_tree_render_frame', 'char*', ['str']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
@@ -1621,6 +1627,30 @@ export function losslessTreeCapability(projectRoot?: string): string | null {
     // Borrowed static C string — must NOT be freed.
     const ptr = _lossless_tree_capability();
     return ptr ? koffi.decode(ptr, 'char', -1) : null;
+}
+
+/** The frame path this plugin should poll for `filePath` (the binary owns the hash). */
+export function losslessTreeFramePath(filePath: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    const ptr = _lossless_tree_frame_path(filePath);
+    try {
+        return ptr ? koffi.decode(ptr, 'char', -1) : null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/** Read + render the frame at `framePath` to document text in one call, or null. */
+export function losslessTreeRenderFrame(framePath: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    const ptr = _lossless_tree_render_frame(framePath);
+    try {
+        return ptr ? koffi.decode(ptr, 'char', -1) : null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
 }
 
 /**

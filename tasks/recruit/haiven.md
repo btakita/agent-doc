@@ -263,7 +263,6 @@ Short, spoken-voice lines you can say almost verbatim. No em-dashes, no "delve/l
 **Delivery reminders:** camera framed, decent light and audio; lead with the result, then how; name real systems (Presence AI, Milyoni, lazily-go, agent-doc, tsift); keep energy up and answers tight.
 ❯ Please give me a script for.
 ❯ > Great, let's dive right in. First question: Can you walk me through your professional background, highlighting the most relevant accomplishments?
-<!-- agent:boundary:bfa09c6f -->
 ### Re: Script for "walk me through your background + most relevant accomplishments" — opus-4-8
 
 This is the classic opener. They asked for the **most relevant** accomplishments, so lead with real-time + Go + reactive and skip a full chronology. Aim for 90 to 110 seconds. Say it in your own cadence; this is a script to internalize, not read flat.
@@ -300,7 +299,6 @@ Please answer these questions as well
 > Thank you for that example. It sounds like you used modularization and redundancy to keep things moving. Now, for the final question: Where do you see yourself in the next few years, and how does this role fit into your goals?
 
 Organize all info from this document into one coherent response. So I can see all speaking blurbs.
-<!-- agent:boundary:c1d4e7f2 -->
 ### Re: Answers to the six follow-up questions + all speaking blurbs, organized — opus-4-8
 
 Everything below is spoken-voice, no em-dashes, STAR-shaped, 45 to 90 seconds each. Say "Haiven" and the role back early, lead with the outcome, name three or four real systems per answer: **Presence AI** (WebRTC avatar pipeline), **Milyoni** (real-time video social events at scale), **lazily / lazily-go** (reactive signals + CRDT, Go port), **agent-doc** (CRDT-synced document + live queue), **tsift** (AI code-retrieval).
@@ -404,6 +402,16 @@ Everything below is spoken-voice, no em-dashes, STAR-shaped, 45 to 90 seconds ea
 > "How is the trust-and-safety signals engine architected on NATS and JetStream today, and where do you expect it to need to scale as you move into Beta?"
 
 **Delivery reminders:** camera framed, decent light and audio. Lead with the result, then how. Name real systems. Say "Haiven" and the role back early. Volunteer the Go gap once, framed as a fast ramp, then move on. Keep answers tight, 45 to 90 seconds.
+
+### Re: haiven closeout churn — gpt-5
+
+I fixed the agent-doc churn causes I could prove locally: rebuilt and installed the current agent-doc CLI/cdylib, recycled the controller path, installed the local JetBrains plugin build, removed stale IPC transients, reaped `#haivenscreen` into `agent:done`, and preserved the current haiven speaking-script content.
+
+Changed paths: `src/agent-doc` implementation/tests/specs, plus `tasks/recruit/haiven.md` maintenance. Verification: `cargo check`, focused Rust repair/workflow tests, JetBrains `./gradlew test`, VS Code `npm test -- --runInBand`, `make check`, and `make install` all passed. Latest GitHub CI is already red on `main` (`fix: make hot-path sidecar reads degrade to absent, never fail`, run `28825018295`), recorded as external baseline for this local fix.
+
+Remaining operational note: the JetBrains plugin installer reported that IntelliJ must restart to activate the Kotlin-side plugin update; until then, live editor IPC can still reject writes. I did not use `--force-disk` while IntelliJ owned the buffer.
+
+<!-- agent:boundary:20005ae4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -414,13 +422,18 @@ Everything below is spoken-voice, no em-dashes, STAR-shaped, 45 to 90 seconds ea
 ## Backlog
 
 <!-- agent:backlog -->
-- [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
-- [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role
-- [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
-- [#haivenprofiles] Persist Haiven + Craig Fryar profiles as standalone files (tasks/recruit/, mail/contacts/craig-fryar/)
+- [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
+- [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role
+- [ ] [#haivenprofiles] Persist Haiven + Craig Fryar profiles as standalone files (tasks/recruit/, mail/contacts/craig-fryar/)
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
+<!-- /agent:done -->

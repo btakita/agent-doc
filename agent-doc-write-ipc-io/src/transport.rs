@@ -197,6 +197,20 @@ pub fn try_ipc_with_effects(
     normalize_prefix_lines: Option<&[String]>,
     reuse_patch_id: Option<&str>,
 ) -> Result<IpcResult> {
+    // #lzlosstree Phase 5: for a tree-capable session, drop a lossless-tree frame of
+    // the agent-owned full-document candidate alongside the flat component patches, so
+    // the capable plugin's frame watcher renders + applies from the tree. Best-effort
+    // and additive — a frame-emit failure never blocks the authoritative flat write,
+    // and non-capable sessions get no frame (the flat channel stays authoritative).
+    if let Some(content) = content_ours {
+        match crate::maybe_emit_lossless_tree_frame(file, content) {
+            Ok(_) => {}
+            Err(e) => eprintln!(
+                "[write] lossless-tree frame emit skipped for {}: {e}",
+                file.display()
+            ),
+        }
+    }
     try_ipc_inner(
         effects,
         file,

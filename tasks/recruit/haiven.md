@@ -285,6 +285,125 @@ This is the classic opener. They asked for the **most relevant** accomplishments
 - Name at most three or four systems. Depth beats breadth; you can expand on any of them in later questions.
 - Land on Haiven in the last sentence so the answer points forward, not just backward.
 - Numbers help if one comes naturally (H100s, live concert scale), but don't force them here.
+
+Please answer these questions as well
+> Thanks for sharing that overview. To get a clearer picture, could you highlight one or two specific accomplishments you're most proud of, and the direct impact they had?
+
+> Thank you for that detailed example. That helps give a solid sense of your work. Let's move on to the next question: Tell me about a time you faced a significant challenge at work. How did you handle it?
+
+> Thanks for sharing that. Could you elaborate a bit more on how you approached resolving the architectural differences with your team? What steps did you take to reach that solution?
+
+> Got it. That gives a clearer picture of how you navigated that challenge. Let's move on. How do you prioritize your work when you have multiple tasks or deadlines?
+
+> Thanks for explaining your approach. Could you share an example of a time when you had to juggle competing deadlines and what specific steps you took to make sure everything stayed on track?
+
+> Thank you for that example. It sounds like you used modularization and redundancy to keep things moving. Now, for the final question: Where do you see yourself in the next few years, and how does this role fit into your goals?
+
+Organize all info from this document into one coherent response. So I can see all speaking blurbs.
+<!-- agent:boundary:c1d4e7f2 -->
+### Re: Answers to the six follow-up questions + all speaking blurbs, organized — opus-4-8
+
+Everything below is spoken-voice, no em-dashes, STAR-shaped, 45 to 90 seconds each. Say "Haiven" and the role back early, lead with the outcome, name three or four real systems per answer: **Presence AI** (WebRTC avatar pipeline), **Milyoni** (real-time video social events at scale), **lazily / lazily-go** (reactive signals + CRDT, Go port), **agent-doc** (CRDT-synced document + live queue), **tsift** (AI code-retrieval).
+
+**The through-line (the shape of every answer):**
+> "I build real-time, reactive, eventually-consistent systems, which is exactly what Haiven is building."
+
+---
+
+#### 1. Walk me through your background / most relevant accomplishments
+
+**Primary (~100s)**
+> "Sure. I'm a software engineer with about twenty years of experience, and the through-line of my career has been real-time, reactive systems, which is exactly what Haiven is building.
+>
+> A few highlights that map to this role. At Presence AI I architected a production pipeline that turns text into audio and then into lip-synced video, streamed live over WebRTC on H100 GPUs, all under tight latency. At Milyoni I built and ran real-time video social events at scale, live concerts for partners like Warner Bros and Universal Music, so I've handled real-time media and presence with real users watching.
+>
+> On the open-source side, I author lazily, a cross-language reactive-signals and CRDT library, including a Go port built on goroutines and channels. That's the same fine-grained reactivity SolidJS is built on, and it's real, current Go. I also built agent-doc, a document that syncs in real time across several clients using CRDTs, with a live work queue you can reorder and consume during concurrent edits. That's the same shape as real-time chat, presence, and an event-driven signals system.
+>
+> Earlier I was at Pivotal Labs helping launch startups, and today I deliver end to end for my own clients, from database schema all the way to production. So what I bring to Haiven is deep real-time and reactive systems experience, current Go, and comfort owning features end to end on a small, fast-moving team."
+
+**Tight fallback (~45s)**
+> "I'm a software engineer with about twenty years of experience, focused on real-time, reactive systems, which is exactly Haiven's space. I architected Presence AI's live WebRTC avatar pipeline on H100 GPUs, and I ran real-time video social events at scale at Milyoni. I author lazily, a reactive-signals and CRDT library with a Go port built on goroutines and channels, and I built agent-doc, a real-time CRDT-synced document with a live work queue. So real-time media, reactive frontends, and concurrent Go are all daily work for me, and I like owning features end to end on a small team."
+
+---
+
+#### 2. One or two accomplishments you're most proud of, and their direct impact
+
+**(~80s)**
+> "Two come to mind. The first is the real-time avatar pipeline I architected at Presence AI. I designed a system that turns text into audio and then into lip-synced video, streamed live over WebRTC on H100 GPUs, and it had to stay low-latency for real conversations. The impact was that it moved real-time AI avatars from a demo into something usable in production, which was the core of the product.
+>
+> The second is my lazily library. I built a cross-language reactive-signals and CRDT system, and then ported the whole thing to Go on goroutines and channels. The impact there is that I now have correct real-time, eventually-consistent state sync that works across languages, backed by a shared spec and test suite, and it's the exact foundation I'd bring into Haiven's WebSocket and signals work. So one shipped a hard product feature under real latency pressure, and the other is reusable infrastructure I keep building real systems on."
+
+---
+
+#### 3. A significant challenge at work, and how you handled it
+
+**(~85s)**
+> "One that stands out is getting real-time collaboration correct under concurrent edits. I was building a system where several clients edit the same document at once, a controller process, editor plugins, and a background supervisor, and the first approach we reached for was the obvious one, last-write-wins with some locking. It kept losing edits and duplicating items in the shared queue whenever two clients changed things at the same time.
+>
+> That's a genuinely hard distributed-systems problem, and adding more locks just made it slower and still wrong. So I stepped back and reframed it as an eventual-consistency problem instead of a locking problem, and moved the design to CRDTs with a cell-identity merge, so every item has a stable identity and concurrent reorders or edits converge instead of clobbering each other. That's the same class of problem as keeping chat history or a work queue consistent across services, which is why it maps so directly to this role."
+
+---
+
+#### 4. How you approached resolving the architectural differences with your team, and the steps you took
+
+**(~85s)**
+> "The disagreement was really locking versus CRDTs. The worry about CRDTs was that they're more complex up front, and the team wanted to ship fast. So the steps I took were concrete.
+>
+> First, I reproduced the data loss with a failing test, a deterministic scenario where two clients edit at once and an item gets dropped, so the problem stopped being abstract and everyone could see it. Second, I built a small spike of the CRDT cell-identity approach against that same test to prove it converged, instead of arguing in theory. Third, I scoped it as a strangler, we didn't rewrite everything at once, I moved the merge layer in behind the existing interface so the rest of the system didn't have to change. And I wrote a formal spec and a shared test suite so the behavior was pinned down across every language port.
+>
+> The result was we kept the velocity the team wanted and got correctness we could actually trust, and the decision held because it was backed by tests, not opinions."
+
+---
+
+#### 5. How you prioritize when you have multiple tasks or deadlines
+
+**(~70s)**
+> "I prioritize by impact and by what unblocks other people first. When several things compete, I separate what's actually urgent from what just feels urgent, and I look for the work that other tasks or other people are blocked on, and I do that first. Then I break big pieces into smaller modular ones that can ship independently, so I'm always delivering something usable instead of holding everything for one big drop. I also build in redundancy and automation, tests and reproducible builds, so I'm not a single point of failure and one slipping deadline doesn't cascade into the others. And I flag risk early, because a surprise is worse than a heads-up. On a small, fast-moving team like Haiven's, that mix of ruthless prioritization and shipping in small modular increments is what keeps things moving."
+
+---
+
+#### 6. An example of juggling competing deadlines, and the specific steps
+
+**(~85s)**
+> "A recent one is my consulting work. I've been delivering for two clients at the same time, Equity Funding Source on Cloudflare Workers and D1, and MonsterRodHolders on WooCommerce and Stripe, both with real deadlines and real users.
+>
+> The specific steps were, first I mapped out what each one actually needed and by when, and I front-loaded whatever was blocking the client from moving, like getting the payment and checkout path working before polishing anything. Then I modularized, I kept each client's work in clean, independent chunks so context-switching didn't cost me much, and I automated the repetitive parts, deploys and checks, so I wasn't hand-running things under time pressure. I also set expectations directly with each client about what would land when, so nobody was waiting in the dark. The result was both shipped what they needed on time, and quality stayed up because the automation caught regressions instead of me catching them at 2am."
+
+---
+
+#### 7. Where you see yourself in the next few years, and how this role fits
+
+**(~75s)**
+> "Over the next few years I want to go deep on real-time distributed systems at production scale, and grow into the engineer a team leans on for the hard architectural calls, the concurrency, the consistency, the performance under load. I've built a lot of this as a solo maintainer and consultant, and what I want now is to bring that into a focused product with a real team and real players using it.
+>
+> Haiven fits that exactly. It's real-time systems, event-driven signals, a Go backend and a reactive frontend, which is squarely where my work already lives, and it's small enough that I'd own features end to end and see my fingerprints on the product. The honest version is I'd also be deepening my Go in production here, which I want to do, and I'm bringing twenty years of systems experience to everything around it. So it's a good fit both ways, I grow where I want to grow, and Haiven gets someone already fluent in the hard parts."
+
+---
+
+#### Topical backups (if they probe other areas)
+
+**Why Haiven / why this role**
+> "I've spent my career building real-time, reactive systems, and that's exactly what Haiven is. I ran live video social events at scale at Milyoni and built a production real-time avatar pipeline at Presence AI, so the WebSocket chat, presence, and signals side of this role is familiar ground. What draws me is owning player-facing real-time features end to end, on a small team, on a gaming platform I'd actually use."
+
+**Your Go experience (say the gap once, then move on)**
+> "I'll be straight with you: my Go is newer than the rest of my systems experience, but it's real and current. I authored lazily-go, a full port of my reactive-primitives library, built on goroutines and channels, with CRDT collection types and a distributed sync plane. I've also worked with go-fuse and Cerebrium's Go CLI. I ramp fast on a new language's ecosystem, because the hard part, the concurrency and the real-time state, is already what I do."
+
+**Event-driven / pub-sub / message brokers**
+> "My reactive frameworks are essentially pub-sub under the hood: signals propagate through a dependency graph, and my lazily library has a distributed CRDT plane for syncing state across nodes. That maps straight onto NATS and JetStream. I think about a trust-and-safety signals system as a stream of events fanning out to consumers, which is the model I already build in."
+
+**AI/ML features in production**
+> "I built tsift, a code-retrieval system that uses embeddings and a graph to score and rank results under a token budget, and at Presence AI I shipped AI-driven media generation under tight latency constraints. So content scoring, moderation signals, and recommendations are a familiar problem shape for your trust-and-safety engine."
+
+**Payments / virtual economy**
+> "On payments I've done production checkout and Stripe work on MonsterRodHolders, and I built a large consumer auto-buying portal at honk with TrueCar, with partners like USAA. On-chain specifically is a gap, I've done traditional payments, not on-chain, but a virtual-currency ledger and a payment path is familiar territory."
+
+**A hard technical problem**
+> "One that sticks with me is keeping a document correct when several clients edit it at once. I used CRDTs with a cell-identity merge so that reordering or editing items in a live queue never duplicates or drops one, even under concurrent edits. Getting that merge right is the same core problem as consistent chat history or a reliable work queue."
+
+**A question to ask them**
+> "How is the trust-and-safety signals engine architected on NATS and JetStream today, and where do you expect it to need to scale as you move into Beta?"
+
+**Delivery reminders:** camera framed, decent light and audio. Lead with the result, then how. Name real systems. Say "Haiven" and the role back early. Volunteer the Go gap once, framed as a fast ramp, then move on. Keep answers tight, 45 to 90 seconds.
 <!-- /agent:exchange -->
 
 ## Queue

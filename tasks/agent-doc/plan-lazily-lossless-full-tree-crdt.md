@@ -520,18 +520,23 @@ session's uncommitted `native.ts`/`NativeLib.kt` WIP is preserved in the working
 collided files will need a merge when that session lands (its edits vs my binding additions) —
 the accepted collision. My new file + clean-file edits are synced into the working tree.
 
-**Remaining for Phases 5-6 (the bidirectional frame-protocol runtime + live evidence):**
+**Phase 5 SERVER runtime LANDED (`2177aeab`, `bb0a90a8`).** Rather than route through the
+concurrently-rewritten controller message plane (`rpc.rs`), the frame protocol uses a
+**dedicated transport** the plan itself calls for (`.agent-doc/lossless-frames/`):
+`markdown-lossless` gained `LOSSLESS_FRAME_DIR` + `write_frame`/`read_frame_render` (separate
+from `.agent-doc/patches/` so a non-capable plugin never sees frames — no double-apply), and
+`write-ipc-io::maybe_emit_lossless_tree_frame` emits a frame of the agent-owned full-document
+candidate for tree-capable sessions, **wired into `try_ipc_with_effects`** so every real IPC
+write to a capable editor drops a frame (best-effort + additive — never blocks the flat write).
+Verified: 7315 workspace tests + clippy clean; on `main` (`bb0a90a8`), backup `lzlosstree-phase456`.
 
-- Server: when `tree_frames_allowed()`, emit a tree projection frame as the editor write
-  representation (in the write/IPC path) instead of a text/component patch.
-- Plugin: dispatch an incoming frame message → `losslessTreeRender` → apply to the live buffer
-  (IntelliJ Document API / VS Code TextDocument); and send local edits as tree ops (via the
-  lazily-kt/js `LosslessTreeCrdt`).
-- Server: skip flat-relay creation when `!flat_relay_required()` (Phase 6), after sustained
-  live evidence.
-
-All primitives exist (FFI, plugin bindings, negotiation, projection, gates); this remaining
-wiring is the live-authority runtime behavior whose validation is the operator eyeball.
+**Remaining Phase 5/6 — the plugin apply half + live evidence.** The plugin already binds
+`losslessTreeRender`; what's left is the plugin frame-**watcher** (poll `LOSSLESS_FRAME_DIR` →
+`render` → apply to the live buffer via IntelliJ Document API / VS Code TextDocument → delete
+as ACK, registered in the plugin lifecycle), the reverse edit-as-ops direction, and the Phase 6
+`!flat_relay_required()` flat-relay skip after sustained evidence. That watcher/apply code is
+compile-only-verifiable UI work whose correctness — two live editors converging — is exactly
+the operator-eyeball (`[operator-verify]`) gate. The server now produces the frames it consumes.
 
 The capability advertisement (add `lossless_tree_crdt_v1` to `EDITOR_CAPABILITIES` in the clean
 `TypingTracker.kt`) is a **promise the plugin can exchange tree frames** — it must not be added

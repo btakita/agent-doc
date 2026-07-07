@@ -550,12 +550,25 @@ sessions still get it. No-op until a capable plugin attaches.
 those sessions — the "tree as live authority" write direction is implemented across binary + both
 editors. All on `main` (`690555f5`), backup `lzlosstree-phase456`.
 
-**Genuinely remaining:** the reverse **edit-as-ops** direction (editor typing → tree leaf ops,
-an enhancement over the current whole-document frame apply) and the **live two-editor convergence
-proof** — a human watching two real editors converge through the frame channel, which is the
-`[operator-verify]` gate the project's rules put on live-authority cutover. Every layer beneath
-that proof — projection, negotiation, FFI, both plugin bindings + advertisement + apply watchers,
-server emit, flat-relay skip, and the merge authority flip — is implemented and verified.
+**Reverse edit-as-ops direction LANDED (`bd89b951`).** An editor edit now maps to a lossless-tree
+**leaf edit** rather than a flat splice: `apply_text_edit(doc, offset, delete_len, insert)` finds
+the single leaf owning the edit range (via `leaf_spans` + `edit_leaf`) and declines on a leaf
+boundary; `apply_text_edits` replays a sequence; `replay_editor_ops_via_tree` converts captured
+`EditorOp`s (the plugin's real insert@offset / delete-range typing, reported via
+`agent_doc_record_editor_op`) into leaf edits. Wired as a **shadow on the real op-capture merge
+path** (`merge_inner`): when the flat replay reproduces `theirs`, the same ops are confirmed to
+update leaf nodes to `theirs` and logged `editor_ops_tree_replay` — the op-causality evidence,
+mirroring how the forward frame flip began. Exposed via `agent_doc_lossless_tree_apply_edit`.
+Verified: 7318 tests (tree replay == flat replay within a leaf; cross-leaf declines), clippy clean,
+symbol exported.
+
+**Only the live proof remains.** The **live two-editor convergence proof** — a human watching two
+real editors converge through the frame channel — is the `[operator-verify]` gate the project's
+rules put on live-authority cutover; no test substitutes for it. Every layer beneath it — Phases
+3–6 across the binary and both editors: projection, negotiation, FFI, both plugins' bindings +
+advertisement + apply watchers, server frame emit, the reverse edit-as-ops path, flat-relay skip,
+and the merge-authority flip — is implemented and verified. All on `main` (`bd89b951`), backup
+`lzlosstree-phase456`.
 
 The capability advertisement (add `lossless_tree_crdt_v1` to `EDITOR_CAPABILITIES` in the clean
 `TypingTracker.kt`) is a **promise the plugin can exchange tree frames** — it must not be added

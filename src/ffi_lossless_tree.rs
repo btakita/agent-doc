@@ -30,6 +30,61 @@ pub extern "C" fn agent_doc_lossless_tree_capability() -> *const c_char {
     c"lossless_tree_crdt_v1".as_ptr()
 }
 
+/// The on-disk frame path a capable plugin should poll for `file` (see
+/// `agent_doc_write_ipc_io::lossless_frame_path`): the binary owns the document hash,
+/// so the plugin asks for the path rather than re-deriving it. Returns a heap C string
+/// (free with `agent_doc_free_string`) or null on invalid UTF-8 / resolution error.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_lossless_tree_frame_path(
+    file_path: *const c_char,
+) -> *mut c_char {
+    if file_path.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        return std::ptr::null_mut();
+    };
+    let Ok(frame) = agent_doc_write_ipc_io::lossless_frame_path(std::path::Path::new(path)) else {
+        return std::ptr::null_mut();
+    };
+    match CString::new(frame.to_string_lossy().into_owned()) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Read the lossless-tree frame file at `frame_path` and render it to document text —
+/// the plugin's one-call apply source. Returns a heap C string (free with
+/// `agent_doc_free_string`), or null when the frame is absent / unparseable (the
+/// plugin then keeps its buffer). Equivalent to reading the file and calling
+/// [`agent_doc_lossless_tree_render`], but handles the file read too.
+///
+/// # Safety
+///
+/// `frame_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_lossless_tree_render_frame(
+    frame_path: *const c_char,
+) -> *mut c_char {
+    if frame_path.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Ok(path) = (unsafe { CStr::from_ptr(frame_path) }).to_str() else {
+        return std::ptr::null_mut();
+    };
+    match agent_doc_merge::lossless_tree::read_frame_render(std::path::Path::new(path)) {
+        Ok(Some(text)) => match CString::new(text) {
+            Ok(s) => s.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        _ => std::ptr::null_mut(),
+    }
+}
+
 /// Project `doc_text` into a durable lossless-tree JSON projection (op-stream +
 /// rendered hash). Returns a heap C string (free with `agent_doc_free_string`) or
 /// null on invalid UTF-8 / serialization failure / interior NUL.

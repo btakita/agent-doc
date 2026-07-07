@@ -1389,6 +1389,31 @@ fn checkpoint_durable_projection_for_file_with_mode(
         return Ok(DurableProjectionCheckpoint::Detached);
     }
 
+    // #lzlosstree Phase 6: deprecate the flat relay for tree-capable sessions. When the
+    // attached editor advertises lossless_tree_crdt_v1 it is authoritative through the
+    // lossless-tree frame channel + durable tree projection, so the flat `.yrs` relay
+    // projection is not written. Non-capable sessions still get the flat checkpoint
+    // (the compatibility / detached-recovery path), so this is a no-op until a capable
+    // plugin attaches.
+    let negotiation = agent_doc_debounce::negotiate_lossless_tree_capability(
+        &agent_doc_debounce::live_buffer_snapshots(&file.display().to_string()),
+    );
+    if !negotiation.flat_relay_required() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_durable_checkpoint_skipped file={} source={} authority=lossless_tree reason=tree_capable",
+                file.display(),
+                source,
+            ),
+        );
+        // Reuse `Detached` — its contract is exactly "the relay projection is
+        // intentionally untouched" — so no new enum variant forces a match-arm edit in
+        // the concurrently-rewritten controller (`rpc.rs`). The `reason=tree_capable`
+        // log distinguishes this Phase 6 skip from the detached-authority skip.
+        return Ok(DurableProjectionCheckpoint::Detached);
+    }
+
     let current = match mode {
         DurableProjectionMode::Foreground => current_text_for_file_with_authority(file, authority)?,
         DurableProjectionMode::Background => ensure_document_model(file, source)?,

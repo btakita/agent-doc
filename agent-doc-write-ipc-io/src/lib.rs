@@ -240,6 +240,19 @@ pub fn build_ipc_patches_json(
 /// case the caller's existing flat patch/text path is the authority. This is the
 /// dedicated tree-update transport (a non-capable plugin never sees the frame dir),
 /// so it composes with, and never double-applies against, the flat channel.
+/// The on-disk path of the lossless-tree frame for `file`:
+/// `<ipc-project-root>/.agent-doc/lossless-frames/<document-state-hash>.json`. The
+/// server writes here and the capable plugin's watcher polls exactly this path (the
+/// binary owns the hash so the plugin never re-derives it — it asks via FFI).
+pub fn lossless_frame_path(file: &Path) -> Result<std::path::PathBuf> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    Ok(project_root
+        .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
+        .join(format!("{hash}.json")))
+}
+
 pub fn maybe_emit_lossless_tree_frame(file: &Path, content: &str) -> Result<bool> {
     let file_key = file.to_string_lossy();
     let snapshots = agent_doc_debounce::live_buffer_snapshots(&file_key);
@@ -258,12 +271,7 @@ pub fn emit_lossless_tree_frame_for_negotiation(
     if !negotiation.tree_frames_allowed() {
         return Ok(false);
     }
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    let frame_path = project_root
-        .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
-        .join(format!("{hash}.json"));
+    let frame_path = lossless_frame_path(file)?;
     agent_doc_markdown_lossless::write_frame(&frame_path, content)?;
     agent_doc_ops_log_io::log_op(
         file,

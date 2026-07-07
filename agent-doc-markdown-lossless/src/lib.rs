@@ -444,6 +444,46 @@ mod tests {
         assert_eq!(parse(&out).render(), out);
     }
 
+    /// The load-bearing equivalence for Phase 2: for a clean-marker component the
+    /// tree's bounded body replace is byte-identical to the real element parser's
+    /// `replace_content`. This is what lets `replace_component_inner` stand in for
+    /// `element::replace_content` at every component-body write site that currently
+    /// feeds the full-document CRDT — a wholesale drop-in, not a per-path shadow.
+    #[test]
+    fn replace_component_inner_matches_element_replace_content() {
+        let docs = [
+            "<!-- agent:status -->\nold\n<!-- /agent:status -->\n",
+            "---\ntitle: t\n---\n\n<!-- agent:status patch=replace -->\nold status\n<!-- /agent:status -->\n\n<!-- agent:log -->\nkeep\n<!-- /agent:log -->\n",
+            "intro prose\n\n<!-- agent:queue -->\ndo [#x]\n<!-- /agent:queue -->\ntail\n",
+            "<!-- agent:log -->\n<!-- /agent:log -->\n", // empty inner
+            "<!-- agent:status -->\ncafé ☕ 世界\n<!-- /agent:status -->\n", // multibyte
+        ];
+        let replacements = [
+            "\nNEW\n",
+            "\nmulti\nline\n",
+            "",
+            "\n",
+            "just text no newlines",
+        ];
+        for doc in docs {
+            let comps = agent_doc_element::element::parse(doc).expect("element parse");
+            for comp in &comps {
+                for new_content in replacements {
+                    let legacy = comp.replace_content(doc, new_content);
+                    let tree = replace_component_inner(doc, &comp.name, new_content)
+                        .unwrap_or_else(|| panic!("tree declined {}={new_content:?}", comp.name));
+                    assert_eq!(
+                        tree, legacy,
+                        "tree/element divergence for component {} content {new_content:?}",
+                        comp.name
+                    );
+                    // And the tree result is itself lossless.
+                    assert_eq!(parse(&tree).render(), tree);
+                }
+            }
+        }
+    }
+
     #[test]
     fn replace_component_inner_declines_missing_or_malformed() {
         // No such component -> None (caller keeps legacy path).

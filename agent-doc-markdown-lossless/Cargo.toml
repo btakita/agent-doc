@@ -9,3 +9,8 @@ repository = "https://github.com/btakita/agent-doc"
 [dependencies]
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
 lazily = { version = "0.21", features = ["lossless-tree"] }
+
+[dev-dependencies]
+# Cross-check the tree's bounded component-body replace against the real element
+# parser's replace_content, proving byte-parity for the drop-in (#lzlosstree Phase 2).
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }

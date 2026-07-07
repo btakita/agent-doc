@@ -700,49 +700,89 @@ pub fn lossless_tree_merge_enabled() -> bool {
 ///
 /// Default-ON with the [`LOSSLESS_MERGE_ENV`] kill-switch (mirrors `#qcellmerge1`):
 /// a single env var reverts to the pure legacy path.
+///
+/// # Full flip on the additive path
+///
+/// When the tree is confident **and both sides only *inserted* relative to base**
+/// (each is a line-supersequence of base — no line deleted or reordered), no
+/// stale-side revert is possible, so a structural 3-way is provably causally safe
+/// and **the flat full-document CRDT is not computed at all**. This is the common,
+/// perf-critical case (appending an agent response, a new queue line): the tree is
+/// the sole authority and the merge cost drops to the edited subtree. Only when a
+/// side *deleted* content — where a stale revert could regress a struck head or a
+/// committed block — does the CRDT run, as the arbiter of the guarded path.
 pub fn merge_by_component(
     base_state: Option<&[u8]>,
     ours_text: &str,
     theirs_text: &str,
 ) -> Result<String> {
-    let authoritative = merge_by_component_authoritative(base_state, ours_text, theirs_text);
-    if lossless_tree_merge_enabled()
-        && let Ok(crdt_text) = &authoritative
+    if !lossless_tree_merge_enabled() {
+        return merge_by_component_authoritative(base_state, ours_text, theirs_text);
+    }
+    let base_text = match base_state {
+        Some(bytes) => CrdtDoc::decode_state(bytes)
+            .map(|d| d.to_text())
+            .unwrap_or_default(),
+        None => String::new(),
+    };
+    let Some(tree_text) =
+        agent_doc_markdown_lossless::merge_via_lossless_tree(&base_text, ours_text, theirs_text)
+    else {
+        // The tree is not confident (conflict / structural or frontmatter divergence
+        // / opaque markers): the causality-aware CRDT owns this merge.
+        return merge_by_component_authoritative(base_state, ours_text, theirs_text);
+    };
+    // FULL flip: both sides are insertions-only over base ⇒ no deletion ⇒ no stale
+    // revert is possible ⇒ the tree is the sole authority and the CRDT never runs.
+    if line_supersequence_of(&base_text, ours_text)
+        && line_supersequence_of(&base_text, theirs_text)
     {
-        let base_text = match base_state {
-            Some(bytes) => CrdtDoc::decode_state(bytes)
-                .map(|d| d.to_text())
-                .unwrap_or_default(),
-            None => String::new(),
-        };
-        match agent_doc_markdown_lossless::merge_via_lossless_tree(
-            &base_text,
-            ours_text,
-            theirs_text,
-        ) {
-            // The tree is confident and byte-agrees with the CRDT: it is the
-            // authority-of-record for this merge, and 3-way sufficed.
-            Some(tree_text) if &tree_text == crdt_text => {
-                eprintln!(
-                    "[crdt] merge_by_component: lossless-tree authoritative (merged_len={})",
-                    tree_text.len()
-                );
-                return Ok(tree_text);
-            }
-            // The tree diverged from the causality-aware CRDT (stale-side revert /
-            // sticky-head case). Keep the CRDT result; record the case for the
-            // op-causality follow-up.
-            Some(tree_text) => {
-                eprintln!(
-                    "[crdt] merge_by_component: lossless_merge_divergence tree_len={} crdt_len={} (keeping CRDT — needs op causality)",
-                    tree_text.len(),
-                    crdt_text.len()
-                );
-            }
-            None => {}
+        eprintln!(
+            "[crdt] merge_by_component: lossless-tree authoritative, CRDT skipped (additive merged_len={})",
+            tree_text.len()
+        );
+        return Ok(tree_text);
+    }
+    // GUARDED path: a side deleted content relative to base, so a stale-side revert
+    // is possible. Compute the causality-aware CRDT; the tree wins only on byte
+    // agreement, otherwise the CRDT arbitrates (struck-head / committed-block cases)
+    // and the divergence is logged as the op-causality worklist.
+    let authoritative = merge_by_component_authoritative(base_state, ours_text, theirs_text);
+    if let Ok(crdt_text) = &authoritative {
+        if &tree_text == crdt_text {
+            eprintln!(
+                "[crdt] merge_by_component: lossless-tree authoritative (agrees, merged_len={})",
+                tree_text.len()
+            );
+            return Ok(tree_text);
         }
+        eprintln!(
+            "[crdt] merge_by_component: lossless_merge_divergence tree_len={} crdt_len={} (keeping CRDT — needs op causality)",
+            tree_text.len(),
+            crdt_text.len()
+        );
     }
     authoritative
+}
+
+/// Whether every line of `base` appears, in order, within `side` — i.e. `side` was
+/// produced from `base` by **insertions only** (no line deleted or reordered). When
+/// this holds for both merge sides there is no deletion, hence no stale-side revert
+/// to mishandle, so a structural 3-way merge is causally safe without the CRDT.
+fn line_supersequence_of(base: &str, side: &str) -> bool {
+    let mut base_lines = base.lines();
+    let Some(mut want) = base_lines.next() else {
+        return true; // empty base ⇒ trivially preserved
+    };
+    for line in side.lines() {
+        if line == want {
+            match base_lines.next() {
+                Some(next) => want = next,
+                None => return true, // consumed every base line in order
+            }
+        }
+    }
+    false
 }
 
 /// Merge aligned `ours`/`theirs` node vectors (same component-name sequence),

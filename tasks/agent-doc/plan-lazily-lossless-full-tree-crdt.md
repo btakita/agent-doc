@@ -443,12 +443,28 @@ decline to `None`. The isolated-worktree gate passed in full — **7305 workspac
 `make check`" blocker by verifying at clean HEAD in the worktree rather than the contaminated
 main tree. The markdown-lossless↔merge dev-dependency cycle (test-only) is allowed.
 
-Remaining merge-layer work (still ahead): extend the tree merge to reconcile *with* the
-existing `document_cell` (`#qcellmerge1`) per-cell path rather than duplicate it; collect live
-`lossless_merge_parity=match` evidence across real sessions; then flip authority (return the
-tree result when it agrees / is confidently correct, legacy otherwise). The authority flip and
-the wire/persistence model (Phases 3+) plus editor-capability (Phases 4-6) remain gated on
-live proof.
+**Authority flip LANDED (`ebbc2840`).** `merge_by_component` now returns the lossless-tree
+merge result as the authority-of-record whenever a structural 3-way is provably sufficient:
+when `merge_via_lossless_tree` is confident AND byte-agrees with the causality-aware CRDT,
+the tree's result is returned. Default-ON with an `AGENT_DOC_LOSSLESS_MERGE` kill-switch
+(mirrors `#qcellmerge1`).
+
+Key finding from the flip (the full-suite gate earned its keep): a naive flip — return the
+tree result and skip the CRDT — **fails 4 tests**, all *stale-side causality* cases (3 queue
+struck-head "stale unstrike must not resurrect", 1 exchange "never drop committed block on
+stale side"). A pure-text tree merge is **causality-blind**: it cannot tell a forward edit
+from a stale revert, so it regresses content the CRDT's op history protects. Hence the flip
+is *guarded* — the tree wins only on byte-agreement; on divergence the CRDT result wins and
+the case is logged `lossless_merge_divergence`. This is byte-transparent today (safe to
+default ON) and the divergence log is the concrete worklist for the next phase.
+
+**The true authority replacement (drop the CRDT computation) needs op causality in the tree**
+— the durable-frontier / version-vector model (Phase 3). Once the tree carries causality it
+can be authoritative on disagreement too (because then a divergence means the *stale text*,
+not the tree, is wrong), and `merge_by_component_authoritative` can be retired. That, the
+wire/persistence model, and editor-capability (Phases 4-6) remain gated on that op-causality
+work + live proof. Also still ahead: reconcile the tree merge *with* the parallel
+`document_cell` (`#qcellmerge1`) per-cell path rather than duplicate it.
 
 - **Phases 4-6 — operator-gated.** Editor plugin capability, tree as live authority, and
   flat-relay deprecation require live editor/plugin capability proof and are

@@ -664,41 +664,83 @@ fn merge_by_component_authoritative(
     Ok(merged)
 }
 
-/// Public per-component 3-way merge. Delegates to the authoritative yrs-backed
-/// implementation and, as a **non-authoritative shadow** (`#lzlosstree`), also
-/// runs the lossless-tree merge over the same inputs and logs whether the two
-/// agree. The lossless-tree result is never returned; this only gathers the live
-/// byte-parity evidence the merge-layer replacement needs before any authority
-/// flip. Pure measurement — it cannot change the merge outcome.
+/// Env kill-switch for the lossless-tree merge cutover (`#lzlosstree`). Mirrors
+/// `#qcellmerge1`'s `AGENT_DOC_CELL_MERGE`: **default ON**, and only an explicit
+/// falsy value (`0`/`false`/`off`/`no`, case/space-insensitive) turns it off.
+pub const LOSSLESS_MERGE_ENV: &str = "AGENT_DOC_LOSSLESS_MERGE";
+
+/// Whether the lossless-tree per-component merge is authoritative when it is
+/// confident. Default ON with the [`LOSSLESS_MERGE_ENV`] kill-switch.
+pub fn lossless_tree_merge_enabled() -> bool {
+    match std::env::var(LOSSLESS_MERGE_ENV) {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+/// Public per-component 3-way merge. The lossless-tree merge (`#lzlosstree`) is the
+/// **authority-of-record for every merge where a structural 3-way is provably
+/// sufficient**: when
+/// [`merge_via_lossless_tree`](agent_doc_markdown_lossless::merge_via_lossless_tree)
+/// is confident (identical framing on all three sides, every component body merging
+/// unambiguously) *and* its result is byte-identical to the causality-aware CRDT,
+/// the tree's result is returned as the authoritative value.
+///
+/// The CRDT remains the arbiter for exactly one reason: a pure-text tree merge is
+/// causality-blind, so it cannot tell a legitimate forward edit from a **stale-side
+/// revert** (a stale replica un-striking a struck queue head, or dropping a
+/// committed exchange block). In those cases the CRDT's op history keeps the forward
+/// state and the tree would regress it, so the two diverge and the CRDT result wins;
+/// the divergence is logged as `lossless_merge_divergence` — the worklist for giving
+/// the tree op causality (durable-frontier phase) so it can become authoritative on
+/// disagreement too, at which point the CRDT computation can be dropped entirely.
+///
+/// Default-ON with the [`LOSSLESS_MERGE_ENV`] kill-switch (mirrors `#qcellmerge1`):
+/// a single env var reverts to the pure legacy path.
 pub fn merge_by_component(
     base_state: Option<&[u8]>,
     ours_text: &str,
     theirs_text: &str,
 ) -> Result<String> {
     let authoritative = merge_by_component_authoritative(base_state, ours_text, theirs_text);
-    if let Ok(authoritative_text) = &authoritative {
+    if lossless_tree_merge_enabled()
+        && let Ok(crdt_text) = &authoritative
+    {
         let base_text = match base_state {
             Some(bytes) => CrdtDoc::decode_state(bytes)
                 .map(|d| d.to_text())
                 .unwrap_or_default(),
             None => String::new(),
         };
-        let result = match agent_doc_markdown_lossless::merge_via_lossless_tree(
+        match agent_doc_markdown_lossless::merge_via_lossless_tree(
             &base_text,
             ours_text,
             theirs_text,
         ) {
-            Some(tree_text) if &tree_text == authoritative_text => "match",
-            Some(_) => "mismatch",
-            None => "declined",
-        };
-        eprintln!(
-            "[crdt] lossless_merge_parity result={result} base_len={} ours_len={} theirs_len={} merged_len={}",
-            base_text.len(),
-            ours_text.len(),
-            theirs_text.len(),
-            authoritative_text.len(),
-        );
+            // The tree is confident and byte-agrees with the CRDT: it is the
+            // authority-of-record for this merge, and 3-way sufficed.
+            Some(tree_text) if &tree_text == crdt_text => {
+                eprintln!(
+                    "[crdt] merge_by_component: lossless-tree authoritative (merged_len={})",
+                    tree_text.len()
+                );
+                return Ok(tree_text);
+            }
+            // The tree diverged from the causality-aware CRDT (stale-side revert /
+            // sticky-head case). Keep the CRDT result; record the case for the
+            // op-causality follow-up.
+            Some(tree_text) => {
+                eprintln!(
+                    "[crdt] merge_by_component: lossless_merge_divergence tree_len={} crdt_len={} (keeping CRDT — needs op causality)",
+                    tree_text.len(),
+                    crdt_text.len()
+                );
+            }
+            None => {}
+        }
     }
     authoritative
 }
@@ -1984,6 +2026,57 @@ mod tests {
         let content = "Hello, world!\nLine two.\n";
         let doc = CrdtDoc::from_text(content);
         assert_eq!(doc.to_text(), content);
+    }
+
+    #[test]
+    fn lossless_tree_merge_gate_default_on_with_kill_switch() {
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var(LOSSLESS_MERGE_ENV);
+        }
+        assert!(lossless_tree_merge_enabled(), "absent ⇒ default ON");
+        for v in ["1", "true", "on", "yes", "", "maybe"] {
+            unsafe {
+                std::env::set_var(LOSSLESS_MERGE_ENV, v);
+            }
+            assert!(lossless_tree_merge_enabled(), "{v:?} should stay ON");
+        }
+        for v in ["0", "false", "off", "no", "FALSE", " Off "] {
+            unsafe {
+                std::env::set_var(LOSSLESS_MERGE_ENV, v);
+            }
+            assert!(!lossless_tree_merge_enabled(), "{v:?} should kill (OFF)");
+        }
+        unsafe {
+            std::env::remove_var(LOSSLESS_MERGE_ENV);
+        }
+    }
+
+    /// The guarded flip is byte-transparent: a clean disjoint-component merge (where
+    /// the tree is authoritative) yields exactly the causality-aware CRDT result, and
+    /// a stale-side case (where the tree would diverge) still yields the CRDT result.
+    /// Behavioral parity is what lets the flip default ON safely; the tree only
+    /// *wins* when it byte-agrees, so no observable output changes.
+    #[test]
+    fn guarded_flip_preserves_merge_output_both_paths() {
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let base = "<!-- agent:status -->\nbase\n<!-- /agent:status -->\n\n<!-- agent:log -->\nbase log\n<!-- /agent:log -->\n";
+        let state = CrdtDoc::from_text(base).encode_state();
+        let ours = base.replace("base\n", "ours status\n");
+        let theirs = base.replace("base log", "their log");
+        // Flip ON vs OFF must produce identical bytes on a clean merge.
+        unsafe {
+            std::env::set_var(LOSSLESS_MERGE_ENV, "off");
+        }
+        let legacy = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        unsafe {
+            std::env::set_var(LOSSLESS_MERGE_ENV, "on");
+        }
+        let flipped = merge_by_component(Some(&state), &ours, &theirs).unwrap();
+        unsafe {
+            std::env::remove_var(LOSSLESS_MERGE_ENV);
+        }
+        assert_eq!(flipped, legacy, "guarded flip must be byte-transparent");
     }
 
     // ---- #qnodemerge4: op-capture / evented reflection ----

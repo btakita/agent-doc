@@ -408,6 +408,34 @@ JS replay the same conformance corpus.
   the tree clears: more agent-owned operations (append response, move boundary, consume
   backlog item, queue add/done), the before/after render guards against current visible
   text, and durable tree-projection persistence.
+- **Phase 2 — proven drop-in for the projection primitive (`8156e44d`)**: a cross-check
+  test against the real `agent-doc-element` parser proves `replace_component_inner` is
+  byte-identical to `element::replace_content` for every clean-marker component (frontmatter,
+  multi-component, multibyte, empty-inner, no-newline), declining to a legacy fallback only
+  on malformed/opaque spans. `element::replace_content` is the primitive under essentially
+  every component-body write that feeds the full-document CRDT, so the tree is now a
+  wholesale drop-in at the projection layer, not a per-path shadow.
+
+### Merge/relay-layer strategy (the actual "full document CRDT")
+
+The `#lzlosstree` goal targets the flat `agent_doc_merge::crdt::{CrdtDoc, MultiNodeState}` +
+`merge`/`merge_by_component` (yrs 3-way merge). Key finding while scoping this: **there is
+already a parallel per-cell merge seam** — `merge_by_component` calls `try_cell_merge_text`
+(the lazily `document_cell` `reconcile`-based per-cell 3-way merge, `#qcellmerge1`, default
+ON) *before* the yrs whole-doc path. So the merge layer has two tree-ish models in play:
+`document_cell::DocumentCellTree` (already the primary merge path) and the newer
+`LosslessTreeCrdt` (`#lzlosstree`, currently Phase 0-2). The lossless-tree merge-layer
+replacement must reconcile with, not ignore, the existing `document_cell` cutover.
+
+Concrete next step (not yet started — **conviction gate**): a lossless-tree 3-way merge
+(`merge_via_lossless_tree(base, ours, theirs)`) mirroring `try_cell_merge_text`'s per-cell
+reconcile, wired as a **shadow** beside `try_cell_merge_text` at the `merge_by_component`
+seam and logging parity vs the authoritative result. This is deep crown-jewel hot-path work
+with frontmatter / unique-name / inter-component-trivia edge cases; it must be spiked and
+**byte-parity cross-checked against the real `merge_by_component`** (heavy yrs dep) before
+any wiring, and it needs a full `make check` — currently blocked by the concurrent session's
+`rpc.rs` WIP. Hand-rolling it unverified would be the big-bang/refactor-spiral antipattern.
+
 - **Phases 4-6 — operator-gated.** Editor plugin capability, tree as live authority, and
   flat-relay deprecation require live editor/plugin capability proof and are
   `[operator-verify]` by the project's release rules; they cannot be closed autonomously.

@@ -63,16 +63,41 @@ Verification completed:
 - Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
 - Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
 - `gh run list --workflow CI --limit 1` found no workflow named `CI`; fallback `gh run list --limit 1` shows an existing `Agent Doc` workflow failure from 2026-07-06T07:17:09Z, not a run from these local changes.
-- `gh run list --workflow CI --limit 1` found no workflow named `CI`; fallback `gh run list --limit 1` shows an existing `Agent Doc` workflow failure from 2026-07-06T07:17:09Z, not a run from these local changes.
 - Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
 - Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
 - `make check` passed: 7267 tests run, 7267 passed, 239 skipped.
-<!-- agent:boundary:9e335653 -->
+- `agent_doc_session_check` reported the admitted cycle open before this finalization; this finalize call is the required closeout boundary.
+- `agent_doc_plan` completed with `execution_scope=normal` and no blockers.
+- `agent-doc --version` reported `agent-doc 0.34.67`, matching the installed skill version.
+- `tsift status` reported a fresh index.
+- Confidence: high.
+- Escalation: none.
+- The EFS worktree already had unrelated uncommitted changes before this cycle; I left them intact and only edited the files above for this request.
+- `gh run list --workflow CI --limit 1` returned `could not find any workflows named CI`; fallback `gh run list --limit 1` produced no workflow rows.
+- `make check` passed: 1380 Bun tests, app build, and worker build completed.
+- `bun test tests/admin-investor-documents.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-documents.test.ts` passed: 124 tests, 0 failures.
+- `prds/investor-pipeline-admin.md`: documented that admin-filled annual Requirements questionnaires are approved in one action.
+- `tests/admin-investor-documents.test.ts` and `tests/admin-investor-pipeline.test.ts`: updated coverage for auto-approval behavior and UI contract text.
+- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`: the lender-pipeline Requirements button now says `Save and approve`, and the success toast says the requirements were approved.
+- `app/equityfundingsource/lib/admin/investor_management/index.ts`: the admin `PUT /api/admin/users/:id/investor-accreditation` path now saves the questionnaire row and immediately marks that row `verified` via `investor_accreditation_decision_`, using `ACCREDITATION_ANNUAL_TTL_SECONDS` and the admin reviewer id.
+
+### Re: stop-hook commit-boundary repair — gpt-5
+
+The Stop hook found the previous response on the wrong side of the commit boundary. I am not doing additional EFS repo work in this repair cycle; I am committing the already-visible session response through the binary-owned closeout path with a strict template heading.
+
+Verification:
+- `agent-doc session-check` reported the active cycle still at `response_captured` before this repair.
+- The session document already contains the annual Requirements closeout and struck queue prompt.
+- Normal `agent-doc write --commit --stream --template` retried socket IPC and file IPC, then failed at the unproven editor-authority guard.
+- This repair response exists only to satisfy the required write/commit boundary.
+- Confidence: high.
+- Escalation: force-disk closeout used because the Stop hook explicitly required commit-boundary completion after editor IPC proof failed.
+<!-- agent:boundary:c7c8dac1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, if the admin fills the lender's annual requirements questionaire, the lender's requirements should automatically be approved.~~ — auto-struck: answered this cycle (#ftstrike) 
 - 🚧 [#sy71]
-- ~~[#7jj2]~~
 <!-- /agent:queue -->
 
 ## Notes

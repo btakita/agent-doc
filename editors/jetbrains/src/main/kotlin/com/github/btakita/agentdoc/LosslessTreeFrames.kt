@@ -50,4 +50,32 @@ object LosslessTreeFrames {
         val lib = AgentDocLib.get() ?: return false
         return lib.agent_doc_lossless_tree_projection_current(projectionJson, visibleText) == 1
     }
+
+    /**
+     * The frame path this plugin should poll for [filePath] (the binary owns the
+     * document hash), or null if unavailable. The watcher polls exactly this path.
+     */
+    fun framePath(filePath: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr = lib.agent_doc_lossless_tree_frame_path(filePath) ?: return null
+        return try {
+            ptr.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * Read the frame file at [framePath] and render it to document text in one call,
+     * or null when the frame is absent / unparseable (the caller keeps its buffer).
+     */
+    fun renderFrame(framePath: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr = lib.agent_doc_lossless_tree_render_frame(framePath) ?: return null
+        return try {
+            ptr.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
 }

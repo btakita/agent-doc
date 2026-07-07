@@ -255,6 +255,10 @@ interface AgentDocLib : Library {
     fun agent_doc_lossless_tree_render(projection_json: String): Pointer?
     /** 1 if `projection_json` still describes `visible_text` (frontier/hash proof), else 0. */
     fun agent_doc_lossless_tree_projection_current(projection_json: String, visible_text: String): Int
+    /** The frame path this plugin should poll for `file_path`. Free with [agent_doc_free_string]. */
+    fun agent_doc_lossless_tree_frame_path(file_path: String): Pointer?
+    /** Read + render the frame at `frame_path` to document text. Free with [agent_doc_free_string]. */
+    fun agent_doc_lossless_tree_render_frame(frame_path: String): Pointer?
 
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)

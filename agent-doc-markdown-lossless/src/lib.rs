@@ -207,6 +207,39 @@ pub fn shadow_audit(doc: &str) -> ShadowAudit {
     }
 }
 
+impl ShadowAudit {
+    /// A stable, single-line `key=value` summary for `ops.log`. On a mismatch it
+    /// carries the first differing byte and both lengths so a divergence can be
+    /// triaged from the log alone. Phase 1 shadow projection: logged, never acted
+    /// on (`#lzlosstree`).
+    pub fn ops_log_line(&self, source: &str) -> String {
+        if self.matches {
+            format!(
+                "lossless_shadow source={source} match=true src_len={} nodes={}",
+                self.source_len, self.live_nodes,
+            )
+        } else {
+            format!(
+                "lossless_shadow source={source} match=false first_diff={} src_len={} rendered_len={} nodes={}",
+                self.first_diff_byte
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                self.source_len,
+                self.rendered_len,
+                self.live_nodes,
+            )
+        }
+    }
+}
+
+/// Build the shadow tree for `doc` and return the `ops.log` line describing whether
+/// it round-trips (see [`ShadowAudit::ops_log_line`]). Pure; the caller decides
+/// where to log. This is the Phase 1 shadow-projection entry point for preflight /
+/// session-check.
+pub fn shadow_audit_ops_log_line(doc: &str, source: &str) -> String {
+    shadow_audit(doc).ops_log_line(source)
+}
+
 fn first_diff(a: &[u8], b: &[u8]) -> Option<usize> {
     let n = a.len().min(b.len());
     for i in 0..n {
@@ -295,6 +328,36 @@ mod tests {
         let top = tree.children(TreeNodeId::ROOT);
         assert_eq!(tree.element_kind(top[0]), Some("frontmatter"));
         assert_eq!(tree.render(), doc);
+    }
+
+    #[test]
+    fn ops_log_line_reports_match_and_mismatch() {
+        // A round-tripping document reports match=true with no diff fields.
+        let line =
+            shadow_audit_ops_log_line("<!-- agent:log -->\nx\n<!-- /agent:log -->\n", "initial");
+        assert!(
+            line.starts_with("lossless_shadow source=initial match=true"),
+            "{line}"
+        );
+        assert!(line.contains("src_len="), "{line}");
+        assert!(line.contains("nodes="), "{line}");
+        assert!(
+            !line.contains("first_diff="),
+            "match line must omit diff fields: {line}"
+        );
+
+        // A hand-built mismatch renders match=false with a first_diff byte.
+        let audit = ShadowAudit {
+            matches: false,
+            source_len: 10,
+            rendered_len: 8,
+            first_diff_byte: Some(5),
+            live_nodes: 3,
+        };
+        let line = audit.ops_log_line("session_check");
+        assert!(line.contains("source=session_check match=false"), "{line}");
+        assert!(line.contains("first_diff=5"), "{line}");
+        assert!(line.contains("rendered_len=8"), "{line}");
     }
 
     #[test]

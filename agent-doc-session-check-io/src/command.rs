@@ -460,10 +460,18 @@ pub fn inspect_with_warnings(
         // #rtwwire (rung 3): seed the guard-sweep cache from the authoritative
         // current document. Active editors resolve through the CRDT relay; disk
         // is consulted only when no editor is attached.
-        rc.set_current_document(crate::resolve_current_document(
+        let current_document = crate::resolve_current_document(file, "session_check_guard_sweep")?;
+        // Phase 1 lossless-tree shadow projection (#lzlosstree): audit the tree
+        // round-trip against the same authoritative text the guard sweep uses.
+        // Logged, never load-bearing — the flat CRDT stays the closeout authority.
+        agent_doc_ops_log_io::log_op(
             file,
-            "session_check_guard_sweep",
-        )?);
+            &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
+                current_document.content(),
+                "session_check_guard_sweep",
+            ),
+        );
+        rc.set_current_document(current_document);
         match crate::check_dropped_exchange_prompt_guard(file, &rc)? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),

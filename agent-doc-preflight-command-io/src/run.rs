@@ -90,6 +90,17 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
     let content = resolve_current_preflight_document(file, "initial")?;
+    // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
+    // tree from the authoritative current text, render it, and log whether it
+    // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
+    // this never influences any closeout decision. A `match=false` line is the
+    // signal to investigate the adapter before later phases can trust the tree.
+    if !options.probe {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &agent_doc_markdown_lossless::shadow_audit_ops_log_line(&content, "preflight_initial"),
+        );
+    }
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());

@@ -34,6 +34,7 @@ agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.67" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.67" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.67" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.67" }
+agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.34.67" }
 agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.67" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.67" }
 agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.67" }

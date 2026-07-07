@@ -1735,7 +1735,10 @@ mod tests {
         };
         let parsed: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
-        assert_eq!(parsed["document_cell_merge_acks"][0]["component"], "exchange");
+        assert_eq!(
+            parsed["document_cell_merge_acks"][0]["component"],
+            "exchange"
+        );
         assert_eq!(parsed["document_cell_merge_acks"][0]["id"], "p3kj");
         assert_eq!(
             parsed["document_cell_merge_acks"][0]["reason"],

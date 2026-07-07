@@ -4562,10 +4562,16 @@ fn try_main() -> anyhow::Result<()> {
                     };
                     let threshold =
                     agent_doc_controller_io::project_controller::stale_preparing_controller_threshold();
-                    let (reaped, kept) =
-                    agent_doc_controller_io::project_controller::terminate_stale_preparing_controllers_for_caller(
-                        &root, threshold, dry_run, "admin",
-                    )?;
+                    let (record_reaped, record_kept) =
+                        agent_doc_controller_io::project_controller::terminate_stale_preparing_controllers_for_caller(
+                            &root, threshold, dry_run, "admin",
+                        )?;
+                    let (orphan_reaped, orphan_kept) =
+                        agent_doc_controller_io::project_controller::reap_orphaned_preparing_controllers_for_caller(
+                            &root, threshold, dry_run, "admin",
+                        )?;
+                    let reaped = record_reaped + orphan_reaped;
+                    let kept = record_kept + orphan_kept;
                     if dry_run {
                         println!(
                             "[admin] reap-stale-controllers (dry-run): {reaped} would be terminated, {kept} kept"

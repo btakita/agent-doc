@@ -2633,17 +2633,17 @@ pub fn recycle_controller_force(project_root: &Path, force: bool) -> Result<bool
     } else {
         Ok(false)
     };
-    // #stuckhandoff2: process-scan reap orphaned `Preparing` zombies in this root so
-    // `admin recycle` clears the wedged-preparing class immediately instead of
-    // relying on M1's later self-watchdog tick or the next gc/connect. The shared
-    // threshold spares a healthy young handoff (including one a recycle just
-    // launched). Runs regardless of the recycle RPC outcome.
-    let _ = reap_orphaned_preparing_controllers_for_caller(
-        project_root,
-        stale_preparing_controller_threshold(),
-        false,
-        "recycle",
-    );
+    // #stuckhandoff2: clear stale bootstrap-owned handoffs first, then process-scan
+    // orphaned `Preparing` zombies in this root so `admin recycle` clears the
+    // wedged-preparing class immediately instead of relying on M1's later
+    // self-watchdog tick or the next gc/connect. The shared threshold spares a
+    // healthy young handoff (including one a recycle just launched). Runs
+    // regardless of the recycle RPC outcome.
+    let threshold = stale_preparing_controller_threshold();
+    let _ =
+        terminate_stale_preparing_controllers_for_caller(project_root, threshold, false, "recycle");
+    let _ =
+        reap_orphaned_preparing_controllers_for_caller(project_root, threshold, false, "recycle");
     result
 }
 

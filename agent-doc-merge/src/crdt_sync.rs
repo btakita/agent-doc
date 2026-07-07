@@ -63,6 +63,13 @@ impl ReplicaState {
         }
     }
 
+    /// Create a replica seeded from plain text in linear time.
+    pub fn from_text(client_id: u64, text: &str) -> Self {
+        Self {
+            text: RefCell::new(TextCrdt::from_str(client_id, text)),
+        }
+    }
+
     /// Bootstrap a replica from a previously encoded state (the durable boundary
     /// checkpoint / a peer's full snapshot on first contact). `apply_delta` of the
     /// snapshot preserves each element's `OpId`, so the reconstructed replica shares
@@ -83,6 +90,10 @@ impl ReplicaState {
     pub fn apply_local_edit(&self, offset: u32, delete_len: u32, insert: &str) {
         let mut t = self.text.borrow_mut();
         let cur = t.text();
+        if offset == 0 && (cur.is_empty() || delete_len as usize >= cur.len()) {
+            t.replace_all(insert);
+            return;
+        }
         let start_char = byte_to_char(&cur, offset as usize);
         if delete_len > 0 {
             let end_char = byte_to_char(&cur, offset as usize + delete_len as usize);
@@ -323,6 +334,19 @@ mod tests {
         a.apply_local_edit(0, 0, "roundtrip me");
         let restored = ReplicaState::from_encoded(7, &a.encode_state()).unwrap();
         assert_eq!(restored.text(), "roundtrip me");
+    }
+
+    #[test]
+    fn from_text_and_full_replace_preserve_delta_convergence() {
+        let canonical = ReplicaState::from_text(1, &"seeded line\n".repeat(512));
+        let member = ReplicaState::from_encoded(2, &canonical.encode_state()).unwrap();
+
+        canonical.apply_local_edit(0, u32::MAX, "replacement\nbody\n");
+        let update = canonical.diff(&member.state_vector()).unwrap();
+        member.apply_update(&update).unwrap();
+
+        assert_eq!(canonical.text(), "replacement\nbody\n");
+        assert_eq!(member.text(), canonical.text());
     }
 
     #[test]

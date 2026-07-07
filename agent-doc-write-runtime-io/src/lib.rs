@@ -3685,7 +3685,9 @@ mod tests {
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=no_lazily_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write"),
+                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("typing_status=absent")
+                && log.contains("operator_activity_inferred=false"),
             "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
         );
     }
@@ -4216,7 +4218,9 @@ mod tests {
         assert!(
             log.contains("ipc_proof_insufficient")
                 && log.contains("invariant=no_lazily_visible_write_receipt")
-                && log.contains("patch_id=patch-post-dedupe"),
+                && log.contains("patch_id=patch-post-dedupe")
+                && log.contains("typing_status=absent")
+                && log.contains("operator_activity_inferred=false"),
             "post-dedupe unacknowledged live-edit IPC should be logged:\n{log}"
         );
         assert!(

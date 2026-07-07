@@ -738,7 +738,8 @@ pub fn closeout_recovery_decision_from_state(
     if let Some(proof) = input.stale_capture_supersession_proof
         && matches!(
             state,
-            CloseoutRecoveryState::MissingResponseBody
+            CloseoutRecoveryState::OpenCycle
+                | CloseoutRecoveryState::MissingResponseBody
                 | CloseoutRecoveryState::UnsafeUserContentDrift
         )
     {
@@ -1467,7 +1468,7 @@ mod tests {
             );
         }
 
-        for state in [MissingResponseBody, UnsafeUserContentDrift] {
+        for state in [OpenCycle, MissingResponseBody, UnsafeUserContentDrift] {
             assert_eq!(
                 closeout_recovery_decision_from_state(
                     state,

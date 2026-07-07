@@ -76,6 +76,14 @@ pub trait CloseoutEffects {
         snapshot_content: Option<&str>,
         file_content: Option<&str>,
     ) -> Result<agent_doc_cycle_state_io::CycleState>;
+
+    fn mark_abandoned_frontmatter(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<agent_doc_cycle_state_io::CycleState>;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1023,11 +1031,17 @@ pub fn load_current_observed_closeout_recovery_evidence(
     let visible_doc =
         effects.resolve_current_document(file, "observed_closeout_recovery_evidence")?;
     let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible_doc.content());
+    let current_snapshot_hash = agent_doc_snapshot_io::load(file)?
+        .as_deref()
+        .map(agent_doc_hash::content_hash);
     let Some(projection) = agent_doc_cycle_state_io::load_latest_closeout_recovery_evidence(file)?
     else {
         return Ok(None);
     };
     if projection.visible_markdown_hash != visible_markdown_hash {
+        return Ok(None);
+    }
+    if current_snapshot_hash.is_some() && projection.snapshot_hash != current_snapshot_hash {
         return Ok(None);
     }
     Ok(projected_closeout_recovery_evidence(projection))
@@ -1590,6 +1604,43 @@ pub fn apply_closeout_recovery(
     effects: &dyn CloseoutEffects,
 ) -> Result<RecoveryApplication> {
     let state = classify_closeout_recovery_state_for_file(file, effects);
+    if matches!(
+        state,
+        CloseoutRecoveryState::OpenCycle
+            | CloseoutRecoveryState::MissingResponseBody
+            | CloseoutRecoveryState::UnsafeUserContentDrift
+    ) {
+        let decision =
+            decide_closeout_recovery(file, CloseoutRecoveryDecisionInput::default(), effects);
+        if let CloseoutRecoveryDecision::RetireStaleCapture { proof, .. } = decision {
+            let visible_doc =
+                effects.resolve_current_document(file, "closeout_recovery_retire_stale_capture")?;
+            apply_closeout_recovery_mutation(
+                file,
+                CloseoutRecoveryMutation::RetireStaleCapture {
+                    content: Some(visible_doc.content()),
+                    clear_pending_response: true,
+                    delete_pre_response: true,
+                    mark_cycle_committed_event: None,
+                    mark_cycle_abandoned_event: Some("closeout_recovery_retire_stale_capture"),
+                    reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
+                },
+                effects,
+            )?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "closeout_recovery_retire_stale_capture file={} proof={}",
+                    file.display(),
+                    proof.replace('\n', " ")
+                ),
+            );
+            return Ok(RecoveryApplication::Applied {
+                state,
+                action: format!("retired stale captured response recovery ({proof})"),
+            });
+        }
+    }
     match state {
         CloseoutRecoveryState::Clean => Ok(RecoveryApplication::NothingToDo),
         CloseoutRecoveryState::OpenEmptyPreflight => {
@@ -1640,6 +1691,7 @@ pub enum CloseoutRecoveryMutation<'a> {
         clear_pending_response: bool,
         delete_pre_response: bool,
         mark_cycle_committed_event: Option<&'a str>,
+        mark_cycle_abandoned_event: Option<&'a str>,
         reason: CloseoutRecoveryMutationReason,
     },
 }
@@ -1690,6 +1742,7 @@ pub fn apply_closeout_recovery_mutation(
             clear_pending_response,
             delete_pre_response,
             mark_cycle_committed_event,
+            mark_cycle_abandoned_event,
             reason,
         } => {
             if clear_pending_response {
@@ -1713,6 +1766,22 @@ pub fn apply_closeout_recovery_mutation(
             }
             if let Some(event) = mark_cycle_committed_event {
                 effects.mark_committed_frontmatter(file, event, content, content)?;
+            } else if let Some(event) = mark_cycle_abandoned_event {
+                let resolved_content;
+                let content = match content {
+                    Some(content) => Some(content),
+                    None => {
+                        resolved_content = effects
+                            .resolve_current_document(
+                                file,
+                                "closeout_recovery_retire_stale_capture",
+                            )
+                            .ok()
+                            .map(|doc| doc.content().to_string());
+                        resolved_content.as_deref()
+                    }
+                };
+                effects.mark_abandoned_frontmatter(file, event, content, content)?;
             }
             log_closeout_recovery_mutation(file, "retire_stale_capture", reason);
         }

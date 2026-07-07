@@ -1157,6 +1157,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(signal).unwrap()).unwrap();
         assert_eq!(msg["type"], "publish_live_buffer");
         assert_eq!(msg["file"], "/tmp/plan.md");
+        assert!(msg["issued_at_ms"].as_u64().unwrap() > 0);
         assert!(
             msg.get("content").is_none() && msg.get("patches").is_none(),
             "publish-live-buffer signal must not carry document mutation payload: {msg}"

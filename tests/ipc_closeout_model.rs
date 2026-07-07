@@ -120,7 +120,8 @@ fn expected_closeout_recovery_decision(
     if proof_available
         && matches!(
             state,
-            CloseoutRecoveryState::MissingResponseBody
+            CloseoutRecoveryState::OpenCycle
+                | CloseoutRecoveryState::MissingResponseBody
                 | CloseoutRecoveryState::UnsafeUserContentDrift
         )
     {
@@ -583,6 +584,11 @@ fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
     assert!(
         ops_log.contains("recovery=retry_without_disk_write"),
         "missing lazily receipt should request an editor retry without a direct disk write:\n{ops_log}"
+    );
+    assert!(
+        ops_log.contains("typing_status=absent")
+            && ops_log.contains("operator_activity_inferred=false"),
+        "missing lazily receipt should not be classified as active operator typing without typing evidence:\n{ops_log}"
     );
 }
 

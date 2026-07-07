@@ -45,9 +45,10 @@ pub enum StaleCaptureRetirementDecision {
 /// A drifted `WriteApplied` capture may be retired only after the captured body
 /// is missing from the live document: the write was already attempted, but
 /// replaying onto a drifted baseline risks duplication or reordering. A
-/// drifted `Captured`-only orphan is more conservative because the write never
-/// ran, so retirement also requires proof that the captured heading is already
-/// answered by a superseding live exchange turn.
+/// `Captured`-only orphan is more conservative because the write never ran, so
+/// retirement requires proof that the captured heading is already answered by a
+/// superseding live exchange turn; that proof is enough even when the baseline
+/// hashes have not drifted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StaleCaptureRetirementEvidence {
     pub state: CaptureState,
@@ -59,14 +60,16 @@ pub struct StaleCaptureRetirementEvidence {
 pub const fn decide_stale_capture_retirement(
     evidence: StaleCaptureRetirementEvidence,
 ) -> StaleCaptureRetirementDecision {
-    if !evidence.replay_baseline_drifted || !evidence.captured_response_body_missing {
+    if !evidence.captured_response_body_missing {
         return StaleCaptureRetirementDecision::Keep;
     }
 
     match evidence.state {
-        CaptureState::WriteApplied => StaleCaptureRetirementDecision::RetireWedgedWriteApplied,
         CaptureState::Captured if evidence.captured_response_heading_answered => {
             StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan
+        }
+        CaptureState::WriteApplied if evidence.replay_baseline_drifted => {
+            StaleCaptureRetirementDecision::RetireWedgedWriteApplied
         }
         _ => StaleCaptureRetirementDecision::Keep,
     }
@@ -238,7 +241,7 @@ mod tests {
 
         let superseded = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
             state: CaptureState::Captured,
-            replay_baseline_drifted: true,
+            replay_baseline_drifted: false,
             captured_response_body_missing: true,
             captured_response_heading_answered: true,
         });

@@ -171,7 +171,11 @@ pub const FRONTMATTER_COMPONENT: &str = "__frontmatter__";
 /// Pure: no IO, no git, no agent-doc coupling. See the [module docs](self) for the
 /// full transition table, the frontmatter handling, and the documented prose
 /// reconstruction assumption.
-pub fn document_cell_merge(base: &str, ours_agent: &str, theirs_operator: &str) -> DocumentCellMerge {
+pub fn document_cell_merge(
+    base: &str,
+    ours_agent: &str,
+    theirs_operator: &str,
+) -> DocumentCellMerge {
     let mut outcomes = Vec::new();
     let mut requires_ack = Vec::new();
 

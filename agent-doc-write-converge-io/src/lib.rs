@@ -140,7 +140,8 @@ pub fn try_semantic_merge_convergence(
         return None;
     }
 
-    let active = agent_doc_merge::document_cell_merge::ActiveNodes::new().active_component("exchange");
+    let active =
+        agent_doc_merge::document_cell_merge::ActiveNodes::new().active_component("exchange");
     let sm = agent_doc_merge::document_cell_merge::document_cell_merge_scoped(
         base,
         candidate,

@@ -23,6 +23,10 @@ class TypingTrackerEdtBudgetTest {
             listenerBody.contains("requestNativeDocumentChanged(filePath)"),
         )
         assertTrue(
+            "agent-applied editor patches must share the non-operator provenance path with remote CRDT applies",
+            listenerBody.contains("CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)"),
+        )
+        assertTrue(
             "documentChanged should enqueue the full editor buffer report for a coalesced worker",
             listenerBody.contains("scheduleFullContentReport(filePath, event.document)"),
         )
@@ -173,6 +177,37 @@ class TypingTrackerEdtBudgetTest {
                 reporterBody.contains("forceRefresh = true") &&
                 reporterBody.contains("if (!replicaRefreshAccepted) return false") &&
                 reporterBody.contains("if (drainEditorOps)"),
+        )
+    }
+
+    @Test
+    fun `patch watcher wraps editor document mutations as non-operator changes`() {
+        val watcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val watcher = Files.readString(watcherPath)
+        val componentApplyBody = watcher.substringAfter("\"applyPatch.component\"")
+            .substringBefore("wrote = true")
+        val refreshBody = watcher.substringAfter("\"refreshContent.postcommit\"")
+            .substringBefore("applied = true")
+        val repositionBody = watcher.substringAfter("\"repositionBoundary\"")
+            .substringBefore("} else if (result != content)")
+
+        assertTrue(
+            "agent-doc IPC patch writes should not set the unsynced-local-operator flag",
+            componentApplyBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(patch.file)") &&
+                componentApplyBody.contains("applyMinimalDocumentEditUtil(document, content, result)"),
+        )
+        assertTrue(
+            "socket refresh_content writes should not look like operator typing",
+            refreshBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(filePath)") &&
+                refreshBody.contains("applyMinimalDocumentEditUtil(document, proof.content, content)"),
+        )
+        assertTrue(
+            "socket boundary reposition writes should not look like operator typing",
+            repositionBody.contains("CrdtReplicaManager.withAgentAppliedEditorMutation(filePath)") &&
+                repositionBody.contains("applyMinimalDocumentEditUtil(document, content, result)"),
         )
     }
 

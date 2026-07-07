@@ -17816,6 +17816,19 @@ fn test_agent_doc_controller_owns_fleet_dashboard_policy() {
             && !cli_main.contains("agent_doc_orchestration::admin::"),
         "CLI should adapt concrete admin effects and call agent-doc-admin-io directly"
     );
+    let reap_admin_start = cli_main
+        .find("AdminAction::ReapStaleControllers")
+        .expect("admin reap-stale-controllers branch should exist");
+    let reap_admin_end = reap_admin_start
+        + cli_main[reap_admin_start..]
+            .find("AdminAction::Recycle")
+            .expect("admin recycle branch should follow reap-stale-controllers");
+    let reap_admin = &cli_main[reap_admin_start..reap_admin_end];
+    assert!(
+        reap_admin.contains("terminate_stale_preparing_controllers_for_caller")
+            && reap_admin.contains("reap_orphaned_preparing_controllers_for_caller"),
+        "admin reap-stale-controllers should aggregate record-scoped and orphaned process-scan reapers"
+    );
     assert!(
         cli_dashboard.contains("impl DashboardEffects for CliDashboardEffects")
             && cli_dashboard.contains("ActorListRecord")

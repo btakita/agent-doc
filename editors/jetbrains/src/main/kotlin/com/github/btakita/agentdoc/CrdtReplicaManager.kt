@@ -71,7 +71,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (!file.name.endsWith(".md")) return
             val filePath = file.path
             loggedFilePath = filePath
-            if (applyingRemote.contains(filePath)) return
+            if (CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)) return
             val newFragment = event.newFragment.toString()
             val oldFragment = event.oldFragment.toString()
             if (newFragment.isEmpty() && oldFragment.isEmpty()) return
@@ -628,6 +628,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     companion object {
         private val instances = ConcurrentHashMap<Project, CrdtReplicaManager>()
+        private val applyingAgentMutations = ConcurrentHashMap.newKeySet<String>()
 
         fun getInstance(project: Project): CrdtReplicaManager =
             instances.getOrPut(project) {
@@ -640,6 +641,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
             instances[project]?.requestRemoteDrain(filePath, reason)
+        }
+
+        fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {
+            applyingAgentMutations.add(filePath)
+            return try {
+                block()
+            } finally {
+                applyingAgentMutations.remove(filePath)
+            }
         }
 
         fun ensureReplicaForOpenDocument(
@@ -657,6 +667,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun isApplyingRemote(filePath: String): Boolean =
             instances.values.any { it.applyingRemote.contains(filePath) }
+
+        fun isApplyingNonOperatorMutation(filePath: String): Boolean =
+            applyingAgentMutations.contains(filePath) || isApplyingRemote(filePath)
     }
 
     private fun ownsFilePath(filePath: String): Boolean {

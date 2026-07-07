@@ -1179,8 +1179,8 @@ mod tests {
     }
 
     // A `Captured`-only orphan (write never attempted) must STAY on the
-    // conservative fail-closed path even when the baseline drifts — the retire
-    // path is scoped to `WriteApplied` captures only.
+    // conservative fail-closed path even when the baseline drifts unless a
+    // superseding visible exchange turn proves the captured response is stale.
     #[test]
     fn captured_only_orphan_on_drift_still_fails_closed() {
         let dir = setup_project();
@@ -1201,6 +1201,57 @@ mod tests {
         assert!(
             err.to_string().contains("baseline no longer matches"),
             "captured-only orphan must keep failing closed without superseding evidence: {err}"
+        );
+    }
+
+    // `#stale-capture-captured-only-drift`: supersession proof, not baseline
+    // drift, is the safety condition for a `Captured`-only orphan. This covers
+    // the already-answered live-exchange wedge where replay would duplicate a
+    // stale response even though the capture baseline still matches.
+    #[test]
+    fn retires_superseded_captured_only_orphan_without_baseline_drift() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let live = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n### Re: new — opus-4-8\n\nThe real landed answer.\n<!-- agent:boundary:def -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, live).unwrap();
+        agent_doc_snapshot_io::save(&doc, live, agent_doc_ops_log_io::log_op).unwrap();
+
+        let stale_duplicate = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
+        let capture = agent_doc_capture_io::capture_response(&doc, stale_duplicate).unwrap();
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Captured
+        );
+        assert!(
+            !agent_doc_capture_io::replay_baseline_drifted_with_current_content(
+                &doc, &capture, live
+            )
+            .unwrap(),
+            "fixture should prove supersession without relying on baseline drift"
+        );
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::StaleCaptureRetired);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result, live, "current document must be preserved verbatim");
+        assert!(
+            !result.contains("Lost duplicate."),
+            "stale captured body must not be replayed:\n{result}"
+        );
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            capture.state,
+            agent_doc_workflow::capture::CaptureState::Discarded
+        );
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state should remain as terminal recovery proof");
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("closeout_recovery_mutation")
+                && log.contains("retire_superseded_captured_only_orphan"),
+            "superseded captured orphan retirement must go through the shared recovery mutation primitive:\n{log}"
         );
     }
 
@@ -1253,6 +1304,21 @@ mod tests {
         assert_eq!(
             capture.response_body, lost,
             "captured body must be preserved for forensics"
+        );
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state should remain as terminal recovery proof");
+        assert_eq!(
+            state.phase,
+            agent_doc_turn::CyclePhase::Abandoned,
+            "retiring a stale captured-only orphan must terminalize the old cycle"
+        );
+        assert!(
+            state
+                .last_event
+                .contains("repair_retire_superseded_captured_only_orphan"),
+            "abandoned cycle should explain why replay was dropped: {}",
+            state.last_event
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
@@ -1785,6 +1851,67 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_commit_boundary_recovered");
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            Some(updated)
+        );
+    }
+
+    #[test]
+    fn repair_already_present_response_closes_as_committed_when_head_matches() {
+        let dir = setup_project();
+        let root = dir.path();
+        let doc = root.join("test.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, base).unwrap();
+        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(root, &doc);
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- /patch:exchange -->",
+        );
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+
+        let updated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: topic — gpt-5\n",
+            "Recovered body.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, updated).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["add", "test.md"])
+            .status()
+            .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "manual patchback", "--no-verify"])
+            .status()
+            .unwrap();
+
+        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+
+        let repaired = run(&doc).unwrap();
+        assert_eq!(repaired, RepairOutcome::AlreadyApplied);
+
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("repair should keep terminal cycle proof");
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
+        assert_eq!(state.last_event, "commit_already_current");
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(updated)

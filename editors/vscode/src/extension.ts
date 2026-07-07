@@ -65,6 +65,7 @@ const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 const LIVE_BUFFER_REPORT_DELAY_MS = 75;
+const PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS = 30_000;
 
 // #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
 // VS Code's onDidChangeTextDocument carries only rangeLength (UTF-16) for the
@@ -2236,7 +2237,9 @@ class PatchWatcher implements vscode.Disposable {
     private async processPublishLiveBufferSignal(patchesDir: string): Promise<void> {
         const signalFile = path.join(patchesDir, 'publish-live-buffer.signal');
         let raw: string;
+        let signalMtimeMs: number | undefined;
         try {
+            signalMtimeMs = fs.statSync(signalFile).mtimeMs;
             raw = fs.readFileSync(signalFile, 'utf8');
         } catch {
             return;
@@ -2253,6 +2256,16 @@ class PatchWatcher implements vscode.Disposable {
         } catch {
             this.outputChannel.appendLine('publish_live_buffer: malformed signal payload, ignoring');
             return;
+        }
+        const issuedAtMs = typeof parsed?.issued_at_ms === 'number' && Number.isFinite(parsed.issued_at_ms)
+            ? parsed.issued_at_ms
+            : signalMtimeMs;
+        if (issuedAtMs !== undefined) {
+            const ageMs = Date.now() - issuedAtMs;
+            if (ageMs > PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS) {
+                this.outputChannel.appendLine(`publish_live_buffer: stale signal ignored age_ms=${Math.round(ageMs)}`);
+                return;
+            }
         }
         const file = typeof parsed?.file === 'string' ? parsed.file : undefined;
         if (!file) {

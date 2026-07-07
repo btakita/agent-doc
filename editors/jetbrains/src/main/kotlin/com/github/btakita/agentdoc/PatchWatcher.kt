@@ -757,7 +757,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                         "[patch-watcher] minimal-edit target (refresh_content) for $filePath (${content.length} chars):\n$content",
                     )
                 }
-                applyMinimalDocumentEditUtil(document, proof.content, content)
+                CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
+                    applyMinimalDocumentEditUtil(document, proof.content, content)
+                }
                 applied = true
             })
         }
@@ -818,7 +820,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                             "[patch-watcher] minimal-edit target (repositionBoundary) for $filePath boundaryId=$boundaryId (${result.length} chars):\n$result"
                         )
                     }
-                    applyMinimalDocumentEditUtil(document, content, result)
+                    CrdtReplicaManager.withAgentAppliedEditorMutation(filePath) {
+                        applyMinimalDocumentEditUtil(document, content, result)
+                    }
                 } else if (result != content) {
                     LOG.warn("[patch-watcher] stale editor generation during reposition for $filePath")
                 }
@@ -1325,7 +1329,9 @@ class PatchWatcher(private val project: Project) : Disposable {
                     "[patch-watcher] minimal-edit target (applyPatch.component) for ${patch.file} patchId=${patch.patchId} (${result.length} chars):\n$result"
                 )
             }
-            applyMinimalDocumentEditUtil(document, content, result)
+            CrdtReplicaManager.withAgentAppliedEditorMutation(patch.file) {
+                applyMinimalDocumentEditUtil(document, content, result)
+            }
             wrote = true
             LOG.info("Patch applied to ${patch.file} (${result.length - content.length} chars changed)")
         })

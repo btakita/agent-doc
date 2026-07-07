@@ -2608,6 +2608,7 @@ name = "agent-doc-write-ipc-io"
 version = "0.34.67"
 dependencies = [
  "agent-doc-cycle-state-io",
+ "agent-doc-debounce",
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",

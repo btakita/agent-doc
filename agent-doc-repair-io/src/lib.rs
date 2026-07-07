@@ -361,15 +361,27 @@ pub fn run_with_queue_completion_ids_and_force_disk<
                 file.display()
             );
         }
-        if state_is_open
-            && let Err(e) = agent_doc_cycle_state_io::mark_write_applied(
-                file,
-                "repair_already_applied",
-                Some(&repaired_doc),
-                Some(&repaired_doc),
-            )
-        {
-            eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
+        if state_is_open {
+            let head_matches_repaired_doc =
+                agent_doc_git_io::revision::show_head(file)?.as_deref() == Some(&repaired_doc);
+            let state_result = if head_matches_repaired_doc {
+                effects.repair_io_effects.mark_committed_frontmatter(
+                    file,
+                    "commit_already_current",
+                    Some(&repaired_doc),
+                    Some(&repaired_doc),
+                )
+            } else {
+                agent_doc_cycle_state_io::mark_write_applied(
+                    file,
+                    "repair_already_applied",
+                    Some(&repaired_doc),
+                    Some(&repaired_doc),
+                )
+            };
+            if let Err(e) = state_result {
+                eprintln!("[repair] cycle-state update failed: {} (non-fatal)", e);
+            }
         }
         pending::clear_pending(&canonical)?;
         return Ok(RepairOutcome::AlreadyApplied);
@@ -1186,6 +1198,7 @@ fn discard_pending_capture_for_manual_repair(
             clear_pending_response: true,
             delete_pre_response: true,
             mark_cycle_committed_event: Some("repair_respect_manual_exchange_tail_removal"),
+            mark_cycle_abandoned_event: None,
             reason: agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason::RespectManualTailRemoval,
         },
     )?;
@@ -1246,6 +1259,7 @@ pub fn retire_stale_capture_if_drifted(
                     clear_pending_response: true,
                     delete_pre_response: true,
                     mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
+                    mark_cycle_abandoned_event: None,
                     reason: agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
                 },
             )?;
@@ -1272,6 +1286,7 @@ pub fn retire_stale_capture_if_drifted(
                     clear_pending_response: true,
                     delete_pre_response: true,
                     mark_cycle_committed_event: None,
+                    mark_cycle_abandoned_event: Some("repair_retire_superseded_captured_only_orphan"),
                     reason: agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
                 },
             )?;
@@ -1285,7 +1300,7 @@ pub fn retire_stale_capture_if_drifted(
                 ),
             );
             eprintln!(
-                "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange + baseline drifted); preserved the captured body for forensics",
+                "[repair] retired superseded Captured-only orphan for {} (captured response's heading already answered in the live exchange); preserved the captured body for forensics",
                 file.display()
             );
             Ok(true)

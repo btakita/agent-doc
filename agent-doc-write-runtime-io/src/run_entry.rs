@@ -158,7 +158,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         // No edits — use our version directly
         content_ours.clone()
     } else {
-        eprintln!("[write] File was modified during response generation. Merging...");
+        eprintln!("[write] Current document changed since response baseline. Merging...");
         agent_doc_merge_io::merge_contents(base, &content_ours, &content_current)?
     };
 
@@ -441,7 +441,7 @@ pub(crate) fn run_template(
         } else if content_current == base {
             content_ours.clone()
         } else {
-            eprintln!("[write] File was modified during response generation. Merging...");
+            eprintln!("[write] Current document changed since response baseline. Merging...");
             agent_doc_merge_io::merge_contents(base, &content_ours, content_current)?
         };
         let mut final_content = normalize_final_template_content(
@@ -1274,7 +1274,7 @@ pub(crate) fn run_stream(
             )
         } else {
             eprintln!(
-                "[write] File was modified during response generation. Document-model merging..."
+                "[write] Current document changed since response baseline. Document-model merging..."
             );
             let merged = merge_template_document_model(file, base, &content_ours, content_current)?;
             let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
@@ -2309,7 +2309,9 @@ fn merge_recovery_content(
     }
 
     if content_uses_crdt_write(base) {
-        eprintln!("[write] File was modified during response recovery. Document-model merging...");
+        eprintln!(
+            "[write] Current document changed since response recovery baseline. Document-model merging..."
+        );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

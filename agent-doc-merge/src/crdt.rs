@@ -3714,7 +3714,10 @@ Second answer line three.
         unsafe {
             std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");
         }
-        assert!(!crate::document_cell::document_cell_merge_enabled(), "must be OFF");
+        assert!(
+            !crate::document_cell::document_cell_merge_enabled(),
+            "must be OFF"
+        );
 
         let base = doc_with_exchange_queue("Existing prompt.", "- do [#a1]");
         let base_state = MultiNodeState::from_text(&base).unwrap();

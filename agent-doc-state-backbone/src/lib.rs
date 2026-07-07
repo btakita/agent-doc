@@ -640,7 +640,9 @@ impl StateFact {
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
             Self::DocumentCellMergeAckRecorded { .. } => "document_cell_merge_ack_recorded",
-            Self::DocumentCellMergeAckCarriedForward { .. } => "document_cell_merge_ack_carried_forward",
+            Self::DocumentCellMergeAckCarriedForward { .. } => {
+                "document_cell_merge_ack_carried_forward"
+            }
             Self::OwnerGenerationChanged { .. } => "owner_generation_changed",
             Self::EditorPatchQueued { .. } => "editor_patch_queued",
             Self::EditorPatchApplied { .. } => "editor_patch_applied",

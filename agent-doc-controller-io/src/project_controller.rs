@@ -1924,10 +1924,10 @@ pub fn terminate_stale_preparing_controllers(
 /// the single `bootstrap.pid`; once a newer clean controller overwrites that record,
 /// an old replacement still wedged in `--handoff-state preparing` becomes invisible to
 /// it (the operator's `pkill -f 'controller serve ... --handoff-state preparing'`
-/// case). This walks `/proc` for same-project `controller serve` processes that still
-/// carry `--handoff-state preparing` and whose start age exceeds `stale_after`, then
-/// reaps each via the verified-pid path (cmdline + not-self gated). Returns
-/// `(reaped, kept)`.
+/// case). This walks `/proc` for same-project, non-bootstrap-owned `controller serve`
+/// processes that still carry `--handoff-state preparing` and whose start age
+/// exceeds `stale_after`, then reaps each via the verified-pid path (cmdline +
+/// not-self gated). Returns `(reaped, kept)`.
 pub fn reap_orphaned_preparing_controllers_for_caller(
     project_root: &Path,
     stale_after: Duration,
@@ -1944,6 +1944,9 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
             continue;
         }
         if !crate::process::cmdline_has_preparing_handoff(pid) {
+            continue;
+        }
+        if bootstrap_owns_controller_pid(project_root, pid)? {
             continue;
         }
         let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
@@ -1970,6 +1973,19 @@ pub fn reap_orphaned_preparing_controllers_for_caller(
         reaped += 1;
     }
     Ok((reaped, kept))
+}
+
+fn bootstrap_owns_controller_pid(project_root: &Path, pid: u32) -> Result<bool> {
+    let Some(bootstrap) = read_bootstrap(project_root)? else {
+        return Ok(false);
+    };
+    if bootstrap.pid != pid {
+        return Ok(false);
+    }
+    if !is_same_project_controller_pid(project_root, pid) {
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// gc/self-heal entry point for the orphaned-preparing process-scan reaper. See
@@ -2064,13 +2080,13 @@ pub fn reap_removed_project_root_controllers_all_projects(
 /// `sample-app` handoff that died while the operator is working in `agent-loop`)
 /// stays invisible until agent-doc is next invoked there. M1's self-watchdog
 /// already covers this without any external tick, but this sweep is the
-/// belt-and-suspenders breadth rung: it walks `/proc` for ANY `agent-doc ...
-/// controller serve --handoff-state preparing` process (across all project roots)
-/// whose start age exceeds `stale_after` and reaps each through the verified-pid
-/// path keyed to that process's OWN `--project-root`. This is the cross-project
-/// equivalent of the operator's `pkill -f 'controller serve ... --handoff-state
-/// preparing'`, and it needs no global registry — `/proc` is the index. Returns
-/// `(reaped, kept)`.
+/// belt-and-suspenders breadth rung: it walks `/proc` for any non-bootstrap-owned
+/// `agent-doc ... controller serve --handoff-state preparing` process (across all
+/// project roots) whose start age exceeds `stale_after` and reaps each through the
+/// verified-pid path keyed to that process's OWN `--project-root`. This is the
+/// cross-project equivalent of the operator's `pkill -f 'controller serve ...
+/// --handoff-state preparing'`, and it needs no global registry - `/proc` is the
+/// index. Returns `(reaped, kept)`.
 pub fn reap_orphaned_preparing_controllers_all_projects(
     stale_after: Duration,
     dry_run: bool,
@@ -2086,6 +2102,9 @@ pub fn reap_orphaned_preparing_controllers_all_projects(
             continue;
         };
         if !crate::process::cmdline_has_preparing_handoff(pid) {
+            continue;
+        }
+        if bootstrap_owns_controller_pid(&root, pid)? {
             continue;
         }
         let age = crate::process::process_start_age_secs(pid).unwrap_or(0);
@@ -6459,6 +6478,35 @@ agent:queue\n\
     }
 
     #[test]
+    fn orphan_reaper_skips_self_promoted_stable_bootstrap_with_preparing_argv() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+
+        let mut bootstrap =
+            preparing_runtime_bootstrap(dir.path(), ControllerHandoffState::Stable, None);
+        bootstrap.pid = pid;
+        write_bootstrap_state(&bootstrap).unwrap();
+
+        let (reaped, kept) =
+            reap_orphaned_preparing_controllers(dir.path(), Duration::from_secs(0), false).unwrap();
+        assert_eq!(
+            (reaped, kept),
+            (0, 0),
+            "a self-promoted stable bootstrap must not be treated as an orphan even if argv still says preparing"
+        );
+        assert!(
+            process_is_alive(pid),
+            "the stable bootstrap-owned controller must survive the orphan scan"
+        );
+
+        let _ = sentinel.kill();
+        let _ = sentinel.wait();
+    }
+
+    #[test]
     fn removed_project_root_reaper_reaps_stable_temp_controller() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -6537,6 +6585,44 @@ agent:queue\n\
         assert!(ops_log.contains("caller=recycle"));
 
         unsafe { std::env::remove_var(STALE_PREPARING_CONTROLLER_SECS_ENV) };
+    }
+
+    #[test]
+    fn recycle_reaps_stale_bootstrap_owned_preparing_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let sentinel = spawn_preparing_controller_sentinel(dir.path());
+        let pid = sentinel.id();
+        assert!(crate::process::cmdline_has_preparing_handoff(pid));
+
+        let mut bootstrap = preparing_runtime_bootstrap(
+            dir.path(),
+            ControllerHandoffState::Preparing,
+            Some(timestamp_secs() - 600),
+        );
+        bootstrap.pid = pid;
+        write_bootstrap_state(&bootstrap).unwrap();
+
+        let recycled = recycle_controller(dir.path()).unwrap();
+        assert!(
+            !recycled,
+            "no authoritative controller answered the recycle"
+        );
+
+        let status = wait_for_test_child_exit(
+            sentinel,
+            Duration::from_secs(2),
+            "stale bootstrap-owned preparing controller must be reaped by recycle",
+        );
+        assert!(
+            !status.success(),
+            "bootstrap-owned preparing controller must be signal-terminated: {status:?}"
+        );
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_reaped pid="));
+        assert!(ops_log.contains("caller=recycle"));
     }
     // ---- #qflood: in-flight dispatch coalescing decision ----
     // ---- M2 (#stuckhandoff2): non-Stable controller refuses dispatch ----

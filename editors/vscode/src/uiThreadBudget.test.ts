@@ -82,6 +82,9 @@ describe('editor UI thread budget', () => {
         assert.ok(handlerEnd > handlerStart, 'handler should precede content projection helper');
         const handler = source.slice(handlerStart, handlerEnd);
         assert.ok(handler.includes('this.publishLiveBufferNow(document, projectRoot);'));
+        assert.ok(handler.includes('PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS'));
+        assert.ok(handler.includes('signalMtimeMs'));
+        assert.ok(handler.includes('stale signal ignored'));
         assert.strictEqual(handler.includes('workspace.applyEdit'), false);
         assert.strictEqual(handler.includes('.save('), false);
 

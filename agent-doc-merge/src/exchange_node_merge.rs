@@ -217,7 +217,10 @@ mod tests {
             1,
             "the duplicated response turn collapses to one"
         );
-        assert!(converged.contains("❯ Prompt."), "distinct prompt is preserved");
+        assert!(
+            converged.contains("❯ Prompt."),
+            "distinct prompt is preserved"
+        );
     }
 
     #[test]
@@ -249,8 +252,7 @@ mod tests {
         // The node merge now collapses duplicate identities the operator side
         // already carries, so the merge output converges instead of preserving
         // mirror-ordered duplicates.
-        let poisoned_theirs =
-            "### Re: A — opus\n\nAnswer A.\n\n### Re: A — opus\n\nAnswer A.\n";
+        let poisoned_theirs = "### Re: A — opus\n\nAnswer A.\n\n### Re: A — opus\n\nAnswer A.\n";
         let merged = merge_exchange_nodes("", poisoned_theirs, poisoned_theirs);
         assert_eq!(
             merged.matches("### Re: A").count(),

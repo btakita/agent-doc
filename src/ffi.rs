@@ -415,26 +415,39 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
         Ok(path) => path,
         Err(_) => return,
     };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return,
     };
-    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return,
     };
-    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
         Ok(capabilities) => capabilities,
         Err(_) => return,
     };
+    let capabilities: Vec<&str> = capabilities_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .collect();
+    let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+        path,
+        text,
+        editor,
+        kind,
+        version,
+        &capabilities,
+    );
     agent_doc_debounce::document_changed(path);
 }
 
@@ -462,32 +475,46 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
     editor_kind: *const c_char,
     editor_version: *const c_char,
     capabilities_csv: *const c_char,
-    _no_unsaved_operator_edits: i32,
+    no_unsaved_operator_edits: i32,
 ) {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(path) => path,
         Err(_) => return,
     };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
+    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
         Ok(kind) => kind,
         Err(_) => return,
     };
-    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
+    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
         Ok(version) => version,
         Err(_) => return,
     };
-    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
+    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
         Ok(capabilities) => capabilities,
         Err(_) => return,
     };
+    let capabilities: Vec<&str> = capabilities_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|capability| !capability.is_empty())
+        .collect();
+    let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+        path,
+        text,
+        editor,
+        kind,
+        version,
+        &capabilities,
+        no_unsaved_operator_edits != 0,
+    );
     agent_doc_debounce::document_changed(path);
 }
 
@@ -723,8 +750,10 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
             .flatten()
             .map(|state| state.phase)
             .unwrap_or(agent_doc_turn::CyclePhase::Committed);
-    let phase =
-        resolve_turn_phase(document_model_actor_state(std::path::Path::new(path)), sidecar_phase);
+    let phase = resolve_turn_phase(
+        document_model_actor_state(std::path::Path::new(path)),
+        sidecar_phase,
+    );
     let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
     if proj.turn_in_flight {
         let steering =
@@ -4131,6 +4160,90 @@ mod ack_content_tests {
             agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy()).is_none(),
             "editor-applied receipt must not record a live-buffer sidecar proof"
         );
+    }
+
+    #[test]
+    fn test_document_changed_digest_content_for_editor_v3_records_live_buffer_provenance() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let content = CString::new("before\n### Re: remote\n").unwrap();
+        let editor_id = CString::new("jetbrains:test").unwrap();
+        let editor_kind = CString::new("jetbrains").unwrap();
+        let editor_version = CString::new("test").unwrap();
+        let capabilities = CString::new(format!(
+            "{},{}",
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+        ))
+        .unwrap();
+
+        unsafe {
+            agent_doc_document_changed_digest_content_for_editor_v3(
+                file_path.as_ptr(),
+                content.as_ptr(),
+                editor_id.as_ptr(),
+                editor_kind.as_ptr(),
+                editor_version.as_ptr(),
+                capabilities.as_ptr(),
+                1,
+            )
+        };
+
+        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
+            .expect("v3 full-content report should persist live-buffer sidecar");
+        assert_eq!(
+            snapshot.content.as_deref(),
+            Some("before\n### Re: remote\n")
+        );
+        assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
+        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+        assert!(snapshot.has_capability(agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY));
+        assert!(
+            snapshot.no_unsaved_operator_edits,
+            "v3 provenance flag must survive the FFI bridge"
+        );
+    }
+
+    #[test]
+    fn test_document_changed_digest_content_for_editor_v2_records_live_buffer_without_provenance() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
+        let doc = tmp.path().join("session.md");
+        std::fs::write(&doc, "before\n").unwrap();
+        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
+        let content = CString::new("before\n### Re: fallback\n").unwrap();
+        let editor_id = CString::new("jetbrains:test").unwrap();
+        let editor_kind = CString::new("jetbrains").unwrap();
+        let editor_version = CString::new("test").unwrap();
+        let capabilities = CString::new(format!(
+            "{},{}",
+            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+        ))
+        .unwrap();
+
+        unsafe {
+            agent_doc_document_changed_digest_content_for_editor_v2(
+                file_path.as_ptr(),
+                content.as_ptr(),
+                editor_id.as_ptr(),
+                editor_kind.as_ptr(),
+                editor_version.as_ptr(),
+                capabilities.as_ptr(),
+            )
+        };
+
+        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
+            .expect("v2 full-content report should persist live-buffer sidecar");
+        assert_eq!(
+            snapshot.content.as_deref(),
+            Some("before\n### Re: fallback\n")
+        );
+        assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
+        assert!(!snapshot.no_unsaved_operator_edits);
     }
 
     #[test]

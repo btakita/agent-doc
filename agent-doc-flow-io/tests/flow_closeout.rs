@@ -104,6 +104,21 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
             file_content,
         )
     }
+
+    fn mark_abandoned_frontmatter(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_closeout_runtime_io::closeout_effects().mark_abandoned_frontmatter(
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
 }
 
 fn complete_required_closeout_with_local_crdt_barrier(file: &Path) -> Result<bool> {

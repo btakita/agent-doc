@@ -1058,7 +1058,10 @@ mod tests {
 
         let (deleted, kept) = clean_orphaned_handoff_sockets(&agent_doc_dir, false).unwrap();
 
-        assert_eq!(deleted, 1, "only the dead-PID handoff socket should be reaped");
+        assert_eq!(
+            deleted, 1,
+            "only the dead-PID handoff socket should be reaped"
+        );
         assert_eq!(kept, 1, "the live-PID handoff socket should be kept");
         assert!(!dead.exists(), "dead-PID handoff socket must be removed");
         assert!(live.exists(), "live-PID handoff socket must be preserved");

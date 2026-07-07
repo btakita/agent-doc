@@ -233,6 +233,22 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
             file_content,
         )
     }
+
+    fn mark_abandoned_frontmatter(
+        &self,
+        file: &Path,
+        event: &str,
+        snapshot_content: Option<&str>,
+        file_content: Option<&str>,
+    ) -> Result<agent_doc_cycle_state_io::CycleState> {
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_abandoned(
+            &PIPELINE_FRONTMATTER_EFFECTS,
+            file,
+            event,
+            snapshot_content,
+            file_content,
+        )
+    }
 }
 
 pub fn closeout_recovery_hint(file: &Path) -> String {

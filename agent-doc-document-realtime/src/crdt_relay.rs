@@ -175,9 +175,7 @@ impl RelayHub {
     /// allocation so the first editor delta is never applied to an empty replica.
     pub fn from_text(canonical_id: u64, text: &str) -> Self {
         let mut hub = Self::new(canonical_id);
-        if !text.is_empty() {
-            hub.canonical.apply_local_edit(0, 0, text);
-        }
+        hub.canonical = ReplicaState::from_text(canonical_id, text);
         hub.last_committed_text = Some(text.to_string());
         hub
     }

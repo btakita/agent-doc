@@ -670,7 +670,15 @@ pub fn publish_live_buffer_message(file: &str) -> serde_json::Value {
         "type": "publish_live_buffer",
         "file": file,
         "early_receipt": true,
+        "issued_at_ms": now_millis(),
     })
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 /// Build a VCS refresh payload.
@@ -1290,6 +1298,7 @@ mod tests {
         assert_eq!(message["type"], "publish_live_buffer");
         assert_eq!(message["file"], "/tmp/plan.md");
         assert_eq!(message["early_receipt"], true);
+        assert!(message["issued_at_ms"].as_u64().unwrap() > 0);
         assert!(message_requests_early_receipt(&message.to_string()));
         assert!(message.get("content").is_none());
         assert!(message.get("patches").is_none());

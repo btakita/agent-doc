@@ -80,6 +80,38 @@ fn log_ipc_proof_failure(
     );
 }
 
+fn typing_indicator_status_label(
+    status: agent_doc_debounce::TypingIndicatorStatus,
+) -> &'static str {
+    match status {
+        agent_doc_debounce::TypingIndicatorStatus::Absent => "absent",
+        agent_doc_debounce::TypingIndicatorStatus::Active => "active",
+        agent_doc_debounce::TypingIndicatorStatus::Idle => "idle",
+    }
+}
+
+fn missing_lazily_receipt_detail(file: &Path, detail: &str) -> String {
+    const RECEIPT_TIMEOUT_TYPING_DEBOUNCE_MS: u64 = 500;
+    let indicator_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let typing_status = agent_doc_debounce::typing_indicator_status(
+        &indicator_path,
+        RECEIPT_TIMEOUT_TYPING_DEBOUNCE_MS,
+    );
+    format!(
+        "{} typing_status={} operator_activity_inferred={}",
+        detail,
+        typing_indicator_status_label(typing_status),
+        matches!(
+            typing_status,
+            agent_doc_debounce::TypingIndicatorStatus::Active
+        )
+    )
+}
+
 fn log_partial_response_materialization_for_retry(
     file: &Path,
     source: &str,
@@ -662,8 +694,10 @@ fn try_ipc_inner(
                 // manufactures a raw foreign disk write — the source of IDEA
                 // "File Cache Conflict". Genuine transport failures still vote in
                 // the `Err(timeout)` arm.
+                let receipt_detail =
+                    missing_lazily_receipt_detail(file, "lazily_receipt_timeout=true");
                 eprintln!(
-                    "[write] socket delivered but lazily visible-write receipt was slow — recovering snapshot via file-IPC fallback (no degrade vote)"
+                    "[write] socket delivered but lazily visible-write receipt was slow — recovering snapshot via file-IPC fallback (no degrade vote; {receipt_detail})"
                 );
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -689,7 +723,7 @@ fn try_ipc_inner(
                     Some(&patch_id),
                     "no_lazily_visible_write_receipt",
                     "file_ipc_retry_without_disk_write",
-                    "lazily_receipt_timeout=true",
+                    &receipt_detail,
                 );
                 if let Some(ref cycle_id) = cycle_already_committed(file) {
                     eprintln!(
@@ -1107,8 +1141,10 @@ pub(crate) fn write_ipc_and_poll(
                     (snapshot_content, decision, visible_write_proven)
                 }
                 None => {
+                    let receipt_detail =
+                        missing_lazily_receipt_detail(doc_file, "lazily_receipt_timeout=true");
                     eprintln!(
-                        "[write] file IPC consumed but lazily visible-write receipt was not available after 500ms"
+                        "[write] file IPC consumed but lazily visible-write receipt was not available after 500ms ({receipt_detail})"
                     );
                     log_ipc_proof_failure(
                         doc_file,
@@ -1116,7 +1152,7 @@ pub(crate) fn write_ipc_and_poll(
                         Some(patch_id),
                         "no_lazily_visible_write_receipt",
                         "retry_without_disk_write",
-                        "lazily_receipt_timeout=true",
+                        &receipt_detail,
                     );
                     return Ok(false);
                 }

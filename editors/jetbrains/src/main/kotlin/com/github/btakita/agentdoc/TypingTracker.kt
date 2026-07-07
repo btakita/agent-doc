@@ -146,9 +146,10 @@ object TypingTracker : DocumentListener {
         if (!vFile.name.endsWith(".md")) return
         val filePath = vFile.path
 
-        // A remote CRDT-replica apply is replica churn, not operator typing. Report
-        // the changed buffer, but do not mark it as an unsynced local edit.
-        val remoteCrdtApply = CrdtReplicaManager.isApplyingRemote(filePath)
+        // A remote CRDT-replica apply or an agent-doc patch apply is not operator
+        // typing. Report the changed buffer, but do not mark it as an unsynced
+        // local edit.
+        val remoteCrdtApply = CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)
         if (!remoteCrdtApply) {
             // #falsetyping-guard: a genuine local operator edit is now ahead of
             // disk until saved. A remoteCrdtApply is replica churn, not operator

@@ -1295,7 +1295,9 @@ mod visible_write_content_snapshot_tests {
         assert!(
             ops_log.contains("ipc_proof_insufficient")
                 && ops_log.contains("invariant=no_lazily_visible_write_receipt")
-                && ops_log.contains("recovery=retry_without_disk_write"),
+                && ops_log.contains("recovery=retry_without_disk_write")
+                && ops_log.contains("typing_status=absent")
+                && ops_log.contains("operator_activity_inferred=false"),
             "ops log should record retry-only missing lazily receipt:\n{ops_log}"
         );
     }

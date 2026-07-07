@@ -11,6 +11,7 @@ name = "agent_doc_write_ipc_io"
 
 [dependencies]
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.67" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.67" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.34.67" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.67" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.67" }

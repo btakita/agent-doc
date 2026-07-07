@@ -10,9 +10,9 @@ pub mod ownership;
 pub mod crdt;
 pub mod crdt_sync;
 pub mod document_cell;
+pub mod document_cell_merge;
 pub mod exchange_node_merge;
 pub mod frontmatter_crdt;
-pub mod document_cell_merge;
 
 pub use document_cell::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,
@@ -84,8 +84,11 @@ pub struct MergePlan {
 pub fn merge(request: MergeRequest<'_>) -> MergePlan {
     match request.engine {
         MergeEngine::Semantic => {
-            let outcome =
-                document_cell_merge::document_cell_merge(request.base, request.agent, request.operator);
+            let outcome = document_cell_merge::document_cell_merge(
+                request.base,
+                request.agent,
+                request.operator,
+            );
             MergePlan {
                 merged_doc: outcome.merged_doc,
                 acknowledgements: outcome.requires_ack,

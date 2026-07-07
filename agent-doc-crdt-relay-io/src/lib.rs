@@ -141,12 +141,11 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     }
     let seed_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
+    let seeded_hub = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
-    let hub = registry
-        .entry(hash)
-        .or_insert_with(|| RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text));
+    let hub = registry.entry(hash).or_insert(seeded_hub);
     Ok(f(hub))
 }
 
@@ -1307,22 +1306,23 @@ pub fn set_replica_awareness_for_file(
 /// replacing it.
 pub fn recover_hub_from_disk(file: &Path, projection: &[u8]) -> Result<()> {
     let hash = agent_doc_fs::document_state_hash(file)?;
+    {
+        let registry = hub_registry()
+            .lock()
+            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+        if let Some(existing) = registry.get(&hash) {
+            // A live hub already holds the authority — disk is recovery-only, so
+            // reconcile the projection into it (in-memory wins) instead of clobbering.
+            existing.reconcile_disk_projection(projection)?;
+            return Ok(());
+        }
+    }
+    let hub = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, projection)?;
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
-    match registry.get(&hash) {
-        // A live hub already holds the authority — disk is recovery-only, so
-        // reconcile the projection into it (in-memory wins) instead of clobbering.
-        Some(existing) => {
-            existing.reconcile_disk_projection(projection)?;
-            Ok(())
-        }
-        None => {
-            let hub = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, projection)?;
-            registry.insert(hash, hub);
-            Ok(())
-        }
-    }
+    registry.entry(hash).or_insert(hub);
+    Ok(())
 }
 
 /// Result of refreshing the durable CRDT recovery projection before a process

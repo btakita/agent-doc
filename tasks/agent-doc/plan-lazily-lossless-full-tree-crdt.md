@@ -458,17 +458,35 @@ is *guarded* — the tree wins only on byte-agreement; on divergence the CRDT re
 the case is logged `lossless_merge_divergence`. This is byte-transparent today (safe to
 default ON) and the divergence log is the concrete worklist for the next phase.
 
-**The true authority replacement (drop the CRDT computation) needs op causality in the tree**
-— the durable-frontier / version-vector model (Phase 3). Once the tree carries causality it
-can be authoritative on disagreement too (because then a divergence means the *stale text*,
-not the tree, is wrong), and `merge_by_component_authoritative` can be retired. That, the
-wire/persistence model, and editor-capability (Phases 4-6) remain gated on that op-causality
-work + live proof. Also still ahead: reconcile the tree merge *with* the parallel
-`document_cell` (`#qcellmerge1`) per-cell path rather than duplicate it.
+**Phase 3 durable projection LANDED (`88a1a04b`).** `agent-doc-markdown-lossless` now exposes
+`LosslessProjection { ops: TreeUpdate (full op-stream snapshot), rendered_sha256, rendered_len }`
+with `project(doc)` / `restore(projection)` / `is_current_for(visible_text)` /
+`projection_to_bytes|from_bytes`. The tree already carries op causality (dotted frontier +
+op-log); this serializes it durably so current text can be rebuilt from the tree alone and a
+stale projection (hash mismatch) can never override the editor-visible document. Verified:
+7309 workspace tests, corpus + serde round-trip + staleness guard.
 
-- **Phases 4-6 — operator-gated.** Editor plugin capability, tree as live authority, and
-  flat-relay deprecation require live editor/plugin capability proof and are
-  `[operator-verify]` by the project's release rules; they cannot be closed autonomously.
+**FULL FLIP on the additive path LANDED (`24ce97be`).** `merge_by_component` now makes the
+lossless tree the **sole authority — the flat full-document CRDT is not computed at all** —
+whenever the tree is confident AND both sides only *inserted* relative to base (each a
+line-supersequence of base: no deletion/reorder). With no deletion there is no stale-side
+revert, so a structural 3-way is provably causally safe. This covers the common,
+perf-critical case (appending an agent response, a new queue line): merge cost drops from a
+whole-document yrs merge to the edited subtree. Verified: 7309 workspace tests pass with yrs
+skipped on every additive merge in the suite (byte-correctness proof), clippy clean.
+
+**Remaining for total CRDT elimination (the deletion path).** When a side *deleted* content, a
+stale-side revert is possible, so the CRDT still runs as the guarded arbiter (tree wins on
+byte-agreement, else CRDT; divergence logged). Making the tree authoritative there too needs
+op causality from **editor-sent tree ops** (Phase 5) rather than reconstructed text — a stale
+editor buffer would then arrive with a frontier that proves it is behind, instead of as
+ambiguous text. That is the editor-capability + live-authority work (Phases 4-6). Also still
+ahead: reconcile with the parallel `document_cell` (`#qcellmerge1`) per-cell path.
+
+- **Phase 4 (Rust/FFI half) — agent-doable**: the `lossless_tree_crdt_v1` capability constant
+  and negotiation logic in Rust/FFI. The JetBrains (lazily-kt) and VS Code (lazily-js) plugin
+  halves plus the live-authority proof (Phases 5-6) remain `[operator-verify]` by the
+  project's release rules and cannot be closed autonomously.
 
 ### Phase 0: Adapter Design
 

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -34,218 +34,33 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260702-060602.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260704-044432.md`*
 
 Compacted content:
-- Archived 1 response topic(s): ensure VS Code parity
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): #restartstderrbleed; IPC proof diagnostic (interrupted-cycle r...
-❯ lazily-rs now supports State Charts. Would a State Chart improve state management, observability, and locatability?
-### Re: ensure VS Code parity — publish_live_buffer editor-save (update spec + tests + install + recycle) — opus-4-8
-
-Done. Restored VS Code parity for the editor-save / live-buffer flush, updated spec + tests, installed, and recycled.
-
-**The gap (a real bug, `#vscodepublishparity`).** The editor-sync-barrier timeout flush (`settle_or_flush_editor_sync_barrier`, `crdt_relay_host.rs`) sent `publish_live_buffer` over the **socket only** and early-returned `cause=no_ipc_listener` when no socket owned the project. VS Code (and pluginless / file-IPC editors) run **no socket**, so those sessions silently missed the live-buffer publish a JetBrains session receives — even though the sibling convergence path (`live_buffer_delivery_missing_operator_text_authority_after_refresh`, `write/converge.rs`) already fell back to the `.agent-doc/patches/publish-live-buffer.signal` file signal. It is the same "call editor save" recovery you just used — VS Code just never got asked.
-
-**Fix (committed `a435d7bd`).** Mirrored the converge fallback: socket when a listener is active, else the file signal VS Code watches. VS Code's handler (`processPublishLiveBufferSignal` → `publishLiveBufferNow`, already carrying the `#falsetyping-guard` provenance) was already correct — the binary just wasn't sending it. So parity is restored **binary-side**; no VS Code code change was needed (the fix ships to both plugins via the shared cdylib FFI).
-
-**Spec + tests + install + recycle.**
-- `SPEC.md`: documented the transport-symmetric `publish_live_buffer` contract (socket → file-signal fallback), matching the `save_document` rule.
-- Test: `editor_sync_barrier_timeout_falls_back_to_publish_live_buffer_file_signal_without_listener` proves the no-listener path writes a read-only (no `patch_id`) signal. `make check` green.
-- Install: `make install` (binary + cdylib @ 0.34.67); recycle marked 2 controllers + 3 route-owned supervisors at the idle boundary.
-
-**Residual parity (from a full JB↔VS Code diff).** Filed `#vscsaveproj` for the one remaining actionable gap: VS Code's `save_document` outcome only logs to the output channel, whereas JB records StateProjectionBridge surface ops (observability parity). Two divergences left intentionally: VS Code republishes the live buffer after a successful save (JB doesn't — harmless), and VS Code has no negative-ack channel for save failure (by design — the binary discovers it via ack-content poll timeout).
-### Re: restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade — opus-4-8
-
-> **Queue prompt:** I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.
-
-That bleed is the already-diagnosed `#restartstderrbleed` (committed `e2ec31e55`): a restart `make install` child inherited **fd1 (the agent pane)**, and tmux/Claude Code interpreting those raw build bytes is what opened the split pane and submitted `/usage`. Fix (`auto_install_child_stdio`) is in the tree; the follow-ups are `#restartbleednonroute` (non-route fd2 hardening) and `#gd88` (operator live re-proof).
-
-The rest of this session's work, all committed:
-
-**VS Code `publish_live_buffer` parity (`a435d7bd`).** The editor-sync-barrier flush sent `publish_live_buffer` over the socket only and skipped with `cause=no_ipc_listener` when no socket owned the project — so VS Code / pluginless editors silently missed the live-buffer publish. Mirrored the converge fallback to the `.agent-doc/patches/publish-live-buffer.signal` file signal. Regression test + SPEC. Follow-up `#vscsaveproj` (save_document observability parity).
-
-**cdylib recycles on upgrade (`c012e9b6`).** Root-fix for the mid-session drift you hit: an install bumped the cdylib but editor plugins only reloaded lazily on their next FFI call, so a live IDE kept running old native code (`live_prompt_drift`). Now:
-- **Install broadcasts** — `lib-install` writes a global `agent-doc-reload-broadcast.json` (version + mtime) after the symlink swap. Verified live this install: `[lib-install] broadcast: cdylib reload announced to editor plugins`.
-- **Plugins detect** — JetBrains (Alarm poller + `reload_lib` socket message) and VS Code (interval poller) watch the broadcast and force-reload the cdylib through the existing native path. Versions bumped JB 0.2.206 / VS Code 0.2.39.
-- **Recycle via API** — `agent-doc admin reload-lib [--json]` re-announces the cdylib (verified: `editor_projects: 2`). Skill/runbook `#staleloop-recycle-restart` guidance now points at the auto-broadcast + API instead of the manual install/recycle dance.
-
-`make check` green (6827 tests). Installed 0.34.67 (binary + cdylib) — this very finalize proves the fresh cdylib cleared the drift. **`[operator-verify]`:** install the new plugin builds (JB 0.2.206 / VS Code 0.2.39) and confirm a live IDE force-reloads the cdylib on the next `make install` broadcast (no lazy-FFI wait, no wedge).
-
-### Re: Would a lazily-rs State Chart improve state management / observability / locatability? — opus-4-8
-
-Yes — for the **per-process local** state, which is exactly where this doc's recurring bugs live. But it is not a fix for the cross-process/cross-host bugs, and it's worth being precise about the boundary.
-
-What lazily-rs actually gives us (`src/statechart.rs`, v0.16/0.17): a full Harel chart — compound + orthogonal (parallel) regions, shallow/deep history, entry/exit/transition actions, named guards, internal/external transitions — and it is **reactive compute, not a wire protocol**: the active configuration is a `CellHandle`, so anything reading `configuration()`/`active_leaves()`/`matches()` is invalidated on a real transition and a no-op self-transition is suppressed by the cell's `PartialEq` guard.
-
-**State management — real win.** Almost every bug in this doc is an *implicit* state machine encoded as scattered booleans and string enums, so impossible states are representable and reachable:
-- IPC transport: `socket -> degraded -> file-IPC fallback` (`recovery=retry_without_disk_write` / `direct_write_fallback`)
-- editor sync: `edit_epoch` vs `last_synced_epoch` (the "live editor buffer has unflushed changes ahead of disk; refusing to commit from stale disk" guard fired in *this* preflight)
-- closeout: `written -> committed -> session-check ok`
-- supervisor: `busy / idle / stale-binary / recycle-yield`
-
-These are three or four **orthogonal regions** — transport, editor-sync, closeout — which is precisely what parallel regions model. The payoff isn't prettier code; it's that the illegal transition (finalize while editor epoch is ahead) becomes a rejected edge instead of an ad-hoc guard re-checked at N call sites where one is eventually forgotten (`#boundaryaccum`, `#live_prompt_drift`).
-
-**Observability — real win.** Today diagnosing these means grepping `ops.log` for epoch numbers and *reconstructing* state. A chart gives one named `configuration()` snapshot — `ipc.file_fallback x editor.stale_disk_ahead x closeout.awaiting_commit` — directly loggable by `session-check`/status. And because it's a reactive cell, the status observer re-renders only on a *real* transition (no-op self-transition suppressed) — the exact "don't re-print unchanged status" behavior the loop wants.
-
-**Locatability — real win.** Named states + named transitions + named guards map onto this doc's tag-per-bug culture. `#live_prompt_drift` becomes "transition `finalize` fired in region `closeout` while guard `editor_synced` was false" — one edge, not a call-site hunt.
-
-**The honest boundary — where it does *not* help.** The chart is compute-not-protocol and per-process. It cannot solve the genuinely distributed failures: stale-**binary** supervisor vs newer finalize client (`stale_install`), concurrent sessions force-pushing the shared superproject, editor-plugin vs CLI skew. Those stay **git/CRDT authority + recycle**, not a statechart. This very cycle is an example: a stale JB cdylib buffer with no live supervisor wedged finalize — a per-process chart would not have prevented that. Also: this impl rejects `{"expr": ...}` extended-state guards and `run` actions — so an epoch comparison like `edit_epoch > last_synced_epoch` must be computed outside and passed in as a **named boolean guard** to `send(event, guards)`. Cleaner (guards stay testable), but it means the chart orchestrates transitions; it isn't a computation engine.
-
-This is not greenfield: `#mergestatemachine3` / `#lazilystatesync` already routes JB+VSCode attach/detach/ownership through a merge-ownership state machine. The Harel chart is the natural upgrade of that flat FSM once you add the orthogonal transport/closeout regions.
-
-Recommendation: worth doing, scoped to local process state. Queued as `[recommended] #adstatechart` (PRD-first) so it doesn't auto-drain without your go.
-The agent-doc binary should be able to detect the plugin version. #spec-test-build-install-commit-push
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=ipc_visible_repair patch_id=ee2f06a2-04ac-4cf6-b6b3-c043dfc8a75c invariant=ipc_dedupe recovery=retry_without_disk_write redeliver_editor=true bad_len=25770 bad_hash=98721192fc3e03f0cc8186a64a5d8f1a8754fa91aea093dc4b855614ca45cc8d repaired_len=32259 repaired_hash=cfda902f661a3b66ef9b1cbd1e290e4a392a87bdca1e7010f95d22b2baf2908c doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782972434870
+- Archived 11 response topic(s): ensure VS Code parity; restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade; Would a lazily-rs State Chart improve state management / observability / locatability?; 8 more
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): ensure VS Code parity
+❯ JB `Run Agent Doc` error:
 ```
-### Re: detect the plugin version + audit/fix IPC root causes — opus-4-8
-
-Three asks, addressed in order. Plugin-version detection is **implemented, verified, and committed** (isolated); the IPC audit is done; and the `signals-patchboard.md` claim did not hold up.
-
-**1. Binary detects the plugin version (`#stale-plugin-detect`) — DONE, committed `9b38d017`.** Turns out the plugin version was *already* plumbed end-to-end: every editor buffer report carries `editor_version` via the FFI `_for_editor_v2/v3` calls into `LiveBufferSnapshot.editor_version`. The binary just never compared it. Now:
-- `build.rs` bakes the expected versions from the source-of-truth files (`editors/jetbrains/gradle.properties` → 0.2.206, `editors/vscode/package.json` → 0.2.39) into `AGENT_DOC_EXPECTED_*_PLUGIN_VERSION` (verified emitted); fail-open on a sources-absent build.
-- Preflight emits a non-blocking `stale_plugin` warning (mirroring `stale_install`) when a **live** editor reports a strictly-older version — dotted-numeric compare, leading-`v`/pre-release suffixes ignored, unparseable fails open.
-- 6 tests (compare, kind-map, dedup/silence, **end-to-end live-sidecar**), clippy clean, orchestration suite 1958 passed. SPEC updated.
-- This directly targets the exact failure that wedged this doc: a stale JB plugin running pre-fix native code. Note it would have *warned*, not prevented — the hard version-skew fix is the IPC handshake (root cause B below).
-- **Deploy deferred per your choice:** committed my 4 isolated files only; skipped `make install` + push because the submodule has your uncommitted module-decomposition refactor (~40 files) — installing would deploy that WIP as the live binary. Queued `#staleplugin-deploy` to install+push once the decomposition lands.
-
-**2. IPC root-cause audit (across `agent-doc-bugs2.md` + `equityfundingsource.md`).** 13 distinct failure classes collapse to **5 deep shared root causes**, ranked by severity:
-
-- **A — editor-buffer vs disk/snapshot authority is ambiguous** *(drives content_ours drop `#qftlossdelta`, live_prompt_drift, no_ack, ipc_dedupe)*. The hot path keeps three candidate images (live buffer, `content_ours`, snapshot) and picks per-call with provenance heuristics in `write_policy.rs`; one forgotten guard drops operator text. **This is the only class that loses user work — highest severity.** Fix: make the CRDT the single closeout authority, demote `content_ours`/snapshot to audit-only, and where authority is genuinely unavailable fail closed with a *durable sidecar of the larger buffer* (the artifact missing in `#qftlossdelta`).
-- **B — cross-process version skew has no negotiation** *(drives stale_install + stale-supervisor CRDT corruption)*. Staleness is inferred from mtime/inode, not a fact. Fix: a build-id/protocol-version field in the IPC handshake so a newer client refuses/forces-reload on mismatch. My `#stale-plugin-detect` is the observability down-payment on this; `agent-doc-controller/src/status.rs` already carries `injected_binary_version` to extend to the wire.
-- **C — invariants enforced on the wrong write path** *(drives `#boundaryaccum`)*. Root fix landed (unconditional snapshot collapse); still needs a post-commit >1-boundary verification gate.
-- **D — IPC transport lacks bounded liveness both directions** *(drives no_ack, send_failed, degraded, corrupt controller-state)*. Send side got timeouts (`#af88` A/C); listener `read_line` still has none, file-IPC has no negative-ack, controller-state has no corrupt-file quarantine.
-- **E — transport/editor-sync/closeout state is implicit scattered booleans** *(cross-cuts all)*. This is the `#adstatechart` item I queued last cycle (local-process only).
-
-Priority order: **A → D → B → C → E** (A loses data; D is contained+testable; B retires the skew family; C finishes boundaryaccum; E consolidates once A–D encode correct guards). Queued as backlog items below.
-
-**3. `signals-patchboard.md` — not an editor-IPC failure.** I checked it directly: it carries **no** `ipc_proof_insufficient` / `no_ack` / `file_ipc` marker (unlike bugs2 and EFS). Its signature — response committed but queue heads never struck, empty `agent:status`, a boundary parked mid-`exchange` — is a **queue-consume / head-strike** state, a different family from editor writeback-IPC. The "patchboard-io IPC" referenced in that doc's plan is unbuilt future work under `src/patchboard`, unrelated to agent-doc's editor IPC. So I did not manufacture an IPC fix for it; if you meant the queue/head-strike wedge, say so and I'll scope that separately.
-
-Backlog updated with A–D + the deploy follow-up (E/`#adstatechart` already queued). The deep root-cause fixes are tagged `[focused-cycle]` — each is a real refactor, not a queue-drain item.
-❯ do phase E
-
-### Re: do phase E — opus-4-8
-
-Phase E is `#adstatechart` — the local-process Harel-chart consolidation of root cause **E** (transport / editor-sync / closeout state as scattered booleans). I'd queued it **PRD-first, "doesn't auto-drain without your go"**; this is the go. Two things also worth flagging before diving into code, which is why this cycle is the PRD rung, not the refactor:
-
-**Wrote the PRD:** `tasks/agent-doc/prd-adstatechart-local-process-statechart.md`. It fixes the scope in writing (per-process only), defines the four orthogonal regions, grounds the design in the *real* `lazily-rs` statechart API (`ChartDef::from_json`, `send(event, guards)`, rejects `{expr}` guards + `run` actions → epoch compares computed in Rust as named booleans), encodes the key win (illegal `commit`-while-`editor_ahead` becomes a **rejected `send` edge**, not an ad-hoc guard), and states the honest boundary: this does **not** solve stale-binary / force-push / version-skew — those stay git/CRDT authority + recycle (that's root cause **B**).
-
-**`#adstatechart` was a phantom.** The prior exchange said "E/`#adstatechart` already queued," but it was never actually in `agent:backlog` — only referenced in prose. Filed the real actionable rung-1 item `#adstatechart1` (chart skeleton + pure guards + rejected-edge proof; not yet wired into the live path). Rungs 2–4 (observability read, load-bearing closeout guard, fold-in of the `#mergestatemachine3` FSM) live in the PRD.
-
-**Two gates block *implementing* the chart this cycle, not just my caution:**
-1. **Sequencing** — E consolidates *after* A–D encode the correct guards. A (`#ipcauthority`) shipped its down-payment, D (`#ipcliveness`) is partial, B/C are open. The chart should encode the guards those settle on, not pre-empt them. The skeleton can land early; the guard *semantics* must follow.
-2. **Deploy gate** — `src/agent-doc` currently carries the uncommitted module-decomposition refactor (**122 files**, `#coredecomp`/`#orchdecomp`). Same gate as `#staleplugindeploy`: chart source can be authored + `make check`ed against that tree, but **not** installed/pushed, or we'd ship the decomposition WIP as the live binary.
-
-**Closeout note:** this doc has **no live editor** — `controller.sock` is a 0-byte no-listener stale endpoint and `ps` shows zero agent-doc/controller processes. The granular write hit `send_failed`, so per the documented no-IDE recovery I persisted via `--force-disk` (verified no live buffer to converge with; the prior response is already committed in HEAD).
-
-So: PRD + `#adstatechart1` are the deliverables now; the chart-skeleton implementation is unblocked to start once you want it (it can proceed against the decomposition tree with `make check`, install deferred behind the decomposition landing).
-
-### Re: do the adstatechart PRD (+ publish lazily, ThreadSafe/Async, Rust builder, spec/formal, Lean) — opus-4-8
-
-Done for this turn's agreed scope (**lazily-rs only, then cascade**). All your design questions are answered **yes**, and the foundation is implemented, tested, released, and committed.
-
-**lazily-rs 0.19.0 — released (crates.io + tag `v0.19.0`, commit `458d914`).**
-- **Rust builder API (both JSON + Rust).** `ChartBuilder`/`StateBuilder`/`TransitionBuilder`; both paths funnel through a shared `ChartDef::from_states`, so a Rust-built chart is behaviourally identical to the JSON one. Proven by `builder_matches_json_behaviour`.
-- **ThreadSafe + Async variants.** `ThreadSafeStateChart` (Send+Sync, `parking_lot::Mutex` interior state — a status observer on one thread can read `configuration()` while another drives `send()`) and `AsyncStateChart` (synchronous send/state over `AsyncContext`). This gives StateChart the same three-context parity the flat `StateMachine` already had.
-- **Zero-semantics-drift refactor.** The Harel transition algorithm was extracted verbatim into a context-free engine all three variants delegate to — so the 7/7 conformance fixtures and the existing Lean Harel proofs still hold (104 lib tests + conformance green, clippy clean).
-
-**`#adstatechart1` (Phase E rung 1) — DONE, tested, committed (`8000c8cf`).** `agent-doc-state-backbone::adstatechart`: `ChartFacts` + pure named guards + the four-orthogonal-region chart + the **load-bearing rejected-edge proof** (`commit` while the editor buffer is ahead of disk is a rejected `send` edge, not an ad-hoc guard). 8 tests green. Not installed — the 122-file decomposition deploy gate still holds.
-
-**Your other questions, answered:**
-- **spec/formal release?** No semantics changed, so conformance fixtures + Lean proofs need no change — only a SPEC *prose* note (lazily-spec → Pages). Queued `#adstatechartspec`.
-- **Lean model to prove no wedges?** Partially, honestly. It can prove the chart's *internal* safety (rejected-edge holds on **all** paths, not just my 8 tests) and no dead-end config. It **cannot** prove production wedge-freedom — real wedges are "the unblocking event (IPC ack / recycle) never fires", a distributed-liveness property the per-process chart can't model (same boundary as root cause B). You approved it anyway → queued `#adstatechartlean`, scoped to per-process safety.
-
-**Cascade queued (the "then cascade" half):** `#adstatechart2` (observability read), `#adstatechart3` (wire into the live path via the typed builder + lazily 0.19 + `ThreadSafeStateChart`), `#adstatechartkt` (lazily-kt → Maven → JetBrains plugin), `#adstatechartjs` (lazily-js → npm → VS Code plugin), `#adstatechartlean`, `#adstatechartspec`. The kt/js items are the "upgrade lazily-kt + lazily-js for the plugins" ask — they're separate-language ports with their own registries, so I sequenced them rather than rush-publishing to Maven/npm this turn.
-
-Say "cascade" (or name a specific item) and I'll take the next rung.
-
-### Re: cascade — opus-4-8
-
-Worked the cascade rung by rung. **Four repos shipped this turn**, plus rung 1 from before:
-
-- **lazily-rs 0.19.0** (crates.io) — Rust builder + ThreadSafe/Async chart variants.
-- **lazily-kt 0.9.0** (`#adstatechartkt`, GitHub Packages, tag `v0.9.0`) — Kotlin `ChartBuilder` + `ThreadSafeStateChart`, shared `fromStates`, context-free engine extracted. Full test suite green. (kt has no async state machine, so no AsyncStateChart — matches the binding's own convention.)
-- **lazily-js 1.1.0** (`#adstatechartjs`, tag `v1.1.0`) — JS/TS `ChartBuilder` + `.d.ts` builder types for the VS Code plugin's TypeScript. 169/169 tests green. js has no reactive Context / no threads, so the builder is the whole v0.19 surface there.
-- **lazily-spec** (`#adstatechartspec`, DONE) — non-normative note that a binding MAY expose one chart type per context layer (rs: 3, kt: 2, js: 1) sharing a context-free engine, and MAY offer a typed builder equivalent to the JSON path. No conformance-fixture change.
-
-Every port kept the Harel transition algorithm byte-identical (extracted into a shared engine), so conformance fixtures + the Lean model still hold in each binding.
-
-**`#adstatechartkt` / `#adstatechartjs` narrowed, not closed** — the *libraries* shipped, but the plugin-consumption half remains: bump the JetBrains plugin's lazily-kt dep to 0.9.0 (consume `ChartBuilder`/`ThreadSafeStateChart` for `#mergestatemachine3`), and bump the VS Code plugin's `@lazily/js` dep to 1.1.0. **js npm publish is operator-2FA-gated** (`#lzjsnpmpub`): `npm login` then `npm publish --access public` in `src/lazily-js` — I pushed the tag but can't publish to npm without your login.
-
-**Remaining cascade:** `#adstatechartlean` (Lean invariant proof — approved, contained, needs a focused pass with the lake toolchain), `#adstatechart2`/`#adstatechart3` (agent-doc observability + live wiring), and the two plugin-dep bumps above. Say "cascade" again for the next rung (I'd take the Lean proof next), or name one.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=a59a2904-8926-4d93-bfc8-00d20b88e1db invariant=no_ack recovery=retry_without_disk_write timeout_secs=2 patch_file=/home/brian/work/btakita/agent-loop/.agent-doc/patches/a59a2904-8926-4d93-bfc8-00d20b88e1db.json doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1782980070172
+[route] target tmux session: 0
+Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %81 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.age  nt-doc/logs/route-submit/1783140237213-direct_pane_protected_prompt_input-codex-_81-e43f523881f3.txt
 ```
 
-### Re: cascade statechart work — opus-4-8
+### Re: JB Run Agent Doc protected draft input — gpt-5 (HEAD)
 
-Took the next rung: **`#adstatechartlean` (Lean invariant proof) — DONE, committed (`892fcf2` in `lazily-formal`; superproject submodule pointer bumped `0b1bcab8f`).**
+This one is a correct fail-closed route refusal, not the older accepted-without-dispatch bug. The target Codex pane `%81` had an unsubmitted composer draft (`› Implement {feature}`), and the route code refused before injecting `agent-doc ...` so it would not overwrite or accidentally submit that draft. Immediate recovery: submit or clear that prompt in pane `%81`, then rerun JB **Run Agent Doc**; alternatively claim/start a fresh pane for the document.
 
-`LazilyFormal/AdStateChart.lean` now proves **both** rung-1 invariants the PRD calls for, each by `decide` over the finite closeout config space (so it holds on every path, not the sampled points the 8 Rust unit tests cover):
+I checked the current code path: Rust records `direct_pane_protected_prompt_input`, and JetBrains already has `isProtectedPromptInputRouteFailure` plus `notifyRunAgentDocProtectedPromptInput`. Because the operator-visible result was still a raw "Run Agent Doc error", I added #jbrunprotectedprompt to verify/fix the installed JB action so this typed refusal is surfaced as the actionable protected-prompt warning, while keeping the route guard unchanged.
 
-- **Rejected-edge safety (all paths)** — `commit` while the editor buffer is ahead of disk leaves the config in `written`; `committed` is never entered (`commit_rejected_when_editor_ahead`, `committed_not_entered_when_editor_ahead`), and the legal edge IS taken once synced (`commit_taken_when_editor_synced`), so the guard is doing real work, not `commit` being structurally unreachable. *(Already there from the rung-1 land.)*
-- **No dead-end config** *(new this rung)* — the second invariant the PRD names. `written_not_dead_end`: the non-final `written` state always has an enabled outgoing edge under the synced resolver (progress is possible). `written_commit_edge_exists` + `enabled_empty_when_editor_ahead`: the `commit` edge stays in the transition table under every resolver — editor-ahead rejection is guard work *inside* `send`, not the edge vanishing. `committed_is_final` + `written_is_not_final`: the only terminal sink is the accepting `final` state, so the progress obligation lands on a real non-accepting state rather than vacuously on the sink. Full `lake build` green (14 jobs).
-
-`Kind` derives only `Repr`, so final-ness is projected through a `Bool` match and edge presence uses `.length` to stay decidable without `DecidableEq Kind`/`Transition`.
-
-**Honest boundary unchanged:** this is per-process safety only. It proves the chart cannot *take* the illegal edge and has no non-accepting dead-end; it does **not** prove production wedge-freedom — a live wedge is "the unblocking IPC-ack/recycle event never fires", a distributed-liveness property outside a per-process chart (root cause **B**).
-
-**Remaining cascade:** `#adstatechart2` (observability read) / `#adstatechart3` (live wiring — gated behind the decomposition landing + install), the JetBrains-plugin lazily-kt 0.9.0 dep bump + `#mergestatemachine3` fold-in (`#adstatechartkt`), and the VS Code-plugin `@lazily/js` 1.1.0 dep bump (`#adstatechartjs`; npm publish still operator-2FA-gated, `#lzjsnpmpub`). Say "cascade" for the next rung (I'd take the JetBrains-plugin kt dep bump next — it's the one with live-plugin payoff), or name one.
-
-### Re: cascade — opus-4-8
-
-Took a rung, and re-scoped a blocked one. Two outcomes.
-
-**`#adstatechartkt` re-scoped (not done as written — the framing was wrong).** "Bump the JB plugin's lazily-kt dep to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart" can't be executed:
-- **JVM split:** lazily-kt 0.9.0 is `jvmToolchain(21)` (Kotlin 2.0.21 → JVM21 bytecode); the JB plugin builds on Kotlin 1.9.25 / JVM17 (IntelliJ 2.11). A JVM21 artifact can't be consumed by the JVM17 plugin build.
-- **Contradicts `#lzpkgwire`:** `StateGraphMirror.kt` / `StateProjectionBridge.kt` document that the JB (and VS Code) plugins *deliberately keep a plugin-local canonical copy* of the lazily wire/chart shapes — *because* of that toolchain split — pinned 1:1 to lazily-spec conformance fixtures. Adding a Maven dep reverses that shipped decision.
-- **Value already delivered:** the plugin already mirrors the FFI merge-ownership state (`agent_doc.supervisor.owner`) via the `#lazilystatesync3` `StateGraphMirror`; the SM is FFI-owned (`agent-doc-merge/src/ownership.rs`), plugins are thin reporters by design.
-- **adstatechart-specific part is blocked anyway** on `#adstatechart3` (adstatechart isn't wired into the live state graph yet).
-
-So `#adstatechartkt` should be **closed as superseded by `#lazilystatesync3`** (the dep-bump is architecturally excluded; the ownership-visibility it wanted already ships). Recommend striking it and dropping the "bump lazily-kt dep" phrasing from the cascade.
-
-**`#adstatechart2` (Phase E rung 2, observability read) — DONE, committed (`c8ed0f7c` in the agent-doc submodule).** Advisory, read-only projection of the four orthogonal regions, logged during `session-check` alongside the existing `ops.log` markers. No closeout behavior change.
-- `adstatechart.rs`: `configuration_snapshot(facts, observed)` drives a throwaway chart to the fact-implied configuration and reads `active_leaves()` back as `transport.x editor_sync.x closeout.x supervisor.x`. The closeout region carries the real `editor_synced` guard, so an observed `Committed` while editor-ahead faithfully reports `closeout.written` (the guard rejects the edge) rather than the caller's optimistic phase. +6 unit tests.
-- `adstatechart_snapshot.rs` (orchestration): fail-safe assembler sourcing facts session-check already has — live-buffer edit/sync epochs, IPC listener presence, stale-install detection, cycle phase — and emitting the advisory marker. +2 tests.
-- Guard semantics match the shipped A/C closeout guard (`git.rs commit_blocked_live_buffer_ahead_of_disk`). state-backbone tests 14/14 green; clippy clean.
-- **Verified live:** `session-check` on this doc logged `adstatechart_snapshot advisory=1 transport.socket editor_sync.synced closeout.committed supervisor.sup_idle` — `closeout.committed` correctly reflects the committed cycle state.
-
-**Two honest caveats on the commit.** (1) The agent-doc submodule is mid-decomposition with ~205 uncommitted files (not mine); I staged only my 4 hunks (`c8ed0f7c`) and left that work-in-progress untouched — verified the committed subset compiles against HEAD APIs. (2) `make check` shows 3 pre-existing `finalize_integration` failures + a broken `snapshot.rs` test from that in-flight refactor; I confirmed they fail identically without my change. The superproject `src/agent-doc` pointer was already behind at session start and is left as-is.
-
-**Remaining cascade:** `#adstatechart3` (live wiring — gated behind decomposition + install; also unblocks any real plugin adstatechart mirror). Say "cascade" for the next rung, or name one.
-<!-- agent:boundary:5c5e2f0c -->
+No code changes this cycle; verification was context/log inspection only.
+<!-- agent:boundary:67a30b0a -->
 <!-- /agent:exchange -->
 ## Queue
 
-
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
-- ~~:round_pushpin: do [#falsetyping-guard]~~
 - [#claimnewpane]
 - [#boundaryaccum1]
 - [#qactsync]
-- ~~:pushpin: do [#restartstderrbleed]~~
-Error: timed out waiting for project controller at /home/brian/work/btakita/agent-loop/.agent-doc/controller.sock`
-- ~~I saw serious bleeding into Claude Code during a previous restart. Also, a split pane was opened with Claude Code `/usage` somehow called.~~
 - :pushpin: do [#jbcompactcommit]
-- ~~:pushpin: do [#kjw0]~~
 - :pushpin: do [#2y8j]
 - :pushpin: do [#cdtcutover]
 - :pushpin: do [#crdtauth6]
@@ -256,7 +71,6 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - :pushpin: do [#60ev]
 - :pushpin: do [#suprestassoc-live]
 - :pushpin: do [#agentsignals]
-- ~~:pushpin: do [#qftlossdelta]~~
 - :pushpin: do [#coredecomp]
 - :pushpin: do [#orchdecomp]
 - :pushpin: do [#skillharnessplugin]
@@ -270,12 +84,46 @@ Error: timed out waiting for project controller at /home/brian/work/btakita/agen
 - do [#restartbleednonroute]
 - do [#gd88]
 <!-- /agent:queue -->
-<!--
+
+## Notes
+
+<!-- agent:notes -->
+We are not using an evented FD because this path deliberately has no live bidirectional connection to the plugin. The evented transport is the socket IPC path; file IPC exists specifically for “socket absent/degraded/stale but plugin file
+watcher may still apply patches”. We could use notify/inotify/kqueue as an implementation detail for the filesystem wait, but it still needs the same timeout, nack, ack-content, committed-cycle, and post-apply validation fallback. The
+right extraction is probably a focused FileIpcAckWaiter/sidecar waiter with today’s poll backend first, then an evented backend as an optimization once it is out of orchestration.
+---
+```
+● Finalize deferred with an IPC edge case: socket reported already_applied (response landed in the live buffer) but
+  disk_missing_response_probe failed and it deferred ("document changed after merge; retry after typing stops"). Per
+  the closeout rules I must not force-disk here — I retry the editor path. Let me first check the actual on-disk state.
+
+  Ran 1 shell command
+
+● The response was captured (cycle at response_captured) and socket-applied to a live JetBrains buffer
+  (already_applied), but not yet flushed to disk — a live agent-doc sync --focus process for this doc is holding the
+  editor buffer, so the disk-probe deferred ("retry after typing stops"). Per closeout rules I retry the editor path
+  (no force-disk). Let me retry the finalize:
+
+  Ran 1 shell command
+
+● Same deferral, and notice: current_len=3546 stayed constant but current_hash changed between the two attempts
+  (02e1c199 → 64233287) — the live buffer is actively oscillating (my boundary insertions + a live sync --focus process
+  for this doc). The response is durably captured (response_sha256=d7ddb028). This is the already_applied +
+  buffer-differs deadlock. Before choosing recovery, I must know if there's a real JetBrains editor or just an orphaned
+  sync process holding a phantom buffer.
+
+  Ran 1 shell command
+
+● No live JetBrains IDE, no active listener (both sockets 0B/stale), and the sync process has exited. The
+  already_applied acks came from a now-dead stale endpoint — the "live buffer" is phantom. The response is durably
+  captured and disk is still the clean 2344-byte prompt. This is the documented stale-endpoint → force-disk recovery
+  (no live editor to preserve). Let me first confirm HEAD hasn't advanced (no concurrent commit), then force-disk
+  finalize.
+```
+---
 Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
 ---
 `'/clear' is disabled while a task is in progress
----~~~~
-A recent monsterrodholders.md session had much churn after I edited the queue while a turn was running. One churn item included deleting a queue item that I added
 ---
 agent-doc reentrant run on equityfundingsource.md had recovery churn.
 ```
@@ -290,11 +138,14 @@ The last run had a code fence stripped away by agent-doc.
 #spec-test-build-install-commit-push
 ---
 What are #next-steps to fix bugs?
--->
+<!-- /agent:notes -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#5bzd] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%25 actor_generation=1137 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=12773 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783437151060-direct_pane_dispatch_start_unproven-codex-_25-9831ae756eb0.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
+- [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
+- [ ] [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md
 - [ ] [#adstatechart3] [focused-cycle] #agent-doc-feature Phase E rung 3 (load-bearing): switch adstatechart to the typed lazily 0.19 ChartBuilder, bump agent-doc-state-backbone to lazily 0.19, use ThreadSafeStateChart for cross-thread status observation, and replace the ad-hoc editor_synced check at the finalize/commit site with chart send(commit, guards) plus a fail-closed fallback when the feature is off. SimWorld: N wedged-finalize->direct-commit cycles never commit from stale disk. Live editor proof gated behind decomposition + install. PRD rung 3.
 - [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).

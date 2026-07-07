@@ -493,15 +493,21 @@ ahead: reconcile with the parallel `document_cell` (`#qcellmerge1`) per-cell pat
 tests (M1). Phase 4's "lazily-kt / lazily-js support" for the CRDT itself is already complete —
 the plugins have runtimes to call.
 
-**Remaining Phase 4-plugin / 5 / 6 work is blocked by an active concurrent session, not just
-the live-proof gate.** Everything left lives in files a concurrent codex session is mid-rewrite
-of with large uncommitted WIP:
+**FFI tree-frame surface DONE (`dc82e857`).** `src/ffi_lossless_tree.rs` exposes
+`agent_doc_lossless_tree_capability` / `_project` / `_render` / `_projection_current` over the
+C ABI. Delivered without touching the concurrent session's WIP: a NEW file declared from the
+clean `src/lib.rs`, reaching the projection code through new `agent_doc_merge::lossless_tree`
+re-exports (root crate already deps `agent-doc-merge` + `agent-doc-debounce`), so no dirty
+`src/ffi.rs` / root `Cargo.toml` edit. Verified: 7313 workspace tests + clippy clean.
 
-- FFI tree-frame surface → `src/ffi.rs` (dirty) + a `markdown-lossless` dep in the root
-  `Cargo.toml` (dirty). A new FFI file can't reach `markdown-lossless` without adding that dep,
-  and staging the dirty `Cargo.toml`/`Cargo.lock` would commit the other session's WIP.
-- JetBrains plugin frame handling → `editors/jetbrains/**` (`NativeLib.kt`, listeners — dirty).
-- VS Code plugin frame handling → `editors/vscode/**` (`native.ts`, `extension.ts` — dirty).
+**Remaining Phase 4-plugin / 5 / 6 work is blocked by an active concurrent session.** What is
+left genuinely requires editing files a concurrent codex session is mid-rewrite of:
+
+- JetBrains plugin JNA bindings + IPC frame dispatch → `editors/jetbrains/**` (`NativeLib.kt`,
+  listeners — dirty). A frame arrives, the plugin calls `agent_doc_lossless_tree_render`, and
+  applies the text through the IntelliJ Document API — the "apply to buffer" step must live in
+  the plugin, and its dispatch wiring is in dirty files.
+- VS Code plugin bindings + dispatch → `editors/vscode/**` (`native.ts`, `extension.ts` — dirty).
 
 The capability advertisement (add `lossless_tree_crdt_v1` to `EDITOR_CAPABILITIES` in the clean
 `TypingTracker.kt`) is a **promise the plugin can exchange tree frames** — it must not be added

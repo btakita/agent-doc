@@ -1,0 +1,11 @@
+[package]
+name = "agent-doc-markdown-lossless"
+version = "0.34.67"
+edition = "2024"
+license = "MIT"
+description = "Phase 0 lossless-tree adapter for agent-doc markdown session documents (#lzlosstree): parses a document into a lazily LosslessTreeCrdt whose leaves own every byte, so render(parse(doc)) == doc. Shadow projection only — not an authority path."
+repository = "https://github.com/btakita/agent-doc"
+
+[dependencies]
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.67" }
+lazily = { version = "0.21", features = ["lossless-tree"] }

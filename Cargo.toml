@@ -135,6 +135,7 @@ members = [
     "agent-doc-tmux-commands",
     "agent-doc-tmux-io",
     "agent-doc-markdown-ast",
+    "agent-doc-markdown-lossless",
     "agent-doc-merge",
     "agent-doc-merge-io",
 ]

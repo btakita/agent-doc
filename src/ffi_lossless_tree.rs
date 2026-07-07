@@ -85,6 +85,40 @@ pub unsafe extern "C" fn agent_doc_lossless_tree_render_frame(
     }
 }
 
+/// `#lzlosstree` Phase 5 reverse direction — apply an editor edit (delete `delete_len`
+/// bytes at byte `offset`, insert `insert`) to `doc_text` as a lossless-tree **leaf
+/// edit** ("editor typing updates leaf nodes"), returning the new document text. Returns
+/// a heap C string (free with `agent_doc_free_string`), or null when the edit spans a
+/// leaf boundary / offsets are invalid (the caller falls back to the flat text path).
+///
+/// # Safety
+///
+/// `doc_text` and `insert` must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_lossless_tree_apply_edit(
+    doc_text: *const c_char,
+    offset: usize,
+    delete_len: usize,
+    insert: *const c_char,
+) -> *mut c_char {
+    if doc_text.is_null() || insert.is_null() {
+        return std::ptr::null_mut();
+    }
+    let (Ok(doc), Ok(ins)) = (
+        unsafe { CStr::from_ptr(doc_text) }.to_str(),
+        unsafe { CStr::from_ptr(insert) }.to_str(),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    match agent_doc_merge::lossless_tree::apply_text_edit(doc, offset, delete_len, ins) {
+        Some(text) => match CString::new(text) {
+            Ok(s) => s.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Project `doc_text` into a durable lossless-tree JSON projection (op-stream +
 /// rendered hash). Returns a heap C string (free with `agent_doc_free_string`) or
 /// null on invalid UTF-8 / serialization failure / interior NUL.

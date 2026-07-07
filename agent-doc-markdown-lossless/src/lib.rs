@@ -113,6 +113,78 @@ pub fn write_frame(frame_path: &std::path::Path, content: &str) -> std::io::Resu
     std::fs::write(frame_path, bytes)
 }
 
+/// The live leaves of `tree` in render order as `(leaf, start_byte, byte_len)`, so a
+/// document byte offset can be mapped to the leaf that owns it.
+fn leaf_spans(tree: &LosslessTreeCrdt) -> Vec<(TreeNodeId, usize, usize)> {
+    fn walk(
+        tree: &LosslessTreeCrdt,
+        node: TreeNodeId,
+        cursor: &mut usize,
+        out: &mut Vec<(TreeNodeId, usize, usize)>,
+    ) {
+        for child in tree.children(node) {
+            match tree.leaf_text(child) {
+                Ok(text) => {
+                    let len = text.len();
+                    out.push((child, *cursor, len));
+                    *cursor += len;
+                }
+                Err(_) => walk(tree, child, cursor, out),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    walk(tree, TreeNodeId::ROOT, &mut cursor, &mut out);
+    out
+}
+
+/// Apply a text edit — delete `delete_len` bytes at document byte `offset`, then insert
+/// `insert` — by mapping it to a lossless-tree **leaf edit** ("editor typing updates
+/// leaf nodes", `#lzlosstree` Phase 5 reverse direction). Returns the new document
+/// text, or `None` when the edit range spans a leaf boundary (the caller falls back to
+/// the flat path). Lossless by construction: only the touched leaf's text changes.
+pub fn apply_text_edit(
+    doc: &str,
+    offset: usize,
+    delete_len: usize,
+    insert: &str,
+) -> Option<String> {
+    let mut tree = parse(doc);
+    let spans = leaf_spans(&tree);
+    let edit_end = offset.checked_add(delete_len)?;
+    // Find the single leaf whose byte span fully contains [offset, offset+delete_len).
+    // Prefer a leaf that strictly contains `offset`; for an edit exactly at a leaf's end
+    // boundary (e.g. append), fall to the leaf that ends there.
+    let leaf = spans
+        .iter()
+        .find(|(_, start, len)| {
+            offset >= *start && edit_end <= *start + *len && offset < *start + *len
+        })
+        .or_else(|| {
+            spans
+                .iter()
+                .rev()
+                .find(|(_, start, len)| offset == *start + *len && edit_end == offset)
+        })?;
+    let (node, start, _len) = *leaf;
+    tree.edit_leaf(node, offset - start, delete_len, insert)
+        .ok()?;
+    Some(tree.render())
+}
+
+/// Replay a sequence of text edits onto `base` as lossless-tree leaf edits, each
+/// applied to the running document (so offsets are relative to the prior state, like
+/// captured editor ops). Returns the final document, or `None` if any edit spans a
+/// leaf boundary — the reverse (editor→tree) op replay for tree-authoritative sessions.
+pub fn apply_text_edits(base: &str, edits: &[(usize, usize, &str)]) -> Option<String> {
+    let mut doc = base.to_string();
+    for &(offset, delete_len, insert) in edits {
+        doc = apply_text_edit(&doc, offset, delete_len, insert)?;
+    }
+    Some(doc)
+}
+
 /// Read a lossless-tree frame file and render it back to document text — the editor's
 /// apply side of the Phase 5 transport. Returns `Ok(None)` when the file is absent;
 /// an unparseable frame is an `InvalidData` error (the editor keeps its buffer).
@@ -860,6 +932,50 @@ mod tests {
         std::fs::write(&frame, b"not a projection").unwrap();
         assert!(read_frame_render(&frame).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A naive string edit, to check `apply_text_edit` against for single-leaf edits.
+    fn naive_edit(doc: &str, offset: usize, delete_len: usize, insert: &str) -> String {
+        format!(
+            "{}{}{}",
+            &doc[..offset],
+            insert,
+            &doc[offset + delete_len..]
+        )
+    }
+
+    #[test]
+    fn apply_text_edit_maps_edits_to_leaf_edits() {
+        let doc = "<!-- agent:status -->\nold body\n<!-- /agent:status -->\n";
+        // Insert inside the body leaf.
+        let ins = doc.find("old").unwrap();
+        assert_eq!(
+            apply_text_edit(doc, ins, 0, "brand new ").as_deref(),
+            Some(naive_edit(doc, ins, 0, "brand new ").as_str())
+        );
+        // Delete a range inside the body leaf ("old ").
+        assert_eq!(
+            apply_text_edit(doc, ins, 4, "").as_deref(),
+            Some(naive_edit(doc, ins, 4, "").as_str())
+        );
+        // Replace inside the body leaf.
+        assert_eq!(
+            apply_text_edit(doc, ins, 3, "new").as_deref(),
+            Some(naive_edit(doc, ins, 3, "new").as_str())
+        );
+        // Every result is itself lossless.
+        let edited = apply_text_edit(doc, ins, 3, "new").unwrap();
+        assert_eq!(parse(&edited).render(), edited);
+    }
+
+    #[test]
+    fn apply_text_edit_declines_cross_leaf_edits() {
+        // A range straddling the open-marker token and the body leaf spans a boundary.
+        let doc = "<!-- agent:status -->\nbody\n<!-- /agent:status -->\n";
+        // Offset inside the open marker, deleting past its end into the body.
+        assert_eq!(apply_text_edit(doc, 5, 30, "x"), None);
+        // Out-of-range offset.
+        assert_eq!(apply_text_edit(doc, doc.len() + 1, 0, "x"), None);
     }
 
     #[test]

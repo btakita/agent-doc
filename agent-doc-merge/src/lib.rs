@@ -26,8 +26,8 @@ pub use frontmatter_crdt::merge_contents_crdt;
 /// editor plugins without a new direct dependency.
 pub mod lossless_tree {
     pub use agent_doc_markdown_lossless::{
-        LOSSLESS_FRAME_DIR, LosslessProjection, project, projection_from_bytes,
-        projection_to_bytes, read_frame_render, restore, write_frame,
+        LOSSLESS_FRAME_DIR, LosslessProjection, apply_text_edit, apply_text_edits, project,
+        projection_from_bytes, projection_to_bytes, read_frame_render, restore, write_frame,
     };
 }
 

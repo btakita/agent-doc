@@ -483,10 +483,36 @@ editor buffer would then arrive with a frontier that proves it is behind, instea
 ambiguous text. That is the editor-capability + live-authority work (Phases 4-6). Also still
 ahead: reconcile with the parallel `document_cell` (`#qcellmerge1`) per-cell path.
 
-- **Phase 4 (Rust/FFI half) — agent-doable**: the `lossless_tree_crdt_v1` capability constant
-  and negotiation logic in Rust/FFI. The JetBrains (lazily-kt) and VS Code (lazily-js) plugin
-  halves plus the live-authority proof (Phases 5-6) remain `[operator-verify]` by the
-  project's release rules and cannot be closed autonomously.
+- **Phase 4 Rust capability negotiation — DONE (`18c26bf9`)**: `LOSSLESS_TREE_CRDT_CAPABILITY`,
+  `supports_lossless_tree_crdt`, `LosslessTreeNegotiation`, `negotiate_lossless_tree_capability`.
+
+### Phase 4-6 status and the concurrent-session collision blocker
+
+**Language runtimes DONE.** `lazily-rs`, `lazily-kt`, and `lazily-js` all ship complete
+`LosslessTreeCrdt` implementations (`applyUpdate`/`render`/`diff`/`frontier`) with conformance
+tests (M1). Phase 4's "lazily-kt / lazily-js support" for the CRDT itself is already complete —
+the plugins have runtimes to call.
+
+**Remaining Phase 4-plugin / 5 / 6 work is blocked by an active concurrent session, not just
+the live-proof gate.** Everything left lives in files a concurrent codex session is mid-rewrite
+of with large uncommitted WIP:
+
+- FFI tree-frame surface → `src/ffi.rs` (dirty) + a `markdown-lossless` dep in the root
+  `Cargo.toml` (dirty). A new FFI file can't reach `markdown-lossless` without adding that dep,
+  and staging the dirty `Cargo.toml`/`Cargo.lock` would commit the other session's WIP.
+- JetBrains plugin frame handling → `editors/jetbrains/**` (`NativeLib.kt`, listeners — dirty).
+- VS Code plugin frame handling → `editors/vscode/**` (`native.ts`, `extension.ts` — dirty).
+
+The capability advertisement (add `lossless_tree_crdt_v1` to `EDITOR_CAPABILITIES` in the clean
+`TypingTracker.kt`) is a **promise the plugin can exchange tree frames** — it must not be added
+until the frame-handling glue (FFI + IPC handlers, all in dirty files) exists, or the binary
+would route tree authority to a plugin that can't handle it and break live sessions.
+
+Per the operator memory on concurrent sessions, a collided session verifies and STOPS rather
+than fighting over shared files. Phases 4-plugin/5/6 therefore need the concurrent session to
+land its `editors/**` + `src/ffi.rs` + root-`Cargo.toml` WIP first; then the FFI tree-frame
+surface, plugin frame handlers, capability advertisement, and Phase 5 live-authority wiring are
+agent-doable, leaving only the final live human eyeball (`[operator-verify]`) as the true gate.
 
 ### Phase 0: Adapter Design
 

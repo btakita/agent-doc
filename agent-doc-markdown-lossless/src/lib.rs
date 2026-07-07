@@ -240,6 +240,62 @@ pub fn shadow_audit_ops_log_line(doc: &str, source: &str) -> String {
     shadow_audit(doc).ops_log_line(source)
 }
 
+/// Replace the inner body — the text between the open and close markers — of the
+/// first top-level `<!-- agent:NAME -->` component with `new_inner`, returning the
+/// rendered document. Returns `None` when no such component exists, or when the
+/// component is opaque/malformed (its markers did not split cleanly, so it is a
+/// single `Raw` leaf) — the caller falls back to the legacy path in that case, per
+/// the rollout plan's "fall back if the touched region is raw/error" rule.
+///
+/// Phase 2 primitive (`#lzlosstree`): an agent-owned mutation (status update, queue
+/// item edit, …) expressed as a **bounded** lossless-tree edit instead of a
+/// whole-document string rewrite. Lossless by construction — only the target
+/// component's body leaf changes, so every byte outside that component span is
+/// byte-identical in the result. NOT yet wired into the live write authority path;
+/// byte-parity with `template::apply_patches` replace mode is the gate before that.
+pub fn replace_component_inner(doc: &str, name: &str, new_inner: &str) -> Option<String> {
+    let mut tree = parse(doc);
+    let el = tree
+        .children(TreeNodeId::ROOT)
+        .into_iter()
+        .find(|&c| tree.element_kind(c) == Some(name))?;
+    let kids = tree.children(el);
+    // A cleanly-split component's children are [Token(open), Raw(inner)?, Token(close)].
+    // If the first child is not the open-marker Token, the markers did not split
+    // (opaque/malformed span) and editing would eat marker bytes — bail to legacy.
+    let open = *kids.first()?;
+    if tree.leaf_kind(open) != Some(LeafKind::Token) {
+        return None;
+    }
+    match kids
+        .iter()
+        .copied()
+        .find(|&k| tree.leaf_kind(k) == Some(LeafKind::Raw))
+    {
+        Some(body) => {
+            let cur = tree.leaf_text(body).ok()?;
+            tree.edit_leaf(body, 0, cur.len(), new_inner).ok()?;
+        }
+        None => {
+            // Empty component (open marker directly followed by close): insert a Raw
+            // body leaf right after the open marker. Nothing to do for an empty body.
+            if new_inner.is_empty() {
+                return Some(tree.render());
+            }
+            tree.create_node(
+                el,
+                Some(open),
+                NodeSeed::Leaf {
+                    kind: LeafKind::Raw,
+                    text: new_inner.to_string(),
+                },
+            )
+            .ok()?;
+        }
+    }
+    Some(tree.render())
+}
+
 fn first_diff(a: &[u8], b: &[u8]) -> Option<usize> {
     let n = a.len().min(b.len());
     for i in 0..n {
@@ -358,6 +414,57 @@ mod tests {
         assert!(line.contains("source=session_check match=false"), "{line}");
         assert!(line.contains("first_diff=5"), "{line}");
         assert!(line.contains("rendered_len=8"), "{line}");
+    }
+
+    #[test]
+    fn replace_component_inner_changes_only_the_target_span() {
+        let doc = "intro\n\n<!-- agent:status -->\nold status\n<!-- /agent:status -->\n\n<!-- agent:log -->\nkeep me\n<!-- /agent:log -->\n";
+        let out = replace_component_inner(doc, "status", "new status\n").expect("status exists");
+        // The result is a valid, self-consistent lossless document.
+        assert_eq!(parse(&out).render(), out);
+        // The new body is present; the old body is gone.
+        assert!(out.contains("new status"), "{out}");
+        assert!(!out.contains("old status"), "{out}");
+        // Every byte outside the status component is untouched: prose, the log
+        // component body, and both marker lines survive verbatim.
+        assert!(out.starts_with("intro\n\n<!-- agent:status -->\n"), "{out}");
+        assert!(
+            out.contains(
+                "<!-- /agent:status -->\n\n<!-- agent:log -->\nkeep me\n<!-- /agent:log -->\n"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn replace_component_inner_fills_an_empty_component() {
+        let doc = "<!-- agent:log -->\n<!-- /agent:log -->\n";
+        let out = replace_component_inner(doc, "log", "first line\n").expect("log exists");
+        assert_eq!(out, "<!-- agent:log -->\nfirst line\n<!-- /agent:log -->\n");
+        assert_eq!(parse(&out).render(), out);
+    }
+
+    #[test]
+    fn replace_component_inner_declines_missing_or_malformed() {
+        // No such component -> None (caller keeps legacy path).
+        assert_eq!(
+            replace_component_inner(
+                "<!-- agent:status -->\nx\n<!-- /agent:status -->\n",
+                "log",
+                "y"
+            ),
+            None
+        );
+        // Unclosed/opaque component -> single Raw leaf, no clean markers -> None,
+        // so the primitive never risks eating marker bytes.
+        assert_eq!(
+            replace_component_inner(
+                "<!-- agent:status -->\ndangling no close\nmore\n",
+                "status",
+                "y"
+            ),
+            None
+        );
     }
 
     #[test]

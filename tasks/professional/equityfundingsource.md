@@ -92,7 +92,22 @@ Verification:
 - This repair response exists only to satisfy the required write/commit boundary.
 - Confidence: high.
 - Escalation: force-disk closeout used because the Stop hook explicitly required commit-boundary completion after editor IPC proof failed.
-<!-- agent:boundary:c7c8dac1 -->
+
+### Re: annual Requirements questionnaire queue prompt — gpt-5
+
+> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, if the admin fills the lender's annual requirements questionaire, the lender's requirements should automatically be approved.
+
+That queue prompt is answered by the already-visible implementation closeout: the admin annual Requirements save path now records the questionnaire and immediately approves the lender requirements row, and the lender-pipeline UI copy reflects the one-action `Save and approve` behavior.
+
+No additional EFS repo work was performed in this repair cycle. This response exists to provide the committed free-text queue prompt echo required by `agent-doc session-check` after the Stop-hook recovery.
+
+Verification:
+- The queue prompt is struck in `agent:queue` as answered this cycle.
+- The implementation closeout already records the changed EFS paths and test/build verification.
+- The previous repair response crossed the force-disk closeout path but `session-check` still required this explicit queue-prompt echo.
+- Confidence: high.
+- Escalation: force-disk closeout used because the Stop hook required commit-boundary completion after normal editor IPC proof failed.
+<!-- agent:boundary:de3fa2de -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

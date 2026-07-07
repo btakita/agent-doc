@@ -392,6 +392,18 @@ JS replay the same conformance corpus.
   before wiring: byte-parity with `template::apply_patches` replace mode, plus a full
   `make check` — currently blocked because the working tree carries an unrelated
   concurrent session's controller/write-path (`rpc.rs`) WIP that fails the workspace build.
+- **Phase 2 — first live strangler shadow landed (`005e79d2`)**: `write --status` now
+  computes its component-body replace through `replace_component_inner` *alongside* the
+  legacy `replace_status_content` projection and logs `lossless_write_parity op=status_set
+  result=match|mismatch|declined` on every status write. Measurement only — legacy stays
+  authoritative; the flip is a one-line swap once live parity is green. A parity test
+  proves the tree result is byte-identical to legacy for the standard status shape
+  (multi-line, multibyte, empty), fixing the inner mapping to `\n{text}\n` (element's
+  `open_end` includes the newline after `-->`). `agent-doc-status-io`'s dep graph is clean
+  of the contaminated `controller-io`, so it builds+tests in the main tree; deeper write
+  paths (exchange append, backlog reap, queue edit) are the next strangler targets, then
+  the merge/relay-layer replacement of the flat `CrdtDoc`/`MultiNodeState` — which lives in
+  the contaminated hot path and is gated on the tree clearing + operator live-proof.
 - **Phase 2 remaining / Phase 3 — agent-doable behind `make check` + haiven replay** once
   the tree clears: more agent-owned operations (append response, move boundary, consume
   backlog item, queue add/done), the before/after render guards against current visible

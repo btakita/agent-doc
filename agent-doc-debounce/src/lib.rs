@@ -217,6 +217,15 @@ const LIVE_BUFFER_DIR: &str = ".agent-doc/live-buffer";
 const WRITE_PROVENANCE_DIR: &str = ".agent-doc/write-provenance";
 pub const OPERATOR_TEXT_AUTHORITY_CAPABILITY: &str = "operator_text_authority_v1";
 pub const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY: &str = "lazily_transport_receipts_v1";
+/// `#lzlosstree` Phase 4 capability token. An editor plugin advertises this when it
+/// can exchange **lossless-tree update frames** (create/move/tombstone/leaf-edit ops
+/// carried with a dotted frontier) instead of only whole-document text or component
+/// patches. The tree may become the live merge authority for a session (Phase 5)
+/// only when the attached editor advertises it; a plugin that lacks it falls back to
+/// the flat text-CRDT / component-patch path. The token is versioned so an
+/// incompatible future frame shape negotiates as a new capability rather than
+/// silently drifting.
+pub const LOSSLESS_TREE_CRDT_CAPABILITY: &str = "lossless_tree_crdt_v1";
 
 /// Latest editor-visible buffer digest projection for a document.
 ///
@@ -279,6 +288,56 @@ impl LiveBufferSnapshot {
         self.capabilities
             .iter()
             .any(|candidate| candidate == capability)
+    }
+
+    /// Whether the reporting editor can exchange lossless-tree update frames
+    /// ([`LOSSLESS_TREE_CRDT_CAPABILITY`]) — the Phase 4 gate for routing a session's
+    /// live merge authority through the tree rather than the flat text CRDT.
+    pub fn supports_lossless_tree_crdt(&self) -> bool {
+        self.has_capability(LOSSLESS_TREE_CRDT_CAPABILITY)
+    }
+}
+
+/// The negotiated outcome of asking whether a session may use the lossless tree as
+/// its live authority. Explicit so callers must handle the no-capability fallback
+/// rather than defaulting into a tree path a plugin cannot speak (`#lzlosstree`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LosslessTreeNegotiation {
+    /// The attached editor advertises `lossless_tree_crdt_v1`: tree frames may flow.
+    Supported,
+    /// An editor is attached but does not advertise the capability: fall back to the
+    /// flat text-CRDT / component-patch transport for this session.
+    UnsupportedEditor,
+    /// No editor replica is attached (detached / disk-only): there is no live
+    /// authority to negotiate; the durable projection path applies instead.
+    NoEditor,
+}
+
+impl LosslessTreeNegotiation {
+    /// Whether tree update frames may be used as the live authority.
+    pub fn tree_frames_allowed(self) -> bool {
+        matches!(self, LosslessTreeNegotiation::Supported)
+    }
+}
+
+/// Negotiate the lossless-tree live-authority capability against the attached editor
+/// replicas for a document. `Supported` requires at least one live editor that
+/// advertises [`LOSSLESS_TREE_CRDT_CAPABILITY`]; a live editor without it yields
+/// `UnsupportedEditor` (fall back), and no live editor yields `NoEditor`.
+pub fn negotiate_lossless_tree_capability(
+    snapshots: &[LiveBufferSnapshot],
+) -> LosslessTreeNegotiation {
+    let live: Vec<&LiveBufferSnapshot> = snapshots
+        .iter()
+        .filter(|s| live_buffer_snapshot_editor_is_live(s))
+        .collect();
+    if live.is_empty() {
+        return LosslessTreeNegotiation::NoEditor;
+    }
+    if live.iter().any(|s| s.supports_lossless_tree_crdt()) {
+        LosslessTreeNegotiation::Supported
+    } else {
+        LosslessTreeNegotiation::UnsupportedEditor
     }
 }
 
@@ -1542,6 +1601,55 @@ fn status_file_path(file: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal live-buffer snapshot (editor_id `None` ⇒ treated as live) that
+    /// advertises `capabilities`, for capability-negotiation tests.
+    fn live_snapshot_with_capabilities(capabilities: &[&str]) -> LiveBufferSnapshot {
+        LiveBufferSnapshot {
+            path: "/doc.md".to_string(),
+            len: 0,
+            hash: String::new(),
+            timestamp_ms: 0,
+            edit_epoch: 0,
+            last_synced_epoch: 0,
+            state_vector_b64: None,
+            editor_id: None,
+            editor_kind: None,
+            editor_version: None,
+            capabilities: capabilities.iter().map(|c| c.to_string()).collect(),
+            content: None,
+            no_unsaved_operator_edits: false,
+        }
+    }
+
+    #[test]
+    fn lossless_tree_capability_negotiation() {
+        // No editor ⇒ nothing to negotiate; the durable-projection path applies.
+        assert_eq!(
+            negotiate_lossless_tree_capability(&[]),
+            LosslessTreeNegotiation::NoEditor
+        );
+        // A live editor without the capability ⇒ fall back to the flat path.
+        let without = live_snapshot_with_capabilities(&[LAZILY_TRANSPORT_RECEIPTS_CAPABILITY]);
+        assert!(!without.supports_lossless_tree_crdt());
+        assert_eq!(
+            negotiate_lossless_tree_capability(std::slice::from_ref(&without)),
+            LosslessTreeNegotiation::UnsupportedEditor
+        );
+        assert!(!LosslessTreeNegotiation::UnsupportedEditor.tree_frames_allowed());
+        // A live editor advertising it ⇒ tree frames may flow, even alongside a
+        // non-capable editor.
+        let with = live_snapshot_with_capabilities(&[
+            LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+            LOSSLESS_TREE_CRDT_CAPABILITY,
+        ]);
+        assert!(with.supports_lossless_tree_crdt());
+        assert_eq!(
+            negotiate_lossless_tree_capability(&[without, with]),
+            LosslessTreeNegotiation::Supported
+        );
+        assert!(LosslessTreeNegotiation::Supported.tree_frames_allowed());
+    }
 
     fn wait_for_typing_indicator(file: &str, debounce_ms: u64) {
         for _ in 0..50 {

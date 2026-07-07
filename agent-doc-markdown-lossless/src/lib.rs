@@ -93,6 +93,40 @@ pub fn projection_from_bytes(bytes: &[u8]) -> Result<LosslessProjection, serde_j
     serde_json::from_slice(bytes)
 }
 
+/// The directory (relative to a project root) where the binary drops lossless-tree
+/// **frames** for a tree-capable editor to apply (`#lzlosstree` Phase 5). This is the
+/// dedicated tree-update transport the rollout plan calls for; it is separate from
+/// the flat `.agent-doc/patches/` channel so a non-capable plugin never sees frames.
+pub const LOSSLESS_FRAME_DIR: &str = ".agent-doc/lossless-frames";
+
+/// Write a lossless-tree frame for `content` into `frame_path` (a
+/// `<root>/.agent-doc/lossless-frames/<hash>.json` file): project `content` and
+/// serialize the projection. The capable editor renders it with [`read_frame_render`]
+/// and applies the result to its buffer. Creates the parent directory as needed.
+pub fn write_frame(frame_path: &std::path::Path, content: &str) -> std::io::Result<()> {
+    if let Some(parent) = frame_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let projection = project(content);
+    let bytes = projection_to_bytes(&projection)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(frame_path, bytes)
+}
+
+/// Read a lossless-tree frame file and render it back to document text — the editor's
+/// apply side of the Phase 5 transport. Returns `Ok(None)` when the file is absent;
+/// an unparseable frame is an `InvalidData` error (the editor keeps its buffer).
+pub fn read_frame_render(frame_path: &std::path::Path) -> std::io::Result<Option<String>> {
+    let bytes = match std::fs::read(frame_path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let projection = projection_from_bytes(&bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(Some(restore(&projection)))
+}
+
 fn leaf(kind: LeafKind, text: &str) -> NodeSeed {
     NodeSeed::Leaf {
         kind,
@@ -805,6 +839,27 @@ mod tests {
             );
             assert_eq!(restore(&restored), doc, "{name}: restore after serde");
         }
+    }
+
+    #[test]
+    fn frame_write_then_render_round_trips_through_a_file() {
+        let dir = std::env::temp_dir().join(format!("lzframe-{}", std::process::id()));
+        let frame = dir.join(LOSSLESS_FRAME_DIR).join("abc.json");
+        let content = "<!-- agent:status -->\nframe body\n<!-- /agent:status -->\n";
+        // Server side: emit the frame.
+        write_frame(&frame, content).expect("write frame");
+        // Editor side: render it back to the exact document text.
+        let rendered = read_frame_render(&frame)
+            .expect("read frame")
+            .expect("frame present");
+        assert_eq!(rendered, content);
+        // Absent frame → Ok(None).
+        let missing = dir.join(LOSSLESS_FRAME_DIR).join("missing.json");
+        assert_eq!(read_frame_render(&missing).unwrap(), None);
+        // A corrupt frame is a hard error (editor keeps its buffer), never a silent wrong render.
+        std::fs::write(&frame, b"not a projection").unwrap();
+        assert!(read_frame_render(&frame).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -231,6 +231,52 @@ pub fn build_ipc_patches_json(
     Ok(ipc_patches)
 }
 
+/// `#lzlosstree` Phase 5 server-side frame emission. When the session's attached
+/// editor advertises `lossless_tree_crdt_v1`, drop a lossless-tree **frame** — the
+/// projection of `content` — into `<root>/.agent-doc/lossless-frames/<hash>.json` for
+/// the capable plugin's frame watcher to render (`losslessTreeRender`) and apply to
+/// its buffer. Returns `Ok(true)` when a frame was emitted, `Ok(false)` when the
+/// session is not tree-capable (no editor / editor without the capability) — in which
+/// case the caller's existing flat patch/text path is the authority. This is the
+/// dedicated tree-update transport (a non-capable plugin never sees the frame dir),
+/// so it composes with, and never double-applies against, the flat channel.
+pub fn maybe_emit_lossless_tree_frame(file: &Path, content: &str) -> Result<bool> {
+    let file_key = file.to_string_lossy();
+    let snapshots = agent_doc_debounce::live_buffer_snapshots(&file_key);
+    let negotiation = agent_doc_debounce::negotiate_lossless_tree_capability(&snapshots);
+    emit_lossless_tree_frame_for_negotiation(file, content, negotiation)
+}
+
+/// The emit decision itself, split out so it is testable with a direct
+/// [`LosslessTreeNegotiation`](agent_doc_debounce::LosslessTreeNegotiation) instead of
+/// the live-buffer sidecar machinery.
+pub fn emit_lossless_tree_frame_for_negotiation(
+    file: &Path,
+    content: &str,
+    negotiation: agent_doc_debounce::LosslessTreeNegotiation,
+) -> Result<bool> {
+    if !negotiation.tree_frames_allowed() {
+        return Ok(false);
+    }
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let frame_path = project_root
+        .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
+        .join(format!("{hash}.json"));
+    agent_doc_markdown_lossless::write_frame(&frame_path, content)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "lossless_tree_frame_emitted file={} frame={} len={}",
+            file.display(),
+            frame_path.display(),
+            content.len()
+        ),
+    );
+    Ok(true)
+}
+
 pub fn queue_file_ipc_reposition_boundary(
     file: &Path,
     boundary_id: Option<&str>,
@@ -505,8 +551,56 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_debounce::LosslessTreeNegotiation;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn lossless_frame_emitted_only_for_a_tree_capable_session() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "<!-- agent:status -->\nlive authority body\n<!-- /agent:status -->\n";
+        fs::write(&doc, content).unwrap();
+
+        // A tree-capable session gets a frame that renders back to the exact content.
+        let emitted = emit_lossless_tree_frame_for_negotiation(
+            &doc,
+            content,
+            LosslessTreeNegotiation::Supported,
+        )
+        .unwrap();
+        assert!(emitted, "capable session should emit a frame");
+        let canonical = doc.canonicalize().unwrap();
+        let root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let frame = root
+            .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
+            .join(format!("{hash}.json"));
+        assert!(
+            frame.exists(),
+            "frame file should exist at {}",
+            frame.display()
+        );
+        assert_eq!(
+            agent_doc_markdown_lossless::read_frame_render(&frame)
+                .unwrap()
+                .as_deref(),
+            Some(content),
+            "the emitted frame must render back to the document"
+        );
+
+        // A non-capable session (no editor / editor without the capability) emits no
+        // frame — the flat channel stays authoritative.
+        fs::remove_file(&frame).ok();
+        for neg in [
+            LosslessTreeNegotiation::NoEditor,
+            LosslessTreeNegotiation::UnsupportedEditor,
+        ] {
+            assert!(!emit_lossless_tree_frame_for_negotiation(&doc, content, neg).unwrap());
+            assert!(!frame.exists(), "no frame for {neg:?}");
+        }
+    }
 
     #[test]
     fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {

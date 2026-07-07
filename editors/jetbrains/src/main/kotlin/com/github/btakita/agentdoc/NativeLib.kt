@@ -246,6 +246,16 @@ interface AgentDocLib : Library {
     /** Collect editor-facing visual token ranges as JSON. Caller must free result. */
     fun agent_doc_visual_tokens_json(doc: String): Pointer?
 
+    // ── #lzlosstree Phase 4: lossless-tree frame exchange ──
+    /** The `lossless_tree_crdt_v1` capability token. Borrowed static — do NOT free. */
+    fun agent_doc_lossless_tree_capability(): Pointer?
+    /** Project buffer text to a durable tree projection JSON. Free with [agent_doc_free_string]. */
+    fun agent_doc_lossless_tree_project(doc_text: String): Pointer?
+    /** Render a tree projection JSON back to document text. Free with [agent_doc_free_string]. */
+    fun agent_doc_lossless_tree_render(projection_json: String): Pointer?
+    /** 1 if `projection_json` still describes `visible_text` (frontier/hash proof), else 0. */
+    fun agent_doc_lossless_tree_projection_current(projection_json: String, visible_text: String): Int
+
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)
 

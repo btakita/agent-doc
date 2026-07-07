@@ -34,9 +34,14 @@ internal data class PreparedEditorOp(
 
 private const val OPERATOR_TEXT_AUTHORITY_CAPABILITY = "operator_text_authority_v1"
 private const val LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = "lazily_transport_receipts_v1"
+// #lzlosstree Phase 4: advertise that this plugin can exchange lossless-tree frames
+// (it binds agent_doc_lossless_tree_render/project via LosslessTreeFrames). Kept in
+// sync with agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY on the binary side.
+private const val LOSSLESS_TREE_CRDT_CAPABILITY = "lossless_tree_crdt_v1"
 private val EDITOR_CAPABILITIES = listOf(
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
     LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+    LOSSLESS_TREE_CRDT_CAPABILITY,
 ).joinToString(",")
 
 // #stale-plugin-detect: report the real plugin version over FFI so the binary's

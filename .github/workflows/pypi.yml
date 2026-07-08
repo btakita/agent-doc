@@ -32,6 +32,9 @@ jobs:
       - name: Check out tmux-router path dependency
         run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
 
+      - name: Check out lazily-rs path dependency
+        run: git clone --depth 1 https://github.com/btakita/lazily-rs ../lazily-rs
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -48,27 +51,8 @@ jobs:
           name: wheel-${{ matrix.target }}
           path: dist
 
-  sdist:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check out tmux-router path dependency
-        run: git clone --depth 1 https://github.com/btakita/tmux-router ../tmux-router
-
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          command: sdist
-          args: --out dist
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sdist
-          path: dist
-
   publish:
-    needs: [build, sdist]
+    needs: [build]
     runs-on: ubuntu-latest
     environment: pypi
 

@@ -365,7 +365,7 @@ publish-crate:
 
 # Publish to PyPI
 publish-pypi:
-	.venv/bin/maturin publish --skip-existing
+	.venv/bin/maturin publish --skip-existing --no-sdist
 
 # Publish to both crates.io and PyPI
 publish: publish-crate publish-pypi

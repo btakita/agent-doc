@@ -1,7 +1,6 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use super::*;
-use agent_doc_run_context_io::AgentDocContextExt;
 
 pub(crate) fn active_pane_column_index(
     tmux: &Tmux,
@@ -50,13 +49,13 @@ pub(crate) fn lookup_registry_entry_for_file_session(
     file: &Path,
     session_id: &str,
 ) -> Option<tmux_router::RegistryEntry> {
-    let (_, _project_root, registry_key) = registry_location_for_file(file)?;
-    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
-    let registry = rc.session_registry();
+    let (_, project_root, registry_key) = registry_location_for_file(file)?;
+    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
     let entry = registry.get(&registry_key)?.clone();
     (entry.session_id == session_id).then_some(entry)
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct SyntheticRegistryCandidate {
     pub(crate) session_id: String,
@@ -66,6 +65,7 @@ pub(crate) struct SyntheticRegistryCandidate {
     pub(crate) pane_root_match: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn filter_duplicate_synthetic_registry_candidates(
     candidates: Vec<SyntheticRegistryCandidate>,
 ) -> Vec<SyntheticRegistryCandidate> {
@@ -651,7 +651,7 @@ mod tests {
             .expect("registry entry should remain present");
         assert_eq!(
             entry.pane, actor_pane,
-            "sync must keep sessions.json projected onto the authoritative actor pane"
+            "sync must expose the authoritative actor pane through the durable registry"
         );
     }
     #[test]

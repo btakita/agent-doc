@@ -62,7 +62,41 @@ pub fn run(
         )?
     };
     if preserve_session {
+        if !force_disk {
+            let disk_content =
+                agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                    file,
+                    "reset_command_disk_compare",
+                )?;
+            if disk_content != content {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "reset_preserve_session_refused_authority_disk_divergence file={} authority_hash={} disk_hash={} recovery=save_or_rerun_force_disk",
+                        file.display(),
+                        agent_doc_hash::content_hash(&content),
+                        agent_doc_hash::content_hash(&disk_content),
+                    ),
+                );
+                anyhow::bail!(
+                    "reset --from-current --preserve-session refused for {}: editor/current authority differs from disk. Save or reload the editor if the editor buffer is authoritative, or rerun with --force-disk if the on-disk document is the intended authority.",
+                    file.display()
+                );
+            }
+        }
         rebuild_sidecars_from_current(file, &content, true)?;
+        if force_disk
+            && let Some(outcome) =
+                agent_doc_crdt_relay_io::apply_disk_change_for_file(file, &content)?
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reset_preserve_session_force_disk_reconciled_canonical file={} outcome={outcome:?}",
+                    file.display(),
+                ),
+            );
+        }
         eprintln!(
             "Reset sidecars for {} from current file while preserving session state",
             file.display()
@@ -280,6 +314,91 @@ mod tests {
             std::fs::read_to_string(&capture_path).unwrap(),
             capture_state
         );
+    }
+
+    #[test]
+    fn preserve_session_from_current_refuses_stale_live_authority_and_force_disk_rebuilds_it() {
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("baselines")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        std::fs::write(agent_doc_dir.join("test-local-crdt-relay"), "").unwrap();
+        let doc = dir.path().join("session.md");
+        let expanded = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "resume: keep-me\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: old topic - gpt-5\n\n",
+            "Old response that was compacted.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let compacted = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "resume: keep-me\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/session.md`*\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, expanded).unwrap();
+        let file_str = doc.display().to_string();
+        let pid = std::process::id();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &file_str,
+            &format!("test-editor-{pid}"),
+            pid
+        ));
+        agent_doc_crdt_relay_io::register_replica_for_file(&doc, "intellij:reset-stale")
+            .unwrap()
+            .expect("test relay should attach");
+
+        std::fs::write(&doc, compacted).unwrap();
+        agent_doc_snapshot_io::save(&doc, expanded, agent_doc_ops_log_io::log_op).unwrap();
+        std::fs::write(agent_doc_fs::baseline_path_for(&doc).unwrap(), expanded).unwrap();
+
+        let err = run(&doc, true, true, false).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("editor/current authority differs from disk"),
+            "plain preserve reset must fail closed on stale live authority: {err:#}"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            expanded,
+            "failed reset must not adopt the stale live projection or compacted disk"
+        );
+
+        run(&doc, true, true, true).unwrap();
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            compacted
+        );
+        assert_eq!(
+            std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap(),
+            compacted
+        );
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&doc).unwrap();
+        match current {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+                assert_eq!(text, compacted);
+                assert!(
+                    !text.contains("### Re: old topic"),
+                    "force-disk reset must remove compacted cells from live canonical text"
+                );
+            }
+            other => {
+                panic!("expected live relay current text after force-disk reset, got {other:?}")
+            }
+        }
     }
 
     #[test]

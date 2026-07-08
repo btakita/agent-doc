@@ -335,21 +335,6 @@ fn merge_inner(
         Some(ops) if !ops.is_empty() && base_text.is_ascii() && theirs_text.is_ascii() => {
             match replay_editor_ops(&base_text, ops) {
                 Some(replayed) if replayed == theirs_text => {
-                    // #lzlosstree reverse direction (editor typing updates leaf nodes):
-                    // confirm the same captured ops apply cleanly as lossless-tree LEAF
-                    // edits reproducing theirs. Logged as the op-causality evidence; the
-                    // flat op-replay remains the CRDT feed until the tree is the live
-                    // authority, mirroring how the forward frame flip began as a shadow.
-                    match replay_editor_ops_via_tree(&base_text, ops) {
-                        Some(tree_replay) if tree_replay == theirs_text => eprintln!(
-                            "[crdt] editor_ops_tree_replay: {} op(s) update leaf nodes to theirs exactly (#lzlosstree)",
-                            ops.len()
-                        ),
-                        _ => eprintln!(
-                            "[crdt] editor_ops_tree_replay_declined: {} op(s) span a leaf boundary; flat replay used (#lzlosstree)",
-                            ops.len()
-                        ),
-                    }
                     eprintln!(
                         "[crdt] editor_ops_replayed: {} captured op(s) reproduce theirs exactly (#qnodemerge4)",
                         ops.len()
@@ -2018,24 +2003,6 @@ pub fn replay_editor_ops(base: &str, ops: &[EditorOp]) -> Option<String> {
     Some(buf)
 }
 
-/// `#lzlosstree` Phase 5 **reverse direction** — editor typing updates leaf nodes.
-/// Replay captured editor ops (the editor's real insert@offset / delete-range
-/// sequence) onto `base` as lossless-tree **leaf edits** instead of flat text splices,
-/// so the tree is the authority for the editor's edits too. Returns the edited
-/// document, or `None` when an op spans a leaf boundary (caller falls back to
-/// [`replay_editor_ops`] / the flat path). Byte-identical to [`replay_editor_ops`] for
-/// every op sequence the tree accepts.
-pub fn replay_editor_ops_via_tree(base: &str, ops: &[EditorOp]) -> Option<String> {
-    let edits: Vec<(usize, usize, &str)> = ops
-        .iter()
-        .map(|op| match op {
-            EditorOp::Insert { offset, text } => (*offset, 0usize, text.as_str()),
-            EditorOp::Delete { offset, len } => (*offset, *len, ""),
-        })
-        .collect();
-    agent_doc_markdown_lossless::apply_text_edits(base, &edits)
-}
-
 /// Apply captured editor ops directly to a Yrs text type, in order, as
 /// absolute-offset mutations (insert@offset / remove len@offset). This feeds
 /// the editor's *real* operation sequence into the CRDT so a concurrent agent
@@ -2099,33 +2066,6 @@ mod tests {
         let content = "Hello, world!\nLine two.\n";
         let doc = CrdtDoc::from_text(content);
         assert_eq!(doc.to_text(), content);
-    }
-
-    #[test]
-    fn replay_editor_ops_via_tree_matches_flat_replay_within_a_leaf() {
-        // Editor typing inside one component body: insert, then delete, then insert —
-        // the reverse edit-as-ops path must equal the flat replay byte-for-byte.
-        let base = "<!-- agent:status -->\nready\n<!-- /agent:status -->\n";
-        let at = base.find("ready").unwrap();
-        let ops = vec![
-            EditorOp::Insert {
-                offset: at,
-                text: "very ".to_string(),
-            },
-            EditorOp::Delete { offset: at, len: 5 }, // delete "very "
-            EditorOp::Insert {
-                offset: at,
-                text: "so ".to_string(),
-            },
-        ];
-        let flat = replay_editor_ops(base, &ops).expect("flat replay");
-        let tree = replay_editor_ops_via_tree(base, &ops).expect("tree replay");
-        assert_eq!(tree, flat, "tree editor-op replay must match flat replay");
-        // The result is itself lossless.
-        assert_eq!(agent_doc_markdown_lossless::parse(&tree).render(), tree);
-        // An op spanning a leaf boundary declines (caller falls back to flat).
-        let cross = vec![EditorOp::Delete { offset: 5, len: 30 }];
-        assert_eq!(replay_editor_ops_via_tree(base, &cross), None);
     }
 
     #[test]

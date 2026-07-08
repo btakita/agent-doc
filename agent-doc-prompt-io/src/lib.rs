@@ -3,7 +3,9 @@
 //! ## Spec
 //! - Detects active Claude Code and OpenCode permission/question prompts in a tmux pane and surfaces them as JSON.
 //! - `run(file)` — resolves the session's tmux pane from the document frontmatter, captures pane content, parses for prompt patterns, and prints a `PromptInfo` JSON object to stdout.
-//! - `run_all()` — iterates every entry in `sessions.json`, skips dead panes, and prints a JSON array of `PromptAllEntry` objects (one per live session with its prompt state).
+//! - `run_all()` — iterates every entry in the durable registry, skips dead
+//!   panes, and prints a JSON array of `PromptAllEntry` objects (one per live
+//!   session with its prompt state).
 //! - `answer(file, option_index)` — navigates the prompt TUI to the target option using the prompt's axis (Claude Code: Up/Down, OpenCode: Tab/BackTab; 30 ms between presses) then sends Enter. OpenCode `Allow always` sends a second Enter to accept the follow-up confirmation prompt. Validates that a prompt is active and the index is in range before sending keys.
 //! - Pure prompt parsing, ANSI stripping, and navigation-key policy live in `agent-doc-turn-executor-tmux::prompt`; this module only supplies session/frontmatter/tmux adapters.
 //! - `selected` is 0-based (reflecting TUI cursor position); `options[*].index` is 1-based (matching the TUI display).

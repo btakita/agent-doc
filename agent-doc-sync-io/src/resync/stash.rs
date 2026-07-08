@@ -731,7 +731,7 @@ pub(crate) fn first_non_stash_pane(tmux: &Tmux, session_name: &str) -> Option<St
 /// Purge orphaned agent-doc/claude panes in ANY window (not just stash).
 ///
 /// Targets panes that are:
-/// 1. Not registered in sessions.json
+/// 1. Not registered in the durable registry
 /// 2. Running agent-doc, claude, or node
 /// 3. In a window that has at least one other pane (won't orphan last pane)
 ///

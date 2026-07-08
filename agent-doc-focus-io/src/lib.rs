@@ -14,11 +14,12 @@
 //!   errors if the override pane is not alive.
 //! - When `pane_override` is `None`, reads the file from disk, parses YAML frontmatter,
 //!   and extracts the `agent_doc_session` UUID; errors if the field is absent.
-//! - When `.agent-doc/session-actors.json` has a live local actor projection for the
-//!   document session, focus prefers that actor-owned pane over a stale
-//!   `sessions.json` projection without launching or waiting on the project controller.
-//! - Otherwise, looks up the UUID in `sessions.json` via `agent_doc_session_registry_io::lookup`.
-//! - Live-owner precedence: a pane resolved from the local actor projection or the
+//! - When `.agent-doc/state.db` has a live local actor record for the document
+//!   session, focus prefers that actor-owned pane over stale durable registry
+//!   metadata without launching or waiting on the project controller.
+//! - Otherwise, looks up the UUID in the durable registry via
+//!   `agent_doc_session_registry_io::lookup`.
+//! - Live-owner precedence: a pane resolved from the local actor record or the
 //!   registry is only proof the pane is *alive*, not that it still owns the document.
 //!   After a reroute / fresh-restart the session can move to a new pane while the old
 //!   pane stays alive with a dead owner. Before selecting, focus reconciles the
@@ -34,7 +35,7 @@
 //!   visible layout additively.
 //!
 //! ## Agentic Contracts
-//! - `run_with_tmux` never modifies `sessions.json` or the document on disk.
+//! - `run_with_tmux` never modifies the durable registry or the document on disk.
 //! - A file without `agent_doc_session` in its frontmatter always returns an error with
 //!   a message directing the caller to run `claim` first.
 //! - A registered pane that is no longer alive returns an error; the caller is responsible
@@ -45,8 +46,8 @@
 //! ## Evals
 //! - `focus_live_pane` (aspirational): file has a valid session UUID and a live pane →
 //!   `select-pane` is called and `Ok(())` is returned.
-//! - `focus_prefers_local_actor_projection` (aspirational): stale registry pane +
-//!   live local actor projection → focus selects the actor-owned pane without an RPC.
+//! - `focus_prefers_local_actor_record` (aspirational): stale registry pane +
+//!   live local actor record → focus selects the actor-owned pane without an RPC.
 //! - `focus_dead_pane` (aspirational): session UUID exists in registry, pane is dead, and
 //!   no live owner is provable → error containing "pane … is dead" is returned.
 //! - `focus_repairs_stale_registry_to_live_owner` (aspirational): registered pane is alive
@@ -76,7 +77,7 @@ pub trait FocusEffects {
         session_id: &str,
     ) -> Option<String>;
 
-    fn local_actor_projection_pane_for_document(
+    fn local_actor_record_pane_for_document(
         &self,
         file: &Path,
         session_id: &str,
@@ -89,9 +90,9 @@ pub trait FocusEffects {
 }
 
 /// Resolve the document's live owner pane, but only return it when it is alive
-/// and differs from `candidate`. This is the stale-projection / stale-registry
+/// and differs from `candidate`. This is the stale-record / stale-registry
 /// repair used by [`run_with_tmux`]: after a reroute or fresh-restart moves the
-/// session to a new pane, the registry/projection can still point at the old
+/// session to a new pane, the durable registry can still point at the old
 /// pane (alive as a pane but with a dead owner), so focus must defer to where
 /// the session actually lives.
 fn live_owner_override(
@@ -228,16 +229,15 @@ pub fn run_with_tmux_opts(
         ),
     };
 
-    if let Some(actor_pane) =
-        effects.local_actor_projection_pane_for_document(file, &session_id, tmux)
+    if let Some(actor_pane) = effects.local_actor_record_pane_for_document(file, &session_id, tmux)
     {
-        // The local actor projection only proves the pane is *alive*, not that
+        // The local actor record only proves the pane is *alive*, not that
         // it still owns this document. After a reroute / fresh-restart the
         // session may have moved; defer to the live owner when one exists.
         if let Some(owner) = live_owner_override(effects, file, &session_id, &actor_pane, tmux) {
             promote_and_select(effects, tmux, &owner, defer_stash_promote)?;
             eprintln!(
-                "Focused live-owner pane {} (stale actor projection {}) ({})",
+                "Focused live-owner pane {} (stale actor record {}) ({})",
                 owner,
                 actor_pane,
                 file.display()

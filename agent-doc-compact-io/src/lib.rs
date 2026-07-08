@@ -822,6 +822,16 @@ fn apply_compacted_document(
 
     if force_disk {
         runtime_effects()?.atomic_write(file, compacted)?;
+        if let Some(outcome) = agent_doc_crdt_relay_io::apply_disk_change_for_file(file, compacted)?
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_force_disk_reconciled_canonical file={} outcome={outcome:?}",
+                    file.display(),
+                ),
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1745,6 +1755,60 @@ mod tests {
         assert_eq!(
             agent_doc_snapshot_io::load(&file).unwrap().unwrap(),
             compacted
+        );
+    }
+
+    #[test]
+    fn component_compact_force_disk_rebuilds_live_canonical_from_compacted_document() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-force-disk-canonical\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one\n\nResponse one.\n\n",
+            "### Re: topic two\n\nResponse two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("plugin-owner")).unwrap();
+        std::fs::write(agent_doc_dir.join("test-local-crdt-relay"), "").unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
+            canonical.to_string_lossy().as_ref(),
+            COMPACT_TEST_EDITOR_ID,
+            std::process::id(),
+        ));
+        let _editor = CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
+
+        run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
+            .unwrap();
+
+        let compacted = std::fs::read_to_string(&file).unwrap();
+        assert!(compacted.contains("Compacted summary."));
+        assert!(!compacted.contains("### Re: topic one"));
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        match current {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+                assert_eq!(text, compacted);
+                assert!(
+                    !text.contains("### Re: topic one"),
+                    "force-disk compact must remove archived response cells from live canonical text"
+                );
+            }
+            other => panic!("expected live relay current text, got {other:?}"),
+        }
+        let ops_log =
+            std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("compact_force_disk_reconciled_canonical"),
+            "force-disk compact must record canonical reconcile:\n{ops_log}"
         );
     }
 

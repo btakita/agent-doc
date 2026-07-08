@@ -220,17 +220,6 @@ pub fn diagnose_cycle(
                 |_| true,
             )
         });
-        let actor_session = s.spawn(|| {
-            scan_json_files_source(
-                "actor/session state",
-                &agent_doc,
-                &[
-                    agent_doc.join("session-actors.json"),
-                    agent_doc.join("sessions.json"),
-                ],
-                &terms,
-            )
-        });
         let state =
             s.spawn(|| scan_json_tree_source("agent-doc state", &agent_doc.join("state"), &terms));
 
@@ -243,7 +232,6 @@ pub fn diagnose_cycle(
             codex_hooks.join().unwrap(),
             hook_payloads.join().unwrap(),
             patches.join().unwrap(),
-            actor_session.join().unwrap(),
             state.join().unwrap(),
         ]
     });

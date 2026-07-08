@@ -103,8 +103,8 @@ pub fn prune_with_tmux_timed_in_mode(
         cleanup_mode == PruneCleanupMode::PreserveLiveAgentStashPanes && removed == 0;
 
     // Fetch metadata once. Repeated safe-passive no-op syncs can skip window
-    // metadata and stash cleanup while still pruning the registry and retained
-    // dead non-stash panes.
+    // metadata, stash cleanup, and process-classifying retained dead panes while
+    // still pruning the registry.
     let windows = if skip_expensive_stash_cleanup {
         record_prune_phase(&mut timings, "prune_fetch_windows", WindowMeta::new)
     } else {
@@ -136,10 +136,18 @@ pub fn prune_with_tmux_timed_in_mode(
             }
         });
     }
-    record_prune_phase(&mut timings, "prune_dead_non_stash", || {
-        purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes)
-    });
+    if should_prune_dead_non_stash(cleanup_mode) {
+        record_prune_phase(&mut timings, "prune_dead_non_stash", || {
+            purge_unregistered_dead_non_stash_panes_bulk(tmux, &panes)
+        });
+    } else {
+        record_prune_phase(&mut timings, "prune_dead_non_stash", || {});
+    }
     Ok((removed, timings))
+}
+
+fn should_prune_dead_non_stash(cleanup_mode: PruneCleanupMode) -> bool {
+    cleanup_mode != PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
 /// Quietly prune dead panes and deduplicate entries.
@@ -218,7 +226,7 @@ pub(crate) fn purge_stash_windows(tmux: &Tmux) {
 /// Purge unregistered panes in stash windows.
 ///
 /// Kills individual panes in stash windows that are:
-/// 1. Not registered in sessions.json (orphaned)
+/// 1. Not registered in the durable registry (orphaned)
 /// 2. Running idle shells OR agent-doc/claude/node processes
 /// 3. Leaves other user processes (corky, vim, etc.) alive
 ///
@@ -410,6 +418,16 @@ mod tests {
         assert_eq!(removed[0].0, "sess-a");
         assert!(!registry.contains_key("sess-a"));
         assert!(registry.contains_key("sess-b"));
+    }
+    #[test]
+    fn safe_passive_prune_skips_dead_non_stash_scan() {
+        assert!(!should_prune_dead_non_stash(
+            PruneCleanupMode::SkipExpensiveStashCleanup
+        ));
+        assert!(should_prune_dead_non_stash(PruneCleanupMode::Full));
+        assert!(should_prune_dead_non_stash(
+            PruneCleanupMode::PreserveLiveAgentStashPanes
+        ));
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -680,7 +698,7 @@ mod tests {
         let doc = sub.join("tasks/test.md");
         std::fs::write(&doc, "# test\n").unwrap();
 
-        // Register in the submodule's sessions.json with a dead pane
+        // Register in the submodule's durable registry with a dead pane
         let mut registry = SessionRegistry::new();
         let canonical = doc.canonicalize().unwrap_or(doc.clone());
         registry.insert(

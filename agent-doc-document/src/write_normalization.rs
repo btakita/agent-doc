@@ -178,6 +178,9 @@ pub fn cleanup_resolved_backlog_prompts_after_response(
 }
 
 pub fn latest_response_block_missing_from_current(head: &str, current: &str) -> Option<String> {
+    if current_exchange_is_compacted_summary(current) {
+        return None;
+    }
     let heading = latest_response_heading_missing_from_current(head, current)?;
     let head_components = element::parse(head).ok()?;
     let head_exchange = head_components
@@ -189,6 +192,24 @@ pub fn latest_response_block_missing_from_current(head: &str, current: &str) -> 
             .next()
             .is_some_and(|line| line.trim() == heading)
     })
+}
+
+fn current_exchange_is_compacted_summary(current: &str) -> bool {
+    let Ok(components) = element::parse(current) else {
+        return false;
+    };
+    components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .map(|exchange| {
+            let body = exchange.content(current);
+            body.lines()
+                .any(|line| line.trim() == "### Session Summary")
+                && body
+                    .lines()
+                    .any(|line| line.contains("Compacted. Content archived"))
+        })
+        .unwrap_or(false)
 }
 
 pub fn response_marker_present_in_content(content: &str, marker: &str) -> bool {
@@ -897,6 +918,31 @@ mod tests {
         assert!(recovered.contains("### Re: latest - gpt-5"));
         assert!(recovered.contains("Recovered."));
         assert!(recovered.contains("<!-- agent:boundary:def -->"));
+    }
+
+    #[test]
+    fn response_block_recovery_skips_compacted_current_exchange() {
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: topic one - gpt-5\n\n",
+            "Archived response.\n\n",
+            "### Re: topic two - gpt-5\n\n",
+            "Also archived.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\n",
+            "- Archived 2 response topic(s): topic one; topic two\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            latest_response_block_missing_from_current(head, current),
+            None,
+            "compacted exchange cells are intentionally removed and must not be replayed from HEAD"
+        );
     }
 
     #[test]

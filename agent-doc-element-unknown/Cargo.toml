@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-unknown"
-version = "0.34.67"
+version = "0.34.69"
 edition = "2024"
 description = "Fallback unknown element descriptor for agent-doc"
 license = "MIT"
@@ -10,4 +10,4 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_unknown"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.67" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.69" }

@@ -5,6 +5,8 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.openapi.editor.event.EditorMouseEvent
+import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.FocusChangeListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -25,9 +27,9 @@ import java.util.concurrent.ConcurrentHashMap
  * clicking into the other split never fired a reconcile, so the tmux active
  * pane did not follow the editor selection.
  *
- * This listener closes that gap: it attaches a per-editor [FocusChangeListener]
- * and routes `focusGained` back through the same debounced, generation-guarded
- * reconcile in [EditorTabSyncListener].
+ * This listener closes that gap: it attaches per-editor focus and mouse
+ * listeners and routes editor activation back through the same debounced,
+ * generation-guarded reconcile in [EditorTabSyncListener].
  *
  * Thin-plugin contract: this only reports the focus event. All debounce / dedup
  * / tmux-targeting logic stays in [EditorTabSyncListener] and the `agent-doc`
@@ -38,9 +40,13 @@ class EditorFocusSyncListener private constructor(
     private val tabSync: EditorTabSyncListener,
 ) : Disposable {
     private val focusListener = object : FocusChangeListener {
-        override fun focusGained(editor: Editor) = handleFocusGained(editor)
+        override fun focusGained(editor: Editor) = handleEditorActivated(editor)
 
-        override fun focusGained(editor: Editor, event: FocusEvent) = handleFocusGained(editor)
+        override fun focusGained(editor: Editor, event: FocusEvent) = handleEditorActivated(editor)
+    }
+
+    private val mouseListener = object : EditorMouseListener {
+        override fun mousePressed(event: EditorMouseEvent) = handleEditorActivated(event.editor)
     }
 
     init {
@@ -63,9 +69,10 @@ class EditorFocusSyncListener private constructor(
         if (owner != null && owner != project) return
         val editorEx = editor as? EditorEx ?: return
         editorEx.addFocusListener(focusListener, this)
+        editorEx.addEditorMouseListener(mouseListener, this)
     }
 
-    private fun handleFocusGained(editor: Editor) {
+    private fun handleEditorActivated(editor: Editor) {
         if (project.isDisposed) return
         val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
         tabSync.onEditorFocusGained(project, file)

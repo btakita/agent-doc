@@ -71,14 +71,16 @@ fn assert_source_contains(path: &str, needle: &str) {
 #[test]
 fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
     let vscode = "editors/vscode/src/extension.ts";
-    assert_source_contains(vscode, "buildRunRouteCommandArgs");
-    assert_source_contains(vscode, "'--dispatch-only'");
-    assert_source_contains(vscode, "'--plain-trigger'");
-    assert_source_contains(vscode, "'--debounce'");
-    assert_source_contains(vscode, "'0'");
-    assert_source_contains(vscode, "'--wait-for-ready'");
+    let command_plane = "editors/vscode/src/commandPlane.ts";
+    assert_source_contains(vscode, "runEditorRouteViaPcp");
+    assert_source_contains(vscode, "command: 'editor_route'");
+    assert_source_contains(vscode, "buildEditorRoutePayload");
+    assert_source_contains(command_plane, "dispatch_only: true");
+    assert_source_contains(command_plane, "plain_trigger: true");
+    assert_source_contains(command_plane, "wait_for_ready_secs");
     assert_source_contains(vscode, "ROUTE_WAIT_FOR_READY_SECONDS = '120'");
     assert_source_contains(vscode, "collectVisibleMarkdownColumns(cwd)");
+    assert_source_contains(vscode, "buildRouteLayoutArgs");
     assert_source_contains(vscode, "'--col'");
     assert_source_contains(vscode, "'--focus'");
 }
@@ -86,7 +88,7 @@ fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
 #[test]
 fn vscode_manifest_exposes_jetbrains_parity_commands() {
     let package_json = "editors/vscode/package.json";
-    assert_source_contains(package_json, "\"version\": \"0.2.40\"");
+    assert_source_contains(package_json, "\"version\": \"0.2.41\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
     assert_source_contains(

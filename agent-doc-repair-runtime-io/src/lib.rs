@@ -64,12 +64,12 @@ pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
         "[write] empty response stdin; merged latest committed HEAD response back into visible document for {}",
         file.display()
     );
-    agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
         file,
-        "recover_committed_head_response",
+        &recovered,
         &current,
+        "recover_committed_head_response",
     )?;
-    agent_doc_document_realtime_io::atomic_write_through_authority(file, &recovered)?;
     agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
     agent_doc_commit_io::commit(file)?;
     Ok(true)

@@ -54,39 +54,30 @@ fn check_target_ownership(target: &Path) -> Result<()> {
         None => return Ok(()),
     };
 
-    let sessions_path = project_root.join(".agent-doc/sessions.json");
-    if !sessions_path.exists() {
-        return Ok(());
-    }
-
-    let sessions_content = std::fs::read_to_string(&sessions_path).unwrap_or_default();
-    let sessions: serde_json::Value = serde_json::from_str(&sessions_content).unwrap_or_default();
+    let registry = agent_doc_session_registry_io::load_in(&project_root)
+        .with_context(|| format!("failed to load registry for {}", project_root.display()))?;
 
     let target_canonical = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
 
-    if let Some(obj) = sessions.as_object() {
-        for (_id, entry) in obj {
-            if let (Some(path), Some(pane)) = (
-                entry.get("file").and_then(|v| v.as_str()),
-                entry.get("pane").and_then(|v| v.as_str()),
-            ) {
-                let entry_path = if Path::new(path).is_relative() {
-                    project_root.join(path)
-                } else {
-                    Path::new(path).to_path_buf()
-                };
-                let entry_canonical = std::fs::canonicalize(&entry_path).unwrap_or(entry_path);
+    for entry in registry.values() {
+        if entry.file.is_empty() || entry.pane.is_empty() {
+            continue;
+        }
+        let entry_path = if Path::new(&entry.file).is_relative() {
+            project_root.join(&entry.file)
+        } else {
+            Path::new(&entry.file).to_path_buf()
+        };
+        let entry_canonical = std::fs::canonicalize(&entry_path).unwrap_or(entry_path);
 
-                if entry_canonical == target_canonical && pane != current_pane {
-                    anyhow::bail!(
-                        "target {} is owned by pane {} (current: {}). \
-                         Use --bypass-claim to transfer across panes.",
-                        target.display(),
-                        pane,
-                        current_pane
-                    );
-                }
-            }
+        if entry_canonical == target_canonical && entry.pane != current_pane {
+            anyhow::bail!(
+                "target {} is owned by pane {} (current: {}). \
+                 Use --bypass-claim to transfer across panes.",
+                target.display(),
+                entry.pane,
+                current_pane
+            );
         }
     }
 

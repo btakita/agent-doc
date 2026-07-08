@@ -36,8 +36,9 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         refresher.start()
         refresher.requestRefresh(file, "banner-collect")
         // Empty label == idle / not-an-agent-doc-turn → no banner.
-        val label = refresher.cachedPresentationFor(file.path).label
-        if (label.isEmpty()) return null
+        val presentation = refresher.cachedPresentationFor(file.path)
+        val label = presentation.label
+        if (label.isEmpty() || !presentation.showBanner) return null
         return Function { _ ->
             // A very thin single-line strip instead of the full-height
             // EditorNotificationPanel, so it barely consumes document space.

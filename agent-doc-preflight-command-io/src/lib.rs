@@ -249,26 +249,28 @@ mod th {
         commit_all(root, message, commit_date);
         doc
     }
-    pub(crate) fn write_sessions_json(root: &Path, entries: &[(&str, &str, &Path, &str, &str)]) {
-        let mut sessions = serde_json::Map::new();
+    pub(crate) fn write_session_registry(root: &Path, entries: &[(&str, &str, &Path, &str, &str)]) {
+        let mut registry = tmux_router::Registry::new();
         for (session_id, pane, file, window, started) in entries {
-            sessions.insert(
+            registry.insert(
                 (*session_id).to_string(),
-                serde_json::json!({
-                    "pane": pane,
-                    "pid": 9999,
-                    "cwd": root.to_string_lossy(),
-                    "started": started,
-                    "file": file.strip_prefix(root).unwrap().to_string_lossy(),
-                    "window": window
-                }),
+                tmux_router::RegistryEntry {
+                    pane: (*pane).to_string(),
+                    pid: 9999,
+                    cwd: root.to_string_lossy().to_string(),
+                    started: (*started).to_string(),
+                    session_id: (*session_id).to_string(),
+                    file: file
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    window: (*window).to_string(),
+                    supervisor_instance_id: String::new(),
+                },
             );
         }
-        std::fs::write(
-            root.join(".agent-doc/sessions.json"),
-            serde_json::to_string_pretty(&serde_json::Value::Object(sessions)).unwrap(),
-        )
-        .unwrap();
+        agent_doc_session_registry_io::save_in(root, &registry).unwrap();
     }
     pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
         let canonical = file.canonicalize().unwrap();

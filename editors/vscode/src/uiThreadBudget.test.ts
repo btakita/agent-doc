@@ -59,6 +59,27 @@ describe('editor UI thread budget', () => {
         assert.strictEqual(source.includes('const turnStatusInterval = setInterval'), false);
     });
 
+    it('VS Code Run Agent Doc dispatches through the project controller editor_route RPC', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        assert.ok(source.includes('function controllerSocketPath(projectRoot: string): string'));
+        assert.ok(source.includes("'.agent-doc', 'controller.sock'"));
+        assert.ok(source.includes('async function ensureProjectControllerRunning'));
+        assert.ok(source.includes("['controller', 'status', '--project-root', projectRoot, '--ensure']"));
+        assert.ok(source.includes('async function runEditorRouteViaPcp('));
+        assert.ok(source.includes("command: 'editor_route'"));
+        assert.ok(source.includes("source: 'vscode_plugin'"));
+
+        const start = source.indexOf('async function executeRunForDocument');
+        assert.ok(start >= 0, 'executeRunForDocument should exist');
+        const end = source.indexOf('// ---------------------------------------------------------------------------', start + 1);
+        assert.ok(end > start, 'executeRunForDocument should precede next section marker');
+        const runBody = source.slice(start, end);
+        assert.ok(runBody.includes('await runEditorRouteViaPcp(cwd, rel, filePath, routeKey, abortController.signal);'));
+        assert.strictEqual(runBody.includes('buildRunRouteCommandArgs'), false);
+        assert.strictEqual(runBody.includes("runCli(['route'"), false);
+        assert.strictEqual(source.includes('function buildRunRouteCommandArgs'), false);
+    });
+
     it('VS Code schedules CRDT local forwarding off the text-change listener', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const start = source.indexOf('private scheduleCrdtLocalChangeDelta');

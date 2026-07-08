@@ -132,7 +132,7 @@ fn all_commands() -> Vec<CommandInfo> {
     cmds.push(cmd(
         "/agent-doc resync",
         "[FILE] [--fix]",
-        "Validate sessions.json globally or for one document; `--fix` aliases `fix`",
+        "Validate the durable session registry globally or for one document; `--fix` aliases `fix`",
     ));
     cmds.push(cmd(
         "/agent-doc fix",

@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
     analyzeTabSyncCommandResult,
-    buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     replayDelayAfterTabSyncRun,
@@ -11,6 +12,27 @@ import {
     tabSyncTimeoutBackoffDelayMs,
     visibleSignatureFromColumns,
 } from './tabSync';
+
+describe('VS Code immediate focus handoff wiring', () => {
+    it('attempts PCP focus before tab-sync planner dedup can skip a rapid split switch', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+
+        const focusStart = source.indexOf('function focusExistingPaneForActiveEditor');
+        assert.ok(focusStart >= 0, 'extension.ts must define focusExistingPaneForActiveEditor');
+        const focusBody = source.slice(focusStart, source.indexOf('function onTabChanged', focusStart));
+        assert.ok(focusBody.includes('planCurrentFocusHandoff()'));
+        assert.ok(focusBody.includes('lastFocusHandoffFsPath'));
+        assert.ok(focusBody.includes('native.focusDocumentPaneJson({'));
+
+        const tabChangedStart = source.indexOf('function onTabChanged');
+        assert.ok(tabChangedStart >= 0, 'extension.ts must define onTabChanged');
+        const tabChangedBody = source.slice(tabChangedStart, source.indexOf('// ---------------------------------------------------------------------------', tabChangedStart));
+        const focusIdx = tabChangedBody.indexOf('focusExistingPaneForActiveEditor();');
+        const planIdx = tabChangedBody.indexOf('planCurrentTabChange();');
+        assert.ok(focusIdx >= 0, 'onTabChanged must request immediate focus');
+        assert.ok(planIdx > focusIdx, 'immediate focus must run before planner dedup');
+    });
+});
 
 describe('buildTabChangeCommand', () => {
     it('returns sync with no autostart when the visible markdown set changes', () => {
@@ -256,13 +278,6 @@ describe('buildTabChangeCommand', () => {
                 'src/session-share/tasks/claudescore-3.md',
                 '--no-autostart',
             ],
-        );
-    });
-
-    it('builds immediate focus command args for the fast tab handoff path', () => {
-        assert.deepStrictEqual(
-            buildImmediateFocusCommandArgs('tasks/agent-doc/agent-doc-bugs2.md'),
-            ['focus', 'tasks/agent-doc/agent-doc-bugs2.md'],
         );
     });
 

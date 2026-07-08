@@ -11,8 +11,8 @@
 //!   next loop tick and exits cleanly.
 //! - `status()` prints daemon running state and PID to stdout.
 //! - The daemon resolves the project root (directory containing `.agent-doc/`) at startup
-//!   and `chdir`s there so relative paths (PID file, sessions.json) are always correct.
-//! - Session discovery: `discover_entries()` reads `sessions.json` and classifies each
+//!   and `chdir`s there so relative paths (PID file, durable registry) are always correct.
+//! - Session discovery: `discover_entries()` reads the durable registry and classifies each
 //!   document by frontmatter mode:
 //!   - `FileWatch` — append/template mode: monitored via `notify` file-system watcher.
 //!   - `StreamCapture` — CRDT mode: polled by capturing the associated tmux pane.
@@ -52,7 +52,7 @@
 //! - pid_file_roundtrip: write_pid → read_pid matches process id; remove_pid → read_pid returns None
 //! - pid_alive_self: current process PID → true
 //! - pid_alive_nonexistent: PID 4294967295 → false
-//! - discover_empty_registry: no sessions.json → empty vec
+//! - discover_empty_registry: no durable registry → empty vec
 //! - hash_deterministic: same file content read twice → identical hash
 //! - hash_changes_with_content: file content changed → different hash
 //! - loop_prevention_counter: increment then reset cycle_count → correct values
@@ -239,7 +239,7 @@ pub fn ensure_running() -> Result<bool> {
 
 /// Start the watch daemon.
 ///
-/// Watches files registered in sessions.json for changes. On file change
+/// Watches files registered in the durable registry for changes. On file change
 /// (after debounce), records the event through the controller-owned document
 /// watcher instead of launching the legacy run/preflight loop directly.
 /// For stream-mode documents, polls tmux panes and flushes new output.

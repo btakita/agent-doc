@@ -4,7 +4,7 @@
 //! that *outlive the agent process*: tmux `#{pane_dead}=0` (a pane that dropped
 //! `claude → zsh` still reports alive), the recorded launcher/supervisor pid, or
 //! an open editor session-log. A `claude → zsh` degradation therefore stranded
-//! the `sessions.json` binding — every reaper treated the doc as alive even
+//! the durable registry binding — every reaper treated the doc as alive even
 //! though no agent owned it, forcing a manual `agent-doc claim --force`.
 //!
 //! The fix ties record reaping to the thing whose death we actually care about —

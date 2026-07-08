@@ -4711,7 +4711,7 @@ mod tests {
             .output()
             .unwrap();
 
-        // Secondary doc (tracked in sessions.json, snapshot newer than file — needs sweep)
+        // Secondary doc (tracked in the durable registry, snapshot newer than file — needs sweep)
         let secondary = root.join("secondary.md");
         let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&secondary, secondary_content).unwrap();
@@ -4737,23 +4737,10 @@ mod tests {
         let new_snap = format!("{}\n<!-- agent updated -->", secondary_content);
         fs::write(&snap_abs, &new_snap).unwrap();
 
-        // Write sessions.json with secondary tracked
-        let sessions_path = root.join(".agent-doc/sessions.json");
-        let sessions = serde_json::json!({
-            "secondary-session": {
-                "pane": "%1",
-                "pid": 9999,
-                "cwd": root.to_string_lossy(),
-                "started": "2026-01-01",
-                "file": "secondary.md",
-                "window": "@1"
-            }
-        });
-        fs::write(
-            &sessions_path,
-            serde_json::to_string_pretty(&sessions).unwrap(),
-        )
-        .unwrap();
+        write_session_registry(
+            root,
+            &[("secondary-session", "%1", &secondary, "@1", "2026-01-01")],
+        );
 
         // Run preflight on primary — sweep should commit secondary
         run(&primary).unwrap();
@@ -4834,23 +4821,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         fs::write(&snap_abs, snap_content).unwrap();
 
-        // Write sessions.json with secondary tracked
-        let sessions_path = root.join(".agent-doc/sessions.json");
-        let sessions = serde_json::json!({
-            "secondary-session": {
-                "pane": "%1",
-                "pid": 9999,
-                "cwd": root.to_string_lossy(),
-                "started": "2026-01-01",
-                "file": "secondary.md",
-                "window": "@1"
-            }
-        });
-        fs::write(
-            &sessions_path,
-            serde_json::to_string_pretty(&sessions).unwrap(),
-        )
-        .unwrap();
+        write_session_registry(
+            root,
+            &[("secondary-session", "%1", &secondary, "@1", "2026-01-01")],
+        );
 
         // Count commits before sweep
         let log_before = Command::new("git")
@@ -4910,33 +4884,13 @@ mod tests {
         )
         .unwrap();
 
-        write_sessions_json(
+        write_session_registry(
             root,
             &[
                 ("primary-session", "%70", &primary, "@1", "2026-01-01"),
                 ("secondary-session", "%73", &secondary, "@2", "2026-01-01"),
             ],
         );
-        agent_doc_session_actor_io::project_binding_in(
-            root,
-            &primary.to_string_lossy(),
-            "primary-session",
-            "%70",
-            "@1",
-            "test",
-            "primary_owner",
-        )
-        .unwrap();
-        agent_doc_session_actor_io::project_binding_in(
-            root,
-            &secondary.to_string_lossy(),
-            "secondary-session",
-            "%73",
-            "@2",
-            "test",
-            "secondary_owner",
-        )
-        .unwrap();
 
         run(&primary).unwrap();
 
@@ -4998,7 +4952,7 @@ mod tests {
         )
         .unwrap();
 
-        write_sessions_json(
+        write_session_registry(
             root,
             &[
                 ("primary-session", "%70", &primary, "@1", "2026-01-01"),
@@ -5015,7 +4969,7 @@ mod tests {
             "primary_owner",
         )
         .unwrap();
-        // Leave the sibling owner in sessions.json so this exercises the sweep
+        // Leave the sibling owner in the durable registry so this exercises the sweep
         // fallback projection without seeding an invalid two-document actor
         // alias for pane %70.
 

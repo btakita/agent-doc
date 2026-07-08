@@ -5,7 +5,9 @@ mod transport;
 pub use transport::try_ipc_with_effects;
 
 use agent_doc_element_boundary::boundary::find_boundary_id;
-use agent_doc_element_exchange::extract_post_commit_normalization_targets;
+use agent_doc_element_exchange::{
+    extract_post_commit_normalization_targets, normalize_exchange_prefixes_for_targets,
+};
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_receipt_timeout_error};
 use agent_doc_run_context_io::AgentDocContextExt;
@@ -231,60 +233,6 @@ pub fn build_ipc_patches_json(
     Ok(ipc_patches)
 }
 
-/// `#lzlosstree` Phase 5 server-side frame emission. When the session's attached
-/// editor advertises `lossless_tree_crdt_v1`, drop a lossless-tree **frame** — the
-/// projection of `content` — into `<root>/.agent-doc/lossless-frames/<hash>.json` for
-/// the capable plugin's frame watcher to render (`losslessTreeRender`) and apply to
-/// its buffer. Returns `Ok(true)` when a frame was emitted, `Ok(false)` when the
-/// session is not tree-capable (no editor / editor without the capability) — in which
-/// case the caller's existing flat patch/text path is the authority. This is the
-/// dedicated tree-update transport (a non-capable plugin never sees the frame dir),
-/// so it composes with, and never double-applies against, the flat channel.
-/// The on-disk path of the lossless-tree frame for `file`:
-/// `<ipc-project-root>/.agent-doc/lossless-frames/<document-state-hash>.json`. The
-/// server writes here and the capable plugin's watcher polls exactly this path (the
-/// binary owns the hash so the plugin never re-derives it — it asks via FFI).
-pub fn lossless_frame_path(file: &Path) -> Result<std::path::PathBuf> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    Ok(project_root
-        .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
-        .join(format!("{hash}.json")))
-}
-
-pub fn maybe_emit_lossless_tree_frame(file: &Path, content: &str) -> Result<bool> {
-    let file_key = file.to_string_lossy();
-    let snapshots = agent_doc_debounce::live_buffer_snapshots(&file_key);
-    let negotiation = agent_doc_debounce::negotiate_lossless_tree_capability(&snapshots);
-    emit_lossless_tree_frame_for_negotiation(file, content, negotiation)
-}
-
-/// The emit decision itself, split out so it is testable with a direct
-/// [`LosslessTreeNegotiation`](agent_doc_debounce::LosslessTreeNegotiation) instead of
-/// the live-buffer sidecar machinery.
-pub fn emit_lossless_tree_frame_for_negotiation(
-    file: &Path,
-    content: &str,
-    negotiation: agent_doc_debounce::LosslessTreeNegotiation,
-) -> Result<bool> {
-    if !negotiation.tree_frames_allowed() {
-        return Ok(false);
-    }
-    let frame_path = lossless_frame_path(file)?;
-    agent_doc_markdown_lossless::write_frame(&frame_path, content)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "lossless_tree_frame_emitted file={} frame={} len={}",
-            file.display(),
-            frame_path.display(),
-            content.len()
-        ),
-    );
-    Ok(true)
-}
-
 pub fn queue_file_ipc_reposition_boundary(
     file: &Path,
     boundary_id: Option<&str>,
@@ -432,6 +380,40 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         _ => vec![],
     };
 
+    if let Some(working) = working_doc.as_deref()
+        && let Some(target) =
+            post_commit_reposition_target(working, boundary_id.as_deref(), &normalize_prefix_lines)
+    {
+        match agent_doc_document_realtime_io::apply_canonical_replace_if_attached(
+            file,
+            working,
+            &target,
+            "post_commit_reposition",
+        ) {
+            Ok(Some(relay_write)) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "post_commit_reposition_crdt_relay file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
+                        file.display(),
+                        relay_write.content_hash,
+                        relay_write.update_bytes,
+                        relay_write.targets,
+                        relay_write.delivery_converged,
+                    ),
+                );
+                eprintln!("[commit] CRDT relay boundary refresh queued");
+                return true;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!(
+                    "[commit] CRDT relay boundary refresh failed (falling back to IPC): {err}"
+                );
+            }
+        }
+    }
+
     if !agent_doc_ipc_io::is_listener_active(&project_root) {
         return match queue_file_ipc_reposition_boundary(
             file,
@@ -549,6 +531,23 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
     }
 }
 
+fn post_commit_reposition_target(
+    working_doc: &str,
+    boundary_id: Option<&str>,
+    normalize_prefix_lines: &[String],
+) -> Option<String> {
+    let prefix_repaired = if normalize_prefix_lines.is_empty() {
+        working_doc.to_string()
+    } else {
+        normalize_exchange_prefixes_for_targets(working_doc, normalize_prefix_lines)
+    };
+    let repositioned = agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
+        &prefix_repaired,
+        boundary_id,
+    );
+    (repositioned != working_doc).then_some(repositioned)
+}
+
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content)?;
@@ -559,56 +558,8 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_debounce::LosslessTreeNegotiation;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn lossless_frame_emitted_only_for_a_tree_capable_session() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("session.md");
-        let content = "<!-- agent:status -->\nlive authority body\n<!-- /agent:status -->\n";
-        fs::write(&doc, content).unwrap();
-
-        // A tree-capable session gets a frame that renders back to the exact content.
-        let emitted = emit_lossless_tree_frame_for_negotiation(
-            &doc,
-            content,
-            LosslessTreeNegotiation::Supported,
-        )
-        .unwrap();
-        assert!(emitted, "capable session should emit a frame");
-        let canonical = doc.canonicalize().unwrap();
-        let root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let frame = root
-            .join(agent_doc_markdown_lossless::LOSSLESS_FRAME_DIR)
-            .join(format!("{hash}.json"));
-        assert!(
-            frame.exists(),
-            "frame file should exist at {}",
-            frame.display()
-        );
-        assert_eq!(
-            agent_doc_markdown_lossless::read_frame_render(&frame)
-                .unwrap()
-                .as_deref(),
-            Some(content),
-            "the emitted frame must render back to the document"
-        );
-
-        // A non-capable session (no editor / editor without the capability) emits no
-        // frame — the flat channel stays authoritative.
-        fs::remove_file(&frame).ok();
-        for neg in [
-            LosslessTreeNegotiation::NoEditor,
-            LosslessTreeNegotiation::UnsupportedEditor,
-        ] {
-            assert!(!emit_lossless_tree_frame_for_negotiation(&doc, content, neg).unwrap());
-            assert!(!frame.exists(), "no frame for {neg:?}");
-        }
-    }
 
     #[test]
     fn build_ipc_patches_json_seeded_boundary_is_stable_across_rebuilds() {
@@ -842,6 +793,58 @@ mod tests {
             payload["reposition_boundary_id"],
             serde_json::json!("abc123")
         );
+    }
+
+    #[test]
+    fn post_commit_reposition_target_adds_committed_boundary_without_socket_wait() {
+        let working = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "Compacted summary.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let target = post_commit_reposition_target(working, Some("committed-id"), &[])
+            .expect("compacted exchange without a boundary needs a refresh target");
+
+        assert!(target.contains("<!-- agent:boundary:committed-id -->"));
+        assert!(target.contains("Compacted summary."));
+        assert_ne!(target, working);
+    }
+
+    #[test]
+    fn post_commit_reposition_target_returns_none_when_current() {
+        let working = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "Compacted summary.\n",
+            "<!-- agent:boundary:committed-id -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            post_commit_reposition_target(working, Some("committed-id"), &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn post_commit_reposition_target_repairs_prefixes_before_boundary_refresh() {
+        let working = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "do #spfxnorm. spec-test-build-install-commit-push\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let targets = vec!["do #spfxnorm. spec-test-build-install-commit-push".to_string()];
+
+        let target = post_commit_reposition_target(working, Some("committed-id"), &targets)
+            .expect("prefix repair should produce a refresh target");
+
+        assert!(target.contains("\u{276f} do #spfxnorm. spec-test-build-install-commit-push"));
+        assert!(!target.contains("\n<!-- agent:exchange -->\ndo #spfxnorm"));
+        assert!(target.contains("<!-- agent:boundary:committed-id -->"));
     }
 
     #[test]

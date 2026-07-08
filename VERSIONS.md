@@ -4,6 +4,37 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.69
+
+- **Session ownership now uses the SQLite durable registry instead of the
+  legacy JSON registry/projection files.** `agent-doc-session-registry-io`
+  reads and writes `.agent-doc/state.db` through `tmux-router`, while actor
+  authority stays in the SQLite `documents` table and tmux-router metadata is
+  isolated in `registry_entries`. The old `sessions.json` /
+  `session-actors.json` support paths and actor/session projection refresh
+  hooks are removed; startup, sync, focus, preflight, gc, and integration
+  fixtures now go through the durable registry APIs. `tmux-router` defaults its
+  CLI and documentation to `.tmux-router/state.db`, with focused SQLite
+  coverage for metadata round trips, lookup, window updates, and CAS-safe
+  router saves that do not create actor rows.
+
+## 0.34.68
+
+- **`Run Agent Doc` now routes through the lazily command/RPC message plane
+  (`command-plane-v1`, `#lzmsgpcp`) by default.** The project controller serves a
+  new `editor_command_submit` endpoint beside the classic `editor_route` (shadow
+  mode): it decodes an `agent-doc.editor_route.v1` `CommandSubmit`, dispatches the
+  existing route path unchanged, and returns a folded `CommandProjection` with
+  progress events plus a terminal causal receipt (`applied` on success,
+  `rejected` on failure). Both the JetBrains and VS Code plugins send this
+  envelope and resolve the action **only** on the terminal receipt — a transport
+  ACK or `accepted`/`started` progress never completes the command. Set
+  `AGENT_DOC_COMMAND_PLANE=0` to fall back to the classic `editor_route` request.
+  Terminal semantics, idempotency, generation guards, and reconnect projection
+  are owned by lazily (`lazily-spec` `message-passing.json` + `lazily-rs`
+  `command` module); agent-doc owns the payload schemas
+  (`editors/command-payloads.md`).
+
 ## 0.34.67
 
 - **Claim/sync now prefer the current live `agent-doc` tmux session before a

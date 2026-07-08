@@ -279,6 +279,14 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     )
 }
 
+fn idle_watch_paused_queue_head(file: &Path) -> Option<String> {
+    let content = agent_doc_fs::read_optional_text(file).ok().flatten()?;
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        &content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    )
+}
+
 fn log_idle_queue_context_reset_submit(
     file: &Path,
     shared: &SupervisorShared,
@@ -692,7 +700,21 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                 }
 
-                let active_head = idle_watch_active_queue_head(&path);
+                let queue_pause_reason =
+                    agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(
+                        &path,
+                    );
+                let queue_controller_paused = queue_pause_reason.is_some();
+                // A controller pause is the unattended flood guard. While it is
+                // active, do not ask the live editor/CRDT model for a head on
+                // every poll just to prove an idle-watch skip; use the saved
+                // document to preserve the supervisor failsafe for drainable
+                // on-disk heads without hammering the controller (#qchurn).
+                let active_head = if queue_controller_paused {
+                    idle_watch_paused_queue_head(&path)
+                } else {
+                    idle_watch_active_queue_head(&path)
+                };
                 if active_head.is_none() {
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
@@ -2531,9 +2553,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
 
                 let mut paused_failsafe_active = false;
-                if active_head.is_some()
-                    && agent_doc_queue_io::controller_pause::document_queue_controller_paused(&path)
-                {
+                if active_head.is_some() && queue_controller_paused {
                     // `#qstallguard` Layer C/D: pause throttles to the in-session
                     // loop owner; it does not disable the supervisor failsafe. Skip
                     // when a real `/loop` lease exists or nothing is drainable. With
@@ -3014,6 +3034,44 @@ mod tests {
             &context_clear_projection_with_source(None)
         ));
         assert!(!supervisor_background_context_clear_enabled());
+    }
+
+    #[test]
+    fn paused_queue_head_uses_saved_document_drainability() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:backlog -->\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:queue preset=\"#spec-test-commit-push\" go -->\n",
+                "- 🚧 [#missing]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            idle_watch_paused_queue_head(&doc),
+            None,
+            "undefined backlog ids in a paused queue must not force a live editor probe"
+        );
+
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:backlog -->\n",
+                "- [ ] [#a] saved backlog work\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:queue preset=\"#spec-test-commit-push\" go -->\n",
+                "- 🚧 [#a]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(idle_watch_paused_queue_head(&doc).as_deref(), Some("a"));
     }
 
     #[test]

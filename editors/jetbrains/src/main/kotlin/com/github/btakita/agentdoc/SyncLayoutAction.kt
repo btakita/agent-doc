@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.Gson
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -22,6 +23,7 @@ class SyncLayoutAction : AnAction() {
 
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
+        private val GSON = Gson()
         private const val PRESERVED_LAYOUT_MARKER =
             "[sync] sync preserved the current tmux layout because"
         private const val SAFE_PASSIVE_PRESERVED_LAYOUT_MARKER =
@@ -240,6 +242,16 @@ class SyncLayoutAction : AnAction() {
             }
         }
 
+        internal fun buildSyncColumns(
+            visibleMdFiles: List<String>,
+            editorLayout: EditorLayout?,
+        ): List<String> =
+            if (editorLayout != null && editorLayout.columns.size > 1) {
+                editorLayout.columns.map { column -> column.files.joinToString(",") }
+            } else {
+                listOf(visibleMdFiles.joinToString(","))
+            }
+
         /**
          * `#recyclerestart` Q2 — decide whether a just-completed sync should re-run to
          * apply a layout that superseded it mid-flight. Re-run only when WE held the guard
@@ -256,11 +268,6 @@ class SyncLayoutAction : AnAction() {
         internal fun deferredSyncRetryDelayMs(attempt: Int): Long? =
             if (attempt < SYNC_DEFERRED_MAX_RETRIES) SYNC_DEFERRED_RETRY_MS else null
 
-        internal fun buildFocusCommand(
-            agentDoc: String,
-            focusedFile: String,
-        ): List<String> = listOf(agentDoc, "focus", focusedFile)
-
         /**
          * Syncs tmux layout to match the IDE editor split. Can be called from
          * any action (e.g. ClaimAction calls this after claiming).
@@ -270,7 +277,6 @@ class SyncLayoutAction : AnAction() {
             project: com.intellij.openapi.project.Project,
             notify: Boolean = true,
             noAutostart: Boolean = false,
-            deferredAttempt: Int = 0,
         ) {
             val manager = FileEditorManager.getInstance(project)
             val focusedVFile = manager.selectedTextEditor?.virtualFile
@@ -292,50 +298,7 @@ class SyncLayoutAction : AnAction() {
             }
 
             Thread {
-                var syncGuard: AgentDocLib? = null
-                val lib = AgentDocLib.get()
-                // `#recyclerestart` Q2 (supersede, not warn-and-skip): bump the sync
-                // generation up front. If another sync currently holds the guard, this
-                // newer request is deferred — but the in-flight holder re-runs with THIS
-                // latest layout on completion (see the finally block) instead of dropping
-                // it, so a rapid second `Sync Tmux Layout` is never silently lost.
-                val myGen = lib?.agent_doc_sync_bump_generation() ?: 0L
                 try {
-                    if (lib != null) {
-                        if (!lib.agent_doc_sync_try_lock()) {
-                            val retryDelayMs = deferredSyncRetryDelayMs(deferredAttempt)
-                            LOG.info(
-                                "[sync] deferred sync (gen=$myGen attempt=$deferredAttempt): another sync is in flight; retryDelayMs=$retryDelayMs"
-                            )
-                            if (notify && deferredAttempt == 0) {
-                                TerminalUtil.notifyWarning(project, SYNC_ALREADY_RUNNING_WARNING)
-                            }
-                            if (retryDelayMs != null) {
-                                Thread {
-                                    Thread.sleep(retryDelayMs)
-                                    syncLayout(
-                                        project,
-                                        notify = false,
-                                        noAutostart = noAutostart,
-                                        deferredAttempt = deferredAttempt + 1,
-                                    )
-                                }.apply {
-                                    isDaemon = true
-                                    start()
-                                }
-                            } else if (notify) {
-                                TerminalUtil.notifyWarning(
-                                    project,
-                                    "Sync deferred: another tmux layout sync is still running after ${
-                                        SYNC_DEFERRED_MAX_RETRIES * SYNC_DEFERRED_RETRY_MS / 1000
-                                    }s.",
-                                )
-                            }
-                            return@Thread
-                        }
-                        syncGuard = lib
-                    }
-                    val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
                     val editorLayout =
                         absolutizeEditorLayout(
                             projectRoot,
@@ -345,59 +308,32 @@ class SyncLayoutAction : AnAction() {
                                 LayoutDetector.detectEditorLayout(project),
                             ),
                         )
-                    val cmd = buildSyncCommand(
-                        agentDoc,
+                    val columns = buildSyncColumns(
                         visibleMdFiles,
                         editorLayout,
-                        focusedFile,
-                        noAutostart,
                     )
-                    if (notify) {
-                        TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
-                    }
-                    val result = runCommandWithTimeout(cmd, projectRoot)
-                    val output = result.output
-                    val exitCode = result.exitCode
-                    LOG.info("[sync] exit=$exitCode cmd=${cmd.joinToString(" ")}")
-                    if (output.isNotEmpty()) {
-                        // Log first 500 chars of output for debugging
-                        LOG.info("[sync] output: ${output.take(500)}")
-                    }
-                    if (notify && exitCode != 0) {
-                        val reason = if (result.timedOut) {
-                            "Sync timed out after ${SYNC_PROCESS_TIMEOUT_MS / 1000}s; the local sync guard was released so retry can run binary recovery."
-                        } else {
-                            "Sync failed (exit $exitCode):"
+                    val receipt = CpcRouteClient.submitSyncTmuxLayout(
+                        projectRoot = projectRoot,
+                        columnsJson = GSON.toJson(columns),
+                        window = null,
+                        focus = focusedFile,
+                        noAutostart = noAutostart,
+                        exactVisible = true,
+                        callerKind = if (noAutostart) "automatic" else "manual",
+                    )
+                    if (receipt.exitCode != 0) {
+                        LOG.warn("[sync] pcp async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")
+                        if (notify) {
+                            TerminalUtil.notifyError(
+                                project,
+                                "Sync failed through the project controller; see IDE log for details.",
+                            )
                         }
-                        TerminalUtil.notifyError(project, "$reason\n$output")
-                    } else if (notify) {
-                        val warning = preservedLayoutWarning(output)
-                        if (warning != null) {
-                            TerminalUtil.notifyWarning(project, warning)
-                        }
+                    } else {
+                        LOG.info("[sync] pcp async submit accepted: ${receipt.output.take(500)}")
                     }
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")
-                } finally {
-                    val heldGuard = syncGuard != null
-                    syncGuard?.agent_doc_sync_unlock()
-                    // `#recyclerestart` Q2: if a newer sync arrived while we held the guard
-                    // (it bumped the generation but was deferred), re-run ONCE so the LATEST
-                    // editor layout is applied instead of dropped. Only the guard holder
-                    // re-runs (a deferred request never does), and the generation converges
-                    // when no newer sync is pending, so this cannot loop indefinitely.
-                    if (lib != null &&
-                        shouldRerunAfterSupersede(heldGuard, lib.agent_doc_sync_check_generation(myGen))
-                    ) {
-                        // `#tmuxsynccrash`: the supersede re-run only needs to apply the
-                        // newer editor layout's focus/placement — the destructive doctor
-                        // repair already ran in the superseded pass. Force the re-run
-                        // passive (`--no-autostart`, no doctor repair) so a rapid manual
-                        // sync cannot loop the destructive window-op sequence that crashes
-                        // the tmux server. The binary also rate-limits this defensively.
-                        LOG.info("[sync] re-running after supersede (passive, a newer sync arrived during this one)")
-                        syncLayout(project, notify = false, noAutostart = true)
-                    }
                 }
             }.start()
         }

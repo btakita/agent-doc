@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -33,7 +34,7 @@ class EditorTabSyncListenerTest {
     @Test
     fun `selection change with unchanged visible set routes to focus command not sync`() {
         // #panefocussteal: a pure focus change (same visible layout, operator
-        // switched doc tabs) must move tmux via the dedicated `agent-doc focus`
+        // switched doc tabs) must move tmux via PCP `focus_document_pane`
         // command — `sync` is layout-only and would not follow the switch.
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
@@ -145,6 +146,50 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `opposite pane selection routes to sync when tmux layout model is stale`() {
+        // The editor split did not change, but the controller's lazily-backed
+        // sync state check proved the visible tmux panes are swapped. A
+        // focus-only command would select the correct pane in the wrong column.
+        val visibleMdFiles = listOf(
+            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
+        )
+        val visibleSignature = visibleSignature(visibleMdFiles)
+
+        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
+            visibleMdFiles = visibleMdFiles,
+            visibleSignature = visibleSignature,
+            focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            previousVisibleSignature = visibleSignature,
+            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
+            layoutSynced = false,
+        )
+
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    }
+
+    @Test
+    fun `unchanged editor selection still syncs when tmux layout model is stale`() {
+        val visibleMdFiles = listOf(
+            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            "/repo/src/sample-app/tasks/sampleorders.md",
+        )
+        val focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md"
+        val visibleSignature = visibleSignature(visibleMdFiles)
+
+        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
+            visibleMdFiles = visibleMdFiles,
+            visibleSignature = visibleSignature,
+            focusedFile = focusedFile,
+            previousVisibleSignature = visibleSignature,
+            previousFocusedFile = focusedFile,
+            layoutSynced = false,
+        )
+
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    }
+
+    @Test
     fun `focus gained on a different markdown split triggers reconcile`() {
         // #panefocussplit: moving focus to the other split editor (a different
         // md path than the last focus reconcile) must drive a focus reconcile so
@@ -200,6 +245,23 @@ class EditorTabSyncListenerTest {
         )
 
         assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    }
+
+    @Test
+    fun `automatic sync diagnostics describe CPC submit not CLI process`() {
+        val label = EditorTabSyncListener.formatCpcSyncLabel(
+            columns = listOf(
+                "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                "/repo/src/sample-app/tasks/sampleorders.md",
+            ),
+            focus = "/repo/src/sample-app/tasks/sampleorders.md",
+        )
+
+        assertEquals(
+            "pcp:sync_tmux_layout --col /repo/tasks/agent-doc/agent-doc-bugs2.md --col /repo/src/sample-app/tasks/sampleorders.md --focus /repo/src/sample-app/tasks/sampleorders.md --exact-visible --no-autostart",
+            label,
+        )
+        assertFalse(label.contains("agent-doc sync"))
     }
 
     @Test

@@ -3,7 +3,7 @@
 //! `agent-doc claim` — create a **Binding** between a document and an existing tmux pane.
 //!
 //! **Ontology:** Claim creates a **Binding** (document→pane association) by registering
-//! the session→pane mapping in `sessions.json`. Unlike **Provisioning** (which creates
+//! the session→pane mapping in the durable registry. Unlike **Provisioning** (which creates
 //! new panes), claim binds to a pane that already exists. In normal editor workflow,
 //! users don't need to call claim — **Reconciliation** (`sync`) + **Provisioning**
 //! (`auto_start`) handle pane creation automatically. Claim is for manual pane assignment.
@@ -11,7 +11,7 @@
 //! Usage: `agent-doc claim <file.md> [--position left|right|top|bottom] [--pane %N] [--window @N]`
 //!
 //! Reads (or generates) the session UUID in the document's YAML frontmatter, resolves
-//! the target pane, and registers the session→pane mapping in `sessions.json`. This
+//! the target pane, and registers the session→pane mapping in the durable registry. This
 //! mapping is consumed by `agent-doc route` and the JetBrains/VS Code plugins to
 //! direct commands to the correct tmux pane.
 //!
@@ -24,7 +24,7 @@
 //!   submodule directory).
 //! - Window resolution when `--window` is provided:
 //!   1. Window is alive → use it directly.
-//!   2. Window is dead → search `sessions.json` for an alive window in the same
+//!   2. Window is dead → search the durable registry for an alive window in the same
 //!      project CWD via `find_alive_project_window`. Falls through to no-window
 //!      behaviour if none found.
 //!   3. No `--window` → no window scoping.
@@ -361,7 +361,7 @@ pub fn run(
         }
     }
 
-    // Cross-root binding guard (SPEC §8.5): the calling root's `sessions.json`
+    // Cross-root binding guard (SPEC §8.5): the calling root's durable registry
     // only records documents rooted under it, so the registry loop above cannot
     // see a pane owned by a document rooted in another project/submodule. Inspect
     // the pane's live process tree directly: if it runs an agent-doc/codex owner
@@ -588,7 +588,7 @@ fn is_window_alive(window: &str) -> bool {
     agent_doc_tmux_io::list_panes(&tmux, Some(window), "#{pane_id}").is_ok()
 }
 
-/// Search sessions.json for a live window belonging to the current project.
+/// Search the durable registry for a live window belonging to the current project.
 ///
 /// Iterates all entries in the session registry. For each entry whose `cwd`
 /// matches the current working directory and has a non-empty `window` field,

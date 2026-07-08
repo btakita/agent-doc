@@ -220,10 +220,7 @@ pub fn check_layout() -> Vec<String> {
         ));
     }
 
-    let registry_path = agent_doc_session_registry_io::registry_path();
-    let registry: Option<tmux_router::Registry> = std::fs::read_to_string(&registry_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let registry: Option<tmux_router::Registry> = agent_doc_session_registry_io::load().ok();
     if let Some(registry) = registry {
         let mut pane_sessions: HashSet<String> = HashSet::new();
         for entry in registry.values() {

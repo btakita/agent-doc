@@ -50,7 +50,7 @@ fn registry_sweep_owner(
     registry.get(&key).and_then(|entry| {
         (!entry.pane.trim().is_empty()).then(|| SweepOwner {
             pane: entry.pane.clone(),
-            source: "sessions.json".to_string(),
+            source: "durable_registry".to_string(),
         })
     })
 }

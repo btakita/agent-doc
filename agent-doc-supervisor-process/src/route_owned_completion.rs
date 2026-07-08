@@ -56,6 +56,9 @@ pub trait RouteOwnedCompletionState: Send + Sync + 'static {
     fn ready_busy_blocker_reason(&self, harness: &HarnessConfig) -> Option<String>;
     fn live_pane_busy_reason(&self, harness: &HarnessConfig) -> Option<String>;
     fn owned_pane_label(&self) -> String;
+    fn paused_queue_has_no_supervisor_drainable_head(&self, _file: &Path) -> bool {
+        false
+    }
     fn request_child_stop(&self);
 }
 
@@ -91,6 +94,21 @@ pub fn route_owned_liveness_reason_for_file(
         }
     };
     route_owned_liveness_reason_for_content(&content, facts.committed_file_hash.as_deref())
+}
+
+pub fn route_owned_liveness_after_paused_queue_suppression(
+    reason: Option<RouteOwnedLivenessReason>,
+    paused_queue_has_no_supervisor_drainable_head: bool,
+) -> Option<RouteOwnedLivenessReason> {
+    if paused_queue_has_no_supervisor_drainable_head
+        && matches!(
+            reason.as_ref(),
+            Some(RouteOwnedLivenessReason::QueueNonEmpty)
+        )
+    {
+        return None;
+    }
+    reason
 }
 
 pub fn load_route_owned_cycle_state(
@@ -130,6 +148,26 @@ where
                 if let Ok(Some(cycle_state)) = load_route_owned_cycle_state(&file) {
                     let facts = route_owned_facts_from_cycle_state(&cycle_state);
                     if !route_owned_cycle_committed_since_start(&facts, baseline.as_ref()) {
+                        if facts.phase.is_committed()
+                            && state.paused_queue_has_no_supervisor_drainable_head(&file)
+                        {
+                            let decision = route_owned_reap_decision(reap_policy, None);
+                            let event = format!(
+                                "route_owned_reap_decision policy={} decision={} reason={} cycle={} event={} suppression=paused_queue_no_supervisor_drainable_head",
+                                reap_policy.as_str(),
+                                if decision.reap { "reap" } else { "keep_alive" },
+                                decision.reason,
+                                cycle_state.cycle_id,
+                                cycle_state.last_event
+                            );
+                            log_session_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&file, &event);
+                            if decision.reap {
+                                completed.store(true, Ordering::Relaxed);
+                                state.request_child_stop();
+                                return;
+                            }
+                        }
                         if !sleep_with_stop(&stop, poll_interval) {
                             return;
                         }
@@ -189,9 +227,13 @@ where
                             reason,
                         }
                     } else {
+                        let liveness_reason = route_owned_liveness_after_paused_queue_suppression(
+                            route_owned_liveness_reason_for_file(&file, &facts),
+                            state.paused_queue_has_no_supervisor_drainable_head(&file),
+                        );
                         route_owned_reap_decision(
                             reap_policy,
-                            route_owned_liveness_reason_for_file(&file, &facts),
+                            liveness_reason,
                         )
                     };
                     let event = format!(
@@ -265,6 +307,31 @@ mod tests {
             reason,
             RouteOwnedLivenessReason::AdapterFailure(reason) if reason.starts_with("read_failed:")
         ));
+    }
+
+    #[test]
+    fn paused_queue_suppression_drops_only_queue_liveness() {
+        assert_eq!(
+            route_owned_liveness_after_paused_queue_suppression(
+                Some(RouteOwnedLivenessReason::QueueNonEmpty),
+                true,
+            ),
+            None
+        );
+        assert_eq!(
+            route_owned_liveness_after_paused_queue_suppression(
+                Some(RouteOwnedLivenessReason::BacklogNonEmpty),
+                true,
+            ),
+            Some(RouteOwnedLivenessReason::BacklogNonEmpty)
+        );
+        assert_eq!(
+            route_owned_liveness_after_paused_queue_suppression(
+                Some(RouteOwnedLivenessReason::QueueNonEmpty),
+                false,
+            ),
+            Some(RouteOwnedLivenessReason::QueueNonEmpty)
+        );
     }
 
     #[test]

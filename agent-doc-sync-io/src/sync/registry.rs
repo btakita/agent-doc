@@ -42,6 +42,7 @@ pub(crate) fn first_agent_doc_in_col(col: &str) -> Option<String> {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn build_tmux_router_sync_registry(
     tmux: &Tmux,
     col_args: &[String],

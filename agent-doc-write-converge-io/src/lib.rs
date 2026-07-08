@@ -1487,6 +1487,17 @@ pub fn poll_visible_write_content_lazily_event_or_projection(
 pub trait EditorConvergenceEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
 
+    fn apply_canonical_replace_if_attached(
+        &self,
+        file: &Path,
+        expected_current: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+        let _ = (file, expected_current, content, source);
+        Ok(None)
+    }
+
     fn guard_visible_write_idle_and_current(
         &self,
         file: &Path,
@@ -3806,6 +3817,7 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
+    effects.apply_canonical_replace_if_attached(file, current_content, target, source)?;
     if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
         &canonical_file,
         current_content,

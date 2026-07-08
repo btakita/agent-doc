@@ -2,15 +2,14 @@
 //!
 //! The controller is the live authority for document session actor lookup,
 //! generation changes, lifecycle reports, and routed dispatch acceptance.
-//! `sessions.json` and tmux state remain projections and layout inputs.
+//! Tmux state remains a layout input; ownership state is stored in SQLite.
 
 use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
 use agent_doc_controller::paths::{
-    ACTOR_PROJECTION_FILE, LAYOUT_PROJECTION_FILE, actor_projection_path, launch_lock_path,
-    layout_projection_path, socket_path, state_path,
+    LAYOUT_PROJECTION_FILE, launch_lock_path, layout_projection_path, socket_path, state_path,
 };
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
@@ -50,7 +49,7 @@ use state_store::{
     load_layout_state_from_db, load_session_operator_status_from_db, load_state_events_from_db,
     load_supervisor_lease_from_db, open_state_db, store_layout_state_in_db, timestamp_secs,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -67,6 +66,8 @@ const CONNECT_WAIT: Duration = Duration::from_secs(3);
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
 #[cfg(any(test, feature = "test-support"))]
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_millis(500);
+#[cfg(test)]
+#[allow(dead_code)]
 const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
 /// How long a contended launch waits for the current holder to finish before
@@ -117,6 +118,58 @@ pub struct ControllerEditorRouteRuntimeResult {
     pub output: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxLayoutSyncInvocation {
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub focus: Option<String>,
+    #[serde(default)]
+    pub no_autostart: bool,
+    #[serde(default)]
+    pub exact_visible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxLayoutSyncReceipt {
+    pub applied: bool,
+    pub reason: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub focus: Option<String>,
+    pub no_autostart: bool,
+    pub exact_visible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxLayoutSyncStateInvocation {
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub focus: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxLayoutSyncStateReport {
+    pub synced: bool,
+    pub reason: String,
+    pub expected_documents: Vec<String>,
+    pub actual_documents: Vec<String>,
+    pub panes: Vec<String>,
+    #[serde(default)]
+    pub session_name: Option<String>,
+    #[serde(default)]
+    pub window_id: Option<String>,
+    #[serde(default)]
+    pub window_name: Option<String>,
+    #[serde(default)]
+    pub focus: Option<String>,
+}
+
 pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
     fn consume_queue_prompt_force_disk(
         &self,
@@ -136,6 +189,12 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         invocation: ControllerEditorRouteInvocation,
     ) -> Result<ControllerEditorRouteRuntimeResult>;
+
+    fn sync_tmux_layout(
+        &self,
+        project_root: &Path,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+    ) -> Result<ControllerTmuxLayoutSyncReceipt>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -224,22 +283,27 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             ),
         })
     }
+
+    fn sync_tmux_layout(
+        &self,
+        _project_root: &Path,
+        invocation: ControllerTmuxLayoutSyncInvocation,
+    ) -> Result<ControllerTmuxLayoutSyncReceipt> {
+        Ok(ControllerTmuxLayoutSyncReceipt {
+            applied: true,
+            reason: "test_runtime".to_string(),
+            columns: invocation.columns,
+            window: invocation.window,
+            focus: invocation.focus,
+            no_autostart: invocation.no_autostart,
+            exact_visible: invocation.exact_visible,
+        })
+    }
 }
 
 #[cfg(test)]
 static TEST_RUNTIME_EFFECTS: TestProjectControllerRuntimeEffects =
     TestProjectControllerRuntimeEffects;
-
-#[derive(Clone, Debug)]
-pub struct SessionsProjectionHint {
-    pub session_id: String,
-    pub pane_id: String,
-    pub file: String,
-    pub pid: u32,
-    pub window_id: String,
-    pub cwd: String,
-    pub supervisor_instance_id: String,
-}
 
 /// `#orchver` — stamp the binary crate's `CARGO_PKG_VERSION` into controller identity.
 /// This keeps stale-binary warnings tied to the installed `agent-doc` executable even if
@@ -522,36 +586,6 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
     reconcile_open_dispatch_receipts_after_restart(&conn, &mut stats)?;
     preserve_open_closeout_cycles_after_restart(&conn, &mut stats)?;
     drop(conn);
-
-    if !store.is_empty() {
-        let actor_projection_hash = actor_projection_intended_hash(project_root).ok();
-        match emit_actor_projection(project_root) {
-            Ok(()) => stats.record_projection_emitted(),
-            Err(err) => {
-                let document_id = store
-                    .keys()
-                    .next()
-                    .map(String::as_str)
-                    .unwrap_or("__controller__");
-                record_projection_diagnostic_with_metadata(
-                    project_root,
-                    ACTOR_PROJECTION_FILE,
-                    document_id,
-                    None,
-                    actor_projection_hash.as_deref(),
-                    "retry_pending",
-                    &format!("failed to emit actor projection during controller recovery: {err}"),
-                );
-            }
-        }
-    }
-
-    for record in store.values() {
-        project_sessions_projection_for_actor(project_root, &record.document_id)?;
-    }
-    if !store.is_empty() {
-        stats.record_projection_emitted();
-    }
 
     let conn = open_state_db(project_root)?;
     if state_store::layout_scope_exists(&conn, DEFAULT_LAYOUT_SCOPE)? {
@@ -926,6 +960,40 @@ pub struct ControllerActorInspection {
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxFocusState {
+    pub active: bool,
+    pub reason: String,
+    #[serde(default)]
+    pub session_name: Option<String>,
+    #[serde(default)]
+    pub window_id: Option<String>,
+    #[serde(default)]
+    pub window_name: Option<String>,
+    #[serde(default)]
+    pub pane_id: Option<String>,
+    #[serde(default)]
+    pub document_id: Option<String>,
+    #[serde(default)]
+    pub record: Option<agent_doc_sqlite::state_store::ActorRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTmuxFocusReceipt {
+    pub focused: bool,
+    pub reason: String,
+    #[serde(default)]
+    pub document_id: Option<String>,
+    #[serde(default)]
+    pub pane_id: Option<String>,
+    #[serde(default)]
+    pub session_name: Option<String>,
+    #[serde(default)]
+    pub window_id: Option<String>,
+    #[serde(default)]
+    pub window_name: Option<String>,
+}
+
 // Controller status records now live in `agent-doc-sqlite::state_store`; this
 // module imports them privately while callers that need to name them import the
 // focused crate directly.
@@ -1153,35 +1221,6 @@ fn actor_document_bootstrap_columns(project_root: &Path) -> Result<(Option<Strin
     Ok((launch_mode, controller_epoch))
 }
 
-fn legacy_actor_projection(
-    project_root: &Path,
-) -> Result<Option<BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>>> {
-    let path = actor_projection_path(project_root);
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(None);
-    };
-    let store = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(Some(store))
-}
-
-/// Migrate a legacy `session-actors.json` projection into empty sqlite state.
-///
-/// Glue: the count gate and JSON load stay in orchestration (the `.json`
-/// read goes through `agent_doc_fs`); the actual transition+document
-/// transaction lives in `state_store`, fed the lifted `read_bootstrap`
-/// `launch_mode`/`controller_epoch` tendril.
-fn migrate_legacy_actor_projection(project_root: &Path, conn: &mut Connection) -> Result<()> {
-    if !state_store::actor_documents_empty(conn)? {
-        return Ok(());
-    }
-    let Some(store) = legacy_actor_projection(project_root)? else {
-        return Ok(());
-    };
-    let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
-    state_store::migrate_actor_store_tx(conn, &store, launch_mode, controller_epoch)
-}
-
 fn upsert_supervisor_lease(
     project_root: &Path,
     record: &agent_doc_sqlite::state_store::ActorRecord,
@@ -1368,8 +1407,7 @@ pub fn load_state_backbone_projection(
 pub fn load_actor_store(
     project_root: &Path,
 ) -> Result<BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>> {
-    let mut conn = open_state_db(project_root)?;
-    migrate_legacy_actor_projection(project_root, &mut conn)?;
+    let conn = open_state_db(project_root)?;
     load_actor_store_from_db(&conn)
 }
 
@@ -1377,8 +1415,7 @@ pub fn load_actor_record(
     project_root: &Path,
     document_id: &str,
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
-    let mut conn = open_state_db(project_root)?;
-    migrate_legacy_actor_projection(project_root, &mut conn)?;
+    let conn = open_state_db(project_root)?;
     load_actor_record_from_db(&conn, document_id)
 }
 
@@ -1388,9 +1425,8 @@ pub fn store_actor_record(
     record: &agent_doc_sqlite::state_store::ActorRecord,
 ) -> Result<agent_doc_sqlite::state_store::ActorRecord> {
     let mut conn = open_state_db(project_root)?;
-    migrate_legacy_actor_projection(project_root, &mut conn)?;
     let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
-    let evicted_document_ids = state_store::store_actor_record_tx(
+    let _evicted_document_ids = state_store::store_actor_record_tx(
         &mut conn,
         expected_prior_generation,
         record,
@@ -1398,25 +1434,6 @@ pub fn store_actor_record(
         controller_epoch,
     )?;
 
-    let actor_projection_hash = actor_projection_intended_hash(project_root).ok();
-    if let Err(err) = emit_actor_projection(project_root) {
-        record_projection_diagnostic_with_metadata(
-            project_root,
-            "session-actors.json",
-            &record.document_id,
-            Some(record.generation),
-            actor_projection_hash.as_deref(),
-            "retry_pending",
-            &format!("failed to emit actor projection after sqlite commit: {err}"),
-        );
-    }
-    for evicted_document_id in evicted_document_ids {
-        let _ = project_sessions_projection_for_actor(project_root, &evicted_document_id);
-    }
-    if record.last_transition.caller == "start" && record.last_transition.reason == "session_start"
-    {
-        let _ = project_sessions_projection_for_actor(project_root, &record.document_id);
-    }
     Ok(record.clone())
 }
 
@@ -1797,22 +1814,6 @@ pub fn prune_dead_actors_for_caller(
         }
     }
 
-    // Refresh the legacy `session-actors.json` projection DIRECTLY from the
-    // post-prune db. Do NOT route through `emit_actor_projection`/`load_actor_store`
-    // here: those re-run `migrate_legacy_actor_projection`, which — once the prune
-    // empties the `documents` table — would re-import the just-deleted records
-    // back from the stale json, resurrecting them. Writing the raw db state keeps
-    // the projection and the source of truth in lockstep.
-    if pruned > 0 && !dry_run {
-        let final_store = state_store::load_actor_store_from_db(&conn)?;
-        let path = actor_projection_path(project_root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, serde_json::to_string_pretty(&final_store)?)
-            .with_context(|| format!("failed to refresh actor projection {}", path.display()))?;
-    }
-
     Ok((pruned, kept))
 }
 
@@ -1871,6 +1872,30 @@ pub fn terminate_stale_preparing_controllers_for_caller(
 
     // Only reap a verified same-project controller process, and never ourselves.
     if pid == std::process::id() || !is_same_project_controller_pid(project_root, pid) {
+        if pid != std::process::id() && !process_is_alive(pid) {
+            if dry_run {
+                eprintln!(
+                    "[{caller}] would mark stale preparing controller failed: pid={pid} generation={generation} age_secs={age} reason=dead_pid"
+                );
+                return Ok((1, 0));
+            }
+
+            let mut next = bootstrap.clone();
+            next.handoff_state = ControllerHandoffState::Failed;
+            if let Err(err) = write_bootstrap_state(&next) {
+                eprintln!(
+                    "[{caller}] warning: failed to mark dead stale preparing controller failed pid={pid} generation={generation}: {err}"
+                );
+            }
+
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "stale_preparing_controller_record_marked_failed reason=dead_pid pid={pid} generation={generation} age_secs={age} caller={caller}"
+                ),
+            );
+            return Ok((1, 0));
+        }
         agent_doc_ops_log_io::log_op(
             project_root,
             &format!(
@@ -2202,33 +2227,6 @@ pub fn evict_cross_document_pane_bindings(
     Ok(evicted)
 }
 
-fn emit_actor_projection(project_root: &Path) -> Result<()> {
-    let store = load_actor_store(project_root)?;
-    let path = actor_projection_path(project_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(&store)?;
-    std::fs::write(&path, &content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    let written = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let projected: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
-        serde_json::from_str(&written)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
-    if projected != store {
-        anyhow::bail!("session-actors.json projection drifted from sqlite state");
-    }
-    Ok(())
-}
-
-fn actor_projection_intended_hash(project_root: &Path) -> Result<String> {
-    let store = load_actor_store(project_root)?;
-    Ok(agent_doc_hash::content_hash(&serde_json::to_string_pretty(
-        &store,
-    )?))
-}
-
 fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> Result<()> {
     if state_store::layout_scope_exists(conn, DEFAULT_LAYOUT_SCOPE)? {
         return Ok(());
@@ -2293,183 +2291,6 @@ pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()>
             intended_hash.as_deref(),
             "retry_pending",
             &format!("failed to emit layout projection after sqlite commit: {err}"),
-        );
-    }
-    Ok(())
-}
-
-pub fn project_sessions_projection_for_actor(project_root: &Path, document_id: &str) -> Result<()> {
-    project_sessions_projection_for_actor_with_hint(project_root, document_id, None)
-}
-
-pub fn project_sessions_projection_for_actor_with_hint(
-    project_root: &Path,
-    document_id: &str,
-    hint: Option<&SessionsProjectionHint>,
-) -> Result<()> {
-    let Some(record) = load_actor_record(project_root, document_id)? else {
-        return Ok(());
-    };
-    emit_sessions_projection(project_root, &record, hint)
-}
-
-fn emit_sessions_projection(
-    project_root: &Path,
-    focused_record: &agent_doc_sqlite::state_store::ActorRecord,
-    hint: Option<&SessionsProjectionHint>,
-) -> Result<()> {
-    let conn = open_state_db(project_root)?;
-    let store = load_actor_store_from_db(&conn)?;
-    let mut registry = match agent_doc_session_registry_io::load_in(project_root) {
-        Ok(registry) => registry,
-        Err(err) => {
-            record_projection_diagnostic_with_metadata(
-                project_root,
-                "sessions.json",
-                &focused_record.document_id,
-                Some(focused_record.generation),
-                None,
-                "retry_pending",
-                &format!("failed to load projection: {err}"),
-            );
-            tmux_router::Registry::new()
-        }
-    };
-    let live_actor_panes: BTreeSet<String> = store
-        .values()
-        .filter(|record| {
-            record.state != agent_doc_sqlite::state_store::ActorState::Closed
-                && !record.pane_id.is_empty()
-        })
-        .map(|record| record.pane_id.clone())
-        .collect();
-    registry
-        .retain(|key, entry| store.contains_key(key) || !live_actor_panes.contains(&entry.pane));
-
-    let project_root_default = project_root.to_string_lossy().to_string();
-    for record in store.values() {
-        if record.state == agent_doc_sqlite::state_store::ActorState::Closed
-            || record.pane_id.is_empty()
-        {
-            registry.remove(&record.document_id);
-            continue;
-        }
-        let projected_hint = hint.filter(|hint| {
-            tmux_router::registry::canonical_registry_key_in(project_root, &hint.file)
-                == record.document_id
-        });
-        let prior = registry.get(&record.document_id);
-        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        let default_started_storage;
-        let default_started = if prior
-            .map(|entry| !entry.started.is_empty())
-            .unwrap_or(false)
-        {
-            ""
-        } else {
-            default_started_storage = timestamp_secs().to_string();
-            default_started_storage.as_str()
-        };
-        let selected =
-            status::select_sessions_projection_entry(status::SessionsProjectionEntryFacts {
-                project_root: project_root_default.as_str(),
-                record: status::SessionsProjectionRecordFacts {
-                    document_id: record.document_id.as_str(),
-                    session_id: record.session_id.as_str(),
-                    pane_id: record.pane_id.as_str(),
-                    window_id: record.window_id.as_str(),
-                },
-                prior: prior.map(|entry| status::SessionsProjectionPriorFacts {
-                    pid: entry.pid,
-                    cwd: entry.cwd.as_str(),
-                    started: entry.started.as_str(),
-                    file: entry.file.as_str(),
-                    supervisor_instance_id: entry.supervisor_instance_id.as_str(),
-                }),
-                hint: projected_hint.map(|hint| status::SessionsProjectionHintFacts {
-                    pid: hint.pid,
-                    cwd: hint.cwd.as_str(),
-                    file: hint.file.as_str(),
-                    supervisor_instance_id: hint.supervisor_instance_id.as_str(),
-                }),
-                lease: lease.map(|lease| status::SessionsProjectionLeaseFacts {
-                    supervisor_pid: lease.supervisor_pid,
-                }),
-                default_started,
-            });
-        let entry = tmux_router::RegistryEntry {
-            pane: selected.pane,
-            pid: selected.pid,
-            cwd: selected.cwd,
-            started: selected.started,
-            session_id: selected.session_id,
-            file: selected.file,
-            window: selected.window,
-            supervisor_instance_id: selected.supervisor_instance_id,
-        };
-        registry.insert(record.document_id.clone(), entry);
-    }
-
-    let intended_hash = serde_json::to_string_pretty(&registry)
-        .ok()
-        .map(|content| agent_doc_hash::content_hash(&content));
-    if let Err(err) = agent_doc_session_registry_io::save_in(project_root, &registry) {
-        record_projection_diagnostic_with_metadata(
-            project_root,
-            "sessions.json",
-            &focused_record.document_id,
-            Some(focused_record.generation),
-            intended_hash.as_deref(),
-            "retry_pending",
-            &format!("failed to write projection: {err}"),
-        );
-        return Ok(());
-    }
-    let projected = match agent_doc_session_registry_io::load_in(project_root) {
-        Ok(registry) => registry,
-        Err(err) => {
-            record_projection_diagnostic_with_metadata(
-                project_root,
-                "sessions.json",
-                &focused_record.document_id,
-                Some(focused_record.generation),
-                intended_hash.as_deref(),
-                "retry_pending",
-                &format!("failed to reload projection: {err}"),
-            );
-            return Ok(());
-        }
-    };
-    if focused_record.state == agent_doc_sqlite::state_store::ActorState::Closed
-        || focused_record.pane_id.is_empty()
-    {
-        if projected.contains_key(&focused_record.document_id) {
-            record_projection_diagnostic_with_metadata(
-                project_root,
-                "sessions.json",
-                &focused_record.document_id,
-                Some(focused_record.generation),
-                intended_hash.as_deref(),
-                "retry_pending",
-                "sessions projection kept a closed controller actor binding",
-            );
-        }
-    } else if projected
-        .get(&focused_record.document_id)
-        .is_none_or(|entry| {
-            entry.session_id != focused_record.session_id
-                || entry.pane != focused_record.pane_id
-                || entry.window != focused_record.window_id
-        })
-    {
-        record_projection_diagnostic_with_metadata(
-            project_root,
-            "sessions.json",
-            &focused_record.document_id,
-            Some(focused_record.generation),
-            intended_hash.as_deref(),
-            "retry_pending",
-            "sessions projection drifted from controller actor state",
         );
     }
     Ok(())
@@ -3124,7 +2945,7 @@ mod tests {
     }
 
     #[test]
-    fn actor_store_writes_sqlite_before_actor_projection() {
+    fn actor_store_writes_sqlite_authority() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/test.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -3144,15 +2965,13 @@ mod tests {
             .unwrap();
         assert_eq!(stored, "%41");
 
-        let projection: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
-            serde_json::from_str(
-                &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
-            )
-            .unwrap();
-        assert_eq!(projection.get(&record.document_id).unwrap(), &record);
+        assert!(
+            state_db_path(dir.path()).exists(),
+            "actor store must persist to controller state.db"
+        );
     }
     #[test]
-    fn sessions_projection_reconciles_existing_registry_entry() {
+    fn durable_registry_reconciles_existing_registry_entry() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/test.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -3177,8 +2996,8 @@ mod tests {
         let record = actor_record(&document_id, "%51", "@2");
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
-        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
-        let entry = projected.get(&document_id).unwrap();
+        let durable_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        let entry = durable_registry.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%51");
         assert_eq!(entry.window, "@2");
         assert_eq!(entry.session_id, "session-1");
@@ -3186,7 +3005,7 @@ mod tests {
         assert_eq!(entry.supervisor_instance_id, "supervisor-1");
     }
     #[test]
-    fn sessions_projection_removes_displaced_cross_document_owner() {
+    fn durable_registry_removes_displaced_cross_document_owner() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc_a = dir.path().join("tasks/a.md");
         let doc_b = dir.path().join("tasks/b.md");
@@ -3231,18 +3050,18 @@ mod tests {
         record_b.session_id = "session-b".to_string();
         store_actor_record(dir.path(), Some(0), &record_b).unwrap();
 
-        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        let durable_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
         assert!(
-            !projected.contains_key(&document_a),
-            "displaced document must not remain in sessions.json"
+            !durable_registry.contains_key(&document_a),
+            "displaced document must not remain in the durable registry"
         );
-        let entry_b = projected.get(&document_b).unwrap();
+        let entry_b = durable_registry.get(&document_b).unwrap();
         assert_eq!(entry_b.pane, "%70");
         assert_eq!(entry_b.window, "@7");
         assert_eq!(entry_b.session_id, "session-b");
     }
     #[test]
-    fn sessions_projection_creates_missing_registry_entry_from_controller_state() {
+    fn durable_registry_exposes_controller_state_entry() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("tasks/test.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
@@ -3252,56 +3071,23 @@ mod tests {
 
         store_actor_record(dir.path(), Some(0), &record).unwrap();
 
-        let projected = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
-        let entry = projected.get(&document_id).unwrap();
+        let durable_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        let entry = durable_registry.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%61");
         assert_eq!(entry.window, "@3");
         assert_eq!(entry.session_id, "session-1");
         assert_eq!(entry.file, document_id);
-        assert_eq!(entry.cwd, dir.path().to_string_lossy());
+        assert_eq!(entry.cwd, doc.parent().unwrap().to_string_lossy());
 
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
         let diagnostics: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'session_registry'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(diagnostics, 0);
-    }
-    #[test]
-    fn sessions_projection_failure_records_generation_hash_retry_metadata() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let doc = dir.path().join("tasks/test.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "body").unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/sessions.json")).unwrap();
-        let document_id = doc.to_string_lossy().to_string();
-        let record = actor_record(&document_id, "%61", "@3");
-
-        store_actor_record(dir.path(), Some(0), &record).unwrap();
-
-        let conn = Connection::open(state_db_path(dir.path())).unwrap();
-        let (source_generation, intended_hash, retry_status, message): (
-            i64,
-            String,
-            String,
-            String,
-        ) = conn
-            .query_row(
-                "SELECT source_generation, intended_hash, retry_status, message \
-                 FROM projection_diagnostics \
-                 WHERE projection = 'sessions.json' \
-                 ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(source_generation, 1);
-        assert!(!intended_hash.is_empty());
-        assert_eq!(retry_status, "retry_pending");
-        assert!(message.contains("failed to write projection"));
     }
     #[test]
     fn layout_state_migrates_legacy_projection_to_sqlite() {
@@ -3594,6 +3380,15 @@ mod tests {
             record.state,
             agent_doc_sqlite::state_store::ActorState::Starting
         );
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
+            &doc,
+            "%41",
+            "session-controller",
+            "codex",
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
+            None,
+        )
+        .unwrap();
 
         let register = ControllerRequest {
             command: "register_supervisor".to_string(),
@@ -3650,6 +3445,12 @@ mod tests {
             agent_doc_sqlite::state_store::ActorState::Ready
         );
         assert_eq!(record.last_transition.reason, "prompt_ready");
+        assert!(
+            agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
+                .unwrap()
+                .is_none(),
+            "prompt-ready lifecycle transition must clear stale startup-miss markers"
+        );
 
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
         let (pid, socket, runtime_state): (i64, String, String) = conn
@@ -3662,6 +3463,51 @@ mod tests {
         assert_eq!(pid, 999);
         assert_eq!(socket, "/tmp/agent-doc-test.sock");
         assert_eq!(runtime_state, "ready");
+
+        agent_doc_supervisor_io::startup_miss::record_startup_miss(
+            &doc,
+            "%41",
+            "session-controller",
+            "codex",
+            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
+            None,
+        )
+        .unwrap();
+        let closed_lifecycle = ControllerRequest {
+            command: "mark_lifecycle".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-controller".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: Some("closed".to_string()),
+            caller: Some("sync".to_string()),
+            reason: Some("stale_dead_pane_actor".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&closed_lifecycle).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<agent_doc_sqlite::state_store::ActorRecord> =
+            serde_json::from_str(&response).unwrap();
+        assert!(envelope.ok);
+        let record = envelope.data.unwrap();
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
+        assert!(
+            agent_doc_supervisor_io::startup_miss::load_startup_miss(&doc)
+                .unwrap()
+                .is_none(),
+            "closed lifecycle transition must clear stale startup-miss markers"
+        );
     }
     #[test]
     fn controller_supervisor_heartbeat_refreshes_stale_lease_without_actor_transition() {
@@ -5795,8 +5641,6 @@ agent:queue\n\
         .unwrap();
         drop(conn);
 
-        std::fs::write(actor_projection_path(dir.path()), "{}").unwrap();
-        let _ = std::fs::remove_file(agent_doc_session_registry_io::registry_path_in(dir.path()));
         let _ = std::fs::remove_file(layout_projection_path(dir.path()));
 
         let mut bootstrap = test_bootstrap(&dir);
@@ -5807,15 +5651,8 @@ agent:queue\n\
         assert_eq!(memory_record.pane_id, "%88");
         assert_eq!(memory_record.session_id, "session-restart");
 
-        let actor_projection: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> =
-            serde_json::from_str(
-                &std::fs::read_to_string(actor_projection_path(dir.path())).unwrap(),
-            )
-            .unwrap();
-        assert_eq!(actor_projection.get(&document_id).unwrap(), &record);
-
-        let sessions_projection = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
-        let entry = sessions_projection.get(&document_id).unwrap();
+        let durable_registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        let entry = durable_registry.get(&document_id).unwrap();
         assert_eq!(entry.pane, "%88");
         assert_eq!(entry.window, "@8");
         assert_eq!(entry.session_id, "session-restart");
@@ -6047,7 +5884,7 @@ agent:queue\n\
         let conn = Connection::open(state_db_path(dir.path())).unwrap();
         let diagnostics_before_attach: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'session_registry'",
                 [],
                 |row| row.get(0),
             )
@@ -6085,14 +5922,14 @@ agent:queue\n\
         assert_eq!(record.last_transition.reason, "manual_attach");
         let diagnostics_after_attach: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'sessions.json'",
+                "SELECT COUNT(*) FROM projection_diagnostics WHERE projection = 'session_registry'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
             diagnostics_after_attach, diagnostics_before_attach,
-            "controller attach should not add a projection diagnostic before the caller updates sessions.json"
+            "controller attach should not add a legacy registry diagnostic"
         );
     }
     #[test]
@@ -6200,6 +6037,27 @@ agent:queue\n\
         assert!(ops_log.contains("stale_preparing_controller_reaped_skipped"));
         assert!(ops_log.contains("reason=not_same_project_controller"));
     }
+
+    #[test]
+    fn reaper_marks_dead_preparing_bootstrap_failed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let dead_pid = u32::MAX - 1;
+        assert!(!process_is_alive(dead_pid), "test requires a dead pid");
+        let old = timestamp_secs() - 600;
+        write_preparing_bootstrap(dir.path(), dead_pid, Some(old));
+
+        let (reaped, kept) =
+            terminate_stale_preparing_controllers(dir.path(), Duration::from_secs(45), false)
+                .unwrap();
+        assert_eq!((reaped, kept), (1, 0));
+        let after = read_bootstrap(dir.path()).unwrap().unwrap();
+        assert_eq!(after.handoff_state, ControllerHandoffState::Failed);
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops_log.contains("stale_preparing_controller_record_marked_failed"));
+        assert!(ops_log.contains("reason=dead_pid"));
+    }
+
     #[test]
     fn reaper_dry_run_reports_without_killing() {
         let dir = tempfile::TempDir::new().unwrap();

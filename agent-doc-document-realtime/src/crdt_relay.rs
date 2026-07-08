@@ -474,6 +474,7 @@ impl RelayHub {
                 current.len()
             ));
         }
+        apply_canonical_document_tree_replace(&current, content)?;
         let before = self.canonical.state_vector();
         if current != content {
             let delete_len: u32 = current
@@ -807,6 +808,58 @@ impl RelayHub {
     }
 }
 
+fn apply_canonical_document_tree_replace(current: &str, content: &str) -> Result<()> {
+    let diffs = agent_doc_merge::document_cell::diff_document(current, content);
+    if diffs.is_empty() {
+        return Ok(());
+    }
+    let ctx = lazily::Context::new();
+    let mut tree = agent_doc_merge::document_cell::DocumentCellTree::from_document(&ctx, current);
+    for diff in &diffs {
+        tree.apply(&ctx, diff);
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let rebuilt =
+            agent_doc_merge::document_cell::DocumentCellTree::from_document(&ctx, content);
+        let new_projection = agent_doc_merge::document_cell::project_document(content);
+        for occ in &new_projection {
+            assert_eq!(
+                tree.item_ids(&ctx, &occ.component, occ.occurrence),
+                rebuilt.item_ids(&ctx, &occ.component, occ.occurrence),
+                "canonical document tree update diverged from rebuilt {}:{}",
+                occ.component,
+                occ.occurrence
+            );
+            for (key, expected_value) in &occ.items {
+                let identity = agent_doc_merge::document_cell::node_key_identity(key);
+                assert_eq!(
+                    tree.item_value(&ctx, &occ.component, occ.occurrence, identity),
+                    Some(expected_value.clone()),
+                    "canonical document tree value diverged from compacted projection for {identity}"
+                );
+            }
+        }
+        for occ in agent_doc_merge::document_cell::project_document(current) {
+            let new_occurrence_exists = new_projection.iter().any(|new_occ| {
+                new_occ.component == occ.component && new_occ.occurrence == occ.occurrence
+            });
+            if !new_occurrence_exists {
+                assert!(
+                    tree.item_ids(&ctx, &occ.component, occ.occurrence)
+                        .is_empty(),
+                    "canonical document tree retained removed {}:{}",
+                    occ.component,
+                    occ.occurrence
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// One replica's ephemeral presence: cursor / selection / a display name. NONE of
 /// this is part of the document CRDT — it is never persisted to `.yrs` and never
 /// committed to git.
@@ -1009,6 +1062,45 @@ mod tests {
         assert_eq!(pending[0].origin, 1);
         assert_eq!(pending[0].target, 2);
         assert!(pending[0].patch_id.starts_with("crdt:1:2:1"));
+    }
+
+    #[test]
+    fn cpc_canonical_replace_compacted_exchange_removes_response_cells() {
+        let expanded = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: old topic - gpt-5\n\n",
+            "Old response.\n\n",
+            "### Re: newer topic - gpt-5\n\n",
+            "Newer response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let compacted = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "*Compacted. Content archived to `.agent-doc/archives/session.md`*\n\n",
+            "- Archived 2 response topic(s): old topic; newer topic\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let mut hub = RelayHub::from_text(1, expanded);
+        hub.register(2).unwrap();
+
+        let packet = hub.apply_canonical_replace(expanded, compacted).unwrap();
+
+        assert_eq!(packet.origin, 1);
+        assert_eq!(packet.targets, vec![2]);
+        assert_eq!(hub.canonical_text(), compacted);
+        assert_eq!(hub.member_text(2).unwrap(), compacted);
+        assert!(!hub.canonical_text().contains("### Re: old topic"));
+        assert!(!hub.canonical_text().contains("### Re: newer topic"));
+        assert!(
+            hub.canonical_text().contains("### Session Summary"),
+            "canonical replacement must carry the compacted summary cell"
+        );
+        let pending = hub.pending_updates(2).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].origin, 1);
     }
 
     #[test]

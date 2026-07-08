@@ -5,13 +5,13 @@
 //! When a document is renamed, all hash-keyed state files (snapshots, locks,
 //! pending, CRDT, pre-response) become orphaned because the hash is derived
 //! from the canonical path. This module migrates those files from the old hash
-//! to the new hash and updates the sessions registry.
+//! to the new hash and updates the durable session registry.
 //!
 //! ## Spec
 //!
 //! - `run(old_path, new_path)` migrates all `.agent-doc/` state keyed by the
-//!   old path's hash to the new path's hash. Updates `sessions.json` entries
-//!   whose `file` field matches the old path.
+//!   old path's hash to the new path's hash. Updates registry entries whose
+//!   `file` field matches the old path.
 //! - The old path may no longer exist on disk (rename already happened). In
 //!   that case, `agent_doc_fs::document_state_hash_from_str` is used with the
 //!   absolute path string instead of `agent_doc_fs::document_state_hash` (which

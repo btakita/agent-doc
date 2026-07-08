@@ -1553,7 +1553,7 @@ fn force_interrupt_clear(file: &Path) -> Result<()> {
 
     let mut report = ForceInterruptClearReport {
         actor_closed: force_close_actor_record(&ctx),
-        registry_removed: force_remove_registry_projection(&ctx)?,
+        registry_removed: force_remove_registry_entry(&ctx)?,
         ..ForceInterruptClearReport::default()
     };
 
@@ -1667,7 +1667,7 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
     }
 }
 
-fn force_remove_registry_projection(ctx: &SessionContext) -> Result<bool> {
+fn force_remove_registry_entry(ctx: &SessionContext) -> Result<bool> {
     let registry_path = agent_doc_session_registry_io::registry_path_in(&ctx.base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = agent_doc_session_registry_io::load_in(&ctx.base_dir)?;
@@ -2596,10 +2596,6 @@ fn clear_closed_actor_pane_projection(ctx: &SessionContext) -> Result<Option<Str
         Some(record.generation),
         &cleared,
     )?;
-    agent_doc_controller_io::project_controller::project_sessions_projection_for_actor(
-        &ctx.base_dir,
-        &cleared.document_id,
-    )?;
     Ok(Some(format!(
         "Cleared stale closed actor pane `{}` for `{}`.",
         old_pane,
@@ -3476,8 +3472,7 @@ fn collect_doctor_issues(ctx: &SessionContext) -> Vec<String> {
         issues.push("authoritative actor record is missing".to_string());
     }
     if ctx.registry_entry.is_none() {
-        issues
-            .push("sessions.json has no live registry entry for this document session".to_string());
+        issues.push("durable registry has no live entry for this document session".to_string());
     }
     if matches!(ctx.supervisor_runtime.health, SupervisorHealth::NoSocket) {
         issues.push("no supervisor socket is present for the tracked session".to_string());
@@ -3811,7 +3806,7 @@ mod tests {
     #[test]
     fn registry_lookup_rejects_same_session_entry_for_foreign_document_suprestassoc() {
         // #suprestassoc: restart-supervisor must not combine the target document
-        // with a stale registry projection from a different document that happens
+        // with stale durable registry metadata from a different document that happens
         // to carry the same session id.
         let dir = tempfile::TempDir::new().unwrap();
         let base = dir.path();
@@ -4810,7 +4805,11 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         };
         let issues = collect_doctor_issues(&ctx);
         assert!(issues.iter().any(|issue| issue.contains("actor record")));
-        assert!(issues.iter().any(|issue| issue.contains("registry entry")));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.contains("durable registry"))
+        );
         assert!(
             issues
                 .iter()

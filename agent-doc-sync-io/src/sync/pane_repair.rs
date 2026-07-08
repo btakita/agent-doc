@@ -8,6 +8,16 @@ pub(crate) struct SyncProofCache {
     pub(crate) actor_records:
         RefCell<HashMap<(PathBuf, String), Option<agent_doc_sqlite::state_store::ActorRecord>>>,
     pub(crate) live_owner_matches: RefCell<HashMap<(PathBuf, String, String), bool>>,
+    pub(crate) skip_authoritative_actor_lookup: bool,
+}
+
+impl SyncProofCache {
+    pub(crate) fn safe_passive() -> Self {
+        Self {
+            skip_authoritative_actor_lookup: true,
+            ..Self::default()
+        }
+    }
 }
 
 pub(crate) fn sync_proof_file_key(file: &Path) -> PathBuf {
@@ -1014,6 +1024,43 @@ mod tests {
 
         assert_eq!(cached.pane_id, "%cached");
         assert_eq!(cached.generation, 42);
+    }
+    #[test]
+    fn safe_passive_proof_cache_skips_authoritative_actor_lookup() {
+        let proof_cache = SyncProofCache::safe_passive();
+        let file = Path::new("/tmp/agent-doc-cache-hit.md");
+        let session_id = "cache-session";
+        let record = agent_doc_sqlite::state_store::ActorRecord {
+            document_id: file.display().to_string(),
+            session_id: session_id.to_string(),
+            generation: 42,
+            pane_id: "%cached".to_string(),
+            window_id: "@cached".to_string(),
+            harness: "codex".to_string(),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "prefilled_cache".to_string(),
+                timestamp: 0,
+                prior_generation: 41,
+                new_generation: 42,
+            },
+        };
+        proof_cache.actor_records.borrow_mut().insert(
+            (sync_proof_file_key(file), session_id.to_string()),
+            Some(record),
+        );
+
+        assert!(
+            load_live_authoritative_actor_record_cached(
+                &Tmux::default_server(),
+                file,
+                session_id,
+                &proof_cache,
+            )
+            .is_none(),
+            "safe-passive editor sync must not use controller actor lookups, even from cache"
+        );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]

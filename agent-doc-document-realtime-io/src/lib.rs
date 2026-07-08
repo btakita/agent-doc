@@ -74,6 +74,16 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         atomic_write_through_authority(file, content)
     }
 
+    fn apply_canonical_replace_if_attached(
+        &self,
+        file: &Path,
+        expected_current: &str,
+        content: &str,
+        source: &str,
+    ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+        apply_canonical_replace_if_attached(file, expected_current, content, source)
+    }
+
     fn guard_visible_write_idle_and_current(
         &self,
         file: &Path,
@@ -273,7 +283,11 @@ pub fn atomic_write_if_current_through_authority(
     expected_current: &str,
     source: &str,
 ) -> Result<()> {
-    guard_visible_write_idle_and_current(path, source, expected_current)?;
+    guard_visible_write_idle_current_or_target(path, source, expected_current, Some(content))?;
+    let resolved = try_resolve_current_document_content(path, source)?;
+    if !visible_write_content_matches(&resolved, content) {
+        apply_canonical_replace_if_attached(path, expected_current, content, source)?;
+    }
     atomic_write_through_authority(path, content)
 }
 
@@ -304,6 +318,30 @@ pub fn apply_cpc_write_through_relay_authority(
         content,
         source,
     )
+}
+
+pub fn apply_canonical_replace_if_attached(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+    let relay_write =
+        apply_cpc_write_through_relay_authority(file, expected_current, content, source)?;
+    if let Some(relay_write) = relay_write.as_ref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
+                file.display(),
+                relay_write.content_hash,
+                relay_write.update_bytes,
+                relay_write.targets,
+                relay_write.delivery_converged,
+            ),
+        );
+    }
+    Ok(relay_write)
 }
 
 fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {

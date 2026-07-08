@@ -53,7 +53,7 @@
 //! - Stash windows named exactly `"stash"` or matching `"stash-*"` are the only
 //!   windows whose panes may be killed automatically; non-stash windows are only
 //!   touched when purging orphaned agent panes with sibling panes present.
-//! - `apply_fixes` acquires a `RegistryLock` before mutating `sessions.json`; all
+//! - `apply_fixes` acquires a `RegistryLock` before mutating the durable registry; all
 //!   registry mutations are atomic with respect to concurrent agent-doc processes.
 //! - Dead panes are exclusively handled by `tmux_router::prune()`; `detect_issues`
 //!   skips dead panes entirely to avoid double-reporting.

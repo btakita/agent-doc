@@ -79,6 +79,16 @@ fn timestamp() -> String {
     agent_doc_log_time::format_log_timestamp(now)
 }
 
+fn current_pane_id_from_env() -> Option<String> {
+    std::env::var("TMUX_PANE")
+        .ok()
+        .filter(|pane| !pane.trim().is_empty())
+}
+
+fn disk_document_allows_pre_admission_pane_guard(file: &Path) -> bool {
+    agent_doc_frontmatter_io::session::read_session_id(file).is_some()
+}
+
 struct StartAdmissionLaunchLog<'a> {
     session_log: &'a mut Option<std::fs::File>,
     route_owned: bool,
@@ -275,6 +285,31 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         anyhow::bail!("file not found: {}", file.display());
     }
 
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let admission_tmux = tmux_router::Tmux::default_server();
+    if disk_document_allows_pre_admission_pane_guard(file)
+        && let Some(pane_id) = current_pane_id_from_env()
+        && let Some(other) = agent_doc_sync_io::sync::pane_owned_document_other_than(
+            &admission_tmux,
+            &pane_id,
+            &canonical,
+        )
+    {
+        let message = format!(
+            "start_cross_document_owner_pane_refused file={} pane={} pane_owns={} phase=pre_admission",
+            file.display(),
+            pane_id,
+            other
+        );
+        agent_doc_ops_log_io::log_op(file, &message);
+        anyhow::bail!(
+            "current tmux pane {} already owns another agent-doc document: {}. Run `agent-doc start {}` from a different shell/tmux pane, or use the editor sync/route action to provision a separate owner.",
+            pane_id,
+            other,
+            file.display()
+        );
+    }
+
     let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
     let start_document = resolve_start_admission_document(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -305,7 +340,6 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         &rc.ssh_context(),
     )?;
     let global_config = agent_doc_config::load().unwrap_or_default();
-    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
         .unwrap_or_else(|| {
             std::env::current_dir()
@@ -353,6 +387,26 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
             ),
         );
         anyhow::bail!("{}", diagnostic);
+    }
+
+    if let Some(other) =
+        agent_doc_sync_io::sync::pane_owned_document_other_than(&tmux, &pane_id, &canonical)
+    {
+        let message = format!(
+            "start_cross_document_owner_pane_refused file={} pane={} pane_owns={} session_id={}",
+            file.display(),
+            pane_id,
+            other,
+            session_id
+        );
+        log_event(&mut session_log, &message);
+        agent_doc_ops_log_io::log_op(file, &message);
+        anyhow::bail!(
+            "current tmux pane {} already owns another agent-doc document: {}. Run `agent-doc start {}` from a different shell/tmux pane, or use the editor sync/route action to provision a separate owner.",
+            pane_id,
+            other,
+            file.display()
+        );
     }
 
     clear_superseded_startup_miss(file, &mut session_log, route_owned)?;
@@ -414,23 +468,6 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
     let supervisor_instance_id = uuid::Uuid::new_v4().to_string();
     let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
     let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
-    let file_str = file.to_string_lossy();
-    sessions::register_supervisor(
-        &session_id,
-        &pane_id,
-        &file_str,
-        std::process::id(),
-        &supervisor_instance_id,
-    )?;
-    start_console_status(
-        &mut session_log,
-        route_owned,
-        format!(
-            "Registered session {} -> pane {}",
-            &session_id[..8],
-            pane_id
-        ),
-    );
 
     let start_generation = {
         let generations = agent_doc_session_actor_io::next_generation(&canonical, &session_id)
@@ -485,6 +522,26 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
             actor_record.state.as_str()
         ),
     );
+    start_console_status(
+        &mut session_log,
+        route_owned,
+        format!(
+            "Registered session {} -> pane {}",
+            &session_id[..8],
+            pane_id
+        ),
+    );
+    publish_start_supervisor_registry(StartSupervisorRegistryPublication {
+        file,
+        canonical: &canonical,
+        project_root: &project_root,
+        session_id: &session_id,
+        pane_id: &pane_id,
+        pane_window: &pane_window,
+        supervisor_instance_id: &supervisor_instance_id,
+        session_log: &mut session_log,
+        route_owned,
+    });
 
     fire_session_start_hooks(file, &session_id, &fm, &global_config, &harness);
 
@@ -714,10 +771,33 @@ pub fn existing_session_pane_action(
         session_id,
         Some(current_pane),
     );
+    let entry_ref = entry.as_ref();
+    let effective_entry = if let Some(entry) = entry_ref {
+        if tmux.pane_alive(&entry.pane)
+            && let Some(other) =
+                agent_doc_sync_io::sync::pane_owned_document_other_than(tmux, &entry.pane, file)
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "start_stale_registry_cross_document_pane_ignored file={} pane={} pane_owns={} session_id={}",
+                    file.display(),
+                    entry.pane,
+                    other,
+                    session_id
+                ),
+            );
+            None
+        } else {
+            entry_ref
+        }
+    } else {
+        None
+    };
     Ok(existing_session_pane_action_from_entry(
         tmux,
         current_pane,
-        entry.as_ref(),
+        effective_entry,
         live_owner.as_deref(),
     ))
 }
@@ -843,6 +923,76 @@ struct StartControllerSessionInput<'a> {
     pane_window: &'a str,
     start_generation: u64,
     session_log: &'a mut Option<std::fs::File>,
+}
+
+struct StartSupervisorRegistryPublication<'a> {
+    file: &'a Path,
+    canonical: &'a Path,
+    project_root: &'a Path,
+    session_id: &'a str,
+    pane_id: &'a str,
+    pane_window: &'a str,
+    supervisor_instance_id: &'a str,
+    session_log: &'a mut Option<std::fs::File>,
+    route_owned: bool,
+}
+
+fn publish_start_supervisor_registry(input: StartSupervisorRegistryPublication<'_>) {
+    let StartSupervisorRegistryPublication {
+        file,
+        canonical,
+        project_root,
+        session_id,
+        pane_id,
+        pane_window,
+        supervisor_instance_id,
+        session_log,
+        route_owned,
+    } = input;
+    let canonical_file = canonical.to_string_lossy().to_string();
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| project_root.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    match sessions::register_start_supervisor_in(
+        project_root,
+        session_id,
+        pane_id,
+        &canonical_file,
+        std::process::id(),
+        pane_window,
+        &cwd,
+        supervisor_instance_id,
+    ) {
+        Ok(()) => {
+            log_event(
+                session_log,
+                &format!(
+                    "start_registry_publish file={} pane={} session={} project_root={}",
+                    canonical.display(),
+                    pane_id,
+                    session_id,
+                    project_root.display()
+                ),
+            );
+        }
+        Err(err) => {
+            let message = format!(
+                "start_registry_publish_failed file={} pane={} session={} project_root={} err={err:#}",
+                canonical.display(),
+                pane_id,
+                session_id,
+                project_root.display()
+            );
+            agent_doc_ops_log_io::log_op(file, &message);
+            log_event(session_log, &message);
+            start_console_status(
+                session_log,
+                route_owned,
+                format!("[start] warning: durable registry refresh failed: {err}"),
+            );
+        }
+    }
 }
 
 fn start_controller_session(
@@ -1036,5 +1186,42 @@ mod tests {
             StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
         );
         assert!(document.authority.needs_post_start_document_model_ensure());
+    }
+
+    #[test]
+    fn start_registry_publication_uses_project_root_after_controller_acceptance() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let mut session_log = Some(tempfile::tempfile().unwrap());
+
+        publish_start_supervisor_registry(StartSupervisorRegistryPublication {
+            file: &doc,
+            canonical: &doc,
+            project_root: dir.path(),
+            session_id: "efs",
+            pane_id: "%26",
+            pane_window: "@3",
+            supervisor_instance_id: "sup-efs",
+            session_log: &mut session_log,
+            route_owned: true,
+        });
+
+        let registry = agent_doc_session_registry_io::load_in(dir.path()).unwrap();
+        let key =
+            tmux_router::registry::canonical_registry_key_in(dir.path(), &doc.to_string_lossy());
+        let entry = registry
+            .get(&key)
+            .expect("start registry publication should write the project-root registry");
+        assert_eq!(entry.session_id, "efs");
+        assert_eq!(entry.pane, "%26");
+        assert_eq!(entry.window, "@3");
+        assert_eq!(entry.supervisor_instance_id, "sup-efs");
     }
 }

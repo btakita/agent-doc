@@ -2185,7 +2185,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     .unwrap()
                     .as_deref(),
                 Some(actor_pane.as_str()),
-                "route should still refresh the registry projection to the authoritative actor pane for {actor_state}"
+                "route should still refresh the durable registry to the authoritative actor pane for {actor_state}"
             );
 
             let trigger = HarnessConfig::codex().trigger_command(&file_path);
@@ -3817,21 +3817,16 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn sync_after_claim_handles_malformed_registry() {
-        // When sessions.json is malformed, sync_after_claim should not panic.
+        // When the durable registry is malformed, sync_after_claim should not panic.
         // It should return early (silently) rather than propagating the error.
         let iso = IsolatedTmux::new("route-test-malformed-registry");
         let tmp = tempfile::TempDir::new().unwrap();
         let session = "test";
         let pane = iso.new_session(session, tmp.path()).unwrap();
 
-        // Write malformed sessions.json (array format instead of map)
-        let sessions_path = tmp.path().join(".agent-doc");
-        std::fs::create_dir_all(&sessions_path).unwrap();
-        std::fs::write(
-            sessions_path.join("sessions.json"),
-            r#"{"sessions": [{"bad": "format"}]}"#,
-        )
-        .unwrap();
+        let registry_path = agent_doc_session_registry_io::registry_path_in(tmp.path());
+        std::fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        std::fs::write(&registry_path, b"not a sqlite database").unwrap();
 
         // sync_after_claim should not panic — it handles errors gracefully
         // (returns early on load failure)

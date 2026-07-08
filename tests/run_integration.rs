@@ -936,15 +936,7 @@ fn codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_com
     )
     .unwrap();
     init_git_repo(tmp.path(), &doc);
-    fs::write(
-        tmp.path().join(".agent-doc/sessions.json"),
-        format!(
-            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
-            tmp.path().display(),
-            doc.display()
-        ),
-    )
-    .unwrap();
+    write_codex_owner_session(tmp.path(), &doc);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1000,15 +992,7 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
     init_git_repo(tmp.path(), &doc);
     seed_snapshot(tmp.path(), &doc);
     record_selected_queue_head(tmp.path(), &doc, committed, "do something");
-    fs::write(
-        tmp.path().join(".agent-doc/sessions.json"),
-        format!(
-            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
-            tmp.path().display(),
-            doc.display()
-        ),
-    )
-    .unwrap();
+    write_codex_owner_session(tmp.path(), &doc);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1103,15 +1087,21 @@ fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
 }
 
 fn write_codex_owner_session(root: &Path, doc: &Path) {
-    fs::write(
-        root.join(".agent-doc/sessions.json"),
-        format!(
-            "{{\n  \"session-recursive\": {{\n    \"pane\": \"%77\",\n    \"pid\": 123,\n    \"cwd\": \"{}\",\n    \"started\": \"2026-05-10T00:00:00Z\",\n    \"session_id\": \"session-recursive\",\n    \"file\": \"{}\",\n    \"window\": \"@7\",\n    \"supervisor_instance_id\": \"test-supervisor\"\n  }}\n}}\n",
-            root.display(),
-            doc.display()
-        ),
-    )
-    .unwrap();
+    let mut registry = tmux_router::Registry::new();
+    registry.insert(
+        doc.display().to_string(),
+        tmux_router::RegistryEntry {
+            pane: "%77".to_string(),
+            pid: 123,
+            cwd: root.display().to_string(),
+            started: "2026-05-10T00:00:00Z".to_string(),
+            session_id: "session-recursive".to_string(),
+            file: doc.display().to_string(),
+            window: "@7".to_string(),
+            supervisor_instance_id: "test-supervisor".to_string(),
+        },
+    );
+    agent_doc_session_registry_io::save_in(root, &registry).unwrap();
 }
 
 fn save_active_queue_turn_scope(doc: &Path, id: &str, exchange_tail_floor: usize) {

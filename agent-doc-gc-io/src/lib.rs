@@ -6,9 +6,9 @@
 //!   durable response captures for hash-keyed files/directories.
 //! - Cross-references hashes against existing documents in the project.
 //! - Removes files whose corresponding document no longer exists.
-//! - Scans `.agent-doc/supervisor/*.sock` for orphaned sockets: checks
-//!   sessions.json PID liveness, then tries socket connect as fallback.
-//!   Removes dead sockets and prunes stale sessions.json entries.
+//! - Scans `.agent-doc/supervisor/*.sock` for orphaned sockets: checks durable
+//!   registry PID liveness, then tries socket connect as fallback.
+//!   Removes dead sockets and prunes stale durable registry entries.
 //! - Removes stale `.agent-doc/typing/` indicator files (>7 days).
 //! - Removes stale `.agent-doc/status/` files (>24 hours).
 //! - Removes old `.agent-doc/repair-blocked/` diagnostic files (>7 days).
@@ -24,7 +24,7 @@
 //!   Returns `Ok(GcResult)` with counts of deleted/skipped files.
 //! - Never deletes files or capture ledgers for documents that still exist on disk.
 //! - Stale lock files (>1 hour old) are always cleaned regardless of document existence.
-//! - `clean_orphaned_sockets` acquires `RegistryLock` when pruning sessions.json
+//! - `clean_orphaned_sockets` acquires `RegistryLock` when pruning durable registry
 //!   entries; read-only callers do not hold the lock.
 
 use anyhow::Result;
@@ -465,7 +465,7 @@ pub fn run_with_controller_effects(
     total_deleted += removed_root_reaped;
     total_skipped += removed_root_kept;
 
-    // Clean orphaned supervisor sockets + stale sessions.json entries
+    // Clean orphaned supervisor sockets + stale durable registry entries
     let (sock_deleted, sock_kept) = clean_orphaned_sockets(&project_root, dry_run)?;
     if sock_deleted > 0 {
         eprintln!(
@@ -819,15 +819,15 @@ fn pid_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 
-/// Clean orphaned supervisor sockets and stale sessions.json entries.
+/// Clean orphaned supervisor sockets and stale durable registry entries.
 ///
 /// For each `.sock` file in `.agent-doc/supervisor/`:
 /// 1. Extract session UUID from filename
-/// 2. Look up PID in sessions.json — if PID is alive, keep socket
-/// 3. If PID is dead or no sessions.json entry, try connecting to socket
-/// 4. If connect fails: remove socket file + prune sessions.json entry
+/// 2. Look up PID in the durable registry — if PID is alive, keep socket
+/// 3. If PID is dead or no durable registry entry, try connecting to socket
+/// 4. If connect fails: remove socket file + prune durable registry entry
 ///
-/// Also prunes sessions.json entries whose PID is dead and socket is gone.
+/// Also prunes durable registry entries whose PID is dead and socket is gone.
 fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, usize)> {
     let supervisor_dir = project_root.join(".agent-doc/supervisor");
     if !supervisor_dir.is_dir() {
@@ -882,13 +882,13 @@ fn clean_orphaned_sockets(project_root: &Path, dry_run: bool) -> Result<(usize, 
         }
         deleted += 1;
 
-        // Mark for sessions.json pruning if entry exists
+        // Mark for durable registry pruning if entry exists
         if let Some(key) = registry_key {
             keys_to_prune.push(key);
         }
     }
 
-    // Phase 2: prune sessions.json entries for dead sockets
+    // Phase 2: prune durable registry entries for dead sockets
     // Also find entries whose PID is dead and socket doesn't exist
     for (registry_key, entry) in registry.iter() {
         if keys_to_prune.contains(registry_key) {
@@ -1123,7 +1123,7 @@ mod tests {
         let uuid = "dead-session-uuid";
         std::fs::write(supervisor_dir.join(format!("{uuid}.sock")), "").unwrap();
 
-        // Register in sessions.json with a dead PID
+        // Register in the durable registry with a dead PID
         let mut reg = SessionRegistry::new();
         reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
         agent_doc_session_registry_io::save_in(root, &reg).unwrap();
@@ -1135,7 +1135,7 @@ mod tests {
         // Socket file should be gone
         assert!(!supervisor_dir.join(format!("{uuid}.sock")).exists());
 
-        // sessions.json entry should be pruned
+        // Durable registry entry should be pruned
         let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(!loaded.values().any(|entry| entry.session_id == uuid));
     }
@@ -1173,7 +1173,7 @@ mod tests {
         let supervisor_dir = root.join(".agent-doc/supervisor");
         std::fs::create_dir_all(&supervisor_dir).unwrap();
 
-        // Socket with no sessions.json entry and no live listener
+        // Socket with no durable registry entry and no live listener
         let uuid = "leaked-socket";
         std::fs::write(supervisor_dir.join(format!("{uuid}.sock")), "").unwrap();
 
@@ -1189,7 +1189,7 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc/supervisor")).unwrap();
 
-        // sessions.json entry with dead PID, no socket file
+        // Durable registry entry with dead PID, no socket file
         let uuid = "ghost-session";
         let mut reg = SessionRegistry::new();
         reg.insert(uuid.to_string(), make_session_entry(uuid, 999999));
@@ -1224,7 +1224,7 @@ mod tests {
         // But file should still exist
         assert!(sock_path.exists());
 
-        // And sessions.json should be unmodified
+        // And the durable registry should be unmodified
         let loaded = agent_doc_session_registry_io::load_in(root).unwrap();
         assert!(loaded.values().any(|entry| entry.session_id == uuid));
     }

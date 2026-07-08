@@ -10,8 +10,8 @@
 //!   API, which remains backward-compatible with logs that only have
 //!   `session_start` lines and no explicit generation markers.
 //! - The durable actor store lives behind the Project Controller's SQLite state,
-//!   keyed by canonical document path, while `session-actors.json` and
-//!   `sessions.json` remain compatibility projections during migration.
+//!   keyed by canonical document path. Legacy JSON actor/session projections are
+//!   not read as bootstrap authority.
 //!
 //! ## Agentic Contracts
 //! - The actor store is authoritative for the latest generation once present.
@@ -26,7 +26,7 @@
 
 use agent_doc_harness::{document_harness_from_content, normalize_harness_name};
 use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_content};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 use agent_doc_sqlite::state_store::{self, ActorLastTransition, ActorRecord, ActorState};
@@ -91,32 +91,8 @@ pub fn canonical_document_id_in(base_dir: &Path, file: &str) -> String {
         .unwrap_or_else(|| tmux_router::registry::canonical_registry_key_in(base_dir, file))
 }
 
-fn legacy_actor_projection(project_root: &Path) -> Result<Option<ActorStore>> {
-    let path = agent_doc_controller::paths::actor_projection_path(project_root);
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(None);
-    };
-    let store = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(Some(store))
-}
-
-fn migrate_legacy_actor_projection(
-    project_root: &Path,
-    conn: &mut state_store::Connection,
-) -> Result<()> {
-    if !state_store::actor_documents_empty(conn)? {
-        return Ok(());
-    }
-    let Some(store) = legacy_actor_projection(project_root)? else {
-        return Ok(());
-    };
-    state_store::migrate_actor_store_tx(conn, &store, None, None)
-}
-
 fn load_store_in(base_dir: &Path) -> Result<ActorStore> {
-    let mut conn = state_store::open_state_db(base_dir)?;
-    migrate_legacy_actor_projection(base_dir, &mut conn)?;
+    let conn = state_store::open_state_db(base_dir)?;
     state_store::load_actor_store_from_db(&conn)
 }
 
@@ -124,8 +100,7 @@ fn load_actor_record_by_document_id(
     base_dir: &Path,
     document_id: &str,
 ) -> Result<Option<ActorRecord>> {
-    let mut conn = state_store::open_state_db(base_dir)?;
-    migrate_legacy_actor_projection(base_dir, &mut conn)?;
+    let conn = state_store::open_state_db(base_dir)?;
     state_store::load_actor_record_from_db(&conn, document_id)
 }
 
@@ -135,7 +110,6 @@ fn store_actor_record_in(
     record: &ActorRecord,
 ) -> Result<ActorRecord> {
     let mut conn = state_store::open_state_db(base_dir)?;
-    migrate_legacy_actor_projection(base_dir, &mut conn)?;
     state_store::store_actor_record_tx(&mut conn, expected_prior_generation, record, None, None)?;
     Ok(record.clone())
 }

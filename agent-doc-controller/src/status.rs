@@ -57,9 +57,10 @@ pub struct ControllerBinaryIdentity {
     pub modified_nanos: u32,
 }
 
-/// True when a recorded long-lived process identity matches the freshly
-/// resolved controller binary identity. Missing identity is a fail-open
-/// mismatch.
+/// True only when a recorded long-lived process identity exactly matches the
+/// freshly resolved controller binary identity. Missing identity is not a
+/// match; callers that need fail-open stale detection should use
+/// `process_binary_is_stale`.
 pub fn controller_binary_identity_matches(
     recorded: Option<&ControllerBinaryIdentity>,
     current: Option<&ControllerBinaryIdentity>,
@@ -243,112 +244,6 @@ pub struct ControllerBootstrapStatusFacts {
     pub handoff_state: ControllerHandoffState,
     pub handoff_started_at: Option<u64>,
     pub previous_controller_pid: Option<u32>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionRecordFacts<'a> {
-    pub document_id: &'a str,
-    pub session_id: &'a str,
-    pub pane_id: &'a str,
-    pub window_id: &'a str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionPriorFacts<'a> {
-    pub pid: u32,
-    pub cwd: &'a str,
-    pub started: &'a str,
-    pub file: &'a str,
-    pub supervisor_instance_id: &'a str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionHintFacts<'a> {
-    pub pid: u32,
-    pub cwd: &'a str,
-    pub file: &'a str,
-    pub supervisor_instance_id: &'a str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionLeaseFacts {
-    pub supervisor_pid: Option<u32>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionEntryFacts<'a> {
-    pub project_root: &'a str,
-    pub record: SessionsProjectionRecordFacts<'a>,
-    pub prior: Option<SessionsProjectionPriorFacts<'a>>,
-    pub hint: Option<SessionsProjectionHintFacts<'a>>,
-    pub lease: Option<SessionsProjectionLeaseFacts>,
-    pub default_started: &'a str,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SessionsProjectionEntrySelection {
-    pub pane: String,
-    pub pid: u32,
-    pub cwd: String,
-    pub started: String,
-    pub session_id: String,
-    pub file: String,
-    pub window: String,
-    pub supervisor_instance_id: String,
-}
-
-pub fn select_sessions_projection_entry(
-    facts: SessionsProjectionEntryFacts<'_>,
-) -> SessionsProjectionEntrySelection {
-    let pid = facts
-        .prior
-        .map(|entry| entry.pid)
-        .filter(|pid| *pid != 0)
-        .or_else(|| facts.hint.map(|hint| hint.pid).filter(|pid| *pid != 0))
-        .or_else(|| facts.lease.and_then(|lease| lease.supervisor_pid))
-        .unwrap_or(0);
-    let cwd = facts
-        .prior
-        .and_then(|entry| non_empty_str(entry.cwd))
-        .or_else(|| facts.hint.and_then(|hint| non_empty_str(hint.cwd)))
-        .unwrap_or(facts.project_root)
-        .to_string();
-    let started = facts
-        .prior
-        .and_then(|entry| non_empty_str(entry.started))
-        .unwrap_or(facts.default_started)
-        .to_string();
-    let file = facts
-        .prior
-        .and_then(|entry| non_empty_str(entry.file))
-        .or_else(|| facts.hint.and_then(|hint| non_empty_str(hint.file)))
-        .unwrap_or(facts.record.document_id)
-        .to_string();
-    let supervisor_instance_id = facts
-        .prior
-        .and_then(|entry| non_empty_str(entry.supervisor_instance_id))
-        .or_else(|| {
-            facts
-                .hint
-                .and_then(|hint| non_empty_str(hint.supervisor_instance_id))
-        })
-        .unwrap_or("")
-        .to_string();
-
-    SessionsProjectionEntrySelection {
-        pane: facts.record.pane_id.to_string(),
-        pid,
-        cwd,
-        started,
-        session_id: facts.record.session_id.to_string(),
-        file,
-        window: facts.record.window_id.to_string(),
-        supervisor_instance_id,
-    }
-}
-
-fn non_empty_str(value: &str) -> Option<&str> {
-    if value.is_empty() { None } else { Some(value) }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1415,116 +1310,6 @@ mod tests {
                 ..base
             }
         ));
-    }
-
-    #[test]
-    fn sessions_projection_entry_selection_prefers_prior_metadata_and_live_record_binding() {
-        let selection = select_sessions_projection_entry(SessionsProjectionEntryFacts {
-            project_root: "/project",
-            record: SessionsProjectionRecordFacts {
-                document_id: "tasks/current.md",
-                session_id: "session-live",
-                pane_id: "%51",
-                window_id: "@2",
-            },
-            prior: Some(SessionsProjectionPriorFacts {
-                pid: 123,
-                cwd: "/prior",
-                started: "1",
-                file: "tasks/prior.md",
-                supervisor_instance_id: "supervisor-prior",
-            }),
-            hint: Some(SessionsProjectionHintFacts {
-                pid: 456,
-                cwd: "/hint",
-                file: "tasks/hint.md",
-                supervisor_instance_id: "supervisor-hint",
-            }),
-            lease: Some(SessionsProjectionLeaseFacts {
-                supervisor_pid: Some(789),
-            }),
-            default_started: "999",
-        });
-
-        assert_eq!(
-            selection,
-            SessionsProjectionEntrySelection {
-                pane: "%51".to_string(),
-                pid: 123,
-                cwd: "/prior".to_string(),
-                started: "1".to_string(),
-                session_id: "session-live".to_string(),
-                file: "tasks/prior.md".to_string(),
-                window: "@2".to_string(),
-                supervisor_instance_id: "supervisor-prior".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn sessions_projection_entry_selection_uses_hint_after_empty_prior_metadata() {
-        let selection = select_sessions_projection_entry(SessionsProjectionEntryFacts {
-            project_root: "/project",
-            record: SessionsProjectionRecordFacts {
-                document_id: "tasks/current.md",
-                session_id: "session-live",
-                pane_id: "%51",
-                window_id: "@2",
-            },
-            prior: Some(SessionsProjectionPriorFacts {
-                pid: 0,
-                cwd: "",
-                started: "",
-                file: "",
-                supervisor_instance_id: "",
-            }),
-            hint: Some(SessionsProjectionHintFacts {
-                pid: 456,
-                cwd: "/hint",
-                file: "tasks/hint.md",
-                supervisor_instance_id: "supervisor-hint",
-            }),
-            lease: Some(SessionsProjectionLeaseFacts {
-                supervisor_pid: Some(789),
-            }),
-            default_started: "999",
-        });
-
-        assert_eq!(selection.pid, 456);
-        assert_eq!(selection.cwd, "/hint");
-        assert_eq!(selection.started, "999");
-        assert_eq!(selection.file, "tasks/hint.md");
-        assert_eq!(selection.supervisor_instance_id, "supervisor-hint");
-    }
-
-    #[test]
-    fn sessions_projection_entry_selection_uses_lease_and_defaults_after_empty_sources() {
-        let selection = select_sessions_projection_entry(SessionsProjectionEntryFacts {
-            project_root: "/project",
-            record: SessionsProjectionRecordFacts {
-                document_id: "tasks/current.md",
-                session_id: "session-live",
-                pane_id: "%51",
-                window_id: "@2",
-            },
-            prior: None,
-            hint: Some(SessionsProjectionHintFacts {
-                pid: 0,
-                cwd: "",
-                file: "",
-                supervisor_instance_id: "",
-            }),
-            lease: Some(SessionsProjectionLeaseFacts {
-                supervisor_pid: Some(789),
-            }),
-            default_started: "999",
-        });
-
-        assert_eq!(selection.pid, 789);
-        assert_eq!(selection.cwd, "/project");
-        assert_eq!(selection.started, "999");
-        assert_eq!(selection.file, "tasks/current.md");
-        assert_eq!(selection.supervisor_instance_id, "");
     }
 
     #[test]

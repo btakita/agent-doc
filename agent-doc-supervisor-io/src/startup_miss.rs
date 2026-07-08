@@ -733,23 +733,21 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let doc = setup_project(tmp.path());
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let registry = serde_json::json!({
-            doc.display().to_string(): {
-                "pane": "%408",
-                "pid": 1,
-                "cwd": tmp.path().display().to_string(),
-                "started": "2026-04-29T00:00:00Z",
-                "session_id": "session-456",
-                "file": doc.display().to_string(),
-                "window": "@1",
-                "supervisor_instance_id": ""
-            }
-        });
-        std::fs::write(
-            tmp.path().join(".agent-doc/sessions.json"),
-            serde_json::to_string_pretty(&registry).unwrap(),
-        )
-        .unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            doc.display().to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%408".to_string(),
+                pid: 1,
+                cwd: tmp.path().display().to_string(),
+                started: "2026-04-29T00:00:00Z".to_string(),
+                session_id: "session-456".to_string(),
+                file: doc.display().to_string(),
+                window: "@1".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
 
         let owner = session_registry_lookup()
             .registered_startup_owner(tmp.path(), &doc)

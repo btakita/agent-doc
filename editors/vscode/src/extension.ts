@@ -3,14 +3,15 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native';
 import * as stateMirror from './stateMirror';
 import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
-import { activateLosslessFrameWatchers } from './losslessFrameWatcher';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
 import { parseSaveDocumentSignal } from './saveSignal';
+import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
     buildBusySessionRestartBlockedMessage,
@@ -34,7 +35,6 @@ import {
 } from './popupMenu';
 import {
     analyzeTabSyncCommandResult,
-    buildImmediateFocusCommandArgs,
     buildSyncCommandArgs,
     buildTabChangeCommand,
     flattenVisibleColumns,
@@ -59,9 +59,7 @@ import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
 // ---------------------------------------------------------------------------
 
 let resolvedAgentDoc: string | null = null;
-const SYNC_CLI_TIMEOUT_MS = 30_000;
 const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
-const FOCUS_CLI_TIMEOUT_MS = 750;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
@@ -811,6 +809,36 @@ function formatSyncLayoutSummary(columns: string[][], focusFile?: string): strin
     return `Sync: --col ${summarizedColumns}${focusFile ? ` [focus: ${focusFile}]` : ''}`;
 }
 
+function focusReceiptFocused(raw: string | null): boolean {
+    if (!raw) return false;
+    try {
+        const parsed = JSON.parse(raw);
+        const data = parsed && typeof parsed === 'object' && 'data' in parsed
+            ? (parsed as any).data
+            : parsed;
+        return data?.focused === true;
+    } catch {
+        return false;
+    }
+}
+
+function syncReceiptReason(raw: string | null): string {
+    if (!raw) return '';
+    try {
+        const parsed = JSON.parse(raw);
+        const data = parsed && typeof parsed === 'object' && 'data' in parsed
+            ? (parsed as any).data
+            : parsed;
+        return typeof data?.reason === 'string' ? data.reason : '';
+    } catch {
+        return raw;
+    }
+}
+
+function buildSyncLayoutColumns(columns: string[][]): string[] {
+    return normalizeVisibleColumns(columns).map((column) => column.join(','));
+}
+
 function buildSyncLayoutCommand(
     columns: string[][],
     focusFile?: string,
@@ -843,22 +871,147 @@ function buildRouteLayoutArgs(columns: string[][], focusFile?: string): string[]
     return args;
 }
 
-function buildRunRouteCommandArgs(
-    relativePath: string,
-    columns: string[][],
-    focusFile?: string,
-): string[] {
-    return [
-        'route',
-        '--dispatch-only',
-        '--plain-trigger',
-        '--debounce',
-        '0',
-        '--wait-for-ready',
-        ROUTE_WAIT_FOR_READY_SECONDS,
-        relativePath,
-        ...buildRouteLayoutArgs(columns, focusFile),
-    ];
+function controllerSocketPath(projectRoot: string): string {
+    return path.join(projectRoot, '.agent-doc', 'controller.sock');
+}
+
+async function ensureProjectControllerRunning(projectRoot: string, signal: AbortSignal): Promise<void> {
+    await runCli(
+        ['controller', 'status', '--project-root', projectRoot, '--ensure'],
+        projectRoot,
+        { signal, timeoutMs: 60_000 },
+    );
+}
+
+function requestProjectController(
+    projectRoot: string,
+    request: Record<string, unknown>,
+    signal: AbortSignal,
+): Promise<any> {
+    return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+            reject(new CliCancelledError());
+            return;
+        }
+
+        const socket = net.createConnection(controllerSocketPath(projectRoot));
+        let response = '';
+        let settled = false;
+
+        const cleanup = () => {
+            signal.removeEventListener('abort', abortHandler);
+            socket.removeAllListeners();
+            socket.destroy();
+        };
+        const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            fn();
+        };
+        const abortHandler = () => {
+            socket.destroy();
+            finish(() => reject(new CliCancelledError()));
+        };
+
+        signal.addEventListener('abort', abortHandler, { once: true });
+        socket.setEncoding('utf8');
+        socket.on('connect', () => {
+            socket.write(`${JSON.stringify(request)}\n`);
+        });
+        socket.on('data', (chunk: string) => {
+            response += chunk;
+            const newline = response.indexOf('\n');
+            if (newline < 0) return;
+            const line = response.slice(0, newline).trim();
+            finish(() => {
+                try {
+                    const envelope = JSON.parse(line);
+                    if (envelope?.ok !== true) {
+                        reject(new Error(envelope?.error || 'project controller request failed'));
+                        return;
+                    }
+                    resolve(envelope.data);
+                } catch (err: any) {
+                    reject(new Error(`failed to parse project controller response: ${err.message}`));
+                }
+            });
+        });
+        socket.on('error', (err) => {
+            finish(() => reject(err));
+        });
+        socket.on('end', () => {
+            finish(() => reject(new Error('project controller closed connection without a response')));
+        });
+    });
+}
+
+// #lzmsgpcp: route `Run Agent Doc` through the lazily command/RPC message plane
+// (`command-plane-v1`) instead of the classic `editor_route` request. Phase 7
+// gate 3 — default-on; the controller keeps both endpoints in shadow mode, so
+// `AGENT_DOC_COMMAND_PLANE=0` falls back to the classic path.
+function commandPlaneEnabled(): boolean {
+    return process.env.AGENT_DOC_COMMAND_PLANE !== '0';
+}
+
+// Route via the command plane: send a `CommandSubmit` envelope (namespace
+// `agent-doc`, name `editor_route`) and resolve ONLY on a terminal `applied`
+// projection. Envelope + terminal resolution live in `./commandPlane`.
+async function runEditorRouteViaCommandPlane(
+    cwd: string,
+    rel: string,
+    filePath: string,
+    routeKey: string,
+    layoutArgs: string[],
+    signal: AbortSignal,
+): Promise<string> {
+    const { commandId, message } = buildEditorRouteCommandMessage(
+        rel,
+        routeKey,
+        layoutArgs,
+        Number(ROUTE_WAIT_FOR_READY_SECONDS),
+    );
+    const data = await requestProjectController(
+        cwd,
+        {
+            command: 'editor_command_submit',
+            file: filePath,
+            diagnostic_payload: JSON.stringify(message),
+        },
+        signal,
+    );
+    return resolveEditorRouteTerminal(data, commandId);
+}
+
+async function runEditorRouteViaPcp(
+    cwd: string,
+    rel: string,
+    filePath: string,
+    routeKey: string,
+    signal: AbortSignal,
+): Promise<string> {
+    await ensureProjectControllerRunning(cwd, signal);
+    const layoutArgs = buildRouteLayoutArgs(collectVisibleMarkdownColumns(cwd), rel);
+    if (commandPlaneEnabled()) {
+        return runEditorRouteViaCommandPlane(cwd, rel, filePath, routeKey, layoutArgs, signal);
+    }
+    const data = await requestProjectController(
+        cwd,
+        {
+            command: 'editor_route',
+            file: filePath,
+            diagnostic_payload: JSON.stringify(
+                buildEditorRoutePayload(rel, routeKey, layoutArgs, Number(ROUTE_WAIT_FOR_READY_SECONDS)),
+            ),
+        },
+        signal,
+    );
+    const exitCode = typeof data?.exit_code === 'number' ? data.exit_code : 1;
+    const output = typeof data?.output === 'string' ? data.output : '';
+    if (exitCode !== 0) {
+        throw new Error(output || `CPC editor_route failed with exit code ${exitCode}`);
+    }
+    return output;
 }
 
 // ---------------------------------------------------------------------------
@@ -938,11 +1091,7 @@ async function executeRunForDocument(
     try {
         if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
         routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
-        const output = await runCli(
-            buildRunRouteCommandArgs(rel, collectVisibleMarkdownColumns(cwd), rel),
-            cwd,
-            { signal: abortController.signal },
-        );
+        const output = await runEditorRouteViaPcp(cwd, rel, filePath, routeKey, abortController.signal);
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
         // #r5at: read via the lazily-js reactive mirror (snapshot/delta over the
         // FFI state backbone), falling back to the cold projection pull. The
@@ -1555,7 +1704,7 @@ async function syncLayoutAction(): Promise<void> {
 
     try {
         const { cwd } = resolveProject(root, editor.document.uri.fsPath);
-        await syncLayoutInternal(cwd, true, true);
+        await syncLayoutInternal(cwd, true, false);
     } finally {
         commandRunning = false;
     }
@@ -1583,17 +1732,25 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
     }
 
     try {
-        const args = buildSyncLayoutCommand(visibleColumns, focusFile, noAutostart);
-        const output = await runCli(args, root, { timeoutMs: SYNC_CLI_TIMEOUT_MS });
+        const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
+        const receipt = native.syncTmuxLayoutJson({
+            projectRoot: root,
+            columns: buildSyncLayoutColumns(visibleColumns),
+            focus: effectiveFocusFile,
+            noAutostart,
+            exactVisible: false,
+        });
+        if (!receipt) {
+            throw new Error('project controller sync failed');
+        }
         if (notify) {
-            if (isPreservedLayoutOutput(output)) {
-                const warning = output
-                    .split(/\r?\n/)
-                    .find((line) => isPreservedLayoutOutput(line))
-                    ?? output.trim();
-                vscode.window.showWarningMessage(warning);
+            const reason = syncReceiptReason(receipt);
+            if (isPreservedLayoutOutput(reason)) {
+                void vscode.window.showWarningMessage(
+                    'Sync deferred: the current tmux layout was preserved because one or more requested files are still blocked.',
+                );
             } else {
-                showHint(formatSyncLayoutSummary(visibleColumns, focusFile));
+                showHint(formatSyncLayoutSummary(visibleColumns, effectiveFocusFile));
             }
         }
     } catch (err: any) {
@@ -1613,6 +1770,8 @@ const TAB_SYNC_DEFERRED_RETRY_BASE_MS = 750;
 const TAB_SYNC_DEFERRED_RETRY_MAX_MS = 5_000;
 const TAB_SYNC_MAX_DEFERRED_RETRIES = 8;
 let latestTabSyncGeneration = 0;
+let latestFocusHandoffGeneration = 0;
+let lastFocusHandoffFsPath: string | undefined;
 let tabSyncDeferredRetryKey: string | undefined;
 let tabSyncDeferredRetryCount = 0;
 let tabSyncTimeoutBackoffKey: string | undefined;
@@ -1623,6 +1782,21 @@ interface PlannedTabSyncExecution {
     root: string;
     activeFsPath: string;
     planned: NonNullable<ReturnType<typeof buildTabChangeCommand>>;
+}
+
+interface PlannedFocusHandoff {
+    root: string;
+    activeFsPath: string;
+}
+
+function planCurrentFocusHandoff(): PlannedFocusHandoff | null {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return null;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) return null;
+
+    return { root, activeFsPath: editor.document.uri.fsPath };
 }
 
 function planCurrentTabChange(): PlannedTabSyncExecution | null {
@@ -1730,7 +1904,10 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
                 let output = '';
                 if (execution.planned.command.kind === 'focus') {
                     const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-                    output = await runCli(buildImmediateFocusCommandArgs(rel), cwd, { timeoutMs: FOCUS_CLI_TIMEOUT_MS });
+                    output = native.focusDocumentPaneJson({
+                        projectRoot: cwd,
+                        documentPath: execution.activeFsPath,
+                    }) ?? '';
                 } else {
                     const backoffMs = remainingTabSyncTimeoutBackoffMs(execution);
                     if (backoffMs > 0) {
@@ -1809,13 +1986,24 @@ async function drainTabSync(requestedGeneration: number): Promise<void> {
     }
 }
 
-function focusExistingPaneForTabChange(execution: PlannedTabSyncExecution, generation: number): void {
+function focusExistingPaneForActiveEditor(): void {
+    const execution = planCurrentFocusHandoff();
+    if (execution === null) {
+        lastFocusHandoffFsPath = undefined;
+        return;
+    }
+    if (execution.activeFsPath === lastFocusHandoffFsPath) return;
+    lastFocusHandoffFsPath = execution.activeFsPath;
+    const generation = ++latestFocusHandoffGeneration;
     void (async () => {
-        if (generation !== latestTabSyncGeneration) return;
+        if (generation !== latestFocusHandoffGeneration) return;
         try {
             const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-            await runCli(buildImmediateFocusCommandArgs(rel), cwd, { timeoutMs: FOCUS_CLI_TIMEOUT_MS });
-            if (generation === latestTabSyncGeneration) {
+            const receipt = native.focusDocumentPaneJson({
+                projectRoot: cwd,
+                documentPath: execution.activeFsPath,
+            });
+            if (generation === latestFocusHandoffGeneration && focusReceiptFocused(receipt)) {
                 showHint(`Focus: ${rel}`);
             }
         } catch {
@@ -1825,10 +2013,10 @@ function focusExistingPaneForTabChange(execution: PlannedTabSyncExecution, gener
 }
 
 function onTabChanged(): void {
+    focusExistingPaneForActiveEditor();
     const execution = planCurrentTabChange();
     if (execution === null) return;
-    const generation = requestTabSync();
-    focusExistingPaneForTabChange(execution, generation);
+    requestTabSync();
 }
 
 // ---------------------------------------------------------------------------
@@ -3165,9 +3353,6 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export function activate(context: vscode.ExtensionContext): void {
-    // #lzlosstree Phase 5: apply lossless-tree frames the binary emits for tree-capable
-    // sessions to the live buffer (no-op unless a frame is actually dropped).
-    activateLosslessFrameWatchers(context);
     // Goal 1: coordinate the CPC turn state into the status bar. Refresh on active
     // editor changes and turn-scope file events so the plugin reflects the CPC's
     // authoritative turn phase without a fixed polling interval.

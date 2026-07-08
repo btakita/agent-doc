@@ -27,9 +27,17 @@ pub fn initial_warnings(
     // #fccsupwarn: read-only WARN when the live controller/supervisor hosting
     // this document is serving a stale agent-doc binary. Fail-open: any
     // status/stat error yields no warning and never blocks the cycle.
-    if let Some(message) =
+    if let Some(mut message) =
         agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
     {
+        let recycle_status =
+            agent_doc_controller_io::project_controller::schedule_stale_supervisor_pcp_recycle(
+                file,
+                "preflight_warning",
+            );
+        message.push_str(&format!(
+            " Automatic PCP recycle request status: {recycle_status}."
+        ));
         warnings.push(PreflightWarning {
             code: "supervisor_binary_stale".to_string(),
             message,

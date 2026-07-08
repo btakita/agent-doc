@@ -30,6 +30,8 @@ class TurnStateStatusBarWidget(private val project: Project) :
     companion object {
         const val WIDGET_ID = "com.github.btakita.agentdoc.TurnStateStatusBar"
         private const val BRAND = "agent-doc"
+        private const val DEFAULT_TOOLTIP =
+            "Agent Doc turn state — the CPC's authoritative turn phase for this document"
         private val LOG = Logger.getInstance(TurnStateStatusBarWidget::class.java)
     }
 
@@ -40,6 +42,7 @@ class TurnStateStatusBarWidget(private val project: Project) :
     // stays invisible. Seed with the brand so the component has a paintable size
     // from the first render.
     private var widgetText: String = BRAND
+    private var widgetTooltip: String = DEFAULT_TOOLTIP
 
     override fun ID(): String = WIDGET_ID
 
@@ -69,23 +72,27 @@ class TurnStateStatusBarWidget(private val project: Project) :
         // Always show a visible, non-empty indicator so the widget stays findable
         // and never collapses to zero width: the CPC turn phase when a turn is in
         // flight, "$BRAND: idle" on a markdown document, otherwise the bare brand.
+        val presentation = file?.let {
+            TurnStateBannerRefresher.getInstance(project).cachedPresentationFor(it.path)
+        }
         val next = if (file == null) {
             BRAND
         } else {
-            TurnStateBannerRefresher.getInstance(project)
-                .cachedPresentationFor(file.path)
-                .label
-                .ifEmpty { "$BRAND: idle" }
+            presentation
+                ?.label
+                ?.ifEmpty { "$BRAND: idle" }
+                ?: "$BRAND: idle"
         }
-        if (next != widgetText) {
+        val nextTooltip = presentation?.tooltip ?: DEFAULT_TOOLTIP
+        if (next != widgetText || nextTooltip != widgetTooltip) {
             LOG.info("[turn-widget] refresh: file=${file?.path ?: "(none)"} text=\"$next\"")
             widgetText = next
+            widgetTooltip = nextTooltip
             statusBar?.updateWidget(WIDGET_ID)
         }
     }
 
     override fun getText(): String = widgetText
     override fun getAlignment(): Float = 0f
-    override fun getTooltipText(): String =
-        "Agent Doc turn state — the CPC's authoritative turn phase for this document"
+    override fun getTooltipText(): String = widgetTooltip
 }

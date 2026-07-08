@@ -157,17 +157,14 @@ function resetBindings(): void {
     _normalize_template_structure = null;
     _apply_node_patches = null;
     _admin_inspect_json = null;
+    _tmux_focus_state_json = null;
+    _focus_document_pane_json = null;
+    _sync_tmux_layout_json = null;
     _admin_queue_control_json = null;
     _admin_reap_json = null;
     _admin_handoff_json = null;
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
-    _lossless_tree_capability = null;
-    _lossless_tree_project = null;
-    _lossless_tree_render = null;
-    _lossless_tree_projection_current = null;
-    _lossless_tree_frame_path = null;
-    _lossless_tree_render_frame = null;
     _document_changed = null;
     _document_changed_digest_for_editor = null;
     _document_changed_digest_content_for_editor = null;
@@ -201,14 +198,9 @@ const EDITOR_PLUGIN_KIND = 'vscode';
 const EDITOR_PLUGIN_VERSION = '0.2.40';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
-// #lzlosstree Phase 4: advertise that this plugin can exchange lossless-tree frames
-// (it binds losslessTreeRender/Project). Kept in sync with the binary-side
-// agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY.
-const LOSSLESS_TREE_CRDT_CAPABILITY = 'lossless_tree_crdt_v1';
 const EDITOR_CAPABILITIES = [
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
     LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-    LOSSLESS_TREE_CRDT_CAPABILITY,
 ].join(',');
 
 function findLibrary(projectRoot?: string): string | null {
@@ -344,18 +336,14 @@ let _reposition_boundary_to_end_preserve_head_with_id: any = null;
 let _normalize_template_structure: any = null;
 let _apply_node_patches: any = null;
 let _admin_inspect_json: any = null;
+let _tmux_focus_state_json: any = null;
+let _focus_document_pane_json: any = null;
+let _sync_tmux_layout_json: any = null;
 let _admin_queue_control_json: any = null;
 let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
-// #lzlosstree Phase 4: lossless-tree frame exchange.
-let _lossless_tree_capability: any = null;
-let _lossless_tree_project: any = null;
-let _lossless_tree_render: any = null;
-let _lossless_tree_projection_current: any = null;
-let _lossless_tree_frame_path: any = null;
-let _lossless_tree_render_frame: any = null;
 let _document_changed: any = null;
 let _document_changed_digest: any = null;
 let _document_changed_digest_content: any = null;
@@ -430,6 +418,17 @@ function bindFunctions(): void {
     }
     try {
         _admin_inspect_json = lib.func('agent_doc_admin_inspect_json', FfiJsonResultType, ['str', 'str', 'str', 'str']);
+        _tmux_focus_state_json = lib.func('agent_doc_tmux_focus_state_json', FfiJsonResultType, ['str']);
+        _focus_document_pane_json = lib.func(
+            'agent_doc_focus_document_pane_json',
+            FfiJsonResultType,
+            ['str', 'str'],
+        );
+        _sync_tmux_layout_json = lib.func(
+            'agent_doc_sync_tmux_layout_json',
+            FfiJsonResultType,
+            ['str', 'str', 'str', 'str', 'int', 'int'],
+        );
         _admin_queue_control_json = lib.func(
             'agent_doc_admin_queue_control_json',
             FfiJsonResultType,
@@ -453,18 +452,15 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] admin controller wrappers unavailable: ${e.message}`);
         _admin_inspect_json = null;
+        _tmux_focus_state_json = null;
+        _focus_document_pane_json = null;
+        _sync_tmux_layout_json = null;
         _admin_queue_control_json = null;
         _admin_reap_json = null;
         _admin_handoff_json = null;
         _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
-    _lossless_tree_capability = lib.func('agent_doc_lossless_tree_capability', 'char*', []);
-    _lossless_tree_project = lib.func('agent_doc_lossless_tree_project', 'char*', ['str']);
-    _lossless_tree_render = lib.func('agent_doc_lossless_tree_render', 'char*', ['str']);
-    _lossless_tree_projection_current = lib.func('agent_doc_lossless_tree_projection_current', 'int', ['str', 'str']);
-    _lossless_tree_frame_path = lib.func('agent_doc_lossless_tree_frame_path', 'char*', ['str']);
-    _lossless_tree_render_frame = lib.func('agent_doc_lossless_tree_render_frame', 'char*', ['str']);
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
@@ -1456,6 +1452,67 @@ export function adminInspectJson(options: {
 }
 
 /**
+ * PCP-owned tmux focus projection.
+ */
+export function tmuxFocusStateJson(options: {
+    projectRoot?: string | null;
+} = {}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_tmux_focus_state_json) return null;
+    return decodeJsonResult(
+        _tmux_focus_state_json(optionalString(options.projectRoot)),
+        'tmux_focus_state',
+    );
+}
+
+/**
+ * PCP-owned document pane focus.
+ */
+export function focusDocumentPaneJson(options: {
+    documentPath: string;
+    projectRoot?: string | null;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_focus_document_pane_json) return null;
+    return decodeJsonResult(
+        _focus_document_pane_json(
+            optionalString(options.projectRoot),
+            options.documentPath,
+        ),
+        'focus_document_pane',
+    );
+}
+
+/**
+ * PCP-owned tmux layout sync.
+ */
+export function syncTmuxLayoutJson(options: {
+    columns: string[];
+    projectRoot?: string | null;
+    window?: string | null;
+    focus?: string | null;
+    noAutostart?: boolean;
+    exactVisible?: boolean;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_sync_tmux_layout_json) return null;
+    return decodeJsonResult(
+        _sync_tmux_layout_json(
+            optionalString(options.projectRoot),
+            JSON.stringify(options.columns),
+            optionalString(options.window),
+            optionalString(options.focus),
+            options.noAutostart ? 1 : 0,
+            options.exactVisible ? 1 : 0,
+        ),
+        'sync_tmux_layout',
+    );
+}
+
+/**
  * Controller-backed `agent-doc admin queue pause|resume|drain --json` wrapper.
  */
 export function adminQueueControlJson(options: {
@@ -1575,79 +1632,6 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
     } catch (err: any) {
         console.warn(`[agent-doc/native] visual_tokens_json error: ${err.message}`);
         return [];
-    } finally {
-        if (ptr) _free_string(ptr);
-    }
-}
-
-// ── #lzlosstree Phase 4: lossless-tree frame exchange ──
-
-/** Render a durable tree projection JSON back to document text, or null on failure. */
-export function losslessTreeRender(projectionJson: string, projectRoot?: string): string | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    const ptr = _lossless_tree_render(projectionJson);
-    try {
-        return ptr ? koffi.decode(ptr, 'char', -1) : null;
-    } finally {
-        if (ptr) _free_string(ptr);
-    }
-}
-
-/** Project buffer text into a durable tree projection JSON, or null on failure. */
-export function losslessTreeProject(docText: string, projectRoot?: string): string | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    const ptr = _lossless_tree_project(docText);
-    try {
-        return ptr ? koffi.decode(ptr, 'char', -1) : null;
-    } finally {
-        if (ptr) _free_string(ptr);
-    }
-}
-
-/**
- * Whether `projectionJson` still describes `visibleText` — the frontier/hash proof
- * required before a projection may overwrite the editor-visible buffer. Fails closed.
- */
-export function losslessTreeProjectionCurrent(
-    projectionJson: string,
-    visibleText: string,
-    projectRoot?: string,
-): boolean {
-    if (!ensureLoaded(projectRoot)) return false;
-    bindFunctions();
-    return _lossless_tree_projection_current(projectionJson, visibleText) === 1;
-}
-
-/** The advertised capability token, or null if the native library is unavailable. */
-export function losslessTreeCapability(projectRoot?: string): string | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    // Borrowed static C string — must NOT be freed.
-    const ptr = _lossless_tree_capability();
-    return ptr ? koffi.decode(ptr, 'char', -1) : null;
-}
-
-/** The frame path this plugin should poll for `filePath` (the binary owns the hash). */
-export function losslessTreeFramePath(filePath: string, projectRoot?: string): string | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    const ptr = _lossless_tree_frame_path(filePath);
-    try {
-        return ptr ? koffi.decode(ptr, 'char', -1) : null;
-    } finally {
-        if (ptr) _free_string(ptr);
-    }
-}
-
-/** Read + render the frame at `framePath` to document text in one call, or null. */
-export function losslessTreeRenderFrame(framePath: string, projectRoot?: string): string | null {
-    if (!ensureLoaded(projectRoot)) return null;
-    bindFunctions();
-    const ptr = _lossless_tree_render_frame(framePath);
-    try {
-        return ptr ? koffi.decode(ptr, 'char', -1) : null;
     } finally {
         if (ptr) _free_string(ptr);
     }

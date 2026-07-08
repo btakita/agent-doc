@@ -366,7 +366,7 @@ object TerminalUtil {
                 EditorCommandDecision.START_NOW -> Unit
                 EditorCommandDecision.SUPERSEDE_ACTIVE_RUN -> {
                     replaceActiveRun = true
-                    LOG.warn("[state] Run Agent Doc superseding older plugin route for $relativePath")
+                    LOG.warn("[state] Run Agent Doc superseding older editor_route request for $relativePath")
                     attempt?.recordIfCurrent("route_supersede_active_run")
                 }
                 EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR -> {
@@ -441,11 +441,11 @@ object TerminalUtil {
                 inFlightRouteRegistry.startIfIdle(routeKey, handle)
             }
             if (!routeSlotAcquired) {
-                LOG.warn("[state] route process already alive for $relativePath; suppressing duplicate Run Agent Doc")
+                LOG.warn("[state] editor_route request already alive for $relativePath; suppressing duplicate Run Agent Doc")
                 attempt?.finishIfCurrent(
                     "route_process_already_in_flight",
                     command = cmd,
-                    error = "existing route process is still alive",
+                    error = "existing editor_route request is still in flight",
                 )
                 showHint(project, "Run Agent Doc is already dispatching for $relativePath")
                 onComplete?.invoke()
@@ -506,42 +506,42 @@ object TerminalUtil {
                             continue
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
                             LOG.warn("[route] busy/running after retry budget for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocStillRunning(project, relativePath, output)
                             finalStage = "route_busy_running"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
                             LOG.warn("[route] queued behind active turn for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocQueued(project, relativePath, output)
                             finalStage = "route_queued_pending"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
                             LOG.warn("[route] queue paused for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocQueuePaused(project, file, relativePath, output)
                             finalStage = "route_queue_paused"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED) {
                             LOG.warn("[route] agent switch deferred for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output)
                             finalStage = "route_agent_switch_deferred"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
                             LOG.warn("[route] dispatch start unproven for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocDispatchUnproven(project, relativePath, output)
                             finalStage = "route_dispatch_start_unproven"
                             finalError = routeAttemptError(exitCode, failureKind, output)
                             break
                         } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT) {
                             LOG.warn("[route] protected prompt input for $relativePath: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             notifyRunAgentDocProtectedPromptInput(project, relativePath, output)
                             finalStage = "route_protected_prompt_input"
                             finalError = routeAttemptError(exitCode, failureKind, output)
@@ -561,7 +561,7 @@ object TerminalUtil {
                             break
                         } else {
                             LOG.warn("[route] SUCCESS: $output")
-                            clearPersistedRouteFailureOutput(cwd, relativePath)
+                            clearPersistedRouteFailureOutput(project, cwd, relativePath)
                             StateProjectionBridge.recordRouteDispatchProven(
                                 documentPath,
                                 routeGeneration,
@@ -746,7 +746,7 @@ object TerminalUtil {
             args = listOf("status"),
             startedMessage = "Loading session status for ${file.name}",
             onSuccess = { relativePath, output ->
-                clearPersistedRouteFailureOutput(cwd, relativePath)
+                clearPersistedRouteFailureOutput(project, cwd, relativePath)
                 notifyInfo(project, sessionStatusSuccessMessage(relativePath, output))
             },
             onComplete = onComplete,
@@ -1208,7 +1208,7 @@ object TerminalUtil {
             startedMessage = "Refreshing session status for ${file.name}",
             onSuccess = { relativePath, output ->
                 val (cwd, _) = resolveProject(project, file)
-                clearPersistedRouteFailureOutput(cwd, relativePath)
+                clearPersistedRouteFailureOutput(project, cwd, relativePath)
                 if (sessionStatusShowsIdleDirectPane(output)) {
                     clearSessionContext(project, file, onComplete)
                 } else {
@@ -2328,6 +2328,14 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
+    internal fun clearPersistedRouteFailureOutput(project: Project, cwd: String, relativePath: String): Boolean {
+        val cleared = clearPersistedRouteFailureOutput(cwd, relativePath)
+        if (cleared) {
+            refreshRouteFailureStatus(project, cwd, relativePath, "route-failure-cleared")
+        }
+        return cleared
+    }
+
     internal fun notifyPersistentRouteFailure(
         project: Project,
         cwd: String,
@@ -2337,8 +2345,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         routeOutput: String,
     ) {
         val savedFile = persistRouteFailureOutput(cwd, relativePath, routeOutput)
+        refreshRouteFailureStatus(project, cwd, relativePath, "route-failure-persisted")
         val summary = buildString {
-            append("agent-doc route failed for ")
+            append("editor_route failed for ")
             append(relativePath)
             append(" after ")
             append(elapsed)
@@ -2375,6 +2384,16 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         } catch (_: Exception) {
             System.err.println("[agent-doc] $summary")
         }
+    }
+
+    private fun refreshRouteFailureStatus(project: Project, cwd: String, relativePath: String, reason: String) {
+        val file = File(cwd, relativePath)
+        val filePath = try {
+            file.canonicalPath
+        } catch (_: Exception) {
+            file.absolutePath
+        }
+        TurnStateBannerRefresher.getInstance(project).requestRefresh(filePath, reason)
     }
 
     /**

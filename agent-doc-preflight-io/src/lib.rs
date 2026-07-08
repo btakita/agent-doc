@@ -1220,6 +1220,13 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated = true;
     }
 
+    let stale_marker_before = (
+        current_content.clone(),
+        snapshot_content.clone(),
+        mutated,
+        snapshot_mutated,
+    );
+    let mut stale_supervisor_marker_mutated = false;
     // `#staleshow` — surface "🔴 (restart/recycle your supervisor)" in the upper status area when the
     // live route-owned supervisor/controller serving this document is mapping a STALE
     // agent-doc binary (a newer build is installed but the running process never
@@ -1243,6 +1250,7 @@ fn run_pending_maintenance_with_options(
         }
         current_content = reconciled;
         mutated = true;
+        stale_supervisor_marker_mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
@@ -1253,6 +1261,7 @@ fn run_pending_maintenance_with_options(
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
+        stale_supervisor_marker_mutated = true;
     }
 
     // 3. Persist any mutations to the working tree file and/or the snapshot.
@@ -1271,14 +1280,41 @@ fn run_pending_maintenance_with_options(
         // Falls back to the same plain disk write otherwise. The post-write reap
         // verification below reads `current_content` (not disk), so converging here
         // introduces no read-after-write race.
-        persist_pending_maintenance_doc(
+        let persist_result = persist_pending_maintenance_doc(
             file,
             &content,
             &current_content,
             "pending_maintenance",
             options.force_disk,
             write_effects,
-        )?;
+        );
+        if let Err(err) = persist_result {
+            let err_message = err.to_string();
+            let deferable_status_error = err_message.contains("failed to resolve editor authority")
+                || err_message.contains("editor authority unavailable")
+                || err_message.contains("editor convergence did not complete");
+            if stale_supervisor_marker_mutated && !stale_marker_before.2 && deferable_status_error {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "stale_supervisor_status_update_deferred file={} source=pending_maintenance error={}",
+                        file.display(),
+                        err_message.replace('\n', " ")
+                    ),
+                );
+                eprintln!(
+                    "[preflight] status: deferred stale-supervisor marker update for {}: {}",
+                    file.display(),
+                    err
+                );
+                current_content = stale_marker_before.0;
+                snapshot_content = stale_marker_before.1;
+                mutated = stale_marker_before.2;
+                snapshot_mutated = stale_marker_before.3;
+            } else {
+                return Err(err);
+            }
+        }
     }
     if (mutated || snapshot_mutated)
         && let Some(snap_content) = &snapshot_content
@@ -4341,6 +4377,37 @@ mod tests {
             _source: &str,
         ) -> Result<()> {
             std::fs::write(file, target_content)?;
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct GuardFailingPreflightMaintenanceWriteEffects {
+        authority_checks: std::cell::Cell<usize>,
+        converge_calls: std::cell::Cell<usize>,
+    }
+
+    impl PreflightMaintenanceWriteEffects for GuardFailingPreflightMaintenanceWriteEffects {
+        fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
+
+        fn guard_visible_write_idle_and_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            self.authority_checks.set(self.authority_checks.get() + 1);
+            anyhow::bail!("failed to resolve editor authority for test document")
+        }
+
+        fn converge_or_disk_write(
+            &self,
+            _file: &Path,
+            _current_content: &str,
+            _target_content: &str,
+            _source: &str,
+        ) -> Result<()> {
+            self.converge_calls.set(self.converge_calls.get() + 1);
             Ok(())
         }
     }
@@ -7505,6 +7572,46 @@ mod tests {
             !snapshot_after
                 .contains(agent_doc_document::status_projection::STALE_SUPERVISOR_STATUS_MARKER),
             "fresh supervisor must clear the stale marker from the snapshot: {snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn pending_maintenance_defers_stale_supervisor_marker_when_authority_unavailable() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "🔴 (restart/recycle your supervisor)\n",
+            "Session ready.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::default();
+
+        run_pending_maintenance(&doc, &effects).unwrap();
+
+        assert_eq!(effects.authority_checks.get(), 1);
+        assert_eq!(
+            effects.converge_calls.get(),
+            0,
+            "guard failure must not fall through to an unproven write"
+        );
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            file_after, content,
+            "optional stale-supervisor status clear must be deferred without touching the file"
+        );
+        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after, content,
+            "deferred status clear must not desync the snapshot from the file"
         );
     }
 

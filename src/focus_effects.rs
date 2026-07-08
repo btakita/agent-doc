@@ -17,7 +17,7 @@ impl agent_doc_focus_io::FocusEffects for CliFocusEffects {
         agent_doc_sync_io::sync::find_live_owner_pane_quiet(tmux, file, session_id)
     }
 
-    fn local_actor_projection_pane_for_document(
+    fn local_actor_record_pane_for_document(
         &self,
         file: &Path,
         session_id: &str,

@@ -199,6 +199,27 @@ interface AgentDocLib : Library {
         pane_id: String?,
     ): FfiJsonResult.ByValue
 
+    /** PCP-owned tmux focus projection. */
+    fun agent_doc_tmux_focus_state_json(
+        project_root: String?,
+    ): FfiJsonResult.ByValue
+
+    /** PCP-owned document pane focus. */
+    fun agent_doc_focus_document_pane_json(
+        project_root: String?,
+        document_path: String,
+    ): FfiJsonResult.ByValue
+
+    /** PCP-owned tmux layout sync. */
+    fun agent_doc_sync_tmux_layout_json(
+        project_root: String?,
+        columns_json: String,
+        window: String?,
+        focus: String?,
+        no_autostart: Int,
+        exact_visible: Int,
+    ): FfiJsonResult.ByValue
+
     /** Controller-backed `admin queue pause|resume|drain --json` wrapper. */
     fun agent_doc_admin_queue_control_json(
         project_root: String?,
@@ -245,20 +266,6 @@ interface AgentDocLib : Library {
 
     /** Collect editor-facing visual token ranges as JSON. Caller must free result. */
     fun agent_doc_visual_tokens_json(doc: String): Pointer?
-
-    // ── #lzlosstree Phase 4: lossless-tree frame exchange ──
-    /** The `lossless_tree_crdt_v1` capability token. Borrowed static — do NOT free. */
-    fun agent_doc_lossless_tree_capability(): Pointer?
-    /** Project buffer text to a durable tree projection JSON. Free with [agent_doc_free_string]. */
-    fun agent_doc_lossless_tree_project(doc_text: String): Pointer?
-    /** Render a tree projection JSON back to document text. Free with [agent_doc_free_string]. */
-    fun agent_doc_lossless_tree_render(projection_json: String): Pointer?
-    /** 1 if `projection_json` still describes `visible_text` (frontier/hash proof), else 0. */
-    fun agent_doc_lossless_tree_projection_current(projection_json: String, visible_text: String): Int
-    /** The frame path this plugin should poll for `file_path`. Free with [agent_doc_free_string]. */
-    fun agent_doc_lossless_tree_frame_path(file_path: String): Pointer?
-    /** Read + render the frame at `frame_path` to document text. Free with [agent_doc_free_string]. */
-    fun agent_doc_lossless_tree_render_frame(frame_path: String): Pointer?
 
     /** Record a document change event for debounce tracking. */
     fun agent_doc_document_changed(file_path: String)
@@ -479,6 +486,30 @@ interface AgentDocLib : Library {
      * Caller must free the returned pointer with [agent_doc_free_string].
      */
     fun agent_doc_turn_projection(filePath: String): Pointer?
+
+    /**
+     * Borrowed static capability token for lossless-tree CRDT frame exchange.
+     * Do not free the returned pointer.
+     */
+    fun agent_doc_lossless_tree_capability(): Pointer?
+
+    /**
+     * Project document text into a durable lossless-tree JSON projection.
+     * Caller must free the returned pointer with [agent_doc_free_string].
+     */
+    fun agent_doc_lossless_tree_project(docText: String): Pointer?
+
+    /**
+     * Render a durable lossless-tree JSON projection back to document text.
+     * Caller must free the returned pointer with [agent_doc_free_string].
+     */
+    fun agent_doc_lossless_tree_render(projectionJson: String): Pointer?
+
+    /**
+     * Returns 1 when [projectionJson] still describes [visibleText], 0 when stale
+     * or unvalidatable.
+     */
+    fun agent_doc_lossless_tree_projection_current(projectionJson: String, visibleText: String): Int
 
     /**
      * Subscribe to lazily-spec snapshot/delta messages for a document
@@ -856,6 +887,56 @@ object NativeAdminControls {
             return null
         }
         return decodeJsonResult(lib, result, "admin_inspect")
+    }
+
+    fun tmuxFocusState(projectRoot: String? = null): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_tmux_focus_state_json(projectRoot)
+        } catch (e: Throwable) {
+            LOG.warn("[native] tmux_focus_state unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "tmux_focus_state")
+    }
+
+    fun focusDocumentPane(
+        projectRoot: String? = null,
+        documentPath: String,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_focus_document_pane_json(projectRoot, documentPath)
+        } catch (e: Throwable) {
+            LOG.warn("[native] focus_document_pane unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "focus_document_pane")
+    }
+
+    fun syncTmuxLayout(
+        projectRoot: String? = null,
+        columnsJson: String,
+        window: String? = null,
+        focus: String? = null,
+        noAutostart: Boolean = false,
+        exactVisible: Boolean = false,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_sync_tmux_layout_json(
+                projectRoot,
+                columnsJson,
+                window,
+                focus,
+                if (noAutostart) 1 else 0,
+                if (exactVisible) 1 else 0,
+            )
+        } catch (e: Throwable) {
+            LOG.warn("[native] sync_tmux_layout unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "sync_tmux_layout")
     }
 
     fun queueControl(

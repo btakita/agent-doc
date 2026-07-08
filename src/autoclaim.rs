@@ -11,7 +11,7 @@
 //! - `run()`: entry point; delegates to `run_with_tmux` using the default tmux server.
 //! - `run_with_tmux(tmux)`: reads `$TMUX_PANE` to identify the current pane; if not
 //!   in tmux, exits silently with `Ok(())`.
-//! - Loads `sessions.json` and collects all entries whose `pane` matches the current pane.
+//! - Loads the durable session registry and collects all entries whose `pane` matches the current pane.
 //! - Validates each claim: if the registered file no longer exists on disk, the entry is
 //!   pruned from the registry and the pruned registry is persisted.
 //! - If no valid claims remain, exits with `Ok(())` after logging to stderr.
@@ -44,7 +44,7 @@
 //! - `autoclaim_no_claim_skips_focus`: registry is empty for the current pane → function
 //!   returns `Ok(())` without calling `select-pane` or modifying the registry.
 //! - `autoclaim_prunes_stale_claim` (aspirational): pane has a claim for a deleted file →
-//!   the entry is removed from `sessions.json` and no stdout output is emitted for it.
+//!   the entry is removed from the registry and no stdout output is emitted for it.
 //! - `autoclaim_noop_outside_tmux` (aspirational): `$TMUX_PANE` is unset → function
 //!   returns `Ok(())` immediately with no registry or tmux side effects.
 
@@ -223,7 +223,7 @@ mod tests {
         crate::test_support::env_lock()
     }
 
-    /// Helper: set up a temp dir with a sessions.json containing a claim for the given pane.
+    /// Helper: set up a temp dir with a registry claim for the given pane.
     fn setup_registry(dir: &std::path::Path, pane_id: &str) {
         let mut reg = SessionRegistry::new();
         reg.insert(
@@ -239,11 +239,7 @@ mod tests {
                 supervisor_instance_id: String::new(),
             },
         );
-        let sessions_dir = dir.join(".agent-doc");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-        let sessions_path = sessions_dir.join("sessions.json");
-        let content = serde_json::to_string_pretty(&reg).unwrap();
-        std::fs::write(sessions_path, content).unwrap();
+        agent_doc_session_registry_io::save_in(dir, &reg).unwrap();
     }
 
     #[test]
@@ -301,11 +297,7 @@ mod tests {
                 },
             );
         }
-        let sessions_dir = dir.join(".agent-doc");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-        let sessions_path = sessions_dir.join("sessions.json");
-        let content = serde_json::to_string_pretty(&reg).unwrap();
-        std::fs::write(sessions_path, content).unwrap();
+        agent_doc_session_registry_io::save_in(dir, &reg).unwrap();
     }
 
     #[test]
@@ -359,9 +351,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         // Empty registry — no claims
-        let sessions_dir = dir.path().join(".agent-doc");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-        std::fs::write(sessions_dir.join("sessions.json"), "{}").unwrap();
+        agent_doc_session_registry_io::save_in(dir.path(), &SessionRegistry::new()).unwrap();
 
         let result = run_with_tmux_in_for_pane(&Tmux::default_server(), dir.path(), "%99999");
         assert!(result.is_ok());

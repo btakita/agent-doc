@@ -17,10 +17,13 @@ use agent_doc_controller::supervisor_replacement::{
 use agent_doc_controller::timeout::is_timeout_error;
 use agent_doc_document_realtime::watch_authority::{DiskChangeSignal, WatchAction, WatchDelivery};
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
+use std::collections::BTreeSet;
 
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
 const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(not(any(test, feature = "test-support")))]
+const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -39,12 +42,31 @@ pub(crate) fn request(project_root: &Path, command: &str) -> Result<String> {
 }
 
 pub(crate) fn request_path(path: &Path, command: &str) -> Result<String> {
+    request_path_json(path, serde_json::json!({ "command": command }))
+}
+
+pub(crate) fn request_with_reason(
+    project_root: &Path,
+    command: &str,
+    reason: &str,
+) -> Result<String> {
+    request_path_with_reason(&socket_path(project_root), command, reason)
+}
+
+pub(crate) fn request_path_with_reason(path: &Path, command: &str, reason: &str) -> Result<String> {
+    request_path_json(
+        path,
+        serde_json::json!({ "command": command, "reason": reason }),
+    )
+}
+
+fn request_path_json(path: &Path, request_value: serde_json::Value) -> Result<String> {
     let stream = connect_path(path)?;
     stream
         .set_recv_timeout(Some(CONTROLLER_RPC_TIMEOUT))
         .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
-    let mut request = serde_json::to_string(&serde_json::json!({ "command": command }))?;
+    let mut request = serde_json::to_string(&request_value)?;
     request.push('\n');
     writer_half.write_all(request.as_bytes())?;
     writer_half.flush()?;
@@ -414,6 +436,14 @@ pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
+    if is_same_project_controller_pid(project_root, std::process::id()) {
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
+        return load_actor_record(project_root, &document_id);
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     {
         let document_id = agent_doc_session_actor_io::canonical_document_id_in(
@@ -609,8 +639,7 @@ pub fn session_operator_status(project_root: &Path, file: &Path) -> Result<Sessi
             project_root,
             &file.to_string_lossy(),
         );
-        let mut conn = open_state_db(project_root)?;
-        migrate_legacy_actor_projection(project_root, &mut conn)?;
+        let conn = open_state_db(project_root)?;
         load_session_operator_status_from_db(&conn, &document_id)
     }
 
@@ -696,6 +725,317 @@ pub fn inspect_actor(
             diagnostic_payload: None,
         },
     )
+}
+
+pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        handle_tmux_focus_state(&bootstrap)
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "tmux_focus_state".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<ControllerTmuxFocusReceipt> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        handle_focus_document_pane(
+            &bootstrap,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        if command_plane_enabled() {
+            let payload = FocusDocumentPaneCommandPayload {
+                project_root: Some(project_root.display().to_string()),
+                document_path: file.display().to_string(),
+                no_promotion: true,
+                active_window_guard: true,
+            };
+            return request_command_submit_payload(
+                project_root,
+                Some(file.to_path_buf()),
+                "focus_document_pane",
+                "agent-doc.focus_document_pane.v1",
+                &format!("{}:{}:focus", project_root.display(), file.display()),
+                CONTROLLER_RPC_TIMEOUT,
+                &payload,
+            );
+        }
+        request_controller(
+            project_root,
+            ControllerRequest {
+                command: "focus_document_pane".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+    }
+}
+
+pub fn sync_tmux_layout(
+    project_root: &Path,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    let diagnostic_payload =
+        serde_json::to_string(&invocation).context("serialize sync tmux layout invocation")?;
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.to_path_buf(),
+            socket_path: socket_path(project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        handle_sync_tmux_layout(
+            &bootstrap,
+            ControllerRequest {
+                command: "sync_tmux_layout".to_string(),
+                file: invocation.focus.as_ref().map(PathBuf::from),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+            },
+        )
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        if command_plane_enabled() {
+            let payload = SyncTmuxLayoutCommandPayload {
+                project_root: project_root.display().to_string(),
+                columns: invocation.columns.clone(),
+                window: invocation.window.clone(),
+                focus: invocation.focus.clone(),
+                no_autostart: invocation.no_autostart,
+                exact_visible: invocation.exact_visible,
+                caller_kind: if invocation.no_autostart {
+                    "automatic".to_string()
+                } else {
+                    "manual".to_string()
+                },
+            };
+            return request_command_submit_payload(
+                project_root,
+                invocation.focus.as_ref().map(PathBuf::from),
+                "sync_tmux_layout",
+                "agent-doc.sync_tmux_layout.v1",
+                &format!("{}:sync", project_root.display()),
+                CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+                &payload,
+            );
+        }
+        request_controller_with_timeout(
+            project_root,
+            ControllerRequest {
+                command: "sync_tmux_layout".to_string(),
+                file: invocation.focus.as_ref().map(PathBuf::from),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(diagnostic_payload),
+            },
+            CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT,
+        )
+    }
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn command_plane_enabled() -> bool {
+    std::env::var("AGENT_DOC_COMMAND_PLANE")
+        .map(|value| value != "0")
+        .unwrap_or(true)
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+#[derive(Debug, Serialize, Deserialize)]
+struct SyncTmuxLayoutCommandPayload {
+    project_root: String,
+    columns: Vec<String>,
+    #[serde(default)]
+    window: Option<String>,
+    #[serde(default)]
+    focus: Option<String>,
+    #[serde(default)]
+    no_autostart: bool,
+    #[serde(default)]
+    exact_visible: bool,
+    #[serde(default)]
+    caller_kind: String,
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn request_command_submit_payload<T, P>(
+    project_root: &Path,
+    file: Option<PathBuf>,
+    name: &str,
+    payload_type: &str,
+    idempotency_key: &str,
+    timeout: Duration,
+    payload: &P,
+) -> Result<T>
+where
+    T: DeserializeOwned,
+    P: Serialize,
+{
+    let payload_json = serde_json::to_string(payload)
+        .with_context(|| format!("failed to serialize {name} command payload"))?;
+    let payload_hash = agent_doc_hash::content_hash(&payload_json);
+    let command_nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_else(|_| u128::from(timestamp_secs()));
+    let command_id = format!(
+        "cmd-{}-{}-{}",
+        name.replace('_', "-"),
+        command_nonce,
+        &payload_hash[..payload_hash.len().min(12)]
+    );
+    let submit = lazily::CommandSubmit {
+        command_id: command_id.clone(),
+        causation_id: command_id.clone(),
+        source: "agent-doc-native".to_string(),
+        target: "project-controller".to_string(),
+        namespace: "agent-doc".to_string(),
+        name: name.to_string(),
+        authority_generation: 0,
+        idempotency_key: idempotency_key.to_string(),
+        deadline_ms: timeout.as_millis().try_into().unwrap_or(u64::MAX),
+        policy: lazily::CommandPolicy {
+            dedupe: lazily::DedupePolicy::SameIdempotencyKey,
+            supersede: true,
+            cancel_on_preempt: true,
+        },
+        payload_type: payload_type.to_string(),
+        payload_hash: format!("sha256:{payload_hash}"),
+        payload: lazily::IpcValue::Inline(payload_json.into_bytes()),
+        required_features: vec!["causal-receipts".to_string(), "command-events".to_string()],
+    };
+    let message = lazily::CommandMessage::CommandSubmit(Box::new(submit));
+    let response: serde_json::Value = request_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "editor_command_submit".to_string(),
+            file,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&message)?),
+        },
+        timeout,
+    )?;
+    let exit_code = response
+        .get("exit_code")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(1);
+    if exit_code != 0 {
+        let output = response
+            .get("output")
+            .and_then(|value| value.as_str())
+            .unwrap_or("command-plane request failed");
+        anyhow::bail!("command-plane {name} rejected: {output}");
+    }
+    let payload = response
+        .get("payload")
+        .cloned()
+        .context("command-plane response missing payload")?;
+    serde_json::from_value(payload).with_context(|| format!("decode {name} command payload"))
 }
 
 pub fn control_queue(
@@ -1165,6 +1505,65 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     host_supervisor_stale_warning_for_doc(file)
 }
 
+/// `#fccsupwarn4` — preflight stale-supervisor self-heal.
+///
+/// The warning probe above is deliberately read-only because status/doctor callers
+/// should not mutate live supervisor state. Preflight is different: it has just
+/// proven that the document's serving supervisor maps an old binary, and the
+/// non-destructive repair is to ask the owner to recycle at the next idle boundary.
+/// This helper owns that effect through the same recycle-request marker consumed by
+/// the PCP/supervisor recycle graph. Fail-open: every refusal is logged and returned
+/// as a status string, never raised into the live cycle.
+pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> String {
+    let request_status = if !agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file)
+    {
+        "request_skipped reason=auto_recycle_disabled".to_string()
+    } else if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
+        let project_root_display = if project_root.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            project_root.display().to_string()
+        };
+        let reason =
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_PREFLIGHT;
+        match checkpoint_route_owned_document_crdt(file, "stale_supervisor_pcp_recycle") {
+            Ok(checkpoint_status) => {
+                match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+                    file, reason,
+                ) {
+                    Ok(()) => format!(
+                        "requested project_root={} checkpoint={}",
+                        project_root_display,
+                        checkpoint_status.as_deref().unwrap_or("ok")
+                    ),
+                    Err(err) => format!(
+                        "request_failed project_root={} error={}",
+                        project_root_display,
+                        format!("{err:#}").replace('\n', "\\n")
+                    ),
+                }
+            }
+            Err(err) => format!(
+                "request_skipped project_root={} reason=crdt_checkpoint_error error={}",
+                project_root_display,
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        }
+    } else {
+        "request_skipped reason=no_project_root".to_string()
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "stale_supervisor_pcp_recycle_requested file={} source={} action=request_recycle_through_owner request_status={} reason=supervisor_binary_stale",
+            file.display(),
+            source,
+            request_status
+        ),
+    );
+    request_status
+}
+
 /// `#ctlrecycle` — idle grace before a stale/recycle-requested process actually
 /// recycles. A process must observe "wants-recycle AND idle" continuously for this
 /// long so a brief lull between queue items never triggers a recycle. Override with
@@ -1594,7 +1993,7 @@ pub(crate) fn reap_stale_duplicate_controllers(
 }
 
 pub(crate) fn shutdown_stale_controller(project_root: &Path) {
-    let _ = request(project_root, "shutdown");
+    let _ = request_with_reason(project_root, "shutdown", "stale_controller_replacement");
     let start = Instant::now();
     while start.elapsed() < CONNECT_WAIT {
         if connect(project_root).is_err() {
@@ -3965,6 +4364,412 @@ fn handle_editor_route_rpc(
     })
 }
 
+/// Shadow endpoint for the lazily command/RPC message plane (`command-plane-v1`,
+/// `#lzmsgpcp`). Decodes an `agent-doc.*.v1` payload from a `CommandSubmit`,
+/// dispatches the existing controller path, and returns a folded
+/// `CommandProjection` plus the progress events and the terminal causal receipt.
+///
+/// This is additive: the classic endpoints stay available when
+/// `AGENT_DOC_COMMAND_PLANE=0`. Terminal authority is the causal receipt, not
+/// the transport ACK — command failures become terminal `rejected` receipts in
+/// the returned projection, not transport errors.
+fn handle_editor_command_submit_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
+
+    let command_id = submit.command_id.clone();
+    let generation = submit.authority_generation;
+
+    // Fold the submit + progress events into a projection mirroring what the
+    // plugin will observe. Progress is never terminal.
+    let progress = command_submit_progress_events(&command_id, generation, true);
+    let mut projection = command_submit_projection(&submit, &progress);
+
+    let command_result =
+        dispatch_command_submit_payload(bootstrap, &request, &submit, payload_json);
+
+    // Terminal authority folds through the causal receipt.
+    let receipt_id = format!("{command_id}-receipt");
+    let receipt = if command_result.terminal_applied {
+        lazily::applied_receipt(&receipt_id, &command_id, "project-controller", generation)
+    } else {
+        lazily::rejected_receipt(
+            &receipt_id,
+            &command_id,
+            "project-controller",
+            generation,
+            command_result.terminal_reason.clone().unwrap_or_else(|| {
+                format!("{} exit_code={}", submit.name, command_result.exit_code)
+            }),
+        )
+    };
+    projection.observe_receipt(&receipt);
+
+    Ok(serde_json::json!({
+        "command_id": command_id,
+        "exit_code": command_result.exit_code,
+        "output": command_result.output,
+        "payload": command_result.payload,
+        "projection": serde_json::to_value(projection.to_image())?,
+        "events": serde_json::to_value(progress)?,
+        "receipt": serde_json::to_value(receipt)?,
+    }))
+}
+
+fn parse_editor_command_submit_request(
+    request: &ControllerRequest,
+) -> Result<(lazily::CommandSubmit, String)> {
+    let submit_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let message: lazily::CommandMessage =
+        serde_json::from_str(&submit_json).context("failed to parse CommandSubmit envelope")?;
+    let submit = match message {
+        lazily::CommandMessage::CommandSubmit(submit) => submit,
+        other => anyhow::bail!("editor_command_submit expects a CommandSubmit, got {other:?}"),
+    };
+
+    if submit.namespace != "agent-doc" {
+        anyhow::bail!(
+            "unsupported command namespace: {} for {}",
+            submit.namespace,
+            submit.name
+        );
+    }
+    let expected_payload_prefix = format!("agent-doc.{}.", submit.name);
+    if !submit.payload_type.starts_with(&expected_payload_prefix) {
+        anyhow::bail!(
+            "unsupported payload_type for {}: {}",
+            submit.name,
+            submit.payload_type
+        );
+    }
+
+    let payload_bytes = match &submit.payload {
+        lazily::IpcValue::Inline(bytes) => bytes.clone(),
+        lazily::IpcValue::SharedBlob(_) => {
+            anyhow::bail!("shared-blob command payloads are not supported by the shadow endpoint")
+        }
+    };
+    let payload_json = String::from_utf8(payload_bytes).context("command payload is not UTF-8")?;
+
+    Ok((*submit, payload_json))
+}
+
+fn command_submit_progress_events(
+    command_id: &str,
+    generation: u64,
+    include_started: bool,
+) -> lazily::CommandEvents {
+    let mut events = vec![
+        lazily::CommandEvent {
+            event_id: format!("{command_id}-observed"),
+            command_id: command_id.to_string(),
+            kind: lazily::CommandEventKind::Observed,
+            generation,
+            detail: None,
+        },
+        lazily::CommandEvent {
+            event_id: format!("{command_id}-accepted"),
+            command_id: command_id.to_string(),
+            kind: lazily::CommandEventKind::Accepted,
+            generation,
+            detail: None,
+        },
+    ];
+    if include_started {
+        events.push(lazily::CommandEvent {
+            event_id: format!("{command_id}-started"),
+            command_id: command_id.to_string(),
+            kind: lazily::CommandEventKind::Started,
+            generation,
+            detail: None,
+        });
+    }
+    lazily::CommandEvents { events }
+}
+
+fn command_submit_projection(
+    submit: &lazily::CommandSubmit,
+    progress: &lazily::CommandEvents,
+) -> lazily::CommandProjection {
+    let mut projection = lazily::CommandProjection::new();
+    projection.submit(submit);
+    projection.apply_message(&lazily::CommandMessage::CommandEvents(progress.clone()));
+    projection
+}
+
+/// Submit an editor command and return after CPC admission.
+///
+/// This is the message-passing fast path for editor gestures such as
+/// `Sync Tmux Layout` and focus handoff. The terminal `editor_command_submit`
+/// endpoint above intentionally remains available for RPC callers that need the
+/// final causal receipt before returning.
+fn handle_editor_command_submit_async_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
+    validate_async_editor_command_payload(&submit, &payload_json)?;
+
+    let command_id = submit.command_id.clone();
+    let generation = submit.authority_generation;
+    let progress = command_submit_progress_events(&command_id, generation, false);
+    let projection = command_submit_projection(&submit, &progress);
+
+    let worker_bootstrap = bootstrap.clone();
+    let worker_request = request.clone();
+    let worker_submit = submit.clone();
+    let worker_project_root = bootstrap.project_root.clone();
+    let worker_command_id = command_id.clone();
+    let worker_name = submit.name.clone();
+    spawn_editor_command_async_worker(move || {
+        let result = dispatch_command_submit_payload(
+            &worker_bootstrap,
+            &worker_request,
+            &worker_submit,
+            payload_json,
+        );
+        let terminal_reason = result.terminal_reason.as_deref().unwrap_or("");
+        agent_doc_ops_log_io::log_op(
+            &worker_project_root,
+            &format!(
+                "editor_command_async_completed command={} command_id={} exit_code={} applied={} reason={} output={}",
+                worker_name,
+                worker_command_id,
+                result.exit_code,
+                result.terminal_applied,
+                terminal_reason,
+                compact_command_output(&result.output),
+            ),
+        );
+    })?;
+
+    Ok(serde_json::json!({
+        "command_id": command_id,
+        "exit_code": 0,
+        "output": format!("{} accepted", submit.name),
+        "payload": {
+            "accepted": true,
+            "command": submit.name,
+            "command_id": command_id,
+        },
+        "projection": serde_json::to_value(projection.to_image())?,
+        "events": serde_json::to_value(progress)?,
+        "receipt": serde_json::Value::Null,
+    }))
+}
+
+fn validate_async_editor_command_payload(
+    submit: &lazily::CommandSubmit,
+    payload_json: &str,
+) -> Result<()> {
+    match submit.name.as_str() {
+        "sync_tmux_layout" => {
+            let _: ControllerTmuxLayoutSyncInvocation =
+                serde_json::from_str(payload_json).context("parse sync_tmux_layout payload")?;
+        }
+        "focus_document_pane" => {
+            let _: FocusDocumentPaneCommandPayload =
+                serde_json::from_str(payload_json).context("parse focus_document_pane payload")?;
+        }
+        other => anyhow::bail!("unsupported async editor command: {other}"),
+    }
+    Ok(())
+}
+
+fn compact_command_output(output: &str) -> String {
+    output.replace('\n', " | ").chars().take(320).collect()
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn spawn_editor_command_async_worker<F>(work: F) -> Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    work();
+    Ok(())
+}
+
+#[cfg(not(any(test, feature = "test-support")))]
+fn spawn_editor_command_async_worker<F>(work: F) -> Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("agent-doc-editor-command-async".to_string())
+        .spawn(work)
+        .context("failed to spawn editor command async worker")?;
+    Ok(())
+}
+
+struct CommandSubmitDispatchResult {
+    exit_code: i32,
+    output: String,
+    payload: serde_json::Value,
+    terminal_applied: bool,
+    terminal_reason: Option<String>,
+}
+
+impl CommandSubmitDispatchResult {
+    fn applied<T: Serialize>(output: String, payload: &T) -> Result<Self> {
+        Ok(Self {
+            exit_code: 0,
+            output,
+            payload: serde_json::to_value(payload)?,
+            terminal_applied: true,
+            terminal_reason: None,
+        })
+    }
+
+    fn rejected(command_name: &str, reason: String) -> Self {
+        Self {
+            exit_code: 1,
+            output: reason.clone(),
+            payload: serde_json::json!({ "error": reason }),
+            terminal_applied: false,
+            terminal_reason: Some(format!("{command_name} failed")),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FocusDocumentPaneCommandPayload {
+    document_path: String,
+    #[serde(default)]
+    project_root: Option<String>,
+    #[serde(default)]
+    no_promotion: bool,
+    #[serde(default)]
+    active_window_guard: bool,
+}
+
+fn empty_controller_request(command: &str) -> ControllerRequest {
+    ControllerRequest {
+        command: command.to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: None,
+    }
+}
+
+fn dispatch_command_submit_payload(
+    bootstrap: &ControllerBootstrap,
+    request: &ControllerRequest,
+    submit: &lazily::CommandSubmit,
+    payload_json: String,
+) -> CommandSubmitDispatchResult {
+    match submit.name.as_str() {
+        "editor_route" => {
+            let mut route_request = empty_controller_request("editor_route");
+            route_request.file = request.file.clone();
+            route_request.diagnostic_payload = Some(payload_json);
+            match handle_editor_route_rpc(bootstrap, route_request) {
+                Ok(result) => {
+                    let terminal_applied = result.exit_code == 0;
+                    let terminal_reason = (!terminal_applied)
+                        .then(|| format!("editor_route exit_code={}", result.exit_code));
+                    CommandSubmitDispatchResult {
+                        exit_code: result.exit_code,
+                        output: result.output.clone(),
+                        payload: serde_json::to_value(&result).unwrap_or(serde_json::Value::Null),
+                        terminal_applied,
+                        terminal_reason,
+                    }
+                }
+                Err(err) => {
+                    CommandSubmitDispatchResult::rejected("editor_route", format!("{err:#}"))
+                }
+            }
+        }
+        "sync_tmux_layout" => {
+            let invocation: ControllerTmuxLayoutSyncInvocation =
+                match serde_json::from_str(&payload_json) {
+                    Ok(invocation) => invocation,
+                    Err(err) => {
+                        return CommandSubmitDispatchResult::rejected(
+                            "sync_tmux_layout",
+                            format!("parse sync_tmux_layout payload: {err:#}"),
+                        );
+                    }
+                };
+            let mut sync_request = empty_controller_request("sync_tmux_layout");
+            sync_request.file = invocation.focus.as_ref().map(PathBuf::from);
+            sync_request.diagnostic_payload = Some(match serde_json::to_string(&invocation) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    return CommandSubmitDispatchResult::rejected(
+                        "sync_tmux_layout",
+                        format!("serialize sync_tmux_layout payload: {err:#}"),
+                    );
+                }
+            });
+            match handle_sync_tmux_layout(bootstrap, sync_request) {
+                Ok(receipt) => {
+                    let output =
+                        serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
+                    CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(|err| {
+                        CommandSubmitDispatchResult::rejected(
+                            "sync_tmux_layout",
+                            format!("serialize sync_tmux_layout receipt: {err:#}"),
+                        )
+                    })
+                }
+                Err(err) => {
+                    CommandSubmitDispatchResult::rejected("sync_tmux_layout", format!("{err:#}"))
+                }
+            }
+        }
+        "focus_document_pane" => {
+            let payload: FocusDocumentPaneCommandPayload = match serde_json::from_str(&payload_json)
+            {
+                Ok(payload) => payload,
+                Err(err) => {
+                    return CommandSubmitDispatchResult::rejected(
+                        "focus_document_pane",
+                        format!("parse focus_document_pane payload: {err:#}"),
+                    );
+                }
+            };
+            let _guard_flags = (
+                payload.project_root.as_deref(),
+                payload.no_promotion,
+                payload.active_window_guard,
+            );
+            let mut focus_request = empty_controller_request("focus_document_pane");
+            focus_request.file = Some(PathBuf::from(payload.document_path));
+            match handle_focus_document_pane(bootstrap, focus_request) {
+                Ok(receipt) => {
+                    let output =
+                        serde_json::to_string(&receipt).unwrap_or_else(|_| receipt.reason.clone());
+                    CommandSubmitDispatchResult::applied(output, &receipt).unwrap_or_else(|err| {
+                        CommandSubmitDispatchResult::rejected(
+                            "focus_document_pane",
+                            format!("serialize focus_document_pane receipt: {err:#}"),
+                        )
+                    })
+                }
+                Err(err) => {
+                    CommandSubmitDispatchResult::rejected("focus_document_pane", format!("{err:#}"))
+                }
+            }
+        }
+        other => CommandSubmitDispatchResult::rejected(
+            other,
+            format!("unsupported agent-doc command: {other}"),
+        ),
+    }
+}
+
 fn editor_route_relative_path(
     bootstrap: &ControllerBootstrap,
     canonical: &Path,
@@ -4280,12 +5085,14 @@ pub fn editor_broadcast_project_root_count() -> usize {
 /// either side in `Preparing`. The success path calls [`HandoffDropGuard::complete`]
 /// after the socket rename + reap so a promoted, now-authoritative controller is
 /// never shut down.
+#[cfg(test)]
 pub(crate) struct HandoffDropGuard<'a> {
     project_root: &'a Path,
     temp_sock: &'a Path,
     completed: bool,
 }
 
+#[cfg(test)]
 impl<'a> HandoffDropGuard<'a> {
     pub(crate) fn new(project_root: &'a Path, temp_sock: &'a Path) -> Self {
         Self {
@@ -4300,6 +5107,7 @@ impl<'a> HandoffDropGuard<'a> {
     }
 }
 
+#[cfg(test)]
 impl Drop for HandoffDropGuard<'_> {
     fn drop(&mut self) {
         if self.completed {
@@ -4309,7 +5117,7 @@ impl Drop for HandoffDropGuard<'_> {
         // replacement and rollback of the old public controller's `Preparing`
         // marker. Both operations are idempotent; failures leave the watchdog and
         // process reapers as backstops.
-        let _ = request_path(self.temp_sock, "shutdown");
+        let _ = request_path_with_reason(self.temp_sock, "shutdown", "handoff_drop_guard");
         let rollback = request(self.project_root, "abort_handoff");
         agent_doc_ops_log_io::log_op(
             self.project_root,
@@ -4325,6 +5133,8 @@ impl Drop for HandoffDropGuard<'_> {
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn handoff_stale_controller(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -4390,6 +5200,76 @@ pub fn connect_or_launch(
     connect_or_launch_with_lock_wait(project_root, launch_mode, LAUNCH_LOCK_WAIT)
 }
 
+fn active_controller_status_is_adoptable(
+    active_status: &ControllerStatus,
+    current_binary: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    active_status.active
+        && active_status
+            .handoff_state
+            .unwrap_or(ControllerHandoffState::Stable)
+            == ControllerHandoffState::Stable
+        && !active_controller_status_has_known_binary_mismatch(active_status, current_binary)
+}
+
+fn active_controller_status_has_known_binary_mismatch(
+    active_status: &ControllerStatus,
+    current_binary: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    status::process_binary_is_stale(active_status.controller_binary.as_ref(), current_binary)
+}
+
+fn active_controller_status_non_stable_handoff_state(
+    active_status: &ControllerStatus,
+) -> Option<ControllerHandoffState> {
+    active_status
+        .active
+        .then_some(active_status.handoff_state?)
+        .filter(|state| *state != ControllerHandoffState::Stable)
+}
+
+fn abort_non_stable_active_controller_for_recovery(
+    project_root: &Path,
+    active_status: &ControllerStatus,
+    phase: &str,
+) {
+    let Some(handoff_state) = active_controller_status_non_stable_handoff_state(active_status)
+    else {
+        return;
+    };
+    let rollback = request(project_root, "abort_handoff");
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_active_non_stable_abort_requested phase={phase} pid={} generation={} handoff_state={:?} rollback={}",
+            active_status
+                .pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            active_status.controller_generation.unwrap_or(0),
+            handoff_state,
+            rollback
+                .as_ref()
+                .map(|_| "ok".to_string())
+                .unwrap_or_else(|err| format!("failed:{}", compact_controller_error(err)))
+        ),
+    );
+}
+
+fn log_stable_stale_controller_restart(project_root: &Path, active_status: &ControllerStatus) {
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "controller_active_stale_binary_restart_requested pid={} generation={}",
+            active_status
+                .pid
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            active_status.controller_generation.unwrap_or(0),
+        ),
+    );
+}
+
 fn connect_or_launch_with_lock_wait(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -4399,16 +5279,28 @@ fn connect_or_launch_with_lock_wait(
         && active_status.active
     {
         let current_binary = current_binary_identity().ok();
-        if status::controller_binary_identity_matches(
-            active_status.controller_binary.as_ref(),
-            current_binary.as_ref(),
-        ) {
+        if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
             reap_stale_duplicate_controllers(
                 project_root,
                 active_status.pid,
                 active_status.controller_generation.unwrap_or(1),
             );
             return connect(project_root);
+        } else if let Some(handoff_state) =
+            active_controller_status_non_stable_handoff_state(&active_status)
+        {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_active_non_stable_deferred phase=pre_lock pid={} generation={} handoff_state={:?}",
+                    active_status
+                        .pid
+                        .map(|pid| pid.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    active_status.controller_generation.unwrap_or(0),
+                    handoff_state,
+                ),
+            );
         }
     }
 
@@ -4425,10 +5317,7 @@ fn connect_or_launch_with_lock_wait(
                 && active_status.active
             {
                 let current_binary = current_binary_identity().ok();
-                if status::controller_binary_identity_matches(
-                    active_status.controller_binary.as_ref(),
-                    current_binary.as_ref(),
-                ) {
+                if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
                     log_launch_lock_waiter_adopted(project_root, &active_status, "timeout");
                     reap_stale_duplicate_controllers(
                         project_root,
@@ -4464,10 +5353,7 @@ fn connect_or_launch_with_lock_wait(
         && active_status.active
     {
         let current_binary = current_binary_identity().ok();
-        if status::controller_binary_identity_matches(
-            active_status.controller_binary.as_ref(),
-            current_binary.as_ref(),
-        ) {
+        if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
             if waited_on_launch_lock {
                 log_launch_lock_waiter_adopted(project_root, &active_status, "acquired");
             }
@@ -4477,13 +5363,77 @@ fn connect_or_launch_with_lock_wait(
                 active_status.controller_generation.unwrap_or(1),
             );
             return connect(project_root);
+        } else if active_controller_status_non_stable_handoff_state(&active_status).is_some() {
+            abort_non_stable_active_controller_for_recovery(
+                project_root,
+                &active_status,
+                "post_lock",
+            );
+            if let Ok(recovered_status) = status(project_root)
+                && active_controller_status_is_adoptable(&recovered_status, current_binary.as_ref())
+            {
+                reap_stale_duplicate_controllers(
+                    project_root,
+                    recovered_status.pid,
+                    recovered_status.controller_generation.unwrap_or(1),
+                );
+                return connect(project_root);
+            }
         }
     }
     if connect(project_root).is_ok() {
         if let Ok(old_status) = status(project_root)
             && old_status.active
         {
-            return handoff_stale_controller(project_root, launch_mode, old_status);
+            let current_binary = current_binary_identity().ok();
+            if active_controller_status_is_adoptable(&old_status, current_binary.as_ref()) {
+                reap_stale_duplicate_controllers(
+                    project_root,
+                    old_status.pid,
+                    old_status.controller_generation.unwrap_or(1),
+                );
+                return connect(project_root);
+            }
+            if old_status
+                .handoff_state
+                .unwrap_or(ControllerHandoffState::Stable)
+                == ControllerHandoffState::Stable
+            {
+                log_stable_stale_controller_restart(project_root, &old_status);
+            } else {
+                abort_non_stable_active_controller_for_recovery(
+                    project_root,
+                    &old_status,
+                    "fallback",
+                );
+                if let Ok(recovered_status) = status(project_root) {
+                    if active_controller_status_is_adoptable(
+                        &recovered_status,
+                        current_binary.as_ref(),
+                    ) {
+                        reap_stale_duplicate_controllers(
+                            project_root,
+                            recovered_status.pid,
+                            recovered_status.controller_generation.unwrap_or(1),
+                        );
+                        return connect(project_root);
+                    }
+                    if recovered_status
+                        .handoff_state
+                        .unwrap_or(ControllerHandoffState::Stable)
+                        == ControllerHandoffState::Stable
+                    {
+                        log_stable_stale_controller_restart(project_root, &recovered_status);
+                    } else {
+                        anyhow::bail!(
+                            "project controller is active but not authoritative (handoff_state={:?}); retry after handoff recovery",
+                            old_status
+                                .handoff_state
+                                .unwrap_or(ControllerHandoffState::Preparing)
+                        );
+                    }
+                }
+            }
         }
         shutdown_stale_controller(project_root);
     }
@@ -4517,6 +5467,13 @@ pub fn ensure_controller_running(project_root: &Path, launch_mode: LaunchMode) -
     Ok(())
 }
 
+fn active_public_controller_blocks_public_launch(project_root: &Path) -> Option<ControllerStatus> {
+    let active_status = status(project_root).ok()?;
+    let current_binary = current_binary_identity().ok();
+    active_controller_status_is_adoptable(&active_status, current_binary.as_ref())
+        .then_some(active_status)
+}
+
 pub(crate) fn launch_detached(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     launch_detached_at(
         project_root,
@@ -4539,6 +5496,7 @@ pub(crate) fn launch_detached_at(
     let exe = current_agent_doc_binary()?;
     let mut command = Command::new(exe);
     command
+        .current_dir(project_root)
         .arg("controller")
         .arg("serve")
         .arg("--project-root")
@@ -4614,6 +5572,8 @@ fn inherited_fd_close_limit() -> i32 {
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn wait_for_controller(
     project_root: &Path,
 ) -> Result<interprocess::local_socket::Stream> {
@@ -4626,6 +5586,8 @@ pub(crate) fn wait_for_controller_after_launch(
     wait_for_controller_path_with_timeout(&socket_path(project_root), LAUNCH_CONNECT_WAIT)
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn wait_for_controller_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
     wait_for_controller_path_with_timeout(path, CONNECT_WAIT)
 }
@@ -4671,6 +5633,23 @@ pub(crate) fn serve_with_options(
 ) -> Result<()> {
     let public_sock = socket_path(project_root);
     let mut sock = listen_socket.unwrap_or_else(|| public_sock.clone());
+    if sock == public_sock
+        && handoff_state == ControllerHandoffState::Stable
+        && let Some(active_status) = active_public_controller_blocks_public_launch(project_root)
+    {
+        agent_doc_ops_log_io::log_op(
+            project_root,
+            &format!(
+                "controller_public_launch_skipped_existing_authoritative pid={} generation={}",
+                active_status
+                    .pid
+                    .map(|pid| pid.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                active_status.controller_generation.unwrap_or(1),
+            ),
+        );
+        return Ok(());
+    }
     // M1b (#stuckhandoff2 reopen): a controller launched on a non-public socket is
     // a handoff *replacement* (`controller-handoff-*` temp socket from
     // `handoff_stale_controller`). It becomes authoritative only when its client
@@ -4951,7 +5930,7 @@ fn controller_supervisor_watchdog_tick(
             halt_notified.remove(&document_id);
             continue;
         }
-        // Resolve the served file path from the session registry projection.
+        // Resolve the served file path from the durable registry metadata.
         let Some(file) = registry
             .get(&document_id)
             .map(|entry| PathBuf::from(&entry.file))
@@ -5333,6 +6312,21 @@ pub(crate) fn controller_self_recycle(runtime: &ControllerRuntime, reason: &str)
     );
 }
 
+fn shutdown_reason_allows_fresh_controller(reason: Option<&str>) -> bool {
+    matches!(
+        reason,
+        Some("operator_shutdown" | "controller_restart" | "handoff_drop_guard" | "test_shutdown")
+    )
+}
+
+fn controller_binary_is_stale_for_shutdown(bootstrap: &ControllerBootstrap) -> bool {
+    let current_binary = current_binary_identity().ok();
+    status::process_binary_is_stale(
+        bootstrap.controller_binary.as_ref(),
+        current_binary.as_ref(),
+    )
+}
+
 pub(crate) fn serve_client(
     stream: interprocess::local_socket::Stream,
     runtime: &Arc<ControllerRuntime>,
@@ -5515,7 +6509,33 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "shutdown" => {
+            let reason = request.reason.as_deref();
+            let controller_is_stale = controller_binary_is_stale_for_shutdown(&bootstrap_snapshot);
+            if !controller_is_stale && !shutdown_reason_allows_fresh_controller(reason) {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap_snapshot.project_root,
+                    &format!(
+                        "controller_shutdown_refused pid={} generation={} request_reason={} reason=fresh_controller_requires_explicit_shutdown_reason",
+                        bootstrap_snapshot.pid,
+                        bootstrap_snapshot.controller_generation,
+                        reason.unwrap_or("none"),
+                    ),
+                );
+                anyhow::bail!(
+                    "shutdown refused: controller is fresh and request omitted an accepted reason"
+                );
+            }
             *should_stop = true;
+            agent_doc_ops_log_io::log_op(
+                &bootstrap_snapshot.project_root,
+                &format!(
+                    "controller_shutdown_accepted pid={} generation={} request_reason={} controller_binary_stale={}",
+                    bootstrap_snapshot.pid,
+                    bootstrap_snapshot.controller_generation,
+                    reason.unwrap_or("none"),
+                    controller_is_stale,
+                ),
+            );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "recycle" => {
@@ -5718,6 +6738,16 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_session_status(&bootstrap_snapshot, request))
         }
         "inspect_actor" => controller_envelope(handle_inspect_actor(&bootstrap_snapshot, request)),
+        "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(&bootstrap_snapshot)),
+        "tmux_layout_sync_state" => {
+            controller_envelope(handle_tmux_layout_sync_state(&bootstrap_snapshot, request))
+        }
+        "focus_document_pane" => {
+            controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
+        }
+        "sync_tmux_layout" => {
+            controller_envelope(handle_sync_tmux_layout(&bootstrap_snapshot, request))
+        }
         "queue_control" => controller_envelope(handle_queue_control(&bootstrap_snapshot, request)),
         "admin_control" => controller_envelope(handle_admin_control(&bootstrap_snapshot, request)),
         "projection_repair" => {
@@ -5746,6 +6776,13 @@ pub(crate) fn handle_request_locked(
         "editor_route" => {
             controller_envelope(handle_editor_route_rpc(&bootstrap_snapshot, request))
         }
+        "editor_command_submit" => controller_envelope(handle_editor_command_submit_rpc(
+            &bootstrap_snapshot,
+            request,
+        )),
+        "editor_command_submit_async" => controller_envelope(
+            handle_editor_command_submit_async_rpc(&bootstrap_snapshot, request),
+        ),
         "crdt_current_text" => {
             controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
         }
@@ -6718,6 +7755,12 @@ pub(crate) fn handle_start_session(
             new_generation: generation,
         },
     };
+    ensure_start_session_pane_not_claimed_by_other_actor(
+        &bootstrap.project_root,
+        &record.document_id,
+        &record.session_id,
+        &record.pane_id,
+    )?;
     let record = store_actor_record(
         &bootstrap.project_root,
         Some(generation.saturating_sub(1)),
@@ -6730,7 +7773,6 @@ pub(crate) fn handle_start_session(
         )
     })?;
     refresh_runtime_after_actor_write(runtime)?;
-    let _ = project_sessions_projection_for_actor(&bootstrap.project_root, &record.document_id);
     agent_doc_ops_log_io::log_op(
         &file,
         &format!(
@@ -6742,6 +7784,144 @@ pub(crate) fn handle_start_session(
         ),
     );
     Ok(record)
+}
+
+fn ensure_start_session_pane_not_claimed_by_other_actor(
+    project_root: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+) -> Result<()> {
+    if pane_id.is_empty() {
+        return Ok(());
+    }
+    let store = load_actor_store(project_root)?;
+    let registry = agent_doc_session_registry_io::load_in(project_root).with_context(|| {
+        format!(
+            "failed to load session registry while checking start_session pane alias for {pane_id}"
+        )
+    })?;
+    let conn = open_state_db(project_root)?;
+    let now = timestamp_secs();
+    let mut stale_aliases = Vec::new();
+    for existing in store.values().filter(|record| {
+        record.pane_id == pane_id
+            && record.state != agent_doc_sqlite::state_store::ActorState::Closed
+    }) {
+        if document_ids_equivalent(project_root, &existing.document_id, document_id) {
+            continue;
+        }
+        if existing.session_id == session_id {
+            agent_doc_ops_log_io::log_op(
+                Path::new(document_id),
+                &format!(
+                    "controller_start_session_same_session_pane_alias_admitted document_id={} stale_document_id={} session={} generation={} pane={} state={}",
+                    document_id,
+                    existing.document_id,
+                    existing.session_id,
+                    existing.generation,
+                    pane_id,
+                    existing.state.as_str()
+                ),
+            );
+            continue;
+        }
+        if start_session_cross_document_alias_has_live_claim(
+            project_root,
+            &conn,
+            &registry,
+            existing,
+            now,
+        )? {
+            anyhow::bail!(
+                "refusing start_session cross-document actor pane alias: pane {} is already claimed by {} session={} generation={} state={}",
+                pane_id,
+                existing.document_id,
+                existing.session_id,
+                existing.generation,
+                existing.state.as_str()
+            );
+        }
+        stale_aliases.push(existing.clone());
+    }
+    for existing in stale_aliases {
+        close_stale_start_session_pane_alias(project_root, document_id, pane_id, &existing)?;
+    }
+    Ok(())
+}
+
+fn start_session_cross_document_alias_has_live_claim(
+    project_root: &Path,
+    conn: &Connection,
+    registry: &tmux_router::Registry,
+    record: &agent_doc_sqlite::state_store::ActorRecord,
+    now: u64,
+) -> Result<bool> {
+    let lease = load_supervisor_lease_from_db(conn, &record.document_id, record.generation)?;
+    if lease.as_ref().is_some_and(|lease| {
+        status::supervisor_lease_is_fresh_and_alive(
+            lease.last_heartbeat,
+            lease.supervisor_pid.is_some_and(process_is_alive),
+            now,
+            SUPERVISOR_LEASE_GUARD_STALE_AFTER,
+        )
+    }) {
+        return Ok(true);
+    }
+    Ok(registry.iter().any(|(key, entry)| {
+        document_ids_equivalent(project_root, key, &record.document_id)
+            && entry.session_id == record.session_id
+            && entry.pane == record.pane_id
+            && (record.window_id.is_empty()
+                || entry.window.is_empty()
+                || entry.window == record.window_id)
+            && entry.pid != 0
+            && process_is_alive(entry.pid)
+    }))
+}
+
+fn close_stale_start_session_pane_alias(
+    project_root: &Path,
+    owner_document_id: &str,
+    pane_id: &str,
+    existing: &agent_doc_sqlite::state_store::ActorRecord,
+) -> Result<()> {
+    let mut closed = existing.clone();
+    closed.state = agent_doc_sqlite::state_store::ActorState::Closed;
+    closed.pane_id.clear();
+    closed.window_id.clear();
+    closed.last_transition = agent_doc_sqlite::state_store::ActorLastTransition {
+        caller: "start".to_string(),
+        reason: format!("stale_cross_document_pane_alias owner={owner_document_id} pane={pane_id}"),
+        timestamp: timestamp_secs(),
+        prior_generation: existing.generation,
+        new_generation: existing.generation,
+    };
+    store_actor_record(project_root, Some(existing.generation), &closed).with_context(|| {
+        format!(
+            "failed to close stale start_session pane alias for {} on {}",
+            existing.document_id, pane_id
+        )
+    })?;
+    agent_doc_ops_log_io::log_op(
+        Path::new(&closed.document_id),
+        &format!(
+            "controller_start_session_closed_stale_cross_document_pane_alias document_id={} session={} generation={} pane={} owner={}",
+            closed.document_id, closed.session_id, closed.generation, pane_id, owner_document_id
+        ),
+    );
+    Ok(())
+}
+
+fn document_ids_equivalent(project_root: &Path, left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    if left == right {
+        return true;
+    }
+    let left = agent_doc_session_actor_io::canonical_document_id_in(project_root, left);
+    let right = agent_doc_session_actor_io::canonical_document_id_in(project_root, right);
+    left == right
 }
 
 fn supervisor_report_matches_existing_lease(
@@ -6810,8 +7990,6 @@ fn replace_closed_actor_from_same_supervisor_report(
         &replacement,
     )?;
     refresh_runtime_after_actor_write(runtime)?;
-    let _ =
-        project_sessions_projection_for_actor(&bootstrap.project_root, &replacement.document_id);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -6955,6 +8133,34 @@ pub(crate) fn handle_mark_lifecycle(
         new_generation: current.generation,
     };
     let record = store_actor_record(&bootstrap.project_root, Some(current.generation), &record)?;
+    let startup_miss_clear_reason = match state {
+        agent_doc_sqlite::state_store::ActorState::Ready => Some("actor_ready"),
+        agent_doc_sqlite::state_store::ActorState::Closed => Some("actor_closed"),
+        _ => None,
+    };
+    if let Some(clear_reason) = startup_miss_clear_reason
+        && let Ok(Some(miss)) = agent_doc_supervisor_io::startup_miss::load_startup_miss(&file)
+    {
+        match agent_doc_supervisor_io::startup_miss::clear_startup_miss(&file) {
+            Ok(()) => agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "controller_startup_miss_cleared_lifecycle file={} stale_pane={} actor_pane={} session={} state={} reason={}",
+                    file.display(),
+                    miss.pane_id,
+                    pane_id,
+                    session_id,
+                    state.as_str(),
+                    clear_reason
+                ),
+            ),
+            Err(e) => eprintln!(
+                "[controller] startup-miss clear on {} failed for {} (non-fatal): {e}",
+                state.as_str(),
+                file.display(),
+            ),
+        }
+    }
     // #qflood: a transition to Ready means the turn finished, so any dispatch in
     // flight for this document is now consumed — release the in-flight marker so the
     // open-dispatch set stays accurate for the next busy episode's coalescing and for
@@ -7582,8 +8788,7 @@ pub(crate) fn handle_session_status(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
-    let mut conn = open_state_db(&bootstrap.project_root)?;
-    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    let conn = open_state_db(&bootstrap.project_root)?;
     load_session_operator_status_from_db(&conn, &document_id)
 }
 
@@ -7595,8 +8800,7 @@ pub(crate) fn admin_target_record(
     Option<String>,
     Option<agent_doc_sqlite::state_store::ActorRecord>,
 )> {
-    let mut conn = open_state_db(&bootstrap.project_root)?;
-    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    let conn = open_state_db(&bootstrap.project_root)?;
     if let Some(file) = request.file.as_ref() {
         let document_id = agent_doc_session_actor_io::canonical_document_id_in(
             &bootstrap.project_root,
@@ -7631,8 +8835,7 @@ pub(crate) fn handle_inspect_actor(
     request: ControllerRequest,
 ) -> Result<ControllerActorInspection> {
     let (target, document_id, record) = admin_target_record(bootstrap, &request)?;
-    let mut conn = open_state_db(&bootstrap.project_root)?;
-    migrate_legacy_actor_projection(&bootstrap.project_root, &mut conn)?;
+    let conn = open_state_db(&bootstrap.project_root)?;
     let supervisor_lease = match record.as_ref() {
         Some(record) => {
             load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?
@@ -7689,6 +8892,509 @@ pub(crate) fn handle_inspect_actor(
         admin_operations,
         projection_diagnostics,
     })
+}
+
+fn inactive_tmux_focus_state(
+    reason: &str,
+    session_name: Option<String>,
+    window_id: Option<String>,
+    window_name: Option<String>,
+    pane_id: Option<String>,
+) -> ControllerTmuxFocusState {
+    ControllerTmuxFocusState {
+        active: false,
+        reason: reason.to_string(),
+        session_name,
+        window_id,
+        window_name,
+        pane_id,
+        document_id: None,
+        record: None,
+    }
+}
+
+fn tmux_focus_receipt(
+    focused: bool,
+    reason: &str,
+    document_id: Option<String>,
+    pane_id: Option<String>,
+    session_name: Option<String>,
+    window_id: Option<String>,
+    window_name: Option<String>,
+) -> ControllerTmuxFocusReceipt {
+    ControllerTmuxFocusReceipt {
+        focused,
+        reason: reason.to_string(),
+        document_id,
+        pane_id,
+        session_name,
+        window_id,
+        window_name,
+    }
+}
+
+fn configured_tmux_session_for_project(project_root: &Path) -> Option<String> {
+    let config_path = project_root.join(".agent-doc").join("config.toml");
+    agent_doc_project_config_io::load_project_from(&config_path)
+        .tmux_session
+        .filter(|session| !session.trim().is_empty())
+}
+
+fn active_tmux_window_for_session(
+    tmux: &tmux_router::Tmux,
+    session_name: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let window_id = tmux.active_window(session_name);
+    let window_name = window_id
+        .as_deref()
+        .and_then(|window| agent_doc_tmux_io::target_window_name(tmux, window));
+    let pane_id = tmux.active_pane(session_name);
+    (window_id, window_name, pane_id)
+}
+
+fn resolve_agent_doc_window_id_for_session(
+    tmux: &tmux_router::Tmux,
+    session_name: &str,
+) -> Option<String> {
+    let listing = agent_doc_tmux_io::list_windows(
+        tmux,
+        Some(&format!("{session_name}:")),
+        "#{window_id} #{window_name}",
+    )
+    .ok()?;
+    listing.lines().find_map(|line| {
+        let mut parts = line.splitn(2, ' ');
+        match (parts.next(), parts.next()) {
+            (Some(window_id), Some("agent-doc")) => Some(window_id.to_string()),
+            _ => None,
+        }
+    })
+}
+
+fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
+    let trimmed = file.trim();
+    let path = if Path::new(trimmed).is_absolute() {
+        PathBuf::from(trimmed)
+    } else {
+        project_root.join(trimmed)
+    };
+    path.canonicalize()
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn first_agent_doc_in_layout_column(project_root: &Path, column: &str) -> Option<String> {
+    column.split(',').find_map(|raw| {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        let document_id = canonical_layout_document_id(project_root, raw);
+        let content = std::fs::read_to_string(&document_id).ok()?;
+        let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&content).ok()?;
+        frontmatter.session.as_ref()?;
+        Some(document_id)
+    })
+}
+
+fn layout_sync_state_expected_documents(
+    project_root: &Path,
+    invocation: &ControllerTmuxLayoutSyncStateInvocation,
+) -> Vec<String> {
+    let saved_layout = load_layout_state(project_root).unwrap_or_default();
+    let classified = agent_doc_tmux::classify_sync_layout_columns(&invocation.columns, |column| {
+        first_agent_doc_in_layout_column(project_root, column)
+    });
+    let effective = agent_doc_tmux::apply_column_memory(&classified, &saved_layout);
+    agent_doc_tmux::classify_sync_layout_columns(&effective.columns, |column| {
+        first_agent_doc_in_layout_column(project_root, column)
+    })
+    .into_iter()
+    .filter_map(|column| column.agent_doc)
+    .collect()
+}
+
+fn layout_sync_state_actual_document_for_pane(
+    project_root: &Path,
+    actor_store: &BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
+    registry: &tmux_router::Registry,
+    pane_id: &str,
+) -> String {
+    if let Some(record) = actor_store
+        .values()
+        .find(|record| record.pane_id == pane_id)
+    {
+        return canonical_layout_document_id(project_root, &record.document_id);
+    }
+    registry
+        .values()
+        .find(|entry| entry.pane == pane_id && !entry.file.trim().is_empty())
+        .map(|entry| canonical_layout_document_id(project_root, &entry.file))
+        .unwrap_or_default()
+}
+
+#[derive(Default)]
+struct LayoutSyncStateTarget {
+    session_name: Option<String>,
+    window_id: Option<String>,
+    window_name: Option<String>,
+    focus: Option<String>,
+}
+
+fn layout_sync_state_report(
+    synced: bool,
+    reason: impl Into<String>,
+    expected_documents: Vec<String>,
+    actual_documents: Vec<String>,
+    panes: Vec<String>,
+    target: LayoutSyncStateTarget,
+) -> ControllerTmuxLayoutSyncStateReport {
+    ControllerTmuxLayoutSyncStateReport {
+        synced,
+        reason: reason.into(),
+        expected_documents,
+        actual_documents,
+        panes,
+        session_name: target.session_name,
+        window_id: target.window_id,
+        window_name: target.window_name,
+        focus: target.focus,
+    }
+}
+
+fn layout_sync_state_result(
+    expected_documents: &[String],
+    actual_documents: &[String],
+) -> (bool, &'static str) {
+    if expected_documents == actual_documents {
+        (true, "synced")
+    } else if expected_documents.len() != actual_documents.len() {
+        (false, "pane_count_mismatch")
+    } else {
+        (false, "pane_order_mismatch")
+    }
+}
+
+pub(crate) fn handle_tmux_layout_sync_state(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerTmuxLayoutSyncStateInvocation =
+        serde_json::from_str(&payload_json).context("parse tmux layout sync state invocation")?;
+    let expected_documents =
+        layout_sync_state_expected_documents(&bootstrap.project_root, &invocation);
+    let focus = invocation.focus.clone();
+    if expected_documents.is_empty() {
+        return Ok(layout_sync_state_report(
+            false,
+            "empty_layout_model",
+            expected_documents,
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                window_id: invocation.window,
+                focus,
+                ..LayoutSyncStateTarget::default()
+            },
+        ));
+    }
+
+    let Some(configured_session) = configured_tmux_session_for_project(&bootstrap.project_root)
+    else {
+        return Ok(layout_sync_state_report(
+            false,
+            "missing_tmux_session",
+            expected_documents,
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                window_id: invocation.window,
+                focus,
+                ..LayoutSyncStateTarget::default()
+            },
+        ));
+    };
+    let tmux = tmux_router::Tmux::default_server();
+    if !tmux.session_alive(&configured_session) {
+        return Ok(layout_sync_state_report(
+            false,
+            "tmux_session_not_alive",
+            expected_documents,
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                session_name: Some(configured_session),
+                window_id: invocation.window,
+                focus,
+                ..LayoutSyncStateTarget::default()
+            },
+        ));
+    }
+
+    let window_id = invocation
+        .window
+        .clone()
+        .or_else(|| resolve_agent_doc_window_id_for_session(&tmux, &configured_session));
+    let Some(window_id_value) = window_id.clone() else {
+        return Ok(layout_sync_state_report(
+            false,
+            "missing_agent_doc_window",
+            expected_documents,
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                session_name: Some(configured_session),
+                focus,
+                ..LayoutSyncStateTarget::default()
+            },
+        ));
+    };
+    let window_name = agent_doc_tmux_io::target_window_name(&tmux, &window_id_value);
+    if window_name.as_deref() != Some("agent-doc") {
+        return Ok(layout_sync_state_report(
+            false,
+            "target_window_not_agent_doc",
+            expected_documents,
+            Vec::new(),
+            Vec::new(),
+            LayoutSyncStateTarget {
+                session_name: Some(configured_session),
+                window_id: Some(window_id_value),
+                window_name,
+                focus,
+            },
+        ));
+    }
+
+    let panes = tmux
+        .list_panes_ordered(&window_id_value)
+        .unwrap_or_default();
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let actor_store = load_actor_store_from_db(&conn)?;
+    let registry =
+        agent_doc_session_registry_io::load_in(&bootstrap.project_root).unwrap_or_default();
+    let actual_documents = panes
+        .iter()
+        .map(|pane_id| {
+            layout_sync_state_actual_document_for_pane(
+                &bootstrap.project_root,
+                &actor_store,
+                &registry,
+                pane_id,
+            )
+        })
+        .collect::<Vec<_>>();
+    let (synced, reason) = layout_sync_state_result(&expected_documents, &actual_documents);
+    Ok(layout_sync_state_report(
+        synced,
+        reason,
+        expected_documents,
+        actual_documents,
+        panes,
+        LayoutSyncStateTarget {
+            session_name: Some(configured_session),
+            window_id: Some(window_id_value),
+            window_name,
+            focus,
+        },
+    ))
+}
+
+pub(crate) fn handle_tmux_focus_state(
+    bootstrap: &ControllerBootstrap,
+) -> Result<ControllerTmuxFocusState> {
+    let Some(session_name) = configured_tmux_session_for_project(&bootstrap.project_root) else {
+        return Ok(inactive_tmux_focus_state(
+            "missing_tmux_session",
+            None,
+            None,
+            None,
+            None,
+        ));
+    };
+    let tmux = tmux_router::Tmux::default_server();
+    if !tmux.session_alive(&session_name) {
+        return Ok(inactive_tmux_focus_state(
+            "tmux_session_not_alive",
+            Some(session_name),
+            None,
+            None,
+            None,
+        ));
+    }
+    let (window_id, window_name, pane_id) = active_tmux_window_for_session(&tmux, &session_name);
+    if window_name.as_deref() != Some("agent-doc") {
+        return Ok(inactive_tmux_focus_state(
+            "outside_agent_doc_window",
+            Some(session_name),
+            window_id,
+            window_name,
+            pane_id,
+        ));
+    }
+    let Some(pane_id_value) = pane_id.clone() else {
+        return Ok(inactive_tmux_focus_state(
+            "missing_active_pane",
+            Some(session_name),
+            window_id,
+            window_name,
+            None,
+        ));
+    };
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let record = load_actor_store_from_db(&conn)?
+        .values()
+        .find(|record| record.pane_id == pane_id_value)
+        .cloned();
+    let document_id = record.as_ref().map(|record| record.document_id.clone());
+    Ok(ControllerTmuxFocusState {
+        active: record.is_some(),
+        reason: if record.is_some() {
+            "focused_agent_doc_actor".to_string()
+        } else {
+            "active_pane_unbound".to_string()
+        },
+        session_name: Some(session_name),
+        window_id,
+        window_name,
+        pane_id,
+        document_id,
+        record,
+    })
+}
+
+pub(crate) fn handle_focus_document_pane(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerTmuxFocusReceipt> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &bootstrap.project_root,
+        &canonical.to_string_lossy(),
+    );
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let actor_record = load_actor_record_from_db(&conn, &document_id)?;
+    let (pane_id, focused_reason, not_alive_reason) = if let Some(record) = actor_record {
+        if matches!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Blocked
+                | agent_doc_sqlite::state_store::ActorState::Closed
+        ) {
+            return Ok(tmux_focus_receipt(
+                false,
+                "actor_not_focusable",
+                Some(document_id),
+                Some(record.pane_id),
+                None,
+                None,
+                None,
+            ));
+        }
+        (
+            record.pane_id,
+            "focused_agent_doc_actor",
+            "actor_pane_not_alive",
+        )
+    } else if let Some(entry) =
+        agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?
+    {
+        (
+            entry.pane,
+            "focused_durable_registry",
+            "registry_pane_not_alive",
+        )
+    } else {
+        return Ok(tmux_focus_receipt(
+            false,
+            "missing_actor_record",
+            Some(document_id),
+            None,
+            None,
+            None,
+            None,
+        ));
+    };
+    let tmux = tmux_router::Tmux::default_server();
+    if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
+        return Ok(tmux_focus_receipt(
+            false,
+            not_alive_reason,
+            Some(document_id),
+            Some(pane_id),
+            None,
+            None,
+            None,
+        ));
+    }
+    let session_name = tmux
+        .pane_session(&pane_id)
+        .ok()
+        .or_else(|| configured_tmux_session_for_project(&bootstrap.project_root));
+    let Some(session_name_value) = session_name.clone() else {
+        return Ok(tmux_focus_receipt(
+            false,
+            "missing_tmux_session",
+            Some(document_id),
+            Some(pane_id),
+            None,
+            None,
+            None,
+        ));
+    };
+    let (window_id, window_name, _active_pane) =
+        active_tmux_window_for_session(&tmux, &session_name_value);
+    if window_name.as_deref() != Some("agent-doc") {
+        return Ok(tmux_focus_receipt(
+            false,
+            "outside_agent_doc_window",
+            Some(document_id),
+            Some(pane_id),
+            Some(session_name_value),
+            window_id,
+            window_name,
+        ));
+    }
+    let pane_window = tmux.pane_window(&pane_id).ok();
+    if pane_window.as_deref() != window_id.as_deref() {
+        return Ok(tmux_focus_receipt(
+            false,
+            "actor_pane_not_visible",
+            Some(document_id),
+            Some(pane_id),
+            Some(session_name_value),
+            window_id,
+            window_name,
+        ));
+    }
+    tmux.select_pane(&pane_id)?;
+    Ok(tmux_focus_receipt(
+        true,
+        focused_reason,
+        Some(document_id),
+        Some(pane_id),
+        Some(session_name_value),
+        window_id,
+        window_name,
+    ))
+}
+
+pub(crate) fn handle_sync_tmux_layout(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerTmuxLayoutSyncReceipt> {
+    if bootstrap.handoff_state != ControllerHandoffState::Stable {
+        anyhow::bail!(
+            "sync_tmux_layout refused: controller not authoritative (handoff_state={:?})",
+            bootstrap.handoff_state
+        );
+    }
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerTmuxLayoutSyncInvocation =
+        serde_json::from_str(&payload_json).context("parse sync tmux layout invocation")?;
+    runtime_effects()?.sync_tmux_layout(&bootstrap.project_root, invocation)
 }
 
 pub(crate) fn rejected_admin_receipt(
@@ -7890,13 +9596,6 @@ pub(crate) fn handle_admin_control(
         other => anyhow::bail!("unknown admin control action: {other}"),
     }
     store_actor_record(&bootstrap.project_root, Some(record.generation), &next)?;
-    project_sessions_projection_for_actor(&bootstrap.project_root, &next.document_id)
-        .with_context(|| {
-            format!(
-                "failed to repair sessions projection for {}",
-                next.document_id
-            )
-        })?;
     Ok(receipt)
 }
 
@@ -7943,38 +9642,16 @@ pub(crate) fn handle_projection_repair(
 pub(crate) fn repair_projection_from_controller_state(
     project_root: &Path,
     projection: &str,
-    document_id: Option<&str>,
+    _document_id: Option<&str>,
 ) -> Result<()> {
     match projection {
         "all" => {
-            emit_actor_projection(project_root)?;
-            repair_sessions_projection(project_root, document_id)?;
             emit_layout_projection(project_root)?;
-        }
-        "actors" | "session-actors" | "session-actors.json" => {
-            emit_actor_projection(project_root)?;
-        }
-        "sessions" | "sessions.json" => {
-            repair_sessions_projection(project_root, document_id)?;
         }
         "layout" | "last_layout" | "last_layout.json" => {
             emit_layout_projection(project_root)?;
         }
         other => anyhow::bail!("unknown projection repair target: {other}"),
-    }
-    Ok(())
-}
-
-pub(crate) fn repair_sessions_projection(
-    project_root: &Path,
-    document_id: Option<&str>,
-) -> Result<()> {
-    if let Some(document_id) = document_id {
-        return project_sessions_projection_for_actor(project_root, document_id);
-    }
-    let store = load_actor_store(project_root)?;
-    for document_id in store.keys() {
-        project_sessions_projection_for_actor(project_root, document_id)?;
     }
     Ok(())
 }
@@ -8772,7 +10449,10 @@ fn sanitize_controller_serve_inherited_fds() -> usize {
 
 pub fn run_shutdown(root: Option<&Path>) -> Result<()> {
     let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
-    println!("{}", request(&project_root, "shutdown")?);
+    println!(
+        "{}",
+        request_with_reason(&project_root, "shutdown", "operator_shutdown")?
+    );
     Ok(())
 }
 
@@ -8819,7 +10499,7 @@ pub fn force_restart_controller(
     if !force {
         // A healthy controller exits cleanly here; a wedged one times out and we
         // fall through to the signal reap below (bounded inside `request`).
-        graceful = request(project_root, "shutdown").is_ok();
+        graceful = request_with_reason(project_root, "shutdown", "controller_restart").is_ok();
     }
 
     let self_pid = std::process::id();
@@ -8879,6 +10559,478 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    fn test_controller_binary_identity() -> ControllerBinaryIdentity {
+        ControllerBinaryIdentity {
+            path: PathBuf::from("/tmp/agent-doc"),
+            version: "test".to_string(),
+            len: 123,
+            modified_secs: 456,
+            modified_nanos: 789,
+        }
+    }
+
+    fn active_controller_status_with_handoff_state(
+        handoff_state: ControllerHandoffState,
+    ) -> ControllerStatus {
+        ControllerStatus {
+            active: true,
+            project_root: PathBuf::from("/tmp/project"),
+            socket_path: PathBuf::from("/tmp/project/.agent-doc/controller.sock"),
+            launch_mode: Some(LaunchMode::Lazy),
+            bootstrap_epoch: Some(1),
+            pid: Some(42),
+            controller_binary: Some(test_controller_binary_identity()),
+            controller_generation: Some(7),
+            handoff_state: Some(handoff_state),
+            handoff_started_at: Some(1),
+            previous_controller_pid: None,
+            stale_duplicate_pids: Vec::new(),
+            freshness: None,
+            control_plane: status::default_control_plane_status(),
+        }
+    }
+
+    fn command_submit_request_for_test(
+        file: Option<PathBuf>,
+        name: &str,
+        payload_type: &str,
+        payload: serde_json::Value,
+        command_id: &str,
+    ) -> ControllerRequest {
+        let payload_bytes = payload.to_string().into_bytes();
+        let submit = lazily::CommandSubmit {
+            command_id: command_id.to_string(),
+            causation_id: command_id.to_string(),
+            source: "test-plugin".to_string(),
+            target: "project-controller".to_string(),
+            namespace: "agent-doc".to_string(),
+            name: name.to_string(),
+            authority_generation: 0,
+            idempotency_key: format!("test:{name}"),
+            deadline_ms: 5_000,
+            policy: lazily::CommandPolicy {
+                dedupe: lazily::DedupePolicy::SameIdempotencyKey,
+                supersede: true,
+                cancel_on_preempt: true,
+            },
+            payload_type: payload_type.to_string(),
+            payload_hash: "sha256:test".to_string(),
+            payload: lazily::IpcValue::Inline(payload_bytes),
+            required_features: vec!["causal-receipts".to_string(), "command-events".to_string()],
+        };
+        let message = lazily::CommandMessage::CommandSubmit(Box::new(submit));
+        ControllerRequest {
+            command: "editor_command_submit".to_string(),
+            file,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&message).unwrap()),
+        }
+    }
+
+    #[test]
+    fn command_submit_dispatches_sync_tmux_layout_payload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let request = command_submit_request_for_test(
+            None,
+            "sync_tmux_layout",
+            "agent-doc.sync_tmux_layout.v1",
+            serde_json::json!({
+                "project_root": dir.path().display().to_string(),
+                "columns": ["tasks/one.md,tasks/two.md"],
+                "focus": null,
+                "no_autostart": false,
+                "exact_visible": true,
+                "caller_kind": "manual"
+            }),
+            "cmd-sync",
+        );
+
+        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        assert_eq!(response["exit_code"], 0);
+        assert_eq!(response["payload"]["reason"], "test_runtime");
+        assert_eq!(
+            response["payload"]["columns"][0],
+            "tasks/one.md,tasks/two.md"
+        );
+        assert_eq!(response["projection"]["commands"][0]["status"], "applied");
+        assert_eq!(response["projection"]["commands"][0]["terminal"], true);
+    }
+
+    #[test]
+    fn async_command_submit_admits_sync_tmux_layout_without_terminal_wait() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let request = command_submit_request_for_test(
+            None,
+            "sync_tmux_layout",
+            "agent-doc.sync_tmux_layout.v1",
+            serde_json::json!({
+                "project_root": dir.path().display().to_string(),
+                "columns": ["tasks/one.md"],
+                "focus": null,
+                "no_autostart": false,
+                "exact_visible": true,
+                "caller_kind": "manual"
+            }),
+            "cmd-sync-async",
+        );
+
+        let response = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap();
+        assert_eq!(response["exit_code"], 0);
+        assert_eq!(response["payload"]["accepted"], true);
+        assert_eq!(response["payload"]["command"], "sync_tmux_layout");
+        assert_eq!(response["projection"]["commands"][0]["status"], "accepted");
+        assert_eq!(response["projection"]["commands"][0]["terminal"], false);
+        assert!(response["receipt"].is_null());
+    }
+
+    #[test]
+    fn async_command_submit_rejects_unsupported_editor_commands_before_admission() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let request = command_submit_request_for_test(
+            None,
+            "editor_route",
+            "agent-doc.editor_route.v1",
+            serde_json::json!({
+                "relative_path": "plan.md",
+                "dispatch_only": true,
+                "plain_trigger": true,
+                "wait_for_ready_secs": 0,
+                "layout_args": []
+            }),
+            "cmd-route-async",
+        );
+
+        let err = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap_err();
+        assert!(format!("{err:#}").contains("unsupported async editor command"));
+    }
+
+    #[test]
+    fn command_submit_dispatches_focus_document_pane_payload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/one.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: one\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let request = command_submit_request_for_test(
+            Some(doc.clone()),
+            "focus_document_pane",
+            "agent-doc.focus_document_pane.v1",
+            serde_json::json!({
+                "project_root": dir.path().display().to_string(),
+                "document_path": doc.display().to_string(),
+                "no_promotion": true,
+                "active_window_guard": true
+            }),
+            "cmd-focus",
+        );
+
+        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        assert_eq!(response["exit_code"], 0);
+        assert_eq!(response["payload"]["focused"], false);
+        assert_eq!(response["payload"]["reason"], "missing_actor_record");
+        assert_eq!(response["projection"]["commands"][0]["status"], "applied");
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_result_detects_swapped_panes() {
+        let expected = vec![
+            "/repo/tasks/left.md".to_string(),
+            "/repo/tasks/right.md".to_string(),
+        ];
+        let actual = vec![
+            "/repo/tasks/right.md".to_string(),
+            "/repo/tasks/left.md".to_string(),
+        ];
+
+        assert_eq!(
+            layout_sync_state_result(&expected, &actual),
+            (false, "pane_order_mismatch")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_result_detects_missing_or_extra_panes() {
+        let expected = vec![
+            "/repo/tasks/left.md".to_string(),
+            "/repo/tasks/right.md".to_string(),
+        ];
+        let actual = vec!["/repo/tasks/left.md".to_string()];
+
+        assert_eq!(
+            layout_sync_state_result(&expected, &actual),
+            (false, "pane_count_mismatch")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_result_accepts_matching_model() {
+        let expected = vec![
+            "/repo/tasks/left.md".to_string(),
+            "/repo/tasks/right.md".to_string(),
+        ];
+
+        assert_eq!(
+            layout_sync_state_result(&expected, &expected),
+            (true, "synced")
+        );
+    }
+
+    #[test]
+    fn tmux_layout_sync_state_rpc_reports_missing_tmux_session_with_model() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/left.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: left-session\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "tmux_layout_sync_state",
+                "diagnostic_payload": serde_json::to_string(&ControllerTmuxLayoutSyncStateInvocation {
+                    columns: vec![doc.display().to_string()],
+                    window: None,
+                    focus: Some(doc.display().to_string()),
+                }).unwrap()
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+
+        assert_eq!(envelope["ok"], true);
+        assert_eq!(envelope["data"]["synced"], false);
+        assert_eq!(envelope["data"]["reason"], "missing_tmux_session");
+        assert_eq!(
+            envelope["data"]["expected_documents"][0].as_str(),
+            Some(doc.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn command_submit_unknown_agent_doc_command_is_terminal_rejection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let request = command_submit_request_for_test(
+            None,
+            "unknown_command",
+            "agent-doc.unknown_command.v1",
+            serde_json::json!({}),
+            "cmd-unknown",
+        );
+
+        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        assert_eq!(response["exit_code"], 1);
+        assert!(
+            response["output"]
+                .as_str()
+                .unwrap()
+                .contains("unsupported agent-doc command")
+        );
+        assert_eq!(response["projection"]["commands"][0]["status"], "rejected");
+        assert_eq!(response["projection"]["commands"][0]["terminal"], true);
+    }
+
+    #[test]
+    fn active_controller_adoption_requires_stable_handoff_state() {
+        let current_binary = test_controller_binary_identity();
+        let stable = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        assert!(active_controller_status_is_adoptable(
+            &stable,
+            Some(&current_binary)
+        ));
+
+        for state in [
+            ControllerHandoffState::Preparing,
+            ControllerHandoffState::Promoted,
+            ControllerHandoffState::Retiring,
+            ControllerHandoffState::Failed,
+        ] {
+            let status = active_controller_status_with_handoff_state(state);
+            assert!(
+                !active_controller_status_is_adoptable(&status, Some(&current_binary)),
+                "non-stable active controller must not be adopted: {state:?}"
+            );
+            assert_eq!(
+                active_controller_status_non_stable_handoff_state(&status),
+                Some(state)
+            );
+        }
+    }
+
+    #[test]
+    fn active_controller_adoption_only_rejects_known_binary_mismatch() {
+        let current_binary = test_controller_binary_identity();
+        let stable = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
+        assert!(active_controller_status_is_adoptable(
+            &stable,
+            Some(&current_binary)
+        ));
+        assert!(
+            active_controller_status_is_adoptable(&stable, None),
+            "callers that cannot resolve their own binary must adopt a stable controller"
+        );
+        assert!(!active_controller_status_has_known_binary_mismatch(
+            &stable, None
+        ));
+
+        let missing_recorded_binary = ControllerStatus {
+            controller_binary: None,
+            ..stable.clone()
+        };
+        assert!(
+            active_controller_status_is_adoptable(&missing_recorded_binary, Some(&current_binary)),
+            "legacy/stale status records without binary identity are not proof of mismatch"
+        );
+        assert!(!active_controller_status_has_known_binary_mismatch(
+            &missing_recorded_binary,
+            Some(&current_binary)
+        ));
+
+        let mut changed_binary = current_binary.clone();
+        changed_binary.modified_nanos = changed_binary.modified_nanos.wrapping_add(1);
+        assert!(
+            !active_controller_status_is_adoptable(&stable, Some(&changed_binary)),
+            "known stale binary identity must still trigger replacement"
+        );
+        assert!(active_controller_status_has_known_binary_mismatch(
+            &stable,
+            Some(&changed_binary)
+        ));
+    }
+
+    #[test]
+    fn sync_tmux_layout_refuses_non_authoritative_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut bootstrap = test_bootstrap(&dir);
+        bootstrap.handoff_state = ControllerHandoffState::Preparing;
+        bootstrap.handoff_started_at = Some(timestamp_secs().saturating_sub(60));
+        let request = ControllerRequest {
+            command: "sync_tmux_layout".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&ControllerTmuxLayoutSyncInvocation {
+                    columns: vec!["tasks/a.md".to_string()],
+                    window: None,
+                    focus: Some("tasks/a.md".to_string()),
+                    no_autostart: false,
+                    exact_visible: false,
+                })
+                .unwrap(),
+            ),
+        };
+
+        let err = handle_sync_tmux_layout(&bootstrap, request).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("controller not authoritative"),
+            "sync must fail closed on non-stable handoff state: {err:#}"
+        );
+    }
+
+    #[test]
+    fn fresh_controller_refuses_bare_shutdown_from_stale_client() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let err = handle_request(
+            &(serde_json::json!({ "command": "shutdown" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap_err();
+
+        assert!(!should_stop);
+        assert!(
+            format!("{err:#}").contains("shutdown refused"),
+            "fresh controller must reject unreasoned shutdown: {err:#}"
+        );
+    }
+
+    #[test]
+    fn fresh_controller_accepts_explicit_operator_shutdown() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "shutdown",
+                "reason": "operator_shutdown"
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+
+        assert!(should_stop);
+        assert!(response.contains("\"ok\":true"), "{response}");
+    }
+
+    #[test]
+    fn stale_controller_accepts_bare_shutdown_for_replacement() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let mut bootstrap = test_bootstrap(&dir);
+        let stale_binary = bootstrap.controller_binary.as_mut().unwrap();
+        stale_binary.modified_nanos = stale_binary.modified_nanos.wrapping_add(1);
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({ "command": "shutdown" }).to_string() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+
+        assert!(should_stop);
+        assert!(response.contains("\"ok\":true"), "{response}");
+    }
 
     #[test]
     fn force_restart_controller_with_no_running_controller_is_a_noop_ok() {
@@ -9492,7 +11644,7 @@ mod tests {
         assert_eq!(status.project_root, project_root);
 
         drop(idle_stream);
-        let shutdown = request(&project_root, "shutdown").unwrap();
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
     }
@@ -9524,7 +11676,7 @@ mod tests {
         let next = request(&project_root, "status").unwrap();
         let next_status: ControllerStatus = serde_json::from_str(&next).unwrap();
         assert!(next_status.active);
-        let shutdown = request(&project_root, "shutdown").unwrap();
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
     }
@@ -9567,7 +11719,47 @@ mod tests {
         );
 
         drop(idle_stream);
-        let shutdown = request(&project_root, "shutdown").unwrap();
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn public_controller_serve_skips_when_authoritative_public_controller_exists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+        let before = status(&project_root).unwrap();
+        assert!(before.active);
+
+        let started = Instant::now();
+        serve_with_options(
+            &project_root,
+            LaunchMode::Lazy,
+            None,
+            None,
+            None,
+            ControllerHandoffState::Stable,
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "second public serve should skip instead of replacing the active controller"
+        );
+
+        let after = status(&project_root).unwrap();
+        assert!(after.active);
+        assert_eq!(after.pid, before.pid);
+        let ops_log = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops_log.contains("controller_public_launch_skipped_existing_authoritative"),
+            "skip proof marker missing:\n{ops_log}"
+        );
+
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
     }
@@ -9631,7 +11823,7 @@ mod tests {
             "the historical launch-lock error must not be logged:\n{ops_log}"
         );
 
-        let shutdown = request(&project_root, "shutdown").unwrap();
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         server.join().unwrap().unwrap();
     }
@@ -10003,9 +12195,9 @@ mod tests {
         let doc_id = doc.to_string_lossy().to_string();
         record_projection_diagnostic(
             dir.path(),
-            "session-actors.json",
+            "controller-state",
             &doc_id,
-            "test projection lag",
+            "test controller-state lag",
         );
         let conn = open_state_db(dir.path()).unwrap();
         state_store::upsert_queue_head_in_db(
@@ -10816,6 +13008,45 @@ mod tests {
         );
     }
     #[test]
+    fn schedule_stale_supervisor_pcp_recycle_marks_doc_for_idle_recycle() {
+        // `#fccsupwarn4`: a preflight-proven stale route-owned supervisor should
+        // schedule the safe idle-boundary recycle automatically, not just tell the
+        // operator to run `admin recycle` by hand.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body").unwrap();
+
+        assert!(
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .is_none(),
+            "no request before preflight schedules one"
+        );
+
+        let status = schedule_stale_supervisor_pcp_recycle(&file, "preflight_warning");
+        assert!(
+            status.contains("requested project_root="),
+            "schedule status should prove the request was written: {status}"
+        );
+
+        let request =
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .expect("recycle-request present after preflight scheduling");
+        assert_eq!(
+            request.reason,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_PREFLIGHT
+        );
+
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("stale_supervisor_pcp_recycle_requested")
+                && ops_log.contains("source=preflight_warning")
+                && ops_log.contains("reason=supervisor_binary_stale"),
+            "ops log should record the automatic recycle request:\n{ops_log}"
+        );
+    }
+
+    #[test]
     fn schedule_supervisor_recycle_marks_served_doc() {
         // `#turnsaferecycle` Goal 1: an install fan-out marks a served route-owned
         // document so its supervisor recycles at the next idle boundary.
@@ -11188,6 +13419,556 @@ mod tests {
             .expect("bumped-generation start must pass the CAS");
         assert_eq!(record.generation, 84);
         assert_eq!(record.pane_id, "%44");
+    }
+
+    fn ready_actor_for_start_alias_test(
+        bootstrap: &ControllerBootstrap,
+        document_id: &str,
+        session_id: &str,
+        generation: u64,
+        pane_id: &str,
+        window_id: &str,
+    ) -> agent_doc_sqlite::state_store::ActorRecord {
+        agent_doc_sqlite::state_store::ActorRecord {
+            document_id: document_id.to_string(),
+            session_id: session_id.to_string(),
+            generation,
+            pane_id: pane_id.to_string(),
+            window_id: window_id.to_string(),
+            harness: agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                document_id,
+            ),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "idle".to_string(),
+                timestamp: 1,
+                prior_generation: generation.saturating_sub(1),
+                new_generation: generation,
+            },
+        }
+    }
+
+    fn start_session_request_for_alias_test(
+        file: &Path,
+        session_id: &str,
+        pane_id: &str,
+        window_id: &str,
+        generation: u64,
+    ) -> ControllerRequest {
+        ControllerRequest {
+            command: "start_session".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: Some(session_id.to_string()),
+            pane_id: Some(pane_id.to_string()),
+            window_id: Some(window_id.to_string()),
+            generation: Some(generation),
+            state: None,
+            caller: Some("start".to_string()),
+            reason: Some("session_start".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        }
+    }
+
+    fn save_registry_entry_for_alias_test(
+        project_root: &Path,
+        document_id: &str,
+        session_id: &str,
+        pane_id: &str,
+        window_id: &str,
+        file: &Path,
+        pid: u32,
+    ) {
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            document_id.to_string(),
+            tmux_router::RegistryEntry {
+                pane: pane_id.to_string(),
+                pid,
+                cwd: project_root.to_string_lossy().to_string(),
+                started: "test".to_string(),
+                session_id: session_id.to_string(),
+                file: file.to_string_lossy().to_string(),
+                window: window_id.to_string(),
+                supervisor_instance_id: "test-supervisor".to_string(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(project_root, &registry).unwrap();
+    }
+
+    #[test]
+    fn start_session_closes_stale_cross_document_pane_alias_without_live_claim() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let candidate_doc = dir.path().join("tasks/candidate.md");
+        std::fs::write(
+            &owner_doc,
+            "---\nagent_doc_session: owner\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &candidate_doc,
+            "---\nagent_doc_session: candidate\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let owner_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &owner_doc.to_string_lossy(),
+        );
+        let candidate_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &candidate_doc.to_string_lossy(),
+        );
+
+        let owner =
+            ready_actor_for_start_alias_test(&bootstrap, &owner_doc_id, "owner", 1131, "%4", "@3");
+        store_actor_record(&bootstrap.project_root, None, &owner).unwrap();
+
+        let record = handle_start_session(
+            &bootstrap,
+            None,
+            start_session_request_for_alias_test(&candidate_doc, "candidate", "%4", "@3", 1),
+        )
+        .expect("stale cross-document pane alias should be closed before start");
+
+        assert_eq!(record.document_id, candidate_doc_id);
+        assert_eq!(record.pane_id, "%4");
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        let owner_after = store
+            .get(&owner_doc_id)
+            .expect("stale owner should remain as closed history");
+        assert_eq!(
+            owner_after.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
+        assert!(owner_after.pane_id.is_empty());
+        assert!(owner_after.window_id.is_empty());
+        assert_eq!(owner_after.last_transition.caller, "start");
+        assert!(
+            owner_after
+                .last_transition
+                .reason
+                .contains("stale_cross_document_pane_alias"),
+            "owner transition should record stale-alias repair: {}",
+            owner_after.last_transition.reason
+        );
+    }
+
+    #[test]
+    fn start_session_closes_stale_alias_when_registry_pid_is_dead() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let candidate_doc = dir.path().join("tasks/candidate.md");
+        std::fs::write(
+            &owner_doc,
+            "---\nagent_doc_session: owner\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &candidate_doc,
+            "---\nagent_doc_session: candidate\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let owner_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &owner_doc.to_string_lossy(),
+        );
+
+        let owner =
+            ready_actor_for_start_alias_test(&bootstrap, &owner_doc_id, "owner", 7, "%44", "@9");
+        store_actor_record(&bootstrap.project_root, None, &owner).unwrap();
+        save_registry_entry_for_alias_test(
+            &bootstrap.project_root,
+            &owner_doc_id,
+            "owner",
+            "%44",
+            "@9",
+            &owner_doc,
+            u32::MAX,
+        );
+
+        handle_start_session(
+            &bootstrap,
+            None,
+            start_session_request_for_alias_test(&candidate_doc, "candidate", "%44", "@10", 1),
+        )
+        .expect("dead durable registry entry should not keep stale pane alias live");
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            store.get(&owner_doc_id).unwrap().state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
+    }
+
+    #[test]
+    fn start_session_refuses_cross_document_alias_with_live_registry_entry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let candidate_doc = dir.path().join("tasks/candidate.md");
+        std::fs::write(
+            &owner_doc,
+            "---\nagent_doc_session: owner\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &candidate_doc,
+            "---\nagent_doc_session: candidate\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let owner_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &owner_doc.to_string_lossy(),
+        );
+        let candidate_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &candidate_doc.to_string_lossy(),
+        );
+
+        let owner =
+            ready_actor_for_start_alias_test(&bootstrap, &owner_doc_id, "owner", 7, "%44", "@9");
+        store_actor_record(&bootstrap.project_root, None, &owner).unwrap();
+        save_registry_entry_for_alias_test(
+            &bootstrap.project_root,
+            &owner_doc_id,
+            "owner",
+            "%44",
+            "@9",
+            &owner_doc,
+            std::process::id(),
+        );
+
+        let err = handle_start_session(
+            &bootstrap,
+            None,
+            start_session_request_for_alias_test(&candidate_doc, "candidate", "%44", "@10", 1),
+        )
+        .unwrap_err();
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("cross-document actor pane alias"),
+            "live durable registry entry must block cross-document pane takeover: {rendered}"
+        );
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            store.get(&owner_doc_id).unwrap().state,
+            agent_doc_sqlite::state_store::ActorState::Ready
+        );
+        assert!(
+            !store.contains_key(&candidate_doc_id),
+            "candidate start must not replace a registry-backed live owner"
+        );
+    }
+
+    #[test]
+    fn start_session_refuses_nonclosed_cross_document_pane_alias() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let candidate_doc = dir.path().join("tasks/candidate.md");
+        std::fs::write(
+            &owner_doc,
+            "---\nagent_doc_session: owner\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &candidate_doc,
+            "---\nagent_doc_session: candidate\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let owner_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &owner_doc.to_string_lossy(),
+        );
+        let candidate_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &candidate_doc.to_string_lossy(),
+        );
+
+        let owner = agent_doc_sqlite::state_store::ActorRecord {
+            document_id: owner_doc_id.clone(),
+            session_id: "owner".to_string(),
+            generation: 7,
+            pane_id: "%44".to_string(),
+            window_id: "@9".to_string(),
+            harness: agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                &owner_doc_id,
+            ),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "supervisor".to_string(),
+                reason: "idle".to_string(),
+                timestamp: 1,
+                prior_generation: 6,
+                new_generation: 7,
+            },
+        };
+        store_actor_record(&bootstrap.project_root, None, &owner).unwrap();
+        upsert_supervisor_lease(
+            &bootstrap.project_root,
+            &owner,
+            Some(std::process::id()),
+            None,
+            "ready",
+        )
+        .unwrap();
+
+        let err = handle_start_session(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "start_session".to_string(),
+                file: Some(candidate_doc.clone()),
+                session_id: Some("candidate".to_string()),
+                pane_id: Some("%44".to_string()),
+                window_id: Some("@10".to_string()),
+                generation: Some(1),
+                state: None,
+                caller: Some("start".to_string()),
+                reason: Some("session_start".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+        .unwrap_err();
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("cross-document actor pane alias"),
+            "start_session must refuse a pane claimed by another document: {rendered}"
+        );
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            store.get(&owner_doc_id).unwrap().state,
+            agent_doc_sqlite::state_store::ActorState::Ready
+        );
+        assert!(
+            !store.contains_key(&candidate_doc_id),
+            "candidate start must not evict or replace the existing owner"
+        );
+    }
+
+    #[test]
+    fn start_session_allows_same_document_pane_alias_from_legacy_document_key() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
+        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let canonical_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
+        let legacy_doc_id = "tasks/professional/equityfundingsource.md".to_string();
+
+        let legacy_actor = agent_doc_sqlite::state_store::ActorRecord {
+            document_id: legacy_doc_id.clone(),
+            session_id: "efs".to_string(),
+            generation: 1131,
+            pane_id: "%4".to_string(),
+            window_id: "@3".to_string(),
+            harness: agent_doc_session_actor_io::detect_document_harness_in(
+                &bootstrap.project_root,
+                &legacy_doc_id,
+            ),
+            state: agent_doc_sqlite::state_store::ActorState::Ready,
+            last_transition: agent_doc_sqlite::state_store::ActorLastTransition {
+                caller: "sync".to_string(),
+                reason: "prompt_ready".to_string(),
+                timestamp: 1,
+                prior_generation: 1130,
+                new_generation: 1131,
+            },
+        };
+        store_actor_record(&bootstrap.project_root, None, &legacy_actor).unwrap();
+
+        let record = handle_start_session(
+            &bootstrap,
+            None,
+            ControllerRequest {
+                command: "start_session".to_string(),
+                file: Some(doc.clone()),
+                session_id: Some("efs".to_string()),
+                pane_id: Some("%4".to_string()),
+                window_id: Some("@3".to_string()),
+                generation: Some(1132),
+                state: None,
+                caller: Some("start".to_string()),
+                reason: Some("session_start".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: None,
+            },
+        )
+        .expect("start_session must accept an equivalent same-document pane alias");
+
+        assert_eq!(record.document_id, canonical_doc_id);
+        assert_eq!(record.generation, 1132);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+        assert_eq!(record.pane_id, "%4");
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        let legacy_after = store
+            .get(&legacy_doc_id)
+            .expect("legacy same-document alias should remain as closed history");
+        assert_eq!(
+            legacy_after.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
+        assert!(legacy_after.pane_id.is_empty());
+        assert!(legacy_after.window_id.is_empty());
+        let canonical_after = store
+            .get(&canonical_doc_id)
+            .expect("canonical document actor should be stored");
+        assert_eq!(
+            canonical_after.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+        assert_eq!(canonical_after.pane_id, "%4");
+    }
+
+    #[test]
+    fn start_session_trims_invisible_same_document_alias_drift_before_live_claim_check() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
+        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let canonical_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
+        let dirty_doc_id = format!("{canonical_doc_id}\n");
+
+        let dirty_actor = ready_actor_for_start_alias_test(
+            &bootstrap,
+            &dirty_doc_id,
+            "efs-old",
+            1131,
+            "%4",
+            "@3",
+        );
+        store_actor_record(&bootstrap.project_root, None, &dirty_actor).unwrap();
+        save_registry_entry_for_alias_test(
+            &bootstrap.project_root,
+            &dirty_doc_id,
+            "efs-old",
+            "%4",
+            "@3",
+            &doc,
+            std::process::id(),
+        );
+
+        let record = handle_start_session(
+            &bootstrap,
+            None,
+            start_session_request_for_alias_test(&doc, "efs", "%4", "@3", 1132),
+        )
+        .expect("invisible same-document id drift must not block start_session");
+
+        assert_eq!(record.document_id, canonical_doc_id);
+        assert_eq!(record.generation, 1132);
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            store.get(&dirty_doc_id).unwrap().state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
+    }
+
+    #[test]
+    fn start_session_allows_same_session_pane_alias_after_restart_key_drift() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
+        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let canonical_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &doc.to_string_lossy(),
+        );
+        let stale_doc_key = format!("{canonical_doc_id}.stale-restart-key");
+
+        let stale_actor =
+            ready_actor_for_start_alias_test(&bootstrap, &stale_doc_key, "efs", 1131, "%4", "@3");
+        store_actor_record(&bootstrap.project_root, None, &stale_actor).unwrap();
+        save_registry_entry_for_alias_test(
+            &bootstrap.project_root,
+            &stale_doc_key,
+            "efs",
+            "%4",
+            "@3",
+            &doc,
+            std::process::id(),
+        );
+
+        let record = handle_start_session(
+            &bootstrap,
+            None,
+            start_session_request_for_alias_test(&doc, "efs", "%4", "@3", 1132),
+        )
+        .expect("same-session same-pane restart must not be treated as cross-document");
+
+        assert_eq!(record.document_id, canonical_doc_id);
+        assert_eq!(record.generation, 1132);
+        assert_eq!(record.pane_id, "%4");
+        assert_eq!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Starting
+        );
+
+        let store = load_actor_store(&bootstrap.project_root).unwrap();
+        assert_eq!(
+            store.get(&stale_doc_key).unwrap().state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+        );
     }
 
     #[test]

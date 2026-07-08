@@ -6,7 +6,7 @@
 //!   have no terminal open yet.
 //! - Session resolution order:
 //!   1. Explicit `--session` flag, if provided.
-//!   2. Scan `sessions.json` for any live pane belonging to this project; reuse its session.
+//!   2. Scan the durable registry for any live pane belonging to this project; reuse its session.
 //!   3. Default session name `"0"`.
 //! - `tmux_session` frontmatter field is deprecated and never consulted during resolution.
 //! - If the resolved session already has an attached client → no-op (no duplicate terminals).
@@ -87,7 +87,7 @@ enum SessionTarget {
 /// Resolve which tmux session to target. Resolution order:
 ///
 /// 1. Explicit `--session` flag
-/// 2. Scan sessions.json for ANY live session with agent-doc panes for this project
+/// 2. Scan the durable registry for ANY live session with agent-doc panes for this project
 /// 3. Fall back to default session name "0"
 ///
 /// Note: `tmux_session` frontmatter is deprecated and no longer consulted.
@@ -108,7 +108,7 @@ fn resolve_target_session(
         return Ok(classify_session(tmux, name));
     }
 
-    // Scan sessions.json for any live session hosting this project's panes
+    // Scan the durable registry for any live session hosting this project's panes
     if let Some(active_session) = find_active_project_session(tmux)? {
         eprintln!(
             "[terminal] targeting session '{}' (from registry scan)",
@@ -131,7 +131,7 @@ fn classify_session(tmux: &Tmux, name: &str) -> SessionTarget {
     }
 }
 
-/// Scan sessions.json for any live pane, and return the tmux session that pane belongs to.
+/// Scan the durable registry for any live pane, and return the tmux session that pane belongs to.
 ///
 /// This handles the "stale frontmatter" case: if the frontmatter says session "foo"
 /// but "foo" doesn't exist, we check if there's any OTHER session with live agent-doc

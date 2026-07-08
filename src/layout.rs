@@ -12,7 +12,7 @@
 //!   - Requires at least one file; errors if `files` is empty.
 //!   - With exactly one file: delegates entirely to `agent-doc-focus-io` and returns.
 //!   - For each file: reads frontmatter to obtain the session UUID via
-//!     `frontmatter::ensure_session`, then looks up the live pane in `sessions.json`.
+//!     `frontmatter::ensure_session`, then looks up the live pane in the durable registry.
 //!     Files with no registered pane or a dead pane are skipped with a stderr warning.
 //!   - When `--window` is supplied, discards any resolved pane that does not belong to
 //!     that window (prevents cross-window pane migration).
@@ -30,14 +30,14 @@
 //!   - Focuses the first file's pane after the layout is complete.
 //!
 //! ## Agentic Contracts
-//! - Only panes that are registered in `sessions.json` are ever broken out of the target
+//! - Only panes that are registered in the durable registry are ever broken out of the target
 //!   window; unmanaged panes are never touched.
 //! - A single-file invocation never modifies tmux window structure; it is a pure focus
 //!   operation.
 //! - The `--window` filter is a hard boundary: panes outside the specified window are
 //!   silently excluded rather than migrated into it.
 //! - After a successful multi-pane layout, the first file's pane is always focused.
-//! - `run_with_tmux` does not modify `sessions.json`; session registry updates are the
+//! - `run_with_tmux` does not modify the durable registry; session registry updates are the
 //!   responsibility of `claim.rs` / `route.rs`.
 //!
 //! ## Evals
@@ -53,7 +53,7 @@
 //!   and one resolved pane is in a different window → that pane is filtered out before
 //!   arrangement.
 //! - `layout_does_not_break_nonregistered_panes` (aspirational): target window contains
-//!   a shell pane not in `sessions.json` alongside a registered pane to be broken out →
+//!   a shell pane not in the registry alongside a registered pane to be broken out →
 //!   only the registered pane is broken out; the shell pane remains.
 //! - `layout_empty_files_errors` (aspirational): `files` is empty → `anyhow::bail!`
 //!   with "at least one file required".

@@ -38,9 +38,6 @@
     <projectListeners>
         <listener class="com.github.btakita.agentdoc.PluginLifecycleListener"
                   topic="com.intellij.openapi.project.ProjectManagerListener"/>
-        <!-- #lzlosstree Phase 5: apply lossless-tree frames to the live buffer. -->
-        <listener class="com.github.btakita.agentdoc.LosslessTreeFrameListener"
-                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
     </projectListeners>
 
     <actions>

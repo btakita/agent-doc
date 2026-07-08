@@ -13,9 +13,9 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Reconciles tmux focus/layout with editor tab switches.
  *
- * Single-document tab-selection changes use `agent-doc focus`; split-layout
- * tab selections stay on non-destructive `agent-doc sync --no-autostart` so
- * a selected pane can be rescued back out of stash into the agent-doc window.
+ * Single-document tab-selection changes use PCP `focus_document_pane`; split-layout
+ * tab selections submit non-destructive `sync_tmux_layout` work to CPC so a
+ * selected pane can be rescued back out of stash into the agent-doc window.
  *
  * Guards against rapid-fire events:
  * - 100ms debounce so only the final burst state is acted upon
@@ -53,11 +53,20 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private const val AUTOMATIC_SYNC_TIMEOUT_MS = 5_000L
         private const val SYNC_TIMEOUT_BACKOFF_BASE_MS = 30_000L
         private const val SYNC_TIMEOUT_BACKOFF_MAX_MS = 300_000L
-        private const val FOCUS_TIMEOUT_MS = 750L
+        private const val FOCUS_TIMEOUT_MS = 2_000L
         private const val MAX_DEFERRED_RETRIES = 8
         private val fallbackGeneration = AtomicLong(0)
         private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
+        private val GSON = com.google.gson.Gson()
+
+        internal fun formatCpcSyncLabel(columns: List<String>, focus: String): String =
+            "pcp:sync_tmux_layout " +
+                columns.joinToString(" ") { "--col $it" } +
+                " --focus $focus --exact-visible --no-autostart"
+
+        internal fun formatCpcSyncHint(columns: List<String>, focus: String): String =
+            "Sync: ${columns.joinToString(" ") { "--col $it" }} [focus: $focus]"
     }
 
     internal enum class AutomaticCommandKind {
@@ -75,6 +84,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val projectRoot: String,
         val command: List<String>,
         val activeFile: String,
+        val columns: List<String> = emptyList(),
     )
 
     internal data class AutomaticStateSnapshot(
@@ -135,21 +145,32 @@ class EditorTabSyncListener : FileEditorManagerListener {
             previousVisibleSignature: String?,
             previousFocusedFile: String?,
             forceReconcile: Boolean = false,
+            layoutSynced: Boolean? = true,
         ): AutomaticCommandPlan? {
             if (visibleMdFiles.isEmpty()) return null
 
             if (
                 !forceReconcile &&
+                layoutSynced != false &&
                 visibleSignature == previousVisibleSignature &&
                 focusedFile == previousFocusedFile
             ) {
                 return null
             }
 
+            // #tmuxsyncstate: an editor focus event can arrive while the editor
+            // split model is unchanged but the tmux panes have drifted/swapped.
+            // The controller's lazily-backed sync state report is the authority
+            // for that mismatch; focus-only would select the right pane but leave
+            // it in the wrong column.
+            if (!forceReconcile && layoutSynced == false) {
+                return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
+            }
+
             // #panefocussteal: a pure focus change (same visible layout, the
             // operator just switched between open doc tabs) is the ONLY case that
-            // should move tmux focus — route it through `agent-doc focus`, the
-            // dedicated focus mover. `agent-doc sync` is layout-only and never
+            // should move tmux focus — route it through PCP `focus_document_pane`.
+            // `agent-doc sync` is layout-only and never
             // moves the operator's active pane (it neutralizes any internal
             // selection), so emitting Sync here would leave the doc-to-doc switch
             // dead. A changed visible layout still goes through Sync.
@@ -257,7 +278,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         latestSnapshot.set(snapshot)
         val generation = requestedGeneration ?: nextGeneration()
         if (immediateFocus) {
-            focusExistingPaneImmediately(project, snapshot, generation)
+            focusExistingPaneImmediately(snapshot, generation)
         }
         executor.schedule(sync@{
             try {
@@ -273,7 +294,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
     }
 
     private fun focusExistingPaneImmediately(
-        project: com.intellij.openapi.project.Project,
         snapshot: AutomaticStateSnapshot,
         generation: Long,
     ) {
@@ -283,25 +303,14 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     log("focus: superseded gen=$generation")
                     return@focus
                 }
-                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
-                val cmd = SyncLayoutAction.buildFocusCommand(
-                    agentDoc = agentDoc,
-                    focusedFile = snapshot.focusedRelativePath,
+                val result = CpcRouteClient.submitFocusDocumentPane(
+                    projectRoot = snapshot.focusedProjectRoot,
+                    documentPath = snapshot.activeFile,
                 )
-                val result = SyncLayoutAction.runCommandWithTimeout(
-                    cmd,
-                    snapshot.focusedProjectRoot,
-                    timeoutMs = FOCUS_TIMEOUT_MS,
-                )
-                val output = result.output
-                val exitCode = result.exitCode
-                if (exitCode == 0) {
-                    log("focus: applied ${snapshot.focusedRelativePath}")
-                    TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
-                } else if (result.timedOut) {
-                    log("focus: deferred ${snapshot.focusedRelativePath} timeout=${FOCUS_TIMEOUT_MS}ms output=${output.take(200)}")
+                if (result.exitCode == 0) {
+                    log("focus: pcp submit accepted file=${snapshot.focusedRelativePath}")
                 } else {
-                    log("focus: skipped ${snapshot.focusedRelativePath} exit=$exitCode output=${output.take(200)}")
+                    log("focus: skipped ${snapshot.focusedRelativePath}: ${result.output}")
                 }
             } catch (e: Exception) {
                 log("focus: skipped ${snapshot.focusedRelativePath}: ${e.message}")
@@ -363,7 +372,32 @@ class EditorTabSyncListener : FileEditorManagerListener {
         )
     }
 
+    private fun queryLayoutSyncState(
+        snapshot: AutomaticStateSnapshot,
+        syncColumns: List<String>,
+    ): Boolean? {
+        if (syncColumns.size < 2) return true
+        val report = CpcRouteClient.tmuxLayoutSyncState(
+            projectRoot = snapshot.syncProjectRoot,
+            columnsJson = GSON.toJson(syncColumns),
+            focus = snapshot.activeFile,
+        )
+        if (report == null) {
+            log("sync state: unavailable for ${snapshot.focusedRelativePath}")
+            return false
+        }
+        log(
+            "sync state: synced=${report.synced} reason=${report.reason} file=${snapshot.focusedRelativePath}"
+        )
+        return report.synced
+    }
+
     private fun buildExecutionPlan(snapshot: AutomaticStateSnapshot): AutomaticExecutionPlan? {
+        val syncColumns = SyncLayoutAction.buildSyncColumns(
+            visibleMdFiles = snapshot.visibleMdFiles,
+            editorLayout = snapshot.editorLayout,
+        )
+        val layoutSynced = queryLayoutSyncState(snapshot, syncColumns)
         val plan = AutomaticCommandPlanner.plan(
             visibleMdFiles = snapshot.visibleMdFiles,
             visibleSignature = snapshot.visibleSignature,
@@ -371,26 +405,18 @@ class EditorTabSyncListener : FileEditorManagerListener {
             previousVisibleSignature = lastVisibleSignature,
             previousFocusedFile = lastFocusedFile,
             forceReconcile = snapshot.forceReconcile,
+            layoutSynced = layoutSynced,
         ) ?: return null
 
         val (projectRoot, cmd) = when (plan.kind) {
             AutomaticCommandKind.Focus -> {
-                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.focusedProjectRoot)
-                snapshot.focusedProjectRoot to SyncLayoutAction.buildFocusCommand(
-                    agentDoc = agentDoc,
-                    focusedFile = snapshot.focusedRelativePath,
+                snapshot.focusedProjectRoot to listOf(
+                    "pcp:focus_document_pane",
+                    snapshot.activeFile,
                 )
             }
             AutomaticCommandKind.Sync -> {
-                val agentDoc = TerminalUtil.resolveAgentDoc(snapshot.syncProjectRoot)
-                snapshot.syncProjectRoot to SyncLayoutAction.buildSyncCommand(
-                    agentDoc = agentDoc,
-                    visibleMdFiles = snapshot.visibleMdFiles,
-                    editorLayout = snapshot.editorLayout,
-                    focusedFile = snapshot.activeFile,
-                    noAutostart = true,
-                    exactVisible = true,
-                )
+                snapshot.syncProjectRoot to listOf("pcp:sync_tmux_layout")
             }
         }
 
@@ -399,6 +425,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             projectRoot = projectRoot,
             command = cmd,
             activeFile = snapshot.activeFile,
+            columns = syncColumns,
         )
     }
 
@@ -481,9 +508,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         project: com.intellij.openapi.project.Project,
         requestedGeneration: Long,
     ) {
-        val lib = AgentDocLib.get()
-        val locked = lib?.agent_doc_sync_try_lock()
-            ?: fallbackRunning.compareAndSet(false, true)
+        val locked = fallbackRunning.compareAndSet(false, true)
         if (!locked) {
             log("guard: layout already running, queued latest request")
             latestSnapshot.get()?.let {
@@ -509,17 +534,46 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     }
                 }
                 val cmd = execution.command
-                log("exec: ${cmd.joinToString(" ")}")
-                TerminalUtil.showHint(project, TerminalUtil.formatLayoutSummary(cmd))
+                when (execution.plan.kind) {
+                    AutomaticCommandKind.Focus -> log("submit: ${cmd.joinToString(" ")}")
+                    AutomaticCommandKind.Sync -> {
+                        log("submit: ${formatCpcSyncLabel(execution.columns, execution.activeFile)}")
+                        TerminalUtil.showHint(
+                            project,
+                            formatCpcSyncHint(execution.columns, execution.activeFile),
+                        )
+                    }
+                }
                 val timeoutMs = when (execution.plan.kind) {
                     AutomaticCommandKind.Focus -> FOCUS_TIMEOUT_MS
                     AutomaticCommandKind.Sync -> AUTOMATIC_SYNC_TIMEOUT_MS
                 }
-                val processResult = SyncLayoutAction.runCommandWithTimeout(
-                    cmd,
-                    execution.projectRoot,
-                    timeoutMs = timeoutMs,
-                )
+                val processResult = if (execution.plan.kind == AutomaticCommandKind.Focus) {
+                    val result = CpcRouteClient.submitFocusDocumentPane(
+                        projectRoot = execution.projectRoot,
+                        documentPath = execution.activeFile,
+                    )
+                    SyncLayoutAction.Companion.SyncProcessResult(
+                        exitCode = result.exitCode,
+                        output = result.output,
+                        timedOut = false,
+                    )
+                } else {
+                    val result = CpcRouteClient.submitSyncTmuxLayout(
+                        projectRoot = execution.projectRoot,
+                        columnsJson = GSON.toJson(execution.columns),
+                        window = null,
+                        focus = execution.activeFile,
+                        noAutostart = true,
+                        exactVisible = true,
+                        callerKind = "automatic",
+                    )
+                    SyncLayoutAction.Companion.SyncProcessResult(
+                        exitCode = result.exitCode,
+                        output = result.output,
+                        timedOut = false,
+                    )
+                }
                 val output = processResult.output
                 val exitCode = processResult.exitCode
                 commandTimedOut = processResult.timedOut
@@ -574,7 +628,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 }
             }
         } finally {
-            lib?.agent_doc_sync_unlock() ?: fallbackRunning.set(false)
+            fallbackRunning.set(false)
             val replayDelayMs = AutomaticCommandPlanner.replayDelayAfterRun(
                 startedGeneration,
                 currentGeneration(),

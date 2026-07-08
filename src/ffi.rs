@@ -63,7 +63,7 @@
 use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
 use anyhow::Context as _;
 use serde::Serialize;
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2418,6 +2418,91 @@ pub unsafe extern "C" fn agent_doc_admin_inspect_json(
             document_path.as_deref(),
             session_id.as_deref(),
             pane_id.as_deref(),
+        )
+    })())
+}
+
+/// Return the PCP-owned tmux focus projection for a project.
+///
+/// The response reports an active document only when the configured tmux
+/// session's current window is `agent-doc`; other tmux windows intentionally
+/// return an inactive projection so editor selection is not recalled from a
+/// stale agent-doc pane.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
+    project_root: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let root = resolve_admin_root(project_root.as_deref(), None)?;
+        agent_doc_controller_io::project_controller::tmux_focus_state(&root)
+    })())
+}
+
+/// Focus the actor pane for a document through the PCP.
+///
+/// This centralizes pane selection behind the controller so JetBrains does not
+/// run `agent-doc focus` or raw tmux commands for editor focus handoff.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_focus_document_pane_json(
+    project_root: *const c_char,
+    document_path: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let document_path =
+            PathBuf::from(unsafe { required_ffi_string(document_path, "document_path") }?);
+        let root = resolve_admin_root(project_root.as_deref(), Some(&document_path))?;
+        agent_doc_controller_io::project_controller::focus_document_pane(&root, &document_path)
+    })())
+}
+
+/// Sync the tmux layout through the PCP/project controller.
+///
+/// `columns_json` is a JSON array of column strings using the same comma-joined
+/// column representation as `agent-doc sync --col`.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_sync_tmux_layout_json(
+    project_root: *const c_char,
+    columns_json: *const c_char,
+    window: *const c_char,
+    focus: *const c_char,
+    no_autostart: c_int,
+    exact_visible: c_int,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root = unsafe { optional_ffi_string(project_root, "project_root") }?;
+        let columns_json = unsafe { required_ffi_string(columns_json, "columns_json") }?;
+        let window = unsafe { optional_ffi_string(window, "window") }?;
+        let focus = unsafe { optional_ffi_string(focus, "focus") }?;
+        let columns: Vec<String> =
+            serde_json::from_str(&columns_json).context("parse columns_json")?;
+        let focus_path = focus.as_deref().map(Path::new);
+        let root = resolve_admin_root(project_root.as_deref(), focus_path)?;
+        agent_doc_controller_io::project_controller::sync_tmux_layout(
+            &root,
+            agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation {
+                columns,
+                window,
+                focus,
+                no_autostart: no_autostart != 0,
+                exact_visible: exact_visible != 0,
+            },
         )
     })())
 }

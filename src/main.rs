@@ -235,6 +235,51 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             ),
         }
     }
+
+    fn sync_tmux_layout(
+        &self,
+        project_root: &Path,
+        invocation: agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation,
+    ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncReceipt>
+    {
+        let sync_result = if invocation.no_autostart {
+            if invocation.exact_visible {
+                agent_doc_sync_io::sync::run_layout_only_exact_visible_in_project_root(
+                    project_root,
+                    &invocation.columns,
+                    invocation.window.as_deref(),
+                    invocation.focus.as_deref(),
+                )
+            } else {
+                agent_doc_sync_io::sync::run_layout_only_in_project_root(
+                    project_root,
+                    &invocation.columns,
+                    invocation.window.as_deref(),
+                    invocation.focus.as_deref(),
+                )
+            }
+        } else {
+            agent_doc_sync_io::sync::run_in_project_root(
+                project_root,
+                &invocation.columns,
+                invocation.window.as_deref(),
+                invocation.focus.as_deref(),
+            )
+        };
+        sync_result?;
+        let sync_report = agent_doc_sync_io::sync::last_sync_run_report();
+        Ok(
+            agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncReceipt {
+                applied: sync_report.applied,
+                reason: sync_report.reason,
+                columns: invocation.columns,
+                window: invocation.window,
+                focus: invocation.focus,
+                no_autostart: invocation.no_autostart,
+                exact_visible: invocation.exact_visible,
+            },
+        )
+    }
 }
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
@@ -1906,7 +1951,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Validate sessions.json against live tmux panes, remove stale entries
+    /// Validate the durable session registry against live tmux panes, remove stale entries
     Resync {
         /// Limit checks/fixes to a single session document
         file: Option<PathBuf>,

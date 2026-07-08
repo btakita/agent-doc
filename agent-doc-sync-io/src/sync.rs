@@ -8,7 +8,7 @@
 //! to create a new pane. Files entering the system for the first time go through
 //! **Initialization** (`ensure_initialized`) which assigns a UUID, creates a snapshot,
 //! and commits to git. The result is a **Binding** (document→pane association) stored
-//! in `sessions.json`.
+//! in the durable registry.
 //!
 //! Usage: `agent-doc sync [--col plan.md,corky.md] [--col agent-doc.md] [--window @1] [--focus plan.md]`
 //!
@@ -192,6 +192,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+#[cfg(test)]
 use tempfile::NamedTempFile;
 
 #[cfg(test)]
@@ -210,9 +211,10 @@ use agent_doc_sync::{
     SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
     WindowIndexNormalizationPlan, auto_started_panes_summary, effective_sync_columns,
     epoch_millis_now, is_file_rename, last_visible_excerpt, latency_budget_status,
-    plan_window_index_normalization, planned_stash_window_indices, registry_relative_file_path,
-    rename_debounce_expired, safe_passive_prune_cleanup_throttle, sanitize_excerpt,
-    sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
+    plan_window_index_normalization, planned_stash_window_indices, preserved_layout_focus_marker,
+    registry_relative_file_path, rename_debounce_expired,
+    reselect_visible_focus_pane_failed_warning, safe_passive_prune_cleanup_throttle,
+    sanitize_excerpt, sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -233,6 +235,45 @@ mod layout;
 pub(crate) use layout::*;
 mod pane_repair;
 pub(crate) use pane_repair::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncRunReport {
+    pub applied: bool,
+    pub reason: String,
+}
+
+impl Default for SyncRunReport {
+    fn default() -> Self {
+        Self {
+            applied: true,
+            reason: "applied".to_string(),
+        }
+    }
+}
+
+thread_local! {
+    static LAST_SYNC_RUN_REPORT: RefCell<SyncRunReport> =
+        RefCell::new(SyncRunReport::default());
+}
+
+fn reset_sync_run_report() {
+    LAST_SYNC_RUN_REPORT.with(|report| {
+        *report.borrow_mut() = SyncRunReport::default();
+    });
+}
+
+fn mark_sync_layout_preserved(reason: &str) {
+    LAST_SYNC_RUN_REPORT.with(|report| {
+        *report.borrow_mut() = SyncRunReport {
+            applied: false,
+            reason: reason.to_string(),
+        };
+    });
+}
+
+pub fn last_sync_run_report() -> SyncRunReport {
+    LAST_SYNC_RUN_REPORT.with(|report| report.borrow().clone())
+}
 
 fn log_sync_latency(
     focus: Option<&str>,
@@ -444,13 +485,41 @@ pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Re
     run_with_options(col_args, window, focus, AutoStartMode::Full)
 }
 
+pub fn run_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
+    tracing::debug!(
+        root = %project_root.display(),
+        cols = ?col_args,
+        window,
+        focus,
+        "sync::run_in_project_root start"
+    );
+    run_with_options_at_root(project_root, col_args, window, focus, AutoStartMode::Full)
+}
+
 fn run_with_options(
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
 ) -> Result<()> {
-    run_with_options_internal(
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    run_with_options_at_root(&cwd, col_args, window, focus, auto_start_mode)
+}
+
+fn run_with_options_at_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
         col_args,
         window,
         focus,
@@ -520,6 +589,21 @@ pub fn run_layout_only(
     run_with_options(col_args, window, focus, AutoStartMode::SafePassive)
 }
 
+pub fn run_layout_only_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
+    run_with_options_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        AutoStartMode::SafePassive,
+    )
+}
+
 /// Run sync in passive editor mode with an exact editor-visible projection.
 ///
 /// Unlike generic focus-only safe-passive sync, this mode does not expand a
@@ -530,7 +614,18 @@ pub fn run_layout_only_exact_visible(
     window: Option<&str>,
     focus: Option<&str>,
 ) -> Result<()> {
-    run_with_options_internal(
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    run_layout_only_exact_visible_in_project_root(&cwd, col_args, window, focus)
+}
+
+pub fn run_layout_only_exact_visible_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
         col_args,
         window,
         focus,
@@ -567,6 +662,19 @@ fn load_live_authoritative_actor_record_uncached(
     if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
         return None;
     }
+    if let Some(other) = pane_owned_document_other_than(tmux, &record.pane_id, &canonical) {
+        let message = format!(
+            "authoritative_actor_cross_document_pane_rejected file={} pane={} pane_owns={} session={} generation={}",
+            file.display(),
+            record.pane_id,
+            other,
+            session_id,
+            record.generation
+        );
+        sync_log(&message);
+        agent_doc_ops_log_io::log_op(file, &message);
+        return None;
+    }
     Some(record)
 }
 
@@ -576,6 +684,9 @@ fn load_live_authoritative_actor_record_cached(
     session_id: &str,
     proof_cache: &SyncProofCache,
 ) -> Option<agent_doc_sqlite::state_store::ActorRecord> {
+    if proof_cache.skip_authoritative_actor_lookup {
+        return None;
+    }
     let key = (sync_proof_file_key(file), session_id.to_string());
     if let Some(record) = proof_cache.actor_records.borrow().get(&key) {
         return record.clone();
@@ -617,7 +728,24 @@ fn project_authoritative_actor_binding(
     proof_cache: &SyncProofCache,
 ) -> Option<String> {
     if matches!(auto_start_mode, AutoStartMode::SafePassive)
-        && let Some(pane_id) = authoritative_actor_pane_for_document(tmux, file, session_id)
+        && proof_cache.skip_authoritative_actor_lookup
+    {
+        log_sync_latency(
+            focus,
+            "controller_actor_lookup",
+            Duration::ZERO,
+            SYNC_CONTROLLER_ACTOR_LOOKUP_BUDGET,
+            auto_start_mode,
+        );
+        sync_log(&format!(
+            "controller_actor_lookup_skipped file={} source=safe_passive_no_controller_actor_rpc",
+            file.display()
+        ));
+        return None;
+    }
+    if matches!(auto_start_mode, AutoStartMode::SafePassive)
+        && let Some(pane_id) =
+            authoritative_actor_pane_for_document_cached(tmux, file, session_id, proof_cache)
     {
         log_sync_latency(
             focus,
@@ -650,28 +778,28 @@ fn project_authoritative_actor_binding(
         .map(|entry| entry.pane.as_str())
         != Some(actor_pane.as_str())
     {
-        let projection_start = Instant::now();
+        let registry_refresh_start = Instant::now();
         eprintln!(
-            "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing sessions.json as a projection",
+            "[sync] authoritative actor generation {} keeps {} on pane {} — refreshing durable registry metadata",
             record.generation,
             file.display(),
             actor_pane
         );
         sync_log(&format!(
-            "actor_projection_refresh file={} pane={} generation={}",
+            "actor_registry_refresh file={} pane={} generation={}",
             file.display(),
             actor_pane,
             record.generation
         ));
         if let Err(err) = reregister_recovered_owner(tmux, file, session_id, &actor_pane) {
             eprintln!(
-                "[sync] warning: failed to project authoritative actor pane {} for {} into sessions.json: {}",
+                "[sync] warning: failed to refresh authoritative actor pane {} for {} in durable registry: {}",
                 actor_pane,
                 file.display(),
                 err
             );
             sync_log(&format!(
-                "warning: actor_projection_refresh_failed file={} pane={} err={}",
+                "warning: actor_registry_refresh_failed file={} pane={} err={}",
                 file.display(),
                 actor_pane,
                 err
@@ -679,8 +807,8 @@ fn project_authoritative_actor_binding(
         }
         log_sync_latency(
             focus,
-            "projection_refresh",
-            projection_start.elapsed(),
+            "registry_refresh",
+            registry_refresh_start.elapsed(),
             SYNC_PROJECTION_REFRESH_BUDGET,
             auto_start_mode,
         );
@@ -715,16 +843,39 @@ fn sync_actor_or_live_owner_matches_cached(
         return *matches;
     }
 
-    let matches = authoritative_actor_pane_for_document_cached(tmux, file, session_id, proof_cache)
-        .as_deref()
-        == Some(pane_id)
-        || find_normal_path_owner_pane_excluding_quiet(tmux, file, session_id, None).as_deref()
-            == Some(pane_id);
+    let matches = find_normal_path_owner_pane_excluding_cached_quiet(
+        tmux,
+        file,
+        session_id,
+        None,
+        proof_cache,
+    )
+    .as_deref()
+        == Some(pane_id);
     proof_cache
         .live_owner_matches
         .borrow_mut()
         .insert(key, matches);
     matches
+}
+
+fn find_normal_path_owner_pane_excluding_cached_quiet(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    excluded_pane: Option<&str>,
+    proof_cache: &SyncProofCache,
+) -> Option<String> {
+    let actor = if proof_cache.skip_authoritative_actor_lookup {
+        None
+    } else {
+        authoritative_actor_pane_for_document_cached(tmux, file, session_id, proof_cache)
+            .filter(|pane| excluded_pane != Some(pane.as_str()))
+    };
+    let candidate = actor.or_else(|| {
+        find_registered_pane_via_path_provenance(tmux, file, session_id, excluded_pane, false)
+    });
+    reject_cross_document_owner_pane(tmux, candidate, file, false)
 }
 
 fn passive_autostart_skip_reason(
@@ -1206,14 +1357,49 @@ fn sync_log(msg: &str) {
     crate::append_sync_log(msg);
 }
 
+fn reselect_visible_focus_pane_if_present(
+    tmux: &Tmux,
+    window: Option<&str>,
+    focus: Option<&str>,
+    reason: &str,
+) -> Option<String> {
+    let focus_display = focus?;
+    let canonical_focus = canonicalize_sync_file(Path::new(focus_display))?;
+    let session_id = agent_doc_frontmatter_io::session::read_session_id(&canonical_focus)?;
+    let pane = find_normal_path_owner_pane(tmux, &canonical_focus, &session_id)?;
+    if let Some(target_window) = window {
+        let visible_panes = tmux.list_window_panes(target_window).unwrap_or_default();
+        if !visible_panes.iter().any(|candidate| candidate == &pane) {
+            return None;
+        }
+    }
+    match tmux.select_pane(&pane) {
+        Ok(()) => {
+            let message = preserved_layout_focus_marker(&pane, reason);
+            eprintln!("{}", message);
+            sync_log(&message);
+            Some(pane)
+        }
+        Err(err) => {
+            let warning = reselect_visible_focus_pane_failed_warning(
+                &pane,
+                &canonical_focus.display().to_string(),
+                &err.to_string(),
+            );
+            eprintln!("{}", warning);
+            sync_log(&warning);
+            None
+        }
+    }
+}
+
 /// Check the per-server-per-session destructive-repair stamp. Returns `true`
 /// when a destructive repair ran within `DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS` (so
 /// this pass should skip it); otherwise records a fresh stamp and returns
 /// `false`. Failing to resolve the stamp path (no `.agent-doc/`) never throttles.
-fn throttle_destructive_repair(tmux: &Tmux, session_name: &str) -> bool {
-    let Some(path) = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| sync_repair_stamp_path(&cwd, tmux.server_socket.as_deref(), session_name))
+fn throttle_destructive_repair(project_root: &Path, tmux: &Tmux, session_name: &str) -> bool {
+    let Some(path) =
+        sync_repair_stamp_path(project_root, tmux.server_socket.as_deref(), session_name)
     else {
         return false;
     };
@@ -1324,23 +1510,45 @@ fn safe_passive_prune_cleanup_mode_at(
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
+#[cfg(test)]
 fn safe_passive_prune_cleanup_mode(
     auto_start_mode: AutoStartMode,
     col_args: &[String],
     window: Option<&str>,
     focus: Option<&str>,
 ) -> agent_doc_tmux::PruneCleanupMode {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    safe_passive_prune_cleanup_mode_at_root(auto_start_mode, col_args, window, focus, &cwd)
+}
+
+fn safe_passive_prune_cleanup_mode_at_root(
+    auto_start_mode: AutoStartMode,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    project_root: &Path,
+) -> agent_doc_tmux::PruneCleanupMode {
     if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
         return agent_doc_tmux::PruneCleanupMode::Full;
     }
     // Editor-driven safe-passive sync is the fast handoff path. It still prunes
-    // stale registry rows and retained dead non-stash panes, but it must not
-    // spend the selection budget scanning stash panes before tmux-router can
-    // detach any extra visible pane from the active editor projection.
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let state_path = agent_doc_sync::sync_prune_state_path(col_args, focus, &cwd);
+    // stale registry rows, but it must not spend the selection budget scanning
+    // stash panes or retained dead panes before tmux-router can detach any extra
+    // visible pane from the active editor projection.
+    let state_path = agent_doc_sync::sync_prune_state_path(col_args, focus, project_root);
     let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
+}
+
+fn exact_visible_safe_passive(
+    auto_start_mode: AutoStartMode,
+    exact_visible_projection: bool,
+) -> bool {
+    matches!(auto_start_mode, AutoStartMode::SafePassive) && exact_visible_projection
+}
+
+fn skip_sync_status_updates_for_mode(auto_start_mode: AutoStartMode) -> bool {
+    matches!(auto_start_mode, AutoStartMode::SafePassive)
 }
 
 pub fn configured_session_for_root(tmux: &Tmux, root: &Path) -> Option<String> {
@@ -1612,13 +1820,9 @@ fn normalize_window_to_index(
 /// Check if this binary is a new build and clear stale caches if so.
 /// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
 /// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
-fn check_build_stamp() {
+fn check_build_stamp(project_root: &Path) {
     let build_ts = option_env!("AGENT_DOC_BUILD_TIMESTAMP").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let cwd = match std::env::current_dir() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    let stamp_path = cwd.join(".agent-doc/build.stamp");
+    let stamp_path = project_root.join(".agent-doc/build.stamp");
     let stored = std::fs::read_to_string(&stamp_path).unwrap_or_default();
     if stored.trim() == build_ts {
         return; // Same build
@@ -1629,7 +1833,7 @@ fn check_build_stamp() {
         build_ts
     );
     // Clear startup locks
-    let starting_dir = cwd.join(".agent-doc/starting");
+    let starting_dir = project_root.join(".agent-doc/starting");
     if starting_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&starting_dir)
     {
@@ -1677,8 +1881,30 @@ fn run_with_options_internal(
     exact_visible_projection: bool,
     tmux: &Tmux,
 ) -> Result<()> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    run_with_options_internal_at_root(
+        &cwd,
+        col_args,
+        window,
+        focus,
+        auto_start_mode,
+        exact_visible_projection,
+        tmux,
+    )
+}
+
+fn run_with_options_internal_at_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+    auto_start_mode: AutoStartMode,
+    exact_visible_projection: bool,
+    tmux: &Tmux,
+) -> Result<()> {
     let window = agent_doc_sync::normalize_scope_arg(window);
     let focus = agent_doc_sync::normalize_scope_arg(focus);
+    reset_sync_run_report();
     tracing::debug!(
         cols = ?col_args,
         window,
@@ -1695,7 +1921,9 @@ fn run_with_options_internal(
     // Serialize sync calls via file lock. Concurrent syncs (from rapid tab switches)
     // race against each other's stash operations, causing pane bouncing. Contention
     // is bounded so a stuck prior editor sync cannot starve later selections forever.
-    let lock_path = std::path::Path::new(".agent-doc/sync.lock");
+    let scope_root = agent_doc_sync::layout_state_scope_root(col_args, focus, project_root);
+    let lock_path_buf = scope_root.join(".agent-doc/sync.lock");
+    let lock_path = lock_path_buf.as_path();
     let sync_lock_wait_budget = if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         SYNC_LOCK_WAIT_LATENCY_BUDGET
     } else {
@@ -1728,12 +1956,10 @@ fn run_with_options_internal(
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches
-    check_build_stamp();
-    if let Ok(cwd) = std::env::current_dir()
-        && let Some(project_root) = agent_doc_project_root_io::project_root_containing(&cwd)
+    check_build_stamp(&scope_root);
     {
         match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
-            &project_root,
+            &scope_root,
             std::time::Duration::from_secs(3600),
             false,
             "sync",
@@ -1747,29 +1973,30 @@ fn run_with_options_internal(
             Ok(_) => {}
             Err(e) => eprintln!("[sync] actor gc warning: {}", e),
         }
-        match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
-            &project_root,
-            false,
-            "sync",
-            "stale_dead_pane_actor",
-        ) {
-            Ok((closed, kept)) if closed > 0 => {
-                eprintln!(
-                    "[sync] actors: {} stale dead-pane closed, {} still active",
-                    closed, kept
-                );
+        if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
+            match agent_doc_controller_io::project_controller::close_stale_dead_pane_actors_with_tmux_for_caller(
+                &scope_root,
+                false,
+                "sync",
+                "stale_dead_pane_actor",
+            ) {
+                Ok((closed, kept)) if closed > 0 => {
+                    eprintln!(
+                        "[sync] actors: {} stale dead-pane closed, {} still active",
+                        closed, kept
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[sync] dead-pane actor gc warning: {}", e),
             }
-            Ok(_) => {}
-            Err(e) => eprintln!("[sync] dead-pane actor gc warning: {}", e),
         }
     }
 
     // Column memory: for columns with non-agent files, substitute the last known
     // agent doc so the reconciler preserves the pane from the previous layout.
     // When sync is called without explicit columns, fall back to that recorded layout.
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let layout_state_root = agent_doc_sync::layout_state_scope_root(col_args, focus, &cwd);
-    let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, &cwd);
+    let layout_state_root = scope_root;
+    let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, project_root);
     let saved_layout =
         match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
             Ok(layout) => layout,
@@ -1802,7 +2029,19 @@ fn run_with_options_internal(
         .into_iter()
         .filter(|col| !col.is_empty())
         .collect();
-    let proof_cache = SyncProofCache::default();
+    let skip_autostart_diagnostics =
+        exact_visible_safe_passive(auto_start_mode, exact_visible_projection);
+    let skip_sync_status_updates = skip_sync_status_updates_for_mode(auto_start_mode);
+    let proof_cache = if skip_autostart_diagnostics {
+        SyncProofCache::safe_passive()
+    } else {
+        SyncProofCache::default()
+    };
+    let hot_latency_focus = if skip_autostart_diagnostics {
+        None
+    } else {
+        focus
+    };
 
     // Resolve the target session/window. Full/manual sync delegates repair to
     // the same file-scoped doctor path that operators can run explicitly;
@@ -1827,7 +2066,7 @@ fn run_with_options_internal(
             .clone()
             .or_else(|| current_tmux_session_name(tmux))
         {
-            Some(session) if throttle_destructive_repair(tmux, &session) => {
+            Some(session) if throttle_destructive_repair(&layout_state_root, tmux, &session) => {
                 let message = format!(
                     "[sync] doctor repair throttled for session `{session}` (within {}ms of a prior repair); running reconcile only (#tmuxsynccrash)",
                     agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
@@ -1980,8 +2219,13 @@ fn run_with_options_internal(
     }
 
     let prune_start = Instant::now();
-    let prune_cleanup_mode =
-        safe_passive_prune_cleanup_mode(auto_start_mode, col_args, window, focus);
+    let prune_cleanup_mode = safe_passive_prune_cleanup_mode_at_root(
+        auto_start_mode,
+        col_args,
+        window,
+        focus,
+        &layout_state_root,
+    );
     if matches!(
         prune_cleanup_mode,
         agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
@@ -1998,7 +2242,7 @@ fn run_with_options_internal(
     }; // Clean stale entries before layout calculation
     for timing in prune_timings {
         log_sync_latency(
-            focus,
+            hot_latency_focus,
             timing.phase,
             timing.elapsed,
             SYNC_PRUNE_SUBPHASE_BUDGET,
@@ -2006,7 +2250,7 @@ fn run_with_options_internal(
         );
     }
     log_sync_latency(
-        focus,
+        hot_latency_focus,
         "prune",
         prune_start.elapsed(),
         SYNC_PRUNE_BUDGET,
@@ -2023,7 +2267,7 @@ fn run_with_options_internal(
         ));
     }
 
-    let registry_path = agent_doc_session_registry_io::registry_path();
+    let registry_path = agent_doc_session_registry_io::registry_path_in(&layout_state_root);
     // Track session_id → file path for post-sync claim updates
     let session_files: RefCell<Vec<(String, PathBuf)>> = RefCell::new(Vec::new());
     let blocked_unresolved_files: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
@@ -2099,17 +2343,21 @@ fn run_with_options_internal(
                 let warning = format!("[sync] warning: {}", e);
                 eprintln!("{}", warning);
                 sync_log(&warning);
-                crate::surface_frontmatter_status_with(
-                    path,
-                    "resolve_file",
-                    &e,
-                    save_sync_status_snapshot,
-                    log_sync_status,
-                );
+                if !skip_sync_status_updates {
+                    crate::surface_frontmatter_status_with(
+                        path,
+                        "resolve_file",
+                        &e,
+                        save_sync_status_snapshot,
+                        log_sync_status,
+                    );
+                }
                 return None;
             }
         };
-        crate::clear_frontmatter_status_with(path, save_sync_status_snapshot, log_sync_status);
+        if !skip_sync_status_updates {
+            crate::clear_frontmatter_status_with(path, save_sync_status_snapshot, log_sync_status);
+        }
 
         match fm.session {
             Some(ref key) => {
@@ -2180,21 +2428,25 @@ fn run_with_options_internal(
                     let warning = format!("[sync] warning: {}", e);
                     eprintln!("{}", warning);
                     sync_log(&warning);
-                    crate::surface_frontmatter_status_with(
-                        file_path,
-                        "auto-start",
-                        &e,
-                        save_sync_status_snapshot,
-                        log_sync_status,
-                    );
+                    if !skip_sync_status_updates {
+                        crate::surface_frontmatter_status_with(
+                            file_path,
+                            "auto-start",
+                            &e,
+                            save_sync_status_snapshot,
+                            log_sync_status,
+                        );
+                    }
                     continue;
                 }
             };
-            crate::clear_frontmatter_status_with(
-                file_path,
-                save_sync_status_snapshot,
-                log_sync_status,
-            );
+            if !skip_sync_status_updates {
+                crate::clear_frontmatter_status_with(
+                    file_path,
+                    save_sync_status_snapshot,
+                    log_sync_status,
+                );
+            }
             let session_id = match fm.session {
                 Some(ref id) => id.clone(),
                 None => continue,
@@ -2209,7 +2461,7 @@ fn run_with_options_internal(
                 tmux,
                 file_path,
                 &session_id,
-                focus,
+                hot_latency_focus,
                 auto_start_mode,
                 &proof_cache,
             );
@@ -2289,7 +2541,8 @@ fn run_with_options_internal(
                     file_path.display()
                 ));
             }
-            if matches!(auto_start_mode, AutoStartMode::SafePassive)
+            if !skip_autostart_diagnostics
+                && matches!(auto_start_mode, AutoStartMode::SafePassive)
                 && let Some(pane_id) = registered_pane.as_ref()
                 && claimed_owner.is_none()
                 && registered_pane_proves_live_owner(
@@ -2316,14 +2569,22 @@ fn run_with_options_internal(
                 reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
                 continue;
             }
-            let registered_live_owner = registered_pane.as_ref().is_some_and(|pane| {
-                registered_pane_proves_live_owner(tmux, file_path, &session_id, pane, &proof_cache)
-            });
+            let registered_live_owner = !skip_autostart_diagnostics
+                && registered_pane.as_ref().is_some_and(|pane| {
+                    registered_pane_proves_live_owner(
+                        tmux,
+                        file_path,
+                        &session_id,
+                        pane,
+                        &proof_cache,
+                    )
+                });
             if let Some(pane) = registered_pane.as_ref()
                 && tmux.pane_alive(pane)
                 && !registered_live_owner
             {
-                if claimed_owner.is_none()
+                if !skip_autostart_diagnostics
+                    && claimed_owner.is_none()
                     && let Some(diagnostic) =
                         open_session_log_owner_fail_closed_diagnostic(file_path, &session_id, pane)?
                 {
@@ -2355,7 +2616,8 @@ fn run_with_options_internal(
                         .insert(file_path.to_path_buf());
                     continue;
                 }
-                if claimed_owner.is_none()
+                if !skip_autostart_diagnostics
+                    && claimed_owner.is_none()
                     && let Some(protected) = protected_registered_pane_state(tmux, file_path, pane)
                 {
                     let reason = sanitize_excerpt(&protected.reason)
@@ -2394,16 +2656,29 @@ fn run_with_options_internal(
                         .insert(file_path.to_path_buf());
                     continue;
                 }
-                eprintln!(
-                    "[sync] pane {} for {} is alive but no longer proves ownership — treating it as unresolved instead of reusing the stale binding",
-                    pane,
-                    file_path.display()
-                );
-                sync_log(&format!(
-                    "registered_pane_unowned file={} pane={} action=treat_unresolved",
-                    file_path.display(),
-                    pane
-                ));
+                if skip_autostart_diagnostics {
+                    eprintln!(
+                        "[sync] pane {} for {} is alive; exact-visible no-autostart is treating it as unresolved without ownership diagnostics",
+                        pane,
+                        file_path.display()
+                    );
+                    sync_log(&format!(
+                        "registered_pane_unresolved_no_autostart file={} pane={} action=treat_unresolved",
+                        file_path.display(),
+                        pane
+                    ));
+                } else {
+                    eprintln!(
+                        "[sync] pane {} for {} is alive but no longer proves ownership — treating it as unresolved instead of reusing the stale binding",
+                        pane,
+                        file_path.display()
+                    );
+                    sync_log(&format!(
+                        "registered_pane_unowned file={} pane={} action=treat_unresolved",
+                        file_path.display(),
+                        pane
+                    ));
+                }
             }
             let has_alive_pane = claimed_owner.is_none()
                 && registered_pane
@@ -2513,7 +2788,10 @@ fn run_with_options_internal(
                 continue;
             }
 
-            if matches!(auto_start_mode, AutoStartMode::SafePassive) && registered_pane.is_none() {
+            if !skip_autostart_diagnostics
+                && matches!(auto_start_mode, AutoStartMode::SafePassive)
+                && registered_pane.is_none()
+            {
                 if has_rename_debounce(file_path) {
                     eprintln!(
                         "[sync] skipping auto-start for {} (rename debounce active)",
@@ -2607,6 +2885,18 @@ fn run_with_options_internal(
                 continue;
             }
 
+            if skip_autostart_diagnostics {
+                sync_log(&format!(
+                    "safe_passive_exact_visible_autostart_checks_skipped file={} registered_pane={} reason=no_autostart",
+                    file_path.display(),
+                    registered_pane.as_deref().unwrap_or("none")
+                ));
+                blocked_unresolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
+                continue;
+            }
+
             // No alive pane in registry. Before auto-starting, check if any
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
@@ -2658,7 +2948,7 @@ fn run_with_options_internal(
                 AssociatedPaneResolution::None => {}
             }
 
-            if let Some(ref pane) = registered_pane {
+            if !skip_autostart_diagnostics && let Some(ref pane) = registered_pane {
                 match repair_missing_registered_pane(
                     tmux,
                     file_path,
@@ -2925,7 +3215,7 @@ fn run_with_options_internal(
         // Post-auto_start stash removed: the tmux_router reconciler now always runs
         // the full reconcile path (no early exits), so it handles stashing excess panes.
         log_sync_latency(
-            focus,
+            hot_latency_focus,
             "ownership_proof",
             ownership_proof_start.elapsed(),
             SYNC_OWNERSHIP_PROOF_BUDGET,
@@ -2944,18 +3234,6 @@ fn run_with_options_internal(
         ));
     }
 
-    let tmux_router_registry = match build_tmux_router_sync_registry(tmux, col_args, &proof_cache) {
-        Ok(registry) => registry,
-        Err(err) => {
-            let warning = format!(
-                "[sync] warning: failed to build synthetic tmux-router registry: {}",
-                err
-            );
-            eprintln!("{}", warning);
-            sync_log(&warning);
-            None
-        }
-    };
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
         let mut blocked_files: Vec<String> = blocked_unresolved_files
             .borrow()
@@ -2965,12 +3243,16 @@ fn run_with_options_internal(
         blocked_files.sort();
         if !blocked_files.is_empty() {
             let blocked_summary = blocked_files.join(", ");
-            eprintln!(
+            let message = format!(
                 "[sync] safe passive sync preserved the current tmux layout because unresolved files remain blocked: {}",
                 blocked_summary
             );
-            // `#panefocussteal`: do not reselect the focus pane here — a passive
-            // sync never moves the operator's tmux focus.
+            eprintln!("{message}");
+            mark_sync_layout_preserved(&message);
+            if !skip_autostart_diagnostics {
+                let _ =
+                    reselect_visible_focus_pane_if_present(tmux, window, focus, "blocked_files");
+            }
             sync_log(&format!(
                 "safe_passive_layout_preserved blocked_files={}",
                 blocked_summary
@@ -2978,10 +3260,8 @@ fn run_with_options_internal(
             return Ok(());
         }
     }
-    let tmux_router_registry_path = tmux_router_registry
-        .as_ref()
-        .map(|file| file.path())
-        .unwrap_or(registry_path.as_path());
+
+    let tmux_router_registry_path = registry_path.as_path();
     let allow_unresolved_pane_assignment =
         |path: &Path| !blocked_unresolved_files.borrow().contains(path);
     let logged_open_cycle_panes: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
@@ -3265,7 +3545,8 @@ fn register_synced_files_with_cache(
         let Some(&pane_id) = pane_lookup.get(file_path.as_path()) else {
             continue;
         };
-        if let Some(actor_pane) = authoritative_actor_pane_for_document(tmux, file_path, session_id)
+        if let Some(actor_pane) =
+            authoritative_actor_pane_for_document_cached(tmux, file_path, session_id, proof_cache)
             && pane_id != actor_pane
         {
             eprintln!(
@@ -4183,8 +4464,9 @@ fn is_pane_busy(tmux: &Tmux, pane_id: &str) -> bool {
 
 /// Diagnostic sibling of [`pane_runs_other_document_owner`]: returns the foreign
 /// document path the pane's live process tree owns (a document other than
-/// `claimed_file`), or `None`. Used only for cross-document execution logging.
-fn pane_owned_document_other_than(
+/// `claimed_file`), or `None`. Used by cross-document execution logging, sync
+/// ownership proof, and start admission.
+pub fn pane_owned_document_other_than(
     tmux: &Tmux,
     pane_id: &str,
     claimed_file: &Path,
@@ -4229,7 +4511,7 @@ pub fn log_cross_document_execution_context(file: &Path, origin: &str) {
 /// Walk the pane's process tree (pane pid + direct children) and return true if
 /// any live process is an agent-doc/codex owner session for a document other than
 /// `claimed_file`. Keyed on the live cmdline rather than any single root's
-/// `sessions.json`, so it enforces the one-live-pane-per-document binding
+/// the durable registry, so it enforces the one-live-pane-per-document binding
 /// invariant across project/submodule roots.
 pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: &Path) -> bool {
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
@@ -4523,6 +4805,25 @@ mod tests {
 
     const TEST_PIPELINE_FRONTMATTER_EFFECTS: TestPipelineFrontmatterEffects =
         TestPipelineFrontmatterEffects;
+
+    #[test]
+    fn exact_visible_safe_passive_only_matches_editor_projection_refresh() {
+        assert!(exact_visible_safe_passive(AutoStartMode::SafePassive, true));
+        assert!(!exact_visible_safe_passive(
+            AutoStartMode::SafePassive,
+            false
+        ));
+        assert!(!exact_visible_safe_passive(AutoStartMode::Full, true));
+        assert!(!exact_visible_safe_passive(AutoStartMode::Full, false));
+    }
+
+    #[test]
+    fn safe_passive_skips_sync_status_document_updates() {
+        assert!(skip_sync_status_updates_for_mode(
+            AutoStartMode::SafePassive
+        ));
+        assert!(!skip_sync_status_updates_for_mode(AutoStartMode::Full));
+    }
 
     #[test]
     fn sync_repair_closes_jb_cache_conflict_cancel_commit_boundary() {
@@ -5876,16 +6177,14 @@ mod tests {
         };
         assert!(matches!(resolution, FileResolution::Unmanaged));
     }
-    /// Sync skips files that have a session UUID in frontmatter but no registry entry.
+    /// Sync can inspect files that have a session UUID in frontmatter but no registry entry.
     /// This prevents auto-starting sessions for files that were never properly claimed
     /// or whose claim expired.
     #[test]
     fn sync_skips_file_with_session_uuid_but_no_registry() {
         let tmp = tempfile::TempDir::new().unwrap();
 
-        // Create an empty registry
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        std::fs::write(tmp.path().join(".agent-doc/sessions.json"), "{}").unwrap();
+        agent_doc_session_registry_io::save_in(tmp.path(), &tmux_router::Registry::new()).unwrap();
 
         // Create a file with a session UUID but no matching registry entry
         let doc = tmp.path().join("stale-claim.md");
@@ -5899,11 +6198,10 @@ mod tests {
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("orphan-uuid-123".to_string()));
 
-        // Load registry directly from the temp path (avoid CWD dependency)
-        let reg_content =
-            std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
-        let registry: tmux_router::Registry = serde_json::from_str(&reg_content).unwrap();
-        let has_registry_entry = registry.contains_key("orphan-uuid-123");
+        let registry = agent_doc_session_registry_io::load_in(tmp.path()).unwrap();
+        let has_registry_entry =
+            tmux_router::registry::find_registry_key_by_session_id(&registry, "orphan-uuid-123")
+                .is_some();
         assert!(!has_registry_entry, "should NOT have a registry entry");
 
         // This is what the fixed resolve_file does — returns Unmanaged for stale claims
@@ -5925,23 +6223,21 @@ mod tests {
     fn sync_routes_file_with_session_uuid_and_registry_entry() {
         let tmp = tempfile::TempDir::new().unwrap();
 
-        // Create registry with a matching entry
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let registry_content = serde_json::json!({
-            "claimed-uuid-456": {
-                "pane": "%99",
-                "pid": 12345,
-                "cwd": "/tmp",
-                "started": "2026-01-01T00:00:00Z",
-                "file": "claimed.md",
-                "window": "@0"
-            }
-        });
-        std::fs::write(
-            tmp.path().join(".agent-doc/sessions.json"),
-            serde_json::to_string_pretty(&registry_content).unwrap(),
-        )
-        .unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            "claimed-uuid-456".to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%99".to_string(),
+                pid: 12345,
+                cwd: "/tmp".to_string(),
+                started: "2026-01-01T00:00:00Z".to_string(),
+                session_id: "claimed-uuid-456".to_string(),
+                file: "claimed.md".to_string(),
+                window: "@0".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
 
         // Create a file with a session UUID that matches the registry
         let doc = tmp.path().join("claimed.md");
@@ -5955,11 +6251,10 @@ mod tests {
         let (fm, _) = agent_doc_frontmatter::frontmatter::parse(&content).unwrap();
         assert_eq!(fm.session, Some("claimed-uuid-456".to_string()));
 
-        // Load registry directly from the temp path (avoid CWD dependency)
-        let reg_content =
-            std::fs::read_to_string(tmp.path().join(".agent-doc/sessions.json")).unwrap();
-        let registry: tmux_router::Registry = serde_json::from_str(&reg_content).unwrap();
-        let has_registry_entry = registry.contains_key("claimed-uuid-456");
+        let registry = agent_doc_session_registry_io::load_in(tmp.path()).unwrap();
+        let has_registry_entry =
+            tmux_router::registry::find_registry_key_by_session_id(&registry, "claimed-uuid-456")
+                .is_some();
         assert!(has_registry_entry, "should have a registry entry");
 
         // This is what the fixed resolve_file does — returns Registered for claimed files
@@ -6418,25 +6713,24 @@ mod tests {
         let project = tmp.path();
 
         // Set up registry with an entry pointing to old path
-        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
         let session_id = "rename-test-uuid";
         let old_file = "tasks/old-name.md";
         let new_file = "tasks/new-name.md";
-        let registry_content = serde_json::json!({
-            session_id: {
-                "pane": "%42",
-                "pid": 12345,
-                "cwd": project.to_string_lossy(),
-                "started": "2026-04-20T00:00:00Z",
-                "file": old_file,
-                "window": "@0"
-            }
-        });
-        std::fs::write(
-            project.join(".agent-doc/sessions.json"),
-            serde_json::to_string_pretty(&registry_content).unwrap(),
-        )
-        .unwrap();
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            session_id.to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%42".to_string(),
+                pid: 12345,
+                cwd: project.to_string_lossy().to_string(),
+                started: "2026-04-20T00:00:00Z".to_string(),
+                session_id: session_id.to_string(),
+                file: old_file.to_string(),
+                window: "@0".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(project, &registry).unwrap();
 
         // Verify detection
         assert!(
@@ -6445,11 +6739,9 @@ mod tests {
         );
 
         // Verify we can load the entry and see the old path
-        let reg: tmux_router::Registry = serde_json::from_str(
-            &std::fs::read_to_string(project.join(".agent-doc/sessions.json")).unwrap(),
-        )
-        .unwrap();
-        let entry = reg.get(session_id).unwrap();
+        let reg = agent_doc_session_registry_io::load_in(project).unwrap();
+        let key = tmux_router::registry::find_registry_key_by_session_id(&reg, session_id).unwrap();
+        let entry = reg.get(&key).unwrap();
         assert_eq!(entry.file, old_file);
         assert_eq!(entry.pane, "%42");
     }

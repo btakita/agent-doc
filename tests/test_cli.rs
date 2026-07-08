@@ -2247,11 +2247,6 @@ fn test_cli_ops_diagnose_gathers_cycle_artifacts() {
     )
     .unwrap();
     fs::write(
-        root.join(".agent-doc/session-actors.json"),
-        r#"{"documents":[{"session_id":"session-1","cycle_id":"cycle-a"}]}"#,
-    )
-    .unwrap();
-    fs::write(
         root.join(".agent-doc/state/startup-miss/cycle-a.json"),
         r#"{"cycle_baseline_id":"cycle-a","session_id":"session-1"}"#,
     )
@@ -2448,7 +2443,7 @@ fn test_manifest_uses_publishable_dependency_contract() {
     );
     assert_eq!(
         tmux_router.get("version").and_then(toml::Value::as_str),
-        Some("0.3.13")
+        Some("0.3.14")
     );
 }
 
@@ -15397,7 +15392,7 @@ fn test_agent_doc_session_registry_owns_registry_mutation_policy() {
 }
 
 #[test]
-fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
+fn test_agent_doc_session_registry_io_owns_registry_state_io() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -15412,7 +15407,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     let registry_io_source =
         fs::read_to_string(manifest_dir.join("agent-doc-session-registry-io/src/lib.rs")).unwrap();
     for required in [
-        "pub const SESSIONS_FILE: &str = \".agent-doc/sessions.json\";",
+        "pub const SESSIONS_FILE: &str = \".agent-doc/state.db\";",
         "pub fn registry_path() -> PathBuf",
         "pub fn registry_path_in(base_dir: &Path) -> PathBuf",
         "pub fn load() -> Result<Registry>",
@@ -15425,16 +15420,16 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
         "pub fn deregister(session_id: &str) -> Result<bool>",
         "pub fn deregister_in(base_dir: &Path, session_id: &str) -> Result<bool>",
         "pub fn update_session_file_in(",
-        "serde_json::from_str(&content)",
-        "serde_json::to_string_pretty(registry)",
-        "normalize_registry(base_dir, registry)",
+        "tmux_router::registry::load_registry(&path)",
+        "tmux_router::registry::save_registry(&path, &registry)",
+        "normalize_registry(base_dir, registry.clone())",
         "agent_doc_session_registry::session_pane(",
         "agent_doc_session_registry::session_entry(",
         "agent_doc_session_registry::remove_session_by_id(",
     ] {
         assert!(
             registry_io_source.contains(required),
-            "agent-doc-session-registry-io must own registry snapshot IO/lookup: {required}"
+            "agent-doc-session-registry-io must own registry state IO/lookup: {required}"
         );
     }
 
@@ -15541,7 +15536,7 @@ fn test_agent_doc_session_registry_io_owns_registry_snapshot_io() {
     ] {
         assert!(
             !dispatch_registry_source.contains(forbidden),
-            "session dispatch registry must not duplicate generic sessions.json IO: {forbidden}"
+            "session dispatch registry must not duplicate generic registry IO: {forbidden}"
         );
     }
 
@@ -15967,8 +15962,6 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     let controller_paths =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/paths.rs")).unwrap();
-    let controller_status =
-        fs::read_to_string(manifest_dir.join("agent-doc-controller/src/status.rs")).unwrap();
     assert!(
         controller_lib.contains("pub mod paths;"),
         "agent-doc-controller must expose focused controller path policy"
@@ -15993,32 +15986,16 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     for required in [
         "pub const SOCKET_FILE",
         "pub const STATE_FILE",
-        "pub const ACTOR_PROJECTION_FILE",
         "pub const LAYOUT_PROJECTION_FILE",
         "pub const LOCK_FILE",
         "pub fn socket_path(",
         "pub fn state_path(",
-        "pub fn actor_projection_path(",
         "pub fn layout_projection_path(",
         "pub fn launch_lock_path(",
     ] {
         assert!(
             controller_paths.contains(required),
             "agent-doc-controller paths must own project controller path policy: {required}"
-        );
-    }
-    for required in [
-        "pub struct SessionsProjectionRecordFacts",
-        "pub struct SessionsProjectionPriorFacts",
-        "pub struct SessionsProjectionHintFacts",
-        "pub struct SessionsProjectionLeaseFacts",
-        "pub struct SessionsProjectionEntryFacts",
-        "pub struct SessionsProjectionEntrySelection",
-        "pub fn select_sessions_projection_entry(",
-    ] {
-        assert!(
-            controller_status.contains(required),
-            "agent-doc-controller status must own pure sessions projection selection policy: {required}"
         );
     }
 
@@ -16046,11 +16023,6 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
     assert!(
         project_controller.contains("use agent_doc_controller::paths::{"),
         "project_controller.rs should call focused controller path policy directly"
-    );
-    assert!(
-        project_controller.contains("status::select_sessions_projection_entry(")
-            && project_controller.contains("status::SessionsProjectionEntryFacts"),
-        "project_controller.rs should adapt sqlite/tmux facts and call focused sessions projection selection directly"
     );
 }
 
@@ -16091,6 +16063,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     let supervisor_replacement_source =
         fs::read_to_string(manifest_dir.join("agent-doc-controller/src/supervisor_replacement.rs"))
             .unwrap();
+    let preflight_warnings_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/warnings.rs")).unwrap();
     for required_snippet in [
         "pub fn cmdline_is_agent_doc_owner_session(",
         "pub fn cmdline_references_md_document(",
@@ -16262,6 +16236,12 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     assert!(
         rpc_source.contains("status::process_binary_is_stale("),
         "project_controller::rpc should call focused controller binary staleness policy directly"
+    );
+    assert!(
+        rpc_source.contains("pub fn schedule_stale_supervisor_pcp_recycle(")
+            && preflight_warnings_source.contains("schedule_stale_supervisor_pcp_recycle(")
+            && preflight_warnings_source.contains("Automatic PCP recycle request status"),
+        "preflight stale-supervisor detection must automatically request the PCP idle-boundary recycle, not only warn"
     );
     assert!(
         project_controller_source.contains("CrashRecoveryStats::new(")

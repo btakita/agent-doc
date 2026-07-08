@@ -1,8 +1,7 @@
 //! Session registry filesystem adapters.
 //!
-//! Owns the canonical `.agent-doc/sessions.json` location, JSON persistence,
-//! point-in-time lookup helpers, and tmux-router registry normalization for
-//! loaded snapshots.
+//! Owns the canonical SQLite-backed session registry location, point-in-time
+//! lookup helpers, and tmux-router registry normalization for loaded snapshots.
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -13,7 +12,7 @@ use tmux_router::{Registry, RegistryEntry, RegistryLock};
 pub mod dispatch_registry;
 pub mod registration;
 
-pub const SESSIONS_FILE: &str = ".agent-doc/sessions.json";
+pub const SESSIONS_FILE: &str = ".agent-doc/state.db";
 
 /// Return the path to the sessions registry file relative to CWD.
 pub fn registry_path() -> PathBuf {
@@ -25,7 +24,7 @@ pub fn registry_path_in(base_dir: &Path) -> PathBuf {
     base_dir.join(SESSIONS_FILE)
 }
 
-/// Load the session registry from disk. Returns an empty map if it does not exist.
+/// Load the session registry from durable controller state.
 ///
 /// This is not locked internally. Callers performing read-modify-write must
 /// acquire `tmux_router::RegistryLock` first.
@@ -33,20 +32,14 @@ pub fn load() -> Result<Registry> {
     load_in(&std::env::current_dir()?)
 }
 
-/// Load the session registry from `base_dir/.agent-doc/sessions.json`.
+/// Load the session registry from `base_dir/.agent-doc/state.db`.
 pub fn load_in(base_dir: &Path) -> Result<Registry> {
     let path = registry_path_in(base_dir);
-    if !path.exists() {
-        return Ok(Registry::new());
-    }
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let registry: Registry = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(normalize_registry(base_dir, registry))
+    tmux_router::registry::load_registry(&path)
+        .with_context(|| format!("failed to load registry from {}", path.display()))
 }
 
-/// Save the session registry to disk.
+/// Save the session registry to durable controller state.
 ///
 /// This is not locked internally. Callers must hold `tmux_router::RegistryLock`
 /// before saving a read-modify-write update.
@@ -54,16 +47,12 @@ pub fn save(registry: &Registry) -> Result<()> {
     save_in(&std::env::current_dir()?, registry)
 }
 
-/// Save the session registry to `base_dir/.agent-doc/sessions.json`.
+/// Save the session registry to `base_dir/.agent-doc/state.db`.
 pub fn save_in(base_dir: &Path, registry: &Registry) -> Result<()> {
     let path = registry_path_in(base_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(registry)?;
-    std::fs::write(&path, content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
+    let registry = normalize_registry(base_dir, registry.clone());
+    tmux_router::registry::save_registry(&path, &registry)
+        .with_context(|| format!("failed to save registry to {}", path.display()))
 }
 
 /// Look up the pane ID for a session in CWD's registry.

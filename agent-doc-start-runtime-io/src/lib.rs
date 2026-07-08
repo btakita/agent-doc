@@ -19,11 +19,11 @@
 //!   register the current pane in another live tmux session, `start` updates
 //!   `.agent-doc/config.toml` to that live session so later route/claim work
 //!   follows the new binding instead of the stale dead session.
-//! - If `sessions.json` points at an alive pane that is not the current pane,
+//! - If the durable registry points at an alive pane that is not the current pane,
 //!   `start` must also fail closed instead of attempting a supervisor-driven
 //!   reuse/restart or a registry rebind. Normal `start` is never allowed to
 //!   decide which live pane should disappear.
-//! - Registers the session UUID → current tmux pane ID in `sessions.json` so
+//! - Registers the session UUID → current tmux pane ID in the durable registry so
 //!   other subcommands (`route`, `focus`, etc.) can locate the pane.
 //! - Runs the configured harness binary as a blocking child process inside a persistent restart loop
 //!   so a normal tmux pane never dies on its own.
@@ -82,13 +82,13 @@
 //! - The file path must exist before `run` is called; callers must not rely on
 //!   `run` to create the document.
 //! - After `run` returns `Ok(())`, the session has ended cleanly (user chose
-//!   to quit); the sessions.json entry is not automatically removed.
+//!   to quit); the durable registry entry is not automatically removed.
 //! - Session UUID in frontmatter is idempotent: calling `run` on a file that
 //!   already has a UUID does not regenerate or overwrite it.
 //! - Resolved harness args are prepended to every agent invocation inside the
 //!   loop, including restarts; they are resolved once at startup and held for
 //!   the lifetime of the loop.
-//! - The module writes to the document file (UUID injection), `sessions.json`,
+//! - The module writes to the document file (UUID injection), the durable registry,
 //!   and `.agent-doc/logs/<session-uuid>.log`; it does not touch snapshots,
 //!   git, or claims.
 //! - Must be called from within an active tmux session; violating this contract
@@ -105,7 +105,7 @@
 //! - `start_preserves_existing_uuid`: call `run` on a file that already has a
 //!   `session:` key → file content is unchanged (no re-write), no "Generated"
 //!   message on stderr.
-//! - `start_registers_session`: after setup, `sessions.json` maps the session
+//! - `start_registers_session`: after setup, the durable registry maps the session
 //!   UUID to the current tmux pane ID.
 //! - `start_claude_args_precedence`: Claude resolves frontmatter `claude_args`
 //!   over config `claude_args`, with `AGENT_DOC_CLAUDE_ARGS` as fallback.
@@ -596,6 +596,20 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
 
     fn owned_pane_label(&self) -> String {
         owned_pane_label(self).to_string()
+    }
+
+    fn paused_queue_has_no_supervisor_drainable_head(&self, file: &std::path::Path) -> bool {
+        if !agent_doc_queue_io::controller_pause::document_queue_controller_paused(file) {
+            return false;
+        }
+        let Some(content) = agent_doc_fs::read_optional_text(file).ok().flatten() else {
+            return false;
+        };
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .is_none()
     }
 
     fn request_child_stop(&self) {

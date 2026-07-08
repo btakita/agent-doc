@@ -111,7 +111,9 @@ pub fn resolve_agent_doc_binary_from_env(
 }
 
 fn launchable_agent_doc_binary(path: &Path) -> bool {
-    path_looks_like_agent_doc_binary(path) && launchable_file(path)
+    !path_has_deleted_mapping_suffix(path)
+        && path_looks_like_agent_doc_binary(path)
+        && launchable_file(path)
 }
 
 fn launchable_file(path: &Path) -> bool {
@@ -124,6 +126,12 @@ fn path_looks_like_agent_doc_binary(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.starts_with("agent-doc"))
+}
+
+fn path_has_deleted_mapping_suffix(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(" (deleted)"))
 }
 
 fn token_looks_like_agent_doc_binary(token: &OsStr) -> bool {
@@ -256,6 +264,30 @@ mod tests {
 
         let deleted_exe = dir.join("agent-doc (deleted)");
         assert!(!deleted_exe.exists());
+
+        let resolved = resolve_agent_doc_binary_from_env(
+            None,
+            Some(deleted_exe),
+            Some(OsString::from("agent-doc")),
+            Some(path_bin_dir.into_os_string()),
+            None,
+            &dir,
+        )
+        .unwrap();
+
+        assert_eq!(resolved, path_bin);
+    }
+
+    #[test]
+    fn controller_binary_resolution_skips_existing_deleted_proc_self_exe_suffix() {
+        let dir = temp_dir("existing-deleted-suffix");
+        let path_bin_dir = dir.join("bin");
+        let path_bin = path_bin_dir.join("agent-doc");
+        std::fs::create_dir_all(&path_bin_dir).unwrap();
+        std::fs::write(&path_bin, "fresh").unwrap();
+
+        let deleted_exe = dir.join("agent-doc (deleted)");
+        std::fs::write(&deleted_exe, "old mapped executable").unwrap();
 
         let resolved = resolve_agent_doc_binary_from_env(
             None,

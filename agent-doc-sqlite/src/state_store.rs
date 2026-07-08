@@ -7,8 +7,8 @@
 //! `agent-doc-orchestration` can call into it without pulling the bundled
 //! SQLite C build into its own compile graph.
 //!
-//! Orchestration glue (ops-log, `sessions.json`/`session-actors.json`
-//! projection, `read_bootstrap`, drift verification) stays in
+//! Orchestration glue (ops-log, layout projection emission, `read_bootstrap`,
+//! drift verification) stays in
 //! `agent-doc-orchestration`; this module exposes the SQL primitives those
 //! callers stitch together.
 
@@ -1699,45 +1699,6 @@ pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Res
     Ok(removed)
 }
 
-/// True when the `documents` table holds no rows yet.
-///
-/// Orchestration uses this to gate the legacy `session-actors.json` read so the
-/// JSON is only loaded when a migration could actually run.
-pub fn actor_documents_empty(conn: &Connection) -> Result<bool> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
-    Ok(count == 0)
-}
-
-/// Migrate a legacy `session-actors.json` store into the empty sqlite state.
-///
-/// The orchestration caller loads the legacy JSON and the bootstrap-derived
-/// `launch_mode`/`controller_epoch` tendril, then hands them to this routine,
-/// which only runs when the `documents` table is still empty.
-pub fn migrate_actor_store_tx(
-    conn: &mut Connection,
-    store: &BTreeMap<String, ActorRecord>,
-    launch_mode: Option<String>,
-    controller_epoch: Option<i64>,
-) -> Result<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
-    if count > 0 {
-        return Ok(());
-    }
-    let tx = conn.transaction()?;
-    for record in store.values() {
-        let transition_id = insert_actor_transition(&tx, None, record)?;
-        upsert_actor_document(
-            &tx,
-            record,
-            transition_id,
-            launch_mode.clone(),
-            controller_epoch,
-        )?;
-    }
-    tx.commit()?;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Control-plane durable facts.
 // ---------------------------------------------------------------------------
@@ -2399,9 +2360,9 @@ mod tests {
         )?;
         insert_projection_diagnostic(
             &conn,
-            "session-actors.json",
+            "controller-state",
             &record.document_id,
-            "projection lag",
+            "diagnostic lag",
         )?;
         insert_admin_operation_in_db(
             &conn,

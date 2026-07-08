@@ -16,7 +16,7 @@
 //!   3. Ensures a session UUID exists in the file's YAML frontmatter (generates one if missing).
 //!   4. Resolves the target tmux session: prefers project config (`config.toml`), falls
 //!      back to current tmux session, auto-updates config when the configured session is dead.
-//!   5. Looks up the registered pane in `sessions.json`.
+//!   5. Looks up the registered pane in the durable registry.
 //!   6. If pane is alive: first verify that a live process tree still proves the
 //!      document is running there. If the live owner is another pane, re-register there;
 //!      if no live owner exists, fail closed instead of sending the trigger into an

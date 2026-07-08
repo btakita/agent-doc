@@ -188,7 +188,8 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
                         return Ok(StopResponse::Block {
                             decision: "block",
                             reason: format!(
-                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. The hook wrote or recovered the response but could not finish the required commit boundary: {err}. Do not send the final answer yet. Finish the commit boundary for this turn and end with `agent-doc session-check {}`.",
+                                "agent-doc Stop hook intercepted an unfinished document cycle for {}. The hook wrote or recovered the response but could not finish the required commit boundary: {err}. Do not send the final answer yet. Finish the commit boundary for this turn with `agent-doc commit {}` and end with `agent-doc session-check {}`.",
+                                file.display(),
                                 file.display(),
                                 file.display()
                             ),

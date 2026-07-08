@@ -65,14 +65,17 @@ impl Drop for CommitLock {
 /// After a successful commit inside a submodule, stage and partial-commit the
 /// updated submodule pointer in the superproject. Uses an explicit pathspec on
 /// the commit so any other staged files in the parent index are preserved.
-pub fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path, msg: &str) {
+pub fn update_parent_submodule_pointer(
+    super_root: &Path,
+    submodule_root: &Path,
+    msg: &str,
+) -> anyhow::Result<()> {
     let _commit_lock = CommitLock::acquire(super_root);
     let rel = match submodule_root.strip_prefix(super_root) {
         Ok(r) => r,
-        Err(_) => {
-            eprintln!("[commit] cannot compute submodule relative path; skipping pointer update");
-            return;
-        }
+        Err(_) => anyhow::bail!(
+            "parent submodule pointer is not committed: cannot compute submodule relative path. Run `agent-doc commit` to retry the idempotent parent-pointer closeout."
+        ),
     };
     let rel_str = rel.to_string_lossy().to_string();
 
@@ -80,15 +83,18 @@ pub fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path,
     match add {
         Ok(o) if o.status.success() => {}
         Ok(o) => {
-            eprintln!(
-                "[commit] parent git add for submodule pointer failed: {}",
+            anyhow::bail!(
+                "parent submodule pointer is not committed: git add {} failed: {}. Run `agent-doc commit` to retry the idempotent parent-pointer closeout.",
+                rel_str,
                 String::from_utf8_lossy(&o.stderr).trim()
             );
-            return;
         }
         Err(e) => {
-            eprintln!("[commit] parent git add error: {}", e);
-            return;
+            anyhow::bail!(
+                "parent submodule pointer is not committed: git add {} error: {}. Run `agent-doc commit` to retry the idempotent parent-pointer closeout.",
+                rel_str,
+                e
+            );
         }
     }
 
@@ -112,15 +118,21 @@ pub fn update_parent_submodule_pointer(super_root: &Path, submodule_root: &Path,
                 || stdout.contains("nothing to commit")
                 || stderr.contains("no changes added")
             {
-                return;
+                return Ok(());
             }
-            eprintln!(
-                "[commit] parent submodule pointer commit failed: {}",
+            anyhow::bail!(
+                "parent submodule pointer is not committed: git commit {} failed: {}. Run `agent-doc commit` to retry the idempotent parent-pointer closeout.",
+                rel_str,
                 stderr.trim()
             );
         }
-        Err(e) => eprintln!("[commit] parent submodule pointer commit error: {}", e),
+        Err(e) => anyhow::bail!(
+            "parent submodule pointer is not committed: git commit {} error: {}. Run `agent-doc commit` to retry the idempotent parent-pointer closeout.",
+            rel_str,
+            e
+        ),
     }
+    Ok(())
 }
 
 #[derive(Debug)]

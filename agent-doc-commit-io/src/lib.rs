@@ -1184,7 +1184,7 @@ where
 
         if in_submodule && agent_doc_git_io::submodule::is_submodule_pointer_stale(file) {
             eprintln!("[commit] submodule pointer stale in parent after no-op commit - updating");
-            update_parent_submodule_pointer(&super_root, &git_root, &msg);
+            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
         }
 
         let elapsed_total = t_total.elapsed().as_millis();
@@ -1405,7 +1405,7 @@ where
         );
 
         if in_submodule {
-            update_parent_submodule_pointer(&super_root, &git_root, &msg);
+            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
         }
     }
 

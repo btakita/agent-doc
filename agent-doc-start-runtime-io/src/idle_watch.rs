@@ -1721,18 +1721,47 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // reads that latch here and combines it with its own staleness probe,
                 // so a wedge against a stale binary recycles immediately instead of
                 // waiting for an opt-in or an idle boundary that may never come.
-                let write_wedged = path
+                // `#midturn-wedge-recycle`: use the once-per-episode signal. It is
+                // true only while the wedge is latched AND no recycle has yet been
+                // attempted for this episode, so the recycle fires mid-turn (even on a
+                // fresh binary) but at most once — the guard is latched on the marker
+                // right before the execve below.
+                let wedge_needs_recycle = path
                     .canonicalize()
                     .ok()
                     .map(|canonical| {
                         let project_root =
                             agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-                        agent_doc_write_converge_io::editor_ipc_write_wedged(
+                        agent_doc_write_converge_io::editor_ipc_write_wedge_needs_recycle(
                             &project_root,
                             &canonical,
                         )
                     })
                     .unwrap_or(false);
+                // Recycle at the FIRST AVAILABLE SAFE intra-turn checkpoint, not the
+                // instant the wedge is seen. A tick is a safe checkpoint when no
+                // supervisor IPC connection is being handled
+                // (`inflight_connection_handlers() == 0`): an `execve` recycle there
+                // cannot sever an active patch apply mid-flight. The wedge is already
+                // capture-backed (the write closeout parked the response + retry patch
+                // before latching the wedge), so an in-flight handler is the only unsafe
+                // window. Off a safe checkpoint the recycle defers to the next tick and
+                // re-checks — it still fires mid-turn (no wait for the full turn
+                // boundary), just at the earliest point that cannot corrupt in-flight IO.
+                let inflight_handlers = agent_doc_ipc_io::inflight_connection_handlers();
+                let at_safe_checkpoint = inflight_handlers == 0;
+                let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
+                if wedge_needs_recycle && !at_safe_checkpoint {
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_wedge_recycle_deferred_unsafe_checkpoint file={} pane={} inflight={} reason=await_safe_intra_turn_checkpoint (#midturn-wedge-recycle)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            inflight_handlers,
+                        ),
+                    );
+                }
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,
@@ -1758,6 +1787,32 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ipc_io::inflight_connection_handlers(),
                         ),
                     );
+                }
+                // `#midturn-wedge-recycle`: if this tick's recycle is being driven by a
+                // proven editor-IPC wedge, latch the once-per-episode guard on the
+                // dewedge marker BEFORE any recycle path runs — the `execve` below never
+                // returns, so the fresh supervisor must not re-read the still-latched
+                // wedge and recycle-loop. Latching for both the in-place recycle and the
+                // kill+relaunch escalation covers every wedge-driven recycle path.
+                if write_wedged
+                    && matches!(
+                        recycle_action,
+                        SupervisorRecycleAction::RecycleImmediate
+                            | SupervisorRecycleAction::EscalateKillRelaunch
+                    )
+                    && let Ok(canonical) = path.canonicalize()
+                {
+                    let project_root =
+                        agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+                    if let Err(err) = agent_doc_write_converge_io::mark_ipc_wedge_recycle_attempted(
+                        &project_root,
+                        &canonical,
+                    ) {
+                        eprintln!(
+                            "[agent-doc] idle-queue watch: failed to latch wedge recycle guard for {}: {err:#}",
+                            path.display()
+                        );
+                    }
                 }
                 // `#wd40` / `#staleloop-recycle-restart`: automate the manual
                 // `make install` + `admin recycle` + end-turn the operator had to

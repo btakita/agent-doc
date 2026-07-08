@@ -4,12 +4,25 @@
 pub struct ChildLaunchPlan {
     pub use_continue_args: bool,
     pub auto_trigger: bool,
+    /// `#stale-ctrl-d-arm` — every fresh child launch (first run, restart, and
+    /// recycle-`execve` adopt) must arm stale-Ctrl+D suppression until the child prints
+    /// its first prompt. A Ctrl+D (EOF) that arrives BEFORE that first prompt is
+    /// definitionally stale — most importantly one buffered in the inherited stdin fd
+    /// across an `execve` recycle — and would otherwise EOF-kill the freshly-launched
+    /// agent, dropping the interrupted turn to the restart-or-quit prompt (the observed
+    /// "crashed and did not restart the turn"). The guard self-disarms once
+    /// `prompt_visible_once` flips true, so an intentional operator Ctrl+D at a live
+    /// prompt still reaches the child (the "forwarded quit keys own the keepalive
+    /// prompt" contract is preserved).
+    pub arm_stale_ctrl_d_suppression: bool,
 }
 
 pub fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLaunchPlan {
     ChildLaunchPlan {
         use_continue_args: !first_run,
         auto_trigger: auto_trigger_next_launch || !first_run,
+        // A pre-first-prompt Ctrl+D is stale on EVERY launch, so this is unconditional.
+        arm_stale_ctrl_d_suppression: true,
     }
 }
 
@@ -59,6 +72,7 @@ mod tests {
             ChildLaunchPlan {
                 use_continue_args: false,
                 auto_trigger: false,
+                arm_stale_ctrl_d_suppression: true,
             },
             "initial supervisor launch should open the harness without typing agent-doc"
         );
@@ -67,6 +81,7 @@ mod tests {
             ChildLaunchPlan {
                 use_continue_args: true,
                 auto_trigger: true,
+                arm_stale_ctrl_d_suppression: true,
             },
             "continue-mode restart should resume and re-submit agent-doc"
         );
@@ -75,9 +90,25 @@ mod tests {
             ChildLaunchPlan {
                 use_continue_args: false,
                 auto_trigger: true,
+                arm_stale_ctrl_d_suppression: true,
             },
             "fresh restart still needs to re-submit agent-doc after the new prompt"
         );
+    }
+
+    #[test]
+    fn every_child_launch_arms_stale_ctrl_d_suppression() {
+        // `#stale-ctrl-d-arm` regression: the suppression flag was previously never
+        // armed anywhere (dead code), so a Ctrl+D buffered across an `execve` recycle
+        // EOF-killed the freshly-adopted child. Every launch shape must arm it.
+        for first_run in [false, true] {
+            for auto_trigger in [false, true] {
+                assert!(
+                    child_launch_plan(first_run, auto_trigger).arm_stale_ctrl_d_suppression,
+                    "launch (first_run={first_run}, auto_trigger={auto_trigger}) must arm stale-Ctrl+D suppression"
+                );
+            }
+        }
     }
 
     #[test]

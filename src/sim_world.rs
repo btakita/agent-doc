@@ -254,6 +254,11 @@ enum SimCommand {
     /// wedge feeds `supervisor_recycle_action` as `write_wedged`, forcing an
     /// immediate recycle of a stale supervisor even when auto-recycle is opted OUT.
     MarkWriteWedged,
+    /// `#midturn-wedge-recycle`: toggle whether a supervisor IPC connection is being
+    /// handled right now. While `true` the current tick is NOT a safe intra-turn
+    /// checkpoint, so a wedge recycle defers; the first tick where it is `false`
+    /// recycles (mirrors idle_watch.rs's `inflight_connection_handlers()` gate).
+    MarkIpcInflight(bool),
     /// `#suprecyclestall`: the next in-place `execve` recycle will fail to launch
     /// any candidate binary (e.g. an old pre-fix launch path). The watch must fall
     /// back to continuing on the current binary, never `process::exit` (which would
@@ -716,6 +721,12 @@ struct RecycleClearModel {
     /// wedged against a nominally-active listener (the persisted `degraded` latch the
     /// converge closeout reads). Feeds `write_wedged` to `supervisor_recycle_action`.
     write_wedged: bool,
+    /// `#midturn-wedge-recycle`: a supervisor IPC connection is being handled right
+    /// now, so this tick is NOT a safe intra-turn checkpoint — an `execve` recycle
+    /// would sever the in-flight apply. Mirrors idle_watch.rs's
+    /// `inflight_connection_handlers() != 0` gate: a wedge recycle waits for the first
+    /// tick where this is false before firing.
+    ipc_inflight: bool,
     /// `#supselfheal` Phase 3 (`#supselfheal-reexecescalate`): a prior in-place
     /// `execve` recycle failed, so the recycle policy escalates to a bounded
     /// kill+relaunch (`EscalateKillRelaunch`) instead of looping
@@ -3416,9 +3427,13 @@ fn recycle_boot_with_surviving_child_adopts_without_redispatch() {
 }
 
 #[test]
-fn write_wedged_recycle_defers_while_agent_doc_cycle_open() {
-    // `#supselfheal` + `#midturn-recycle-resume`: the write-wedge recycle trigger is
-    // allowed to override an auto-recycle opt-out, but not the live-cycle interlock.
+fn write_wedged_recycles_immediately_even_while_cycle_open() {
+    // `#midturn-wedge-recycle`: a proven editor-IPC wedge means the open agent-doc
+    // cycle can NEVER close — closeout is blocked on a convergence receipt that will
+    // not arrive — so deferring the recycle until the cycle commits would deadlock.
+    // The wedge therefore recycles IMMEDIATELY, mid-cycle, even with auto-recycle
+    // opted OUT. This is the exact deadlock that previously forced a manual
+    // `admin recycle`.
     let mut world = SimWorld::new(8_203);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
@@ -3430,29 +3445,83 @@ fn write_wedged_recycle_defers_while_agent_doc_cycle_open() {
     world.apply(SimCommand::MarkWriteWedged).unwrap();
     world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
 
+    // A single tick with the cycle STILL open recycles now — no deferral.
     world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
-    assert_eq!(
-        world.coverage.supervisor_recycles, 0,
-        "write-wedge recycle must defer while the agent-doc cycle is open"
-    );
-    assert!(
-        world.recycle_clear.write_wedged,
-        "the wedge latch stays pending while the recycle is deferred"
-    );
-
-    world
-        .apply(SimCommand::SetAgentDocCycleOpen(false))
-        .unwrap();
-    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
-
     assert_eq!(
         world.coverage.wedge_triggered_recycles, 1,
-        "the write-wedge trigger fires after the cycle commits"
+        "a proven wedge recycles immediately even while the agent-doc cycle is open"
     );
     assert_eq!(world.coverage.supervisor_recycles, 1);
     assert!(
         !world.recycle_clear.write_wedged,
-        "the successful recycle clears the wedge latch"
+        "the successful recycle clears the wedge latch (once-per-episode guard)"
+    );
+}
+
+#[test]
+fn write_wedged_recycles_mid_turn_off_boundary() {
+    // `#midturn-wedge-recycle`: the whole point — a wedge recycles even when the
+    // harness turn is ACTIVE (no turn boundary is reachable). The supervisor is fresh
+    // (NOT stale) and auto-recycle is on by default, mirroring this session: the
+    // running supervisor matched the installed binary yet the editor-IPC write never
+    // converged, so nothing recycled until a manual `admin recycle`.
+    let mut world = SimWorld::new(8_207);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    // Turn is in flight (Busy) → `turn_boundary` is false. No stale binary.
+    world.apply(SimCommand::SupervisorBusy).unwrap();
+    world.apply(SimCommand::MarkWriteWedged).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.wedge_triggered_recycles, 1,
+        "a proven wedge recycles mid-turn (off boundary) on a fresh binary"
+    );
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert!(
+        !world.recycle_clear.write_wedged,
+        "the mid-turn wedge recycle clears the wedge latch"
+    );
+}
+
+#[test]
+fn write_wedged_recycle_waits_for_first_safe_intra_turn_checkpoint() {
+    // `#midturn-wedge-recycle`: the wedge recycle must not `execve` while a supervisor
+    // IPC connection is being handled (that would sever the in-flight apply). It waits
+    // for the FIRST tick that is a safe intra-turn checkpoint — no in-flight handler —
+    // then recycles, still mid-turn (no wait for the full turn boundary).
+    let mut world = SimWorld::new(8_211);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world.apply(SimCommand::MarkWriteWedged).unwrap();
+    world.apply(SimCommand::SetAgentDocCycleOpen(true)).unwrap();
+    // An IPC apply is in flight → this tick is NOT a safe checkpoint.
+    world.apply(SimCommand::MarkIpcInflight(true)).unwrap();
+
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.supervisor_recycles, 0,
+        "the wedge recycle defers while an IPC apply is in flight (unsafe checkpoint)"
+    );
+    assert!(
+        world.recycle_clear.write_wedged,
+        "the wedge latch stays pending until a safe checkpoint is reached"
+    );
+
+    // The in-flight apply drains → the next tick is the first safe checkpoint.
+    world.apply(SimCommand::MarkIpcInflight(false)).unwrap();
+    world.apply(SimCommand::SupervisorIdleQueueTick).unwrap();
+    assert_eq!(
+        world.coverage.wedge_triggered_recycles, 1,
+        "the wedge recycles at the first safe intra-turn checkpoint"
+    );
+    assert_eq!(world.coverage.supervisor_recycles, 1);
+    assert!(
+        !world.recycle_clear.write_wedged,
+        "the safe-checkpoint recycle clears the wedge latch"
     );
 }
 

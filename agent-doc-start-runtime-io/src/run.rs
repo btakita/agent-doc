@@ -460,7 +460,6 @@ pub fn run_with_reap_policy(
     let mut restart_count: u32 = 0;
     let mut resize_watcher: Option<resize::ResizeWatcher> = None;
     let mut failed_resume_tracker = FailedResumeTracker::default();
-    let mut suppress_stale_ctrl_d_until_prompt = false;
     let mut child_launch_count: u32 = 0;
     let _actor_context = agent_doc_run_context_io::actor_context(canonical.clone());
     let supervisor_exit_reason = loop {
@@ -723,6 +722,13 @@ pub fn run_with_reap_policy(
             .auto_trigger_outcome
             .store(AutoTriggerOutcome::NotNeeded as u8, Ordering::Relaxed);
         shared.prompt_visible_once.store(false, Ordering::Relaxed);
+        // `#stale-ctrl-d-arm` — arm stale-Ctrl+D suppression for this fresh child until
+        // it prints its first prompt (`prompt_visible_once` was just reset above). A
+        // Ctrl+D buffered in the inherited stdin fd across an `execve` recycle would
+        // otherwise reach the freshly-adopted child as EOF and drop the interrupted turn
+        // to the restart-or-quit prompt. Self-disarms once the prompt is seen, so an
+        // intentional operator Ctrl+D at a live prompt still reaches the child.
+        let suppress_stale_ctrl_d_until_prompt = launch_plan.arm_stale_ctrl_d_suppression;
         shared
             .suppress_stale_ctrl_d_until_prompt
             .store(suppress_stale_ctrl_d_until_prompt, Ordering::Relaxed);
@@ -989,7 +995,6 @@ pub fn run_with_reap_policy(
                         first_run = true;
                         auto_trigger_next_launch = auto_trigger;
                         restart_count += 1;
-                        suppress_stale_ctrl_d_until_prompt = false;
                         continue;
                     }
                 }
@@ -1106,7 +1111,6 @@ pub fn run_with_reap_policy(
                                 raw_mode.resume();
                                 first_run = true;
                                 restart_count += 1;
-                                suppress_stale_ctrl_d_until_prompt = false;
                             }
                         }
                     }
@@ -1164,7 +1168,6 @@ pub fn run_with_reap_policy(
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;
-                                        suppress_stale_ctrl_d_until_prompt = false;
                                     }
                                 }
                             }
@@ -1194,7 +1197,6 @@ pub fn run_with_reap_policy(
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;
-                                        suppress_stale_ctrl_d_until_prompt = false;
                                     }
                                 }
                             }
@@ -1225,12 +1227,10 @@ pub fn run_with_reap_policy(
                                         raw_mode.resume();
                                         first_run = true;
                                         restart_count += 1;
-                                        suppress_stale_ctrl_d_until_prompt = false;
                                     }
                                 }
                             }
                             SupervisorRestartContinueExitStrategy::RestartFresh => {
-                                suppress_stale_ctrl_d_until_prompt = false;
                                 if clean_exit_before_prompt {
                                     eprintln!(
                                         "\n{} exited cleanly before ever surfacing a prompt. Restarting fresh instead of resuming...",
@@ -1263,7 +1263,6 @@ pub fn run_with_reap_policy(
                                 restart_count += 1;
                             }
                             SupervisorRestartContinueExitStrategy::Resume => {
-                                suppress_stale_ctrl_d_until_prompt = false;
                                 eprintln!(
                                     "\n{} exited cleanly. Restarting in resume mode to keep the session attached...",
                                     harness.binary
@@ -1304,7 +1303,6 @@ pub fn run_with_reap_policy(
                     first_run = true;
                 }
                 restart_count += 1;
-                suppress_stale_ctrl_d_until_prompt = false;
             }
             RestartAction::Halt => {
                 shared.transition_actor_state(

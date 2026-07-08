@@ -6,6 +6,31 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.69
 
+- **A proven editor-IPC write wedge now auto-recycles the supervisor mid-turn
+  (`#midturn-wedge-recycle`).** Previously `supervisor_recycle_action` gated every
+  recycle behind a turn boundary and deferred on an open cycle — but a wedged
+  turn/cycle can never reach its own boundary (closeout is blocked on a convergence
+  receipt that never arrives), so a wedge on a fresh (non-stale) supervisor
+  deadlocked until the operator ran `admin recycle` by hand. A latched wedge now
+  escalates immediately, bypassing the boundary and cycle-open gates, and is
+  guarded once-per-episode by a `recycle_attempted` flag on the dewedge marker so it
+  cannot recycle-loop. The in-flight response is capture-backed and recovers via
+  redispatch/replay on the fresh supervisor.
+
+- **A Ctrl+D buffered across an `execve` recycle no longer kills the freshly-adopted
+  agent (`#stale-ctrl-d-arm`).** Stale-Ctrl+D suppression (`suppress_stale_ctrl_d_
+  until_prompt`) was never armed anywhere — dead code — so a Ctrl+D (EOF) that
+  arrived before a fresh child printed its first prompt reached the agent and exited
+  it cleanly, dropping the interrupted turn to the restart-or-quit prompt ("the
+  session crashed and did not restart the turn"). Every child launch (first run,
+  restart, and recycle-adopt) now arms the guard via `ChildLaunchPlan.
+  arm_stale_ctrl_d_suppression` until the prompt is seen; an intentional operator
+  Ctrl+D at a live prompt still reaches the child.
+
+- **`make test` can no longer report success on a failing nextest run.** The
+  cargo-nextest branch now guards its exit explicitly (`if ! ...; then exit 1`)
+  instead of relying solely on `set -e`.
+
 - **Editor turn-state status now reads the Project Controller lazily projection,
   not sidecars.** JetBrains and VS Code call the Project Controller
   `state_subscribe` endpoint, mirror the returned lazily snapshot/delta, and

@@ -4479,6 +4479,15 @@ pub fn record_ipc_socket_ack_timeout(
         .as_ref()
         .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
         .unwrap_or(0);
+    // `#midturn-wedge-recycle`: preserve the once-per-episode recycle guard across
+    // marker rewrites. If a mid-turn recycle was already attempted for this wedge
+    // episode, further accruing timeouts must NOT reset it — re-recycling a binary
+    // that a recycle already failed to un-wedge would spin. The flag is cleared only
+    // when the whole marker is removed (a proven-live receipt self-heal).
+    let prior_recycle_attempted = prior
+        .as_ref()
+        .and_then(|value| value.get("recycle_attempted").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
     let consecutive_timeouts = prior_timeouts.saturating_add(1);
     let degraded = agent_doc_supervisor::lifecycle::write_wedged_from_ipc_failures(
         consecutive_timeouts,
@@ -4490,6 +4499,7 @@ pub fn record_ipc_socket_ack_timeout(
             .unwrap_or_else(|| "-".to_string()),
         "consecutive_timeouts": consecutive_timeouts,
         "degraded": degraded,
+        "recycle_attempted": prior_recycle_attempted,
         "last_patch_id": patch_id.unwrap_or("-"),
         "last_transport": transport,
     });
@@ -4553,6 +4563,53 @@ pub fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
         .flatten()
         .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
         .unwrap_or(false)
+}
+
+/// `#midturn-wedge-recycle` — a latched editor-IPC wedge that has NOT yet had a
+/// mid-turn recycle attempted for this episode. This is the signal the idle watch
+/// feeds into `supervisor_recycle_action` as `write_wedged`: it goes false as soon
+/// as [`mark_ipc_wedge_recycle_attempted`] latches the guard, so a single wedge
+/// episode drives at most one auto-recycle and cannot spin. Best effort: a
+/// missing/unreadable marker is "no recycle needed".
+pub fn editor_ipc_write_wedge_needs_recycle(project_root: &Path, file: &Path) -> bool {
+    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    let degraded = value
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let recycle_attempted = value
+        .get("recycle_attempted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    degraded && !recycle_attempted
+}
+
+/// `#midturn-wedge-recycle` — latch the once-per-episode recycle guard on the
+/// dewedge marker so the fresh supervisor (post-`execve`) does not immediately
+/// re-read the still-latched wedge and recycle-loop. Called right before the
+/// recycle `execve`. A no-op (Ok) when there is no current-session marker.
+pub fn mark_ipc_wedge_recycle_attempted(project_root: &Path, file: &Path) -> Result<()> {
+    let Some(mut value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
+        return Ok(());
+    };
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("recycle_attempted".to_string(), serde_json::Value::Bool(true));
+    }
+    let marker = ipc_dewedge_marker_path(project_root, file)?;
+    atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_wedge_recycle_attempted_latched file={} reason=midturn_wedge_recycle",
+            file.display()
+        ),
+    );
+    Ok(())
 }
 
 /// `#supselfheal` Phase 2 — log that a wedged editor-IPC write is now requesting
@@ -4726,6 +4783,55 @@ mod tests {
         assert!(
             editor_ipc_write_wedged(project_root, &file),
             "a latched degraded marker should read as a write wedge"
+        );
+    }
+
+    #[test]
+    fn wedge_needs_recycle_latches_once_per_episode() {
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path();
+        let file = project_root.join("plan.md");
+        fs::write(&file, "# plan\n").unwrap();
+
+        // No marker yet → nothing to recycle.
+        assert!(!editor_ipc_write_wedge_needs_recycle(project_root, &file));
+
+        // Latch the degraded wedge.
+        for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
+            record_ipc_socket_ack_timeout(project_root, &file, Some("p1"), "finalize").unwrap();
+        }
+        assert!(
+            editor_ipc_write_wedge_needs_recycle(project_root, &file),
+            "a fresh latched wedge should request a mid-turn recycle"
+        );
+
+        // After the recycle is attempted, the guard flips false so the fresh
+        // supervisor cannot re-read the still-latched wedge and recycle-loop.
+        mark_ipc_wedge_recycle_attempted(project_root, &file).unwrap();
+        assert!(
+            !editor_ipc_write_wedge_needs_recycle(project_root, &file),
+            "an already-attempted recycle must not request another one"
+        );
+        assert!(
+            editor_ipc_write_wedged(project_root, &file),
+            "the underlying degrade latch is unchanged; only the recycle guard flipped"
+        );
+
+        // Further accruing timeouts must NOT reset the guard (no spin).
+        record_ipc_socket_ack_timeout(project_root, &file, Some("p2"), "finalize").unwrap();
+        assert!(
+            !editor_ipc_write_wedge_needs_recycle(project_root, &file),
+            "accruing more timeouts after a recycle attempt must not re-arm the recycle"
+        );
+
+        // A full self-heal removal starts a clean episode.
+        remove_ipc_dewedge_marker(project_root, &file, "test_self_heal").unwrap();
+        for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
+            record_ipc_socket_ack_timeout(project_root, &file, Some("p3"), "finalize").unwrap();
+        }
+        assert!(
+            editor_ipc_write_wedge_needs_recycle(project_root, &file),
+            "a fresh wedge episode after marker removal should request a recycle again"
         );
     }
 }

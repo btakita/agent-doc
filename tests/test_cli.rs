@@ -30695,7 +30695,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
             && !write_ipc_transport
                 .contains("crate::write::converge::stale_supervisor_write_short_circuit")
             && !write_source.contains("ipc_direct_disk_degraded_for_file")
-            && idle_watch.contains("agent_doc_write_converge_io::editor_ipc_write_wedged")
+            && idle_watch.contains("agent_doc_write_converge_io::editor_ipc_write_wedge_needs_recycle")
             && !flow_closeout.contains("ipc_direct_disk_degraded_for_file")
             && flow_closeout.contains("agent_doc_write_converge_io::ipc_direct_disk_degraded"),
         "write IPC, idle-watch, and closeout callers must import write-converge IO directly instead of routing through orchestration facades"

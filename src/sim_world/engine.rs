@@ -507,6 +507,9 @@ impl SimWorld {
             SimCommand::MarkWriteWedged => {
                 self.recycle_clear.write_wedged = true;
             }
+            SimCommand::MarkIpcInflight(active) => {
+                self.recycle_clear.ipc_inflight = active;
+            }
             SimCommand::MarkReexecWillFail => {
                 self.recycle_clear.reexec_will_fail = true;
             }
@@ -1253,13 +1256,17 @@ impl SimWorld {
         // `supervisor_recycle_action` predicate as `explicit_admin`, so it inherits
         // the same cycle-open deferral and bounded escalation behavior as auto,
         // write-wedged, and failed-reexec recycle arms.
+        // `#midturn-wedge-recycle`: the idle-watch caller pre-gates `write_wedged` on
+        // the first available SAFE intra-turn checkpoint (no IPC connection in flight),
+        // so a wedge waits for a safe point before recycling. Model that gate here.
+        let write_wedged = self.recycle_clear.write_wedged && !self.recycle_clear.ipc_inflight;
         let recycle_action = supervisor_recycle_action(
             self.recycle_clear.binary_stale,
             self.recycle_clear.auto_recycle,
             turn_boundary,
             head_pending,
             self.recycle_clear.operator_recycle_marked,
-            self.recycle_clear.write_wedged,
+            write_wedged,
             self.recycle_clear.reexec_failed,
             // `#midturn-recycle-resume`: an open agent-doc cycle defers the recycle so
             // the `execve` cannot sever the in-flight finalize IPC connection — UNLESS
@@ -1305,16 +1312,22 @@ impl SimWorld {
             recycle_action,
             SupervisorRecycleAction::RecycleImmediate | SupervisorRecycleAction::RecycleDebounced
         );
-        // `#supselfheal` Phase 2: a wedge-driven RecycleImmediate against an opted-OUT
-        // stale supervisor is the wedge trigger overriding the default-OFF surface-only.
-        let wedge_triggered = self.recycle_clear.write_wedged
-            && self.recycle_clear.binary_stale
-            && !self.recycle_clear.auto_recycle
-            && matches!(recycle_action, SupervisorRecycleAction::RecycleImmediate);
+        // `#midturn-wedge-recycle`: a wedge-driven RecycleImmediate is attributed to
+        // the wedge whether or not the binary is stale or auto-recycle is opted in —
+        // the wedge short-circuit in `supervisor_recycle_action` fires first. It also
+        // fires OFF a turn boundary (mid-turn), because a wedged turn can never reach
+        // one, so waiting for a boundary would deadlock.
+        let wedge_triggered =
+            write_wedged && matches!(recycle_action, SupervisorRecycleAction::RecycleImmediate);
         // `#suprecyclestall`: once a self-`execve` recycle has failed the watch
         // disables further attempts and runs on the current binary, so a hopeless
-        // recycle is not re-tried every idle boundary.
-        if turn_boundary && !self.recycle_clear.recycle_disabled && auto_recycle_now {
+        // recycle is not re-tried every idle boundary. A wedge recycle bypasses the
+        // turn-boundary requirement (`#midturn-wedge-recycle`); every other arm still
+        // waits for a boundary, exactly as `do_recycle` does in the real idle watch.
+        if (turn_boundary || wedge_triggered)
+            && !self.recycle_clear.recycle_disabled
+            && auto_recycle_now
+        {
             self.recycle_clear.operator_recycle_marked = false;
             if self.recycle_clear.reexec_will_fail {
                 // `supervisor_perform_reexec` returned Err. The watch logs, surfaces

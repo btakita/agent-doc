@@ -171,6 +171,11 @@ pub fn pid_is_self_or_ancestor_pub(pid: u32) -> bool {
     pid_is_self_or_ancestor(pid)
 }
 
+#[cfg(not(unix))]
+pub fn pid_is_self_or_ancestor_pub(_pid: u32) -> bool {
+    false
+}
+
 #[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
@@ -196,6 +201,11 @@ pub fn supervisor_pid_for_doc(target: &Path) -> Option<u32> {
             return Some(pid);
         }
     }
+    None
+}
+
+#[cfg(not(unix))]
+pub fn supervisor_pid_for_doc(_target: &Path) -> Option<u32> {
     None
 }
 
@@ -227,6 +237,11 @@ pub fn force_kill_verified_supervisor_pid(target: &Path, pid: u32) -> bool {
         }
     }
     !process_is_alive(pid)
+}
+
+#[cfg(not(unix))]
+pub fn force_kill_verified_supervisor_pid(_target: &Path, _pid: u32) -> bool {
+    false
 }
 
 /// Outcome of [`drive_supervisor_kill`], so the CLI / PCP can report what happened.
@@ -295,6 +310,15 @@ pub fn drive_supervisor_kill(
         // gone-enough for the caller; the document no longer has a wedged supervisor.
         Ok(SupervisorKillOutcome::Forced(pid))
     }
+}
+
+#[cfg(not(unix))]
+pub fn drive_supervisor_kill(
+    _file: &Path,
+    _grace: Duration,
+    _dry_run: bool,
+) -> Result<SupervisorKillOutcome> {
+    Ok(SupervisorKillOutcome::NoSupervisor)
 }
 
 #[cfg(test)]

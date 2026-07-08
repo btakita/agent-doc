@@ -9712,6 +9712,7 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
     let state_backbone =
         fs::read_to_string(manifest_dir.join("agent-doc-state-backbone/src/lib.rs")).unwrap();
     for required in [
+        "SupervisorRecycleRequested",
         "SupervisorRecycleStarted",
         "SupervisorRecycleSettled",
         "pub struct SupervisorRecycleProjection",

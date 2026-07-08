@@ -244,6 +244,17 @@ pub enum StateFact {
         pane_session: String,
         lease_epoch: u64,
     },
+    /// Project-scoped supervisor recycle/restart was REQUESTED (stale binary,
+    /// `admin recycle`, install fan-out, or a wedge trigger) but has not begun.
+    /// The PCP owns this pending-intent fact on the lazily statechart instead of
+    /// the on-disk `recycle_request` marker so route callers and the editor
+    /// projection see the pending restart durably.
+    SupervisorRecycleRequested {
+        document_hash: String,
+        reason: String,
+        recycle_epoch: u64,
+        marked_secs: u64,
+    },
     /// Project-scoped supervisor recycle began. The PCP owns this fact instead
     /// of an on-disk recycle marker so route callers can wait on the lazily
     /// state graph.
@@ -555,6 +566,7 @@ impl StateFact {
             | Self::PendingResponseCaptured { document_hash, .. }
             | Self::PendingResponseCleared { document_hash, .. }
             | Self::SupervisorHosting { document_hash, .. }
+            | Self::SupervisorRecycleRequested { document_hash, .. }
             | Self::SupervisorRecycleStarted { document_hash, .. }
             | Self::SupervisorRecycleSettled { document_hash, .. } => document_hash,
         }
@@ -597,6 +609,7 @@ impl StateFact {
             | Self::AgentRestartPerformed { .. }
             | Self::CapabilityProofObserved { .. }
             | Self::SupervisorHosting { .. }
+            | Self::SupervisorRecycleRequested { .. }
             | Self::SupervisorRecycleStarted { .. }
             | Self::SupervisorRecycleSettled { .. } => StateDomain::Supervisor,
             Self::RoutePaneObserved { .. }
@@ -669,6 +682,7 @@ impl StateFact {
             Self::RouteSubmitBlocked { .. } => "route_submit_blocked",
             Self::ProofMarkerObserved { .. } => "proof_marker_observed",
             Self::ProofMarkerDisproved { .. } => "proof_marker_disproved",
+            Self::SupervisorRecycleRequested { .. } => "supervisor_recycle_requested",
             Self::SupervisorRecycleStarted { .. } => "supervisor_recycle_started",
             Self::SupervisorRecycleSettled { .. } => "supervisor_recycle_settled",
         }
@@ -1467,6 +1481,19 @@ impl DocumentStateProjection {
                 ..
             } => {
                 self.apply_supervisor_hosting(pane_session, *lease_epoch);
+            }
+            StateFact::SupervisorRecycleRequested {
+                reason,
+                recycle_epoch,
+                marked_secs,
+                ..
+            } => {
+                self.supervisor.apply_recycle_event(
+                    SupervisorRecycleEvent::Requested,
+                    reason,
+                    *recycle_epoch,
+                    *marked_secs,
+                );
             }
             StateFact::SupervisorRecycleStarted {
                 reason,
@@ -2832,11 +2859,19 @@ impl Default for SupervisorRecycleProjection {
 #[serde(rename_all = "snake_case")]
 pub enum SupervisorRecyclePhase {
     Settled,
+    /// A recycle/restart has been REQUESTED (stale binary, `admin recycle`,
+    /// install fan-out, or a wedge trigger) but the `execve` has not begun. This
+    /// is the "restart intent" state — previously tracked only by the on-disk
+    /// `recycle_request` marker, now modelled on the lazily statechart so route
+    /// callers and the editor projection see the pending restart durably. The
+    /// request `reason` carries the cause (e.g. `stale_binary`).
+    Requested,
     InFlight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisorRecycleEvent {
+    Requested,
     Started,
     Settled,
 }
@@ -2875,10 +2910,18 @@ impl SupervisorRecycleMachine {
 }
 
 pub fn transition_supervisor_recycle(
-    _current: &SupervisorRecyclePhase,
+    current: &SupervisorRecyclePhase,
     event: &SupervisorRecycleEvent,
 ) -> Option<SupervisorRecyclePhase> {
     match event {
+        // A pending recycle/restart request only arms from the settled (idle)
+        // state. Ignore a duplicate request or one that races an already-in-flight
+        // recycle so the chart never walks backwards from `InFlight` to `Requested`
+        // (which would let a stale request re-arm a recycle already underway).
+        SupervisorRecycleEvent::Requested => match current {
+            SupervisorRecyclePhase::Settled => Some(SupervisorRecyclePhase::Requested),
+            _ => None,
+        },
         SupervisorRecycleEvent::Started => Some(SupervisorRecyclePhase::InFlight),
         SupervisorRecycleEvent::Settled => Some(SupervisorRecyclePhase::Settled),
     }
@@ -4977,6 +5020,87 @@ mod tests {
             doc.materialized_visible_write_carry_forward("candidate-a", "file-a", "live-b")
                 .is_none(),
             "live-buffer hash must match the proof"
+        );
+    }
+
+    #[test]
+    fn supervisor_recycle_projection_folds_requested_then_started_then_settled() {
+        // The lazily statechart models the pending recycle/restart intent
+        // (`Requested`) that used to live only in the on-disk recycle-request marker.
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "recycle-requested-1",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "stale_binary".into(),
+                recycle_epoch: 1,
+                marked_secs: 5,
+            },
+        ));
+        let requested = ledger.project().project_supervisor_recycle();
+        assert_eq!(requested.phase, SupervisorRecyclePhase::Requested);
+        assert_eq!(requested.reason.as_deref(), Some("stale_binary"));
+
+        // A duplicate request while already Requested is a no-op (chart stays put).
+        ledger.append(state_event(
+            "recycle-requested-2",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "admin_recycle".into(),
+                recycle_epoch: 2,
+                marked_secs: 6,
+            },
+        ));
+        assert_eq!(
+            ledger.project().project_supervisor_recycle().phase,
+            SupervisorRecyclePhase::Requested,
+            "a second request must not walk the chart backwards or double-arm"
+        );
+
+        // The actual recycle begins → InFlight, then settles.
+        ledger.append(state_event(
+            "recycle-started-1",
+            StateFact::SupervisorRecycleStarted {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "stale_binary".into(),
+                recycle_epoch: 3,
+                marked_secs: 7,
+            },
+        ));
+        assert_eq!(
+            ledger.project().project_supervisor_recycle().phase,
+            SupervisorRecyclePhase::InFlight
+        );
+
+        // A stale (lower-epoch) request after the recycle is in flight is rejected —
+        // it must NOT re-arm a recycle already underway.
+        ledger.append(state_event(
+            "recycle-requested-stale",
+            StateFact::SupervisorRecycleRequested {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "stale_race".into(),
+                recycle_epoch: 2,
+                marked_secs: 8,
+            },
+        ));
+        assert_eq!(
+            ledger.project().project_supervisor_recycle().phase,
+            SupervisorRecyclePhase::InFlight,
+            "a stale-epoch request must not re-arm an in-flight recycle"
+        );
+
+        ledger.append(state_event(
+            "recycle-settled-1",
+            StateFact::SupervisorRecycleSettled {
+                document_hash: PROJECT_SUPERVISOR_DOCUMENT_HASH.into(),
+                reason: "watch_loop_started".into(),
+                recycle_epoch: 3,
+                marked_secs: 9,
+            },
+        ));
+        assert_eq!(
+            ledger.project().project_supervisor_recycle().phase,
+            SupervisorRecyclePhase::Settled
         );
     }
 

@@ -178,3 +178,6 @@
 [submodule "src/lazily-go"]
 	path = src/lazily-go
 	url = git@github.com:lazily-hub/lazily-go.git
+[submodule "src/lazily-cpp"]
+	path = src/lazily-cpp
+	url = git@github.com:lazily-hub/lazily-cpp.git

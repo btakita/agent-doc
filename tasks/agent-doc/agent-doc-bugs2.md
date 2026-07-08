@@ -26,7 +26,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -90,7 +89,7 @@ Preflight had already cleared the stale-supervisor marker; the red status text w
 These are all `[operator-verify]` / `[focused-cycle]` items you said you'd prove live. Next cycle, with your go-ahead, I can clear `#qftlossdelta` and the four backlog candidates once you confirm the live proofs held; otherwise leave them gated.
 
 Changed paths: none (no repo work this cycle). Confidence: high. Escalation: none.
-<!-- agent:boundary:3b940c58 -->
+<!-- agent:boundary:ed38d24e -->
 <!-- /agent:exchange -->
 ## Queue
 

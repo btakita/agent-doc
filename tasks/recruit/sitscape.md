@@ -93,7 +93,7 @@ Let me know if you want to draft/rehearse specific STAR answers, or if you have 
 Since she's Ops/HR, lead every answer with **outcome + how you worked with people**, not implementation detail — but keep one crisp "here's the interactive component / data-viz I built" ready in case she asks you to make the tech concrete.
 
 Follow-ups queued in the backlog: draft the actual STAR stories against this table, and tailor your resume + statement of interest to the JD's keywords. Say the word and I'll draft either.
-<!-- agent:boundary:4e2ceb92 -->
+<!-- agent:boundary:d7e1b948 -->
 <!-- /agent:exchange -->
 
 ## Queue

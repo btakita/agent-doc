@@ -180,10 +180,12 @@ release: check
 # runner rather than reimplementing test execution.
 test:
 	@set -e; \
+	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		$(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); \
+		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-doctest.XXXXXX.log"); \
-		if ! $(CARGO_CLEAN_ENV) cargo test --workspace --doc --quiet >"$$log" 2>&1; then \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --workspace --doc --quiet >"$$log" 2>&1; then \
 			cat "$$log"; \
 			rm -f "$$log"; \
 			exit 1; \
@@ -191,7 +193,7 @@ test:
 		rm -f "$$log"; \
 	else \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-test.XXXXXX.log"); \
-		if ! $(CARGO_CLEAN_ENV) cargo test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --workspace --all-targets --quiet -- --test-threads="$(TEST_THREADS)" >"$$log" 2>&1; then \
 			cat "$$log"; \
 			rm -f "$$log"; \
 			exit 1; \

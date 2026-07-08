@@ -32,6 +32,8 @@ use agent_doc_document_realtime::{
 };
 pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 
+#[cfg(test)]
+use agent_doc_crdt_relay_io::deregister_replica_for_file as test_support_deregister_replica_for_file;
 #[cfg(any(test, feature = "test-support"))]
 use agent_doc_crdt_relay_io::ensure_document_model as test_support_ensure_document_model;
 #[cfg(test)]
@@ -907,55 +909,69 @@ pub fn guard_visible_write_reconcile_with_target(
             delivery_converged,
         }) => {
             let relay_hash = agent_doc_hash::content_hash(&relay_text);
-            if target_content
-                .is_some_and(|target| visible_write_content_matches(&relay_text, target))
-            {
+            if live_editors == 0 {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "visible_write_crdt_current_matches_target file={} source={} target_len={} target_hash={} live_editors={} delivery_converged={}",
+                        "visible_write_crdt_no_live_editors_disk_authority file={} source={} relay_len={} relay_hash={} delivery_converged={}",
                         file.display(),
                         source,
+                        relay_text.len(),
+                        relay_hash,
+                        delivery_converged,
+                    ),
+                );
+            } else {
+                if target_content
+                    .is_some_and(|target| visible_write_content_matches(&relay_text, target))
+                {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "visible_write_crdt_current_matches_target file={} source={} target_len={} target_hash={} live_editors={} delivery_converged={}",
+                            file.display(),
+                            source,
+                            relay_text.len(),
+                            relay_hash,
+                            live_editors,
+                            delivery_converged,
+                        ),
+                    );
+                    return Ok(VisibleWriteReconcile::Clean);
+                }
+                if visible_write_content_matches(&relay_text, expected_current) {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "visible_write_crdt_current_clean file={} source={} expected_len={} expected_hash={} live_editors={} delivery_converged={}",
+                            file.display(),
+                            source,
+                            expected_current.len(),
+                            agent_doc_hash::content_hash(expected_current),
+                            live_editors,
+                            delivery_converged,
+                        ),
+                    );
+                    return Ok(VisibleWriteReconcile::Clean);
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_crdt_current_drift file={} source={} expected_len={} expected_hash={} current_len={} current_hash={} live_editors={} delivery_converged={}",
+                        file.display(),
+                        source,
+                        expected_current.len(),
+                        agent_doc_hash::content_hash(expected_current),
                         relay_text.len(),
                         relay_hash,
                         live_editors,
                         delivery_converged,
                     ),
                 );
-                return Ok(VisibleWriteReconcile::Clean);
+                return Ok(VisibleWriteReconcile::DiskDrifted {
+                    fresh_current: relay_text,
+                });
             }
-            if visible_write_content_matches(&relay_text, expected_current) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "visible_write_crdt_current_clean file={} source={} expected_len={} expected_hash={} live_editors={} delivery_converged={}",
-                        file.display(),
-                        source,
-                        expected_current.len(),
-                        agent_doc_hash::content_hash(expected_current),
-                        live_editors,
-                        delivery_converged,
-                    ),
-                );
-                return Ok(VisibleWriteReconcile::Clean);
-            }
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "visible_write_crdt_current_drift file={} source={} expected_len={} expected_hash={} current_len={} current_hash={} live_editors={} delivery_converged={}",
-                    file.display(),
-                    source,
-                    expected_current.len(),
-                    agent_doc_hash::content_hash(expected_current),
-                    relay_text.len(),
-                    relay_hash,
-                    live_editors,
-                    delivery_converged,
-                ),
-            );
-            return Ok(VisibleWriteReconcile::DiskDrifted {
-                fresh_current: relay_text,
-            });
         }
         Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {}
         Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
@@ -1054,12 +1070,31 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
         )
     };
     match current {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) if text != disk => {
-            Some(BufferState::new(
-                text,
-                true,
-                next_document_authority_epoch(),
-            ))
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text, live_editors, ..
+        })) if live_editors > 0 && text != disk => Some(BufferState::new(
+            text,
+            true,
+            next_document_authority_epoch(),
+        )),
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors: 0,
+            delivery_converged,
+        })) if text != disk => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "durable_buffer_state_crdt_no_live_editors_ignored file={} relay_len={} relay_hash={} disk_len={} disk_hash={} delivery_converged={}",
+                    file.display(),
+                    text.len(),
+                    agent_doc_hash::content_hash(&text),
+                    disk.len(),
+                    agent_doc_hash::content_hash(disk),
+                    delivery_converged,
+                ),
+            );
+            None
         }
         Ok(Some(_)) | Ok(None) => None,
         Err(err) => {
@@ -1280,6 +1315,38 @@ fn try_resolve_current_doc_with_disk_inner(
             live_editors,
             delivery_converged,
         } => {
+            if live_editors == 0 {
+                let relay_len = text.len();
+                let relay_hash = agent_doc_hash::content_hash(&text);
+                let disk = match disk {
+                    Some(disk) => disk.to_string(),
+                    None => std::fs::read_to_string(file).with_context(|| {
+                        format!(
+                            "relay has no live editors for {}; failed to read disk fallback replica",
+                            file.display()
+                        )
+                    })?,
+                };
+                record_disk_replica_authority(file, source, &disk);
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "realtime_doc_resolve_crdt_no_live_editors_disk_authority file={} source={} relay_len={} relay_hash={} disk_len={} disk_hash={} delivery_converged={}",
+                        file.display(),
+                        source,
+                        relay_len,
+                        relay_hash,
+                        disk.len(),
+                        agent_doc_hash::content_hash(&disk),
+                        delivery_converged,
+                    ),
+                );
+                return Ok(resolve_disk_only_current_doc(
+                    file,
+                    &disk,
+                    "crdt_relay_no_live_editors",
+                ));
+            }
             let reconciliation = Reconciliation {
                 authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
                 content: text,
@@ -1664,6 +1731,116 @@ mod tests {
             2,
             "each active-typing attempt should log a no-fallback decision:\n{second_log}"
         );
+    }
+
+    #[test]
+    fn current_resolve_prefers_disk_when_relay_current_has_no_live_editors() {
+        let relay_text = "\
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let disk_prompt = "\
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Session Summary
+- `make check` passed.
+/goal keep the saved disk prompt visible
+<!-- agent:boundary:new -->
+<!-- /agent:exchange -->
+";
+        let (dir, file, canonical) = temp_doc(relay_text);
+        let owner = "test-zero-live-current-resolve";
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
+            "test setup should acquire a live plugin-owner lease"
+        );
+        test_support_register_replica_for_file(&file, owner)
+            .unwrap()
+            .expect("editor-attached replica registers");
+        assert!(
+            test_support_deregister_replica_for_file(&file, owner).unwrap(),
+            "test setup should leave a relay hub with zero live editors"
+        );
+        std::fs::write(&file, disk_prompt).unwrap();
+
+        let resolved = try_resolve_current_doc_from_file(&file)
+            .expect("zero-live relay current should fall back to disk");
+        assert_eq!(
+            resolved.authority,
+            agent_doc_document_realtime::DocAuthority::Disk
+        );
+        assert_eq!(resolved.reason, "crdt_relay_no_live_editors");
+        assert_eq!(resolved.content, disk_prompt);
+        assert!(
+            resolved
+                .content
+                .contains("/goal keep the saved disk prompt visible")
+        );
+        assert!(!resolved.content.contains("agent:boundary:old"));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("realtime_doc_resolve_crdt_no_live_editors_disk_authority"),
+            "zero-live relay demotion should be auditable:\n{log}"
+        );
+        agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
+    }
+
+    #[test]
+    fn visible_write_reconcile_prefers_disk_when_relay_current_has_no_live_editors() {
+        let relay_text = "\
+<!-- agent:exchange patch=append -->
+### Session Summary
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let disk_prompt = "\
+<!-- agent:exchange patch=append -->
+### Session Summary
+- `make check` passed.
+/goal keep the saved disk prompt visible
+<!-- agent:boundary:new -->
+<!-- /agent:exchange -->
+";
+        let (dir, file, canonical) = temp_doc(relay_text);
+        let owner = "test-zero-live-visible-write";
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
+            "test setup should acquire a live plugin-owner lease"
+        );
+        test_support_register_replica_for_file(&file, owner)
+            .unwrap()
+            .expect("editor-attached replica registers");
+        assert!(
+            test_support_deregister_replica_for_file(&file, owner).unwrap(),
+            "test setup should leave a relay hub with zero live editors"
+        );
+        std::fs::write(&file, disk_prompt).unwrap();
+
+        let outcome = guard_visible_write_reconcile_with_target(
+            &file,
+            "test_zero_live_visible_write",
+            relay_text,
+            None,
+        )
+        .expect("zero-live relay current should use disk drift reconciliation");
+        match outcome {
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, disk_prompt);
+            }
+            VisibleWriteReconcile::Clean => panic!("expected disk drift from saved prompt"),
+        }
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("visible_write_crdt_no_live_editors_disk_authority")
+                && log.contains("visible_write_disk_drift_reconcilable"),
+            "zero-live visible-write demotion should be auditable:\n{log}"
+        );
+        agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
     }
 
     #[test]

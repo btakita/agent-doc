@@ -26,6 +26,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -39,7 +40,7 @@ done
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc protected draft input
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): ensure VS Code parity; restart bleed observation + VS Code pa...
-<!-- agent:boundary:80be8013 -->
+<!-- agent:boundary:a75c60eb -->
 <!-- /agent:exchange -->
 ## Queue
 

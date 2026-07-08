@@ -1,7 +1,11 @@
 ---
 agent_doc_session: 9870ec8d-62fc-46b4-aa20-1f8f0b00b141
+agent: claude
+claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
 ---
 
 ## Status
@@ -104,7 +108,6 @@ Added CopilotKit to the freelance/consulting experience. Resume `main` ba71533 p
 
 - `resume` `main` ba71533 — pushed (data.toml + rebuilt PDF).
 - `agent-loop` `main` (resume pointer bump) — local only per the runbook.
-<!-- agent:boundary:04f049e5 -->
 I have an interview with Acadian Asset Management.
 
 Please read
@@ -198,7 +201,6 @@ The role: **60% React/advanced TypeScript + MUI X, 40% Python (FastAPI, Ray, Pan
 **Prep checklist:** (1) rehearse the one-sentence Censible pitch, (2) have the MSCI-issue tie-in ready, (3) prep the Polars/MUI-X honest answers, (4) memorize the "evolution not revolution / overfitting discipline" line, (5) skim your own `libs/domain/src/esg` so you can speak to specifics if pressed.
 
 Want me to (a) draft a one-page "talking points" cheat-sheet PDF via the resume pipeline, (b) do mock Q&A rounds, or (c) pull specific numbers/screens out of the Censible ESG code so you can describe them precisely? Say which and I'll do it.
-<!-- agent:boundary:6e9dbeab -->
 Give me a quick primer on ML topics that are important to Acadian Asset Management.
 ### Re: ML primer for Acadian — opus-4-8
 
@@ -261,6 +263,41 @@ The pattern: ML struggles wherever data is scarce or **non-stationary**. Naming 
 **Your framing in the room:** "I treat ML as an extension of disciplined research, not a replacement for it — out-of-sample honesty and interpretability matter more than model complexity, especially in low signal-to-noise data." That's Acadian's own thesis said back to them.
 
 Want me to (a) drill you with mock ML interview questions + model answers, or (b) go deeper on any one topic (e.g. gradient boosting internals, walk-forward CV, or NLP/transformers for filings)?
+
+❯ Please help me prepare for a 2nd round interview with Acadian Asset Management.
+❯ - jeffrey-enos https://www.linkedin.com/in/jeffrey-enos-a58b02/
+
+❯ They are very interested in open source. Please write some keyphrases that I can use in this call.
+
+❯ What is Gradient Boosting vs Random Forest?
+### Re: Gradient Boosting vs Random Forest — opus-4-8
+
+Both are ensembles of decision trees, but they combine trees in opposite ways.
+
+**Random Forest — bagging (parallel, variance reduction).** Trains many **deep, independent** trees **in parallel**, each on a bootstrap sample of the rows and a random subset of features at each split. Prediction = **average** (regression) or **majority vote** (classification). Each tree is low-bias/high-variance; averaging decorrelated trees cancels the variance. The feature subsampling is what decorrelates them. Trees don't interact, so training parallelizes and adding more trees never overfits (the curve just plateaus).
+
+**Gradient Boosting — boosting (sequential, bias reduction).** Trains **shallow** trees (depth ~3–6, "weak learners") **sequentially**, each fit to the **residuals / negative gradient** of the loss from the ensemble so far. Prediction = **weighted sum** of trees, each scaled by a **learning rate** (shrinkage). Each tree corrects its predecessors' errors, driving down **bias** — powerful, but it **will overfit** if you add too many trees or set the learning rate too high, so you need early stopping / regularization.
+
+| | Random Forest | Gradient Boosting |
+|---|---|---|
+| Combination | Parallel (bagging) | Sequential (boosting) |
+| Each tree fits | Bootstrap of the data | Residuals of current ensemble |
+| Reduces mainly | Variance | Bias |
+| Base tree | Deep, full-grown | Shallow stumps |
+| Overfitting risk | Low, self-limiting | High — must regularize |
+| Key hyperparameters | # trees, max features | learning rate, # trees, depth, subsample |
+| Training | Embarrassingly parallel | Inherently serial |
+| Tuning | Forgiving | Sensitive |
+| Accuracy ceiling | Good | Higher (usually wins on tabular) |
+
+**One-liner for the room:** *Random Forest averages many independent deep trees to cut variance; Gradient Boosting adds shallow trees one at a time, each fixing the last one's errors, to cut bias. RF is robust and hard to overfit; GBM is more accurate but needs careful regularization.*
+
+**Acadian-relevant nuances (quant context):**
+- **Modern GBM = XGBoost / LightGBM / CatBoost** — second-order gradients, regularization, histogram splits. On tabular financial data (fundamentals, factor exposures, cross-sectional signals) a well-tuned GBM usually beats RF, which is why it's the quant/Kaggle tabular workhorse. RF is the safer default when you have little time to tune or want stable feature-importance readings.
+- **Prefer permutation importance / SHAP** over the built-in Gini/split-count importance — the latter is biased toward high-cardinality features. Worth citing.
+- **Respect time in CV** — use purged/embargoed walk-forward splits, not random k-fold, or both models look far better in backtest than live. At a quant shop the interviewer often probes *this* more than the RF-vs-GBM mechanics. Ties straight back to Acadian's overfitting / low-signal-to-noise obsession.
+<!-- agent:boundary:0f618f64 -->
+
 <!-- /agent:exchange -->
 
 ## Queue

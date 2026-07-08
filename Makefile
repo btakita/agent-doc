@@ -215,7 +215,10 @@ sim-medium:
 # Live tmux integration sweep. These tests are intentionally ignored in the
 # default development suite and run on CI where tmux is installed.
 tmux-ci:
-	$(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --test-threads="$(TMUX_TEST_THREADS)"
+	@set -e; \
+	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
+	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --all-targets -- --ignored --test-threads="$(TMUX_TEST_THREADS)"
 
 # Lint
 clippy:

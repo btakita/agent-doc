@@ -876,7 +876,27 @@ pub(crate) fn run_stream(
         // patch queue (plugin applies via Document API) so a degraded stream
         // write never manufactures a raw-disk File Cache Conflict; the disk
         // unproven IPC attempt below fails closed instead of writing behind the editor.
-        if patches_dir.exists() {
+        //
+        // `#6b5h-write-path-parity`: when the relay reports zero live editors
+        // with a converged delivery cut, disk is the write authority (same rule
+        // as the read-path demotion and the `--force-disk` authority gate). Skip
+        // the socket→file-IPC cascade — it cannot get an editor ACK with no live
+        // editor and only accumulates the 6s socket + 2s file-IPC timeouts before
+        // reaching the disk path below.
+        let no_live_editors = write_path_relay_has_no_live_editors(file);
+        if no_live_editors {
+            eprintln!(
+                "[write] relay reports zero live editors — disk is document authority, skipping IPC cascade"
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "write_ipc_no_live_editors_disk_authority file={} reason=crdt_relay_no_live_editors recovery=direct_disk_write",
+                    file.display(),
+                ),
+            );
+        }
+        if patches_dir.exists() && !no_live_editors {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
@@ -2130,6 +2150,41 @@ fn editor_crdt_authority_attached(file: &Path) -> bool {
         .editor_attached()
 }
 
+/// Whether the CRDT relay reports zero live editors with a converged delivery
+/// cut for `file`.
+///
+/// Mirrors the read-path demotion in `try_resolve_current_doc_with_disk_inner`
+/// (`agent-doc-document-realtime-io`) and the force-disk gate in
+/// `ensure_force_disk_editor_authority_ready`: when no live editor owns the
+/// document, disk is the write authority and the socket→file-IPC cascade can
+/// never obtain an editor ACK — it only accumulates timeouts before reaching
+/// the same disk path. Returning `true` here lets `run_stream` skip that
+/// cascade for pure-CLI / no-live-editor sessions (#6b5h write-path parity).
+///
+/// The controller is queried first because it holds the authoritative relay
+/// hub state (the CLI subprocess does not carry an in-memory hub); the local
+/// nonblocking relay probe is the fallback when the controller is unreachable.
+fn write_path_relay_has_no_live_editors(file: &Path) -> bool {
+    let current = match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file,
+        "write_path_no_live_editor_probe",
+    ) {
+        Ok(Some(current)) => current,
+        _ => match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file) {
+            Ok(current) => current,
+            Err(_) => return false,
+        },
+    };
+    matches!(
+        current,
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors: 0,
+            delivery_converged: true,
+            ..
+        }
+    )
+}
+
 fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
     let current = match agent_doc_controller_io::project_controller::
         current_text_via_controller_model_read_for_doc(file, "force_disk_pre_write_authority")
@@ -2970,5 +3025,53 @@ mod tests {
             "rejected patchback must not mutate the document"
         );
         assert!(!after.contains("### Re: churn"));
+    }
+
+    #[test]
+    fn write_path_relay_has_no_live_editors_skips_ipc_when_zero_live_editors() {
+        // #6b5h write-path parity: when the relay hub exists but has zero live
+        // editor replicas, disk is the write authority and the IPC cascade must
+        // be skipped (it can never get an editor ACK). The controller probe
+        // fails here (no controller in the unit test), so the local nonblocking
+        // relay probe — which shares this process's hub registry — must report
+        // Current { live_editors: 0 }.
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("zero-live.md");
+        fs::write(&doc, "# Doc\n\nbody\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let owner = "test-write-path-zero-live";
+        assert!(
+            agent_doc_plugin_owner::try_acquire_plugin_owner(
+                &canonical.display().to_string(),
+                owner,
+                std::process::id(),
+            ),
+            "should acquire plugin-owner lease"
+        );
+        agent_doc_crdt_relay_io::register_replica_for_file(&doc, owner)
+            .unwrap()
+            .expect("hub allocated with a registered editor replica");
+        agent_doc_crdt_relay_io::record_committed_baseline_for_file(&doc);
+        assert!(
+            agent_doc_crdt_relay_io::deregister_replica_for_file(&doc, owner).unwrap(),
+            "deregister leaves zero live editors"
+        );
+
+        assert!(
+            write_path_relay_has_no_live_editors(&doc),
+            "zero-live-editor relay should signal IPC skip (disk is authority)"
+        );
+
+        // Re-register a live editor → probe must report live_editors > 0 → no skip.
+        agent_doc_crdt_relay_io::register_replica_for_file(&doc, owner)
+            .unwrap()
+            .expect("re-register an editor replica");
+        assert!(
+            !write_path_relay_has_no_live_editors(&doc),
+            "a live editor replica must NOT trigger the IPC skip"
+        );
+
+        agent_doc_plugin_owner::release_plugin_owner(&canonical.display().to_string(), owner);
     }
 }

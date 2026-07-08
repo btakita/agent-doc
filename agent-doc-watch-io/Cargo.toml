@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-watch-io"
-version = "0.34.69"
+version = "0.34.70"
 edition = "2024"
 description = "Watch daemon process IO boundary for agent-doc"
 license = "MIT"
@@ -10,22 +10,22 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_watch_io"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.34.69" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.69" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.69" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.69" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.69" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.69" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.69" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.69" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.69" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.69" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.69" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.69" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.69" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.69" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.69" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.69" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.34.70" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.70" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.70" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.70" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.70" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.70" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.70" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.70" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.70" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.70" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.70" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.70" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.70" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.70" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.70" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.70" }
 anyhow = "1"
 notify = "8"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

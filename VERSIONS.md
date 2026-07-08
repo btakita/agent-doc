@@ -4,6 +4,28 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.70
+
+- **Finalize/write now skips the editor-IPC cascade when the relay reports zero
+  live editors (`#6b5h` write-path parity).** The read path already demoted
+  zero-live relay text to disk authority (`553904e8`), and the `--force-disk`
+  authority gate already honored `live_editors: 0`, but the normal (non-force-disk)
+  write gate only checked `patches_dir.exists()` — so a pure-CLI session with no
+  live editor buffer wedged for ~8s on socket→file-IPC `no_ack` timeouts before
+  either bailing ("refusing direct document write") or recovering. The write path
+  now probes the controller (hub authority) with a local-relay fallback and, when
+  it sees `Current { live_editors: 0, delivery_converged: true }`, skips straight
+  to the disk write — disk is authority when no editor owns the document.
+- **JB plugin `CrdtReplicaManager` no longer busy-spins when the CPC controller
+  socket is unavailable (`#crdt-drain-backoff`).** A zero-update drain cycle
+  rescheduled immediately via `requestRemoteDrain(reason = "rescheduled")` with no
+  delay; against a missing `controller.sock` this generated ~70MB/min of
+  `[crdt-replica]` log lines and froze the IDE (observed 2026-07-08, 7×10MB log
+  rotation in ~7 min). Rescheduled drains now apply exponential backoff
+  (100ms → 5s cap) when the previous cycle applied zero useful updates, and reset
+  immediately once real CRDT traffic arrives.
+- JB plugin bumped to 0.2.229.
+
 ## 0.34.69
 
 - **A proven editor-IPC write wedge now auto-recycles the supervisor mid-turn

@@ -25,6 +25,8 @@ private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 60_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 300_000L
+private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
+private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 5_000L
 
 /**
  * Production editor-as-CRDT-replica wiring (`#crdtauth5`, realtime phase 3).
@@ -48,6 +50,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val drainRequestedPaths = ConcurrentHashMap.newKeySet<String>()
     private val registerFailureCounts = ConcurrentHashMap<String, Int>()
     private val registerRetryAfterMs = ConcurrentHashMap<String, Long>()
+    private val consecutiveNoOpReschedules = AtomicInteger(0)
 
     fun start() {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
@@ -205,20 +208,48 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (!drainQueued.compareAndSet(false, true)) return
         executor.execute {
+            var appliedTotal = 0
             try {
-                drainRemoteUpdates(reason)
+                appliedTotal = drainRemoteUpdates(reason)
             } catch (e: Exception) {
                 log.debug("[crdt-replica] remote drain skipped: ${e.message}")
             } finally {
                 drainQueued.set(false)
                 if (drainAllRequested.get() || drainRequestedPaths.isNotEmpty()) {
+                    // #crdt-drain-backoff: when a drain cycle applied zero useful
+                    // updates (notably when the CPC socket is unavailable and every
+                    // pullDelivery returns empty deltas), delay the reschedule with
+                    // exponential backoff instead of re-executing immediately. A
+                    // tight no-op spin generated ~70MB/min of logs and froze the IDE.
+                    if (appliedTotal == 0) {
+                        val delayMs = nextNoOpRescheduleBackoffMs()
+                        log.debug("[crdt-replica] no-op drain cycle; backing off reschedule by ${delayMs}ms (consecutive=${consecutiveNoOpReschedules.get()})")
+                        try {
+                            Thread.sleep(delayMs)
+                        } catch (_: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                        }
+                    } else {
+                        consecutiveNoOpReschedules.set(0)
+                    }
                     requestRemoteDrain(reason = "rescheduled")
+                } else {
+                    consecutiveNoOpReschedules.set(0)
                 }
             }
         }
     }
 
-    private fun drainRemoteUpdates(reason: String) {
+    private fun nextNoOpRescheduleBackoffMs(): Long {
+        val n = consecutiveNoOpReschedules.incrementAndGet()
+        val shifted = 1L shl minOf(n - 1, 12)
+        return minOf(
+            CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS * shifted,
+            CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS,
+        )
+    }
+
+    private fun drainRemoteUpdates(reason: String): Int {
         val started = System.nanoTime()
         val drainAll = drainAllRequested.getAndSet(false)
         val paths = if (drainAll) {
@@ -228,16 +259,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 drained.forEach { drainRequestedPaths.remove(it) }
             }
         }
-        if (paths.isEmpty()) return
+        if (paths.isEmpty()) return 0
         log.debug("[crdt-replica] draining ${paths.size} replica(s) via $reason")
+        var appliedTotal = 0
         for (filePath in paths) {
             val forwarder = forwarders[filePath] ?: continue
-            drainRemoteUpdatesFor(filePath, forwarder)
+            appliedTotal += drainRemoteUpdatesFor(filePath, forwarder)
         }
-        logSlow("remote-drain", paths.firstOrNull() ?: "(none)", started, details = "paths=${paths.size} reason=$reason drain_all=$drainAll")
+        logSlow("remote-drain", paths.firstOrNull() ?: "(none)", started, details = "paths=${paths.size} reason=$reason drain_all=$drainAll applied_total=$appliedTotal")
+        return appliedTotal
     }
 
-    private fun drainRemoteUpdatesFor(filePath: String, forwarder: CrdtReplicaForwarder) {
+    private fun drainRemoteUpdatesFor(filePath: String, forwarder: CrdtReplicaForwarder): Int {
         val started = System.nanoTime()
         var updateCount = 0
         var selfEchoCount = 0
@@ -245,9 +278,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         var ackCount = 0
         var appliedToEditor = false
         var deliveryKind = "deltas"
-        if (hasPendingLocal(filePath)) return
+        var usefulWork = 0
+        if (hasPendingLocal(filePath)) return 0
         try {
-            val expectedText = shadows[filePath] ?: return
+            val expectedText = shadows[filePath] ?: return 0
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
             // the corrected canonical only when the editor buffer still matches
             // the local replica baseline; normal deltas are merged into the native
@@ -256,13 +290,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (delivery is ReplicaPullDelivery.Replace) {
                 deliveryKind = "replace"
                 appliedToEditor = applyReplaceDelivery(filePath, forwarder, expectedText, delivery.text)
-                return
+                usefulWork = if (appliedToEditor) 1 else 0
+                return usefulWork
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
-            if (updates.isEmpty()) return
+            usefulWork = updateCount
+            if (updates.isEmpty()) return 0
 
-            if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText)) return
+            if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText)) return usefulWork
             val appliedRemoteUpdates = mutableListOf<ReplicaRemoteUpdate>()
             var converged: String? = null
             for (update in updates) {
@@ -292,6 +328,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     }
                 }
             }
+            usefulWork = peerUpdateCount + ackCount
         } finally {
             logSlow(
                 "remote-drain-file",
@@ -300,6 +337,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount acked=$ackCount applied=$appliedToEditor",
             )
         }
+        return usefulWork
     }
 
     /**

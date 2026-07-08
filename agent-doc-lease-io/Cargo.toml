@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-lease-io"
-version = "0.34.69"
+version = "0.34.70"
 edition = "2024"
 description = "Lease-related process and filesystem adapters for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_lease_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.69" }
-agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.69" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.70" }
+agent-doc-lease = { path = "../agent-doc-lease", version = "0.34.70" }
 
 [dev-dependencies]
 tempfile = "3"

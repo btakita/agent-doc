@@ -63,7 +63,7 @@ Verification:
 - Installed `agent-doc read tasks/agent-doc/agent-doc-bugs2.md` byte-matches the on-disk document.
 
 Escalation: none. Confidence: high.
-<!-- agent:boundary:c27c98a2 -->
+<!-- agent:boundary:8d41e35e -->
 <!-- /agent:exchange -->
 ## Queue
 

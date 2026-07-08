@@ -2377,6 +2377,9 @@ fn record_projection_diagnostic_with_metadata(
 mod rpc;
 pub use rpc::*;
 
+/// `#agent-doc-command-plane` — agent-doc control-plane ops on lazily command-plane-v1.
+pub mod command_plane;
+
 #[cfg(test)]
 /// Spawn a long-sleep sentinel whose `/proc/<pid>/cmdline` matches the
 /// `agent-doc controller serve --project-root <root>` shape

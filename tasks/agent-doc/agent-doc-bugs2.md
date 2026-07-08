@@ -89,7 +89,37 @@ Preflight had already cleared the stale-supervisor marker; the red status text w
 These are all `[operator-verify]` / `[focused-cycle]` items you said you'd prove live. Next cycle, with your go-ahead, I can clear `#qftlossdelta` and the four backlog candidates once you confirm the live proofs held; otherwise leave them gated.
 
 Changed paths: none (no repo work this cycle). Confidence: high. Escalation: none.
-<!-- agent:boundary:ed38d24e -->
+
+### Re: IDEA crash root cause + finalize write-path fix + JB drain backoff — glm-5.2
+
+**IDEA crash investigation.** No JVM crash dump (`hs_err`) and no clean shutdown sequence — IDEA ended abruptly under heavy load. Two load sources found in the rotated logs:
+
+1. **JB plugin `CrdtReplicaManager` busy-spin** (`idea.3`–`idea.9.log`, all rotated at 16:44, ~70MB in ~7 min). When `controller.sock` was unavailable (`No such file or directory` — during a controller recycle window), every `pullRemoteDelivery` returned zero updates, but the `finally` block in `requestRemoteDrain` rescheduled immediately (`reason=rescheduled drain_all=true`) with **no delay and no backoff**. All log lines shared the same millisecond timestamp — a tight loop logging ~20k lines/sec, freezing the IDE.
+2. **Slow controller projections** (`idea.1.log` 17:16–17:17): `TurnStateBridge` projections took 4349ms (`slow_count=5`, backed off 60s), and `idle_watch` controller RPC probes timed out at 0.8s repeatedly across haiven/arron-fray/bugs2.
+
+IDEA was most likely killed by the operator after becoming unresponsive; the `CrdtReplicaManager` log storm is the actionable bug.
+
+**Fix 1 — JB CRDT drain no-op backoff** (`CrdtReplicaManager.kt`, `#crdt-drain-backoff`). `drainRemoteUpdates`/`drainRemoteUpdatesFor` now return a useful-work count. When a rescheduled cycle applied zero updates, the reschedule delays with exponential backoff (100ms → 5s cap) before re-running; it resets immediately once real CRDT traffic arrives. A missing `controller.sock` no longer spins at full speed.
+
+**Fix 2 — finalize/write zero-live-editor disk demotion** (`agent-doc-write-runtime-io/src/run_entry.rs`, `#6b5h` write-path parity). The normal (non-force-disk) write gate only checked `patches_dir.exists()`, so a pure-CLI session with `live_editors=0` wedged ~8s on socket→file-IPC `no_ack` timeouts before bailing ("refusing direct document write") or recovering. The read path already demoted zero-live relay to disk (`553904e8`), and the `--force-disk` authority gate already honored `live_editors: 0`, but the normal write path did not. Added `write_path_relay_has_no_live_editors(file)` — probes the controller (hub authority) with a local-relay fallback; on `Current { live_editors: 0, delivery_converged: true }` it skips the IPC cascade and writes disk directly. Unit test proves both the zero-live skip and the live-editor no-skip.
+
+Changed paths:
+- `src/agent-doc` (submodule `f62f968d`): `agent-doc-write-runtime-io/src/run_entry.rs`, `editors/jetbrains/.../CrdtReplicaManager.kt`, version bumps (0.34.69→0.34.70), JB plugin (0.2.228→0.2.229), `VERSIONS.md`.
+- `tasks/agent-doc/agent-doc-bugs2.md` via this response.
+
+Verification:
+- `cargo clippy -p agent-doc-write-runtime-io --tests` — clean
+- `cargo test -p agent-doc-write-runtime-io write_path_relay_has_no_live_editors` — 1 passed
+- `cargo test --test finalize_integration` — 66 passed, 0 failed
+- `make check` — 7373 passed, 0 failed, 239 skipped
+- `make install-full` — exit 0; `agent-doc --version` → `0.34.70`
+- `make bump-plugin` — JB plugin 0.2.229 zips built (`agent-doc-jetbrains-0.2.229{,-signed}.zip`)
+- `gh run list --workflow CI --limit 1` — in progress (local verification is the evidence; not blocking on CI)
+
+Deploy: submodule pushed (`f62f968d`), superproject pointer pushed (`83f4f947d`), tag `v0.34.70` pushed, `agent-doc admin recycle` marked. JB plugin zip is built but not yet installed in the running IDEA — `[operator-verify]`: install `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.229-signed.zip` (uninstall → restart → install → restart for structural changes) and confirm the drain backoff holds when `controller.sock` is briefly unavailable.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:90aa4c38 -->
 <!-- /agent:exchange -->
 ## Queue
 

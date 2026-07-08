@@ -332,6 +332,3 @@ lto = "off"
 codegen-units = 256
 incremental = true
 strip = false
-
-[patch.crates-io]
-lazily = { path = "../lazily-rs" }

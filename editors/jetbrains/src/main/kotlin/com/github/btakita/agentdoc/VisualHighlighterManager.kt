@@ -25,7 +25,6 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
-import com.intellij.psi.PsiManager
 import java.awt.Color
 import java.awt.Font
 import java.util.concurrent.ConcurrentHashMap
@@ -54,11 +53,13 @@ class VisualHighlighterManager private constructor(private val project: Project)
     init {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
+                if (!isMarkdown(event.document)) return
                 scheduleRefresh(event.document)
             }
         }, this)
         EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
             override fun editorCreated(event: EditorFactoryEvent) {
+                if (!isMarkdown(event.editor.document)) return
                 scheduleRefresh(event.editor.document)
             }
         }, this)
@@ -92,11 +93,6 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun reparseAndRefresh(file: VirtualFile) {
         val document = FileDocumentManager.getInstance().getDocument(file) ?: return
-        try {
-            PsiManager.getInstance(project).dropPsiCaches()
-        } catch (_: Exception) {
-            // Best-effort PSI cache drop; the VisualHighlighterManager still refreshes via documentChanged
-        }
         scheduleRefresh(document)
     }
 

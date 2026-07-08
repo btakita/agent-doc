@@ -42,6 +42,14 @@ class TmuxPaneFocusSync private constructor(
 
     private fun poll() {
         if (project.isDisposed) return
+        // Cheap gate: when no markdown documents are open there is nothing to
+        // mirror back into the editor, so skip the socket round-trips entirely.
+        val manager = FileEditorManager.getInstance(project)
+        val hasMarkdownOpen = manager.openFiles.any { it.name.endsWith(".md") }
+        if (!hasMarkdownOpen) {
+            lastDocumentPath = null
+            return
+        }
         val projectRoots = candidateProjectRoots(project)
         if (projectRoots.isEmpty()) return
 

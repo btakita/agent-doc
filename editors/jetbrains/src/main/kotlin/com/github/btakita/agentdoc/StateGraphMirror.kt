@@ -217,5 +217,31 @@ data class MirrorProjectionSummary(
     }
 }
 
+data class MirrorTurnProjection(
+    val state: String,
+    val turnInFlight: Boolean,
+) {
+    fun toJsonString(): String {
+        val root = JsonObject()
+        root.addProperty("state", state)
+        root.addProperty("turn_in_flight", turnInFlight)
+        root.addProperty("transition_authority", "project_controller")
+        return root.toString()
+    }
+
+    companion object {
+        fun fromMirror(mirror: StateGraphMirror): MirrorTurnProjection {
+            val closeout = mirror.payloadObject(AgentDocNodeType.CLOSEOUT_CYCLE)
+            return fromPhase(closeout?.stringField("phase"))
+        }
+
+        fun fromPhase(phase: String?): MirrorTurnProjection = when (phase) {
+            "preflight_started" -> MirrorTurnProjection("awaiting_response", true)
+            "response_captured", "write_applied" -> MirrorTurnProjection("persisting", true)
+            else -> MirrorTurnProjection("idle", false)
+        }
+    }
+}
+
 private fun JsonObject.stringField(key: String): String? =
     this.get(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString

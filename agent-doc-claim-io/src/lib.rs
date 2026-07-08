@@ -289,7 +289,7 @@ pub fn run(
     // Auto-scaffold empty files with full template BEFORE ensure_session.
     // ensure_session only writes agent_doc_session — it doesn't set agent_doc_format
     // or add components. Empty files need the full template in one step.
-    {
+    let mut content = {
         let raw = effects.current_document_content(file, "claim_empty_scaffold")?;
         let extension = file.extension().and_then(std::ffi::OsStr::to_str);
         if should_scaffold_empty_markdown(&raw, extension) {
@@ -299,13 +299,16 @@ pub fn run(
             effects.atomic_write(file, &scaffold)?;
             agent_doc_snapshot_io::save(file, &scaffold, agent_doc_ops_log_io::log_op)?;
             effects.commit(file).ok(); // best-effort commit
+            scaffold
+        } else {
+            raw
         }
-    }
+    };
 
-    // Read file content and extract/generate session UUID (in memory only — no disk write yet)
-    let content = effects
-        .current_document_content(file, "claim_ensure_session")
-        .with_context(|| format!("failed to read {}", file.display()))?;
+    // Extract/generate session UUID from the authoritative document state. Once
+    // claim has written a scaffold/default, keep that successful write as the
+    // next baseline instead of re-querying an active editor that may still be in
+    // a typing debounce window for our own mutation.
     let (updated_content, session_id) = frontmatter::ensure_session(&content)?;
 
     // Pane id, tmux handle, and the cross-session guard were resolved above,
@@ -389,13 +392,11 @@ pub fn run(
             .atomic_write(file, &updated_content)
             .with_context(|| format!("failed to write {}", file.display()))?;
         eprintln!("Generated session UUID: {}", session_id);
+        content = updated_content;
     }
 
     // Default to template+crdt if neither format nor write_mode nor legacy mode is set
     {
-        let content = effects
-            .current_document_content(file, "claim_default_format")
-            .with_context(|| format!("failed to read {}", file.display()))?;
         if let Some(updated) = default_format_and_write_content(&content)? {
             effects.atomic_write(file, &updated).with_context(|| {
                 format!(
@@ -407,14 +408,12 @@ pub fn run(
                 "set agent_doc_format=template, agent_doc_write=crdt in {}",
                 file.display()
             );
+            content = updated;
         }
     }
 
     // Scaffold default components for template documents
     {
-        let content = effects
-            .current_document_content(file, "claim_default_components")
-            .with_context(|| format!("failed to read {}", file.display()))?;
         let is_template = uses_template_format(&content)?;
         if let Some(scaffolded) = scaffold_default_template_components(&content)? {
             effects.atomic_write(file, &scaffolded).with_context(|| {

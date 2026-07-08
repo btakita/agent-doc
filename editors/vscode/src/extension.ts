@@ -370,21 +370,17 @@ function showError(message: string): void {
     vscode.window.showErrorMessage(`Agent Doc: ${message}`);
 }
 
-// CPC→plugin turn-state coordination (goal 1): reflect the CPC's authoritative
-// turn phase in a status-bar indicator by calling the native
-// `agent_doc_turn_projection` FFI. Parity with the JetBrains frontend.
+// Project Controller→plugin turn-state coordination: reflect the authoritative
+// lazily state projection in a status-bar indicator. The editor never reads
+// cycle sidecars for this hot path.
 const turnStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
 const TURN_STATUS_MIN_REFRESH_INTERVAL_MS = 1_500;
-const TURN_STATUS_SLOW_PROJECTION_MS = 1_000;
-const TURN_STATUS_SLOW_BACKOFF_MS = 5_000;
-const TURN_STATUS_SLOW_BACKOFF_MAX_MS = 60_000;
-let turnStatusWatcher: vscode.FileSystemWatcher | undefined;
+const TURN_STATUS_PROJECT_CONTROLLER_TIMEOUT_MS = 1_500;
 let turnStatusWatcherRoot: string | undefined;
-let turnStatusWatcherDisposables: vscode.Disposable[] = [];
 let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let turnStatusLastRefreshMs = 0;
-let turnStatusBackoffUntilMs = 0;
-let turnStatusSlowRefreshCount = 0;
+let turnStatusRefreshSeq = 0;
+const turnStatusMirrors = new Map<string, stateMirror.StateGraphMirror>();
 
 function activeAgentDocProjectRoot(): string | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -395,13 +391,10 @@ function activeAgentDocProjectRoot(): string | undefined {
 }
 
 function disposeTurnStatusWatcher(): void {
-    for (const disposable of turnStatusWatcherDisposables) disposable.dispose();
-    turnStatusWatcherDisposables = [];
-    turnStatusWatcher?.dispose();
-    turnStatusWatcher = undefined;
     turnStatusWatcherRoot = undefined;
     if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
     turnStatusRefreshTimer = undefined;
+    turnStatusMirrors.clear();
 }
 
 function configureTurnStatusWatcher(): void {
@@ -409,72 +402,110 @@ function configureTurnStatusWatcher(): void {
     if (root === turnStatusWatcherRoot) return;
     disposeTurnStatusWatcher();
     if (!root) return;
-    const turnScopeDir = path.join(root, '.agent-doc', 'turn-scope');
-    const watcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(turnScopeDir, '*.json'),
-        false,
-        false,
-        true,
-    );
-    turnStatusWatcher = watcher;
     turnStatusWatcherRoot = root;
-    turnStatusWatcherDisposables = [
-        watcher.onDidCreate(() => refreshTurnStatus('turn-scope-create')),
-        watcher.onDidChange(() => refreshTurnStatus('turn-scope-change')),
-        watcher.onDidDelete(() => refreshTurnStatus('turn-scope-delete')),
-    ];
 }
 
 function turnStatusRefreshDelayMs(): number {
     const now = Date.now();
     const minIntervalUntil = turnStatusLastRefreshMs + TURN_STATUS_MIN_REFRESH_INTERVAL_MS;
-    return Math.max(0, Math.max(minIntervalUntil, turnStatusBackoffUntilMs) - now);
+    return Math.max(0, minIntervalUntil - now);
 }
 
 function refreshTurnStatus(reason = 'event', force = false): void {
     if (force) {
         if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
         turnStatusRefreshTimer = undefined;
-        refreshTurnStatusNow(reason);
+        void refreshTurnStatusNow(reason);
         return;
     }
     if (turnStatusRefreshTimer) return;
     const delayMs = turnStatusRefreshDelayMs();
     turnStatusRefreshTimer = setTimeout(() => {
         turnStatusRefreshTimer = undefined;
-        refreshTurnStatusNow(reason);
+        void refreshTurnStatusNow(reason);
     }, delayMs);
 }
 
-function refreshTurnStatusNow(reason: string): void {
+async function turnProjectionFromProjectController(
+    projectRoot: string,
+    filePath: string,
+): Promise<import('./sessionUi').TurnProjection> {
+    const docHash = native.documentHash(filePath);
+    let mirror = turnStatusMirrors.get(docHash);
+    if (!mirror) {
+        mirror = new stateMirror.StateGraphMirror();
+        turnStatusMirrors.set(docHash, mirror);
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TURN_STATUS_PROJECT_CONTROLLER_TIMEOUT_MS);
+    try {
+        const data = await requestProjectController(
+            projectRoot,
+            {
+                command: 'state_subscribe',
+                file: filePath,
+                generation: mirror.isInitialized ? mirror.epoch : 0,
+                diagnostic_payload: JSON.stringify({ document_hash: docHash }),
+            },
+            controller.signal,
+        );
+        const message = data?.message;
+        if (!message || typeof message !== 'object') {
+            throw new Error('Project Controller state_subscribe response missing message');
+        }
+        if (data?.document_hash && data.document_hash !== docHash) {
+            throw new Error('Project Controller returned state for a different document');
+        }
+        if (!mirror.applyMessage(JSON.stringify(message))) {
+            throw new Error('Project Controller state_subscribe message did not apply');
+        }
+        return mirror.turnProjection();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function refreshTurnStatusNow(reason: string): Promise<void> {
+    const seq = ++turnStatusRefreshSeq;
     const editor = vscode.window.activeTextEditor;
     if (!editor || !editor.document.fileName.endsWith('.md')) {
         turnStatusBarItem.hide();
         return;
     }
-    const started = Date.now();
-    const projection = native.turnProjectionForFile(editor.document.fileName) as
-        | import('./sessionUi').TurnProjection
-        | null;
-    const elapsedMs = Date.now() - started;
+    const workspaceRoot = getWorkspaceRoot(editor.document.uri);
+    const projectRoot = workspaceRoot
+        ? resolveProject(workspaceRoot, editor.document.uri.fsPath).cwd
+        : undefined;
     turnStatusLastRefreshMs = Date.now();
-    if (elapsedMs >= TURN_STATUS_SLOW_PROJECTION_MS) {
-        turnStatusSlowRefreshCount = Math.min(turnStatusSlowRefreshCount + 1, 16);
-        const step = Math.min(Math.max(turnStatusSlowRefreshCount - 1, 0), 6);
-        const backoffMs = Math.min(TURN_STATUS_SLOW_BACKOFF_MS * (1 << step), TURN_STATUS_SLOW_BACKOFF_MAX_MS);
-        turnStatusBackoffUntilMs = Date.now() + backoffMs;
-        console.warn(`[agent-doc/turn-state] backing off projection after slow refresh elapsed_ms=${elapsedMs} reason=${reason} backoff_ms=${backoffMs}`);
-    } else {
-        turnStatusSlowRefreshCount = 0;
-        turnStatusBackoffUntilMs = 0;
+    if (!projectRoot) {
+        turnStatusBarItem.text = 'agent-doc: Project Controller disconnected';
+        turnStatusBarItem.tooltip = 'Agent Doc Project Controller is not connected for this document.';
+        turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        turnStatusBarItem.show();
+        return;
+    }
+    let projection: import('./sessionUi').TurnProjection | null = null;
+    let disconnected: string | null = null;
+    try {
+        projection = await turnProjectionFromProjectController(projectRoot, editor.document.fileName);
+    } catch (err: any) {
+        disconnected = err?.message ?? 'Project Controller request failed';
+    }
+    if (seq !== turnStatusRefreshSeq) return;
+    if (disconnected) {
+        turnStatusBarItem.text = 'agent-doc: Project Controller disconnected';
+        turnStatusBarItem.tooltip = `Agent Doc Project Controller is not connected for this document.\n${disconnected}`;
+        turnStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        turnStatusBarItem.show();
+        return;
     }
     const presentation = buildTurnStatePresentation(projection);
     if (presentation.label) {
         // Prominence parity with the JetBrains editor banner: tooltip + an
-        // attention background while the CPC turn is in flight.
+        // attention background while the Project Controller turn is in flight.
         turnStatusBarItem.text = presentation.label;
         turnStatusBarItem.tooltip =
-            "Agent Doc turn state — the CPC's authoritative turn phase for this document";
+            "Agent Doc turn state — the Project Controller's authoritative turn phase for this document";
         turnStatusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.warningBackground',
         );
@@ -983,7 +1014,7 @@ async function runEditorRouteViaCommandPlane(
     return resolveEditorRouteTerminal(data, commandId);
 }
 
-async function runEditorRouteViaPcp(
+async function runEditorRouteViaProjectController(
     cwd: string,
     rel: string,
     filePath: string,
@@ -1009,7 +1040,7 @@ async function runEditorRouteViaPcp(
     const exitCode = typeof data?.exit_code === 'number' ? data.exit_code : 1;
     const output = typeof data?.output === 'string' ? data.output : '';
     if (exitCode !== 0) {
-        throw new Error(output || `CPC editor_route failed with exit code ${exitCode}`);
+        throw new Error(output || `Project Controller editor_route failed with exit code ${exitCode}`);
     }
     return output;
 }
@@ -1091,7 +1122,7 @@ async function executeRunForDocument(
     try {
         if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
         routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
-        const output = await runEditorRouteViaPcp(cwd, rel, filePath, routeKey, abortController.signal);
+        const output = await runEditorRouteViaProjectController(cwd, rel, filePath, routeKey, abortController.signal);
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
         // #r5at: read via the lazily-js reactive mirror (snapshot/delta over the
         // FFI state backbone), falling back to the cold projection pull. The
@@ -2578,7 +2609,7 @@ class PatchWatcher implements vscode.Disposable {
                 try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
                 return;
             }
-            // Handle reposition-only signals immediately; CPC/binary owns debounce.
+            // Handle reposition-only signals immediately; Project Controller/binary owns debounce.
             if (isPureRepositionSignal(patch)) {
                 this.repositionBoundaryNow(
                     patch.file,
@@ -3353,9 +3384,9 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export function activate(context: vscode.ExtensionContext): void {
-    // Goal 1: coordinate the CPC turn state into the status bar. Refresh on active
-    // editor changes and turn-scope file events so the plugin reflects the CPC's
-    // authoritative turn phase without a fixed polling interval.
+    // Coordinate Project Controller turn state into the status bar. Refresh on
+    // active editor changes and editor/plugin events; state itself comes from
+    // the Project Controller lazily projection, never from sidecar files.
     context.subscriptions.push(
         turnStatusBarItem,
         vscode.window.onDidChangeActiveTextEditor(() => refreshActiveTurnStatus()),

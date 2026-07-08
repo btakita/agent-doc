@@ -547,7 +547,7 @@ function bindFunctions(): void {
         _editor_patch_rejected = null;
     }
     try {
-        // CPC→plugin turn-state projection (Shared-Foundation parity with the JB
+        // Project Controller→plugin turn-state projection (Shared Foundation parity with the JB
         // plugin). Optional so an older cdylib without the symbol does not break
         // the rest of the bindings.
         _turn_projection = lib.func('agent_doc_turn_projection', 'char*', ['str']);
@@ -880,7 +880,7 @@ export function stateProjectionForFile(filePath: string, projectRoot?: string): 
     return stateProjection(documentHash(filePath), projectRoot);
 }
 /**
- * CPC→plugin turn-state projection for a document path:
+ * Project Controller→plugin turn-state projection for a document path:
  * `{state, turn_in_flight, transition_authority, realtime_steering?}`. Observe it
  * to render turn-in-flight UI, project realtime steering onto the banner/status
  * label, and decide whether a forwarded operator prompt starts a fresh turn or
@@ -1452,7 +1452,7 @@ export function adminInspectJson(options: {
 }
 
 /**
- * PCP-owned tmux focus projection.
+ * Project Controller-owned tmux focus projection.
  */
 export function tmuxFocusStateJson(options: {
     projectRoot?: string | null;
@@ -1467,7 +1467,7 @@ export function tmuxFocusStateJson(options: {
 }
 
 /**
- * PCP-owned document pane focus.
+ * Project Controller-owned document pane focus.
  */
 export function focusDocumentPaneJson(options: {
     documentPath: string;
@@ -1486,7 +1486,7 @@ export function focusDocumentPaneJson(options: {
 }
 
 /**
- * PCP-owned tmux layout sync.
+ * Project Controller-owned tmux layout sync.
  */
 export function syncTmuxLayoutJson(options: {
     columns: string[];

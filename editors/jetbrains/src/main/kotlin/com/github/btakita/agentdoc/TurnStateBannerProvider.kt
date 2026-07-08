@@ -14,7 +14,7 @@ import javax.swing.JComponent
 import javax.swing.JPanel
 
 /**
- * Editor banner that surfaces the CPC's authoritative turn phase across the top of
+ * Editor banner that surfaces the Project Controller's authoritative turn phase across the top of
  * an agent-doc markdown file (goal 1's visible surface). Unlike the status-bar
  * widget — which the IntelliJ 2026.1 platform instantiates but silently never
  * paints — an [EditorNotificationProvider] renders a real editor component and

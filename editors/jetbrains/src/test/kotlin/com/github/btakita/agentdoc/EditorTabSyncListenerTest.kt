@@ -34,7 +34,7 @@ class EditorTabSyncListenerTest {
     @Test
     fun `selection change with unchanged visible set routes to focus command not sync`() {
         // #panefocussteal: a pure focus change (same visible layout, operator
-        // switched doc tabs) must move tmux via PCP `focus_document_pane`
+        // switched doc tabs) must move tmux via Project Controller `focus_document_pane`
         // command — `sync` is layout-only and would not follow the switch.
         val visibleMdFiles = listOf(
             "/repo/tasks/agent-doc/agent-doc-bugs2.md",
@@ -248,8 +248,8 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `automatic sync diagnostics describe CPC submit not CLI process`() {
-        val label = EditorTabSyncListener.formatCpcSyncLabel(
+    fun `automatic sync diagnostics describe Project Controller submit not CLI process`() {
+        val label = EditorTabSyncListener.formatProjectControllerSyncLabel(
             columns = listOf(
                 "/repo/tasks/agent-doc/agent-doc-bugs2.md",
                 "/repo/src/sample-app/tasks/sampleorders.md",
@@ -258,7 +258,7 @@ class EditorTabSyncListenerTest {
         )
 
         assertEquals(
-            "pcp:sync_tmux_layout --col /repo/tasks/agent-doc/agent-doc-bugs2.md --col /repo/src/sample-app/tasks/sampleorders.md --focus /repo/src/sample-app/tasks/sampleorders.md --exact-visible --no-autostart",
+            "project-controller:sync_tmux_layout --col /repo/tasks/agent-doc/agent-doc-bugs2.md --col /repo/src/sample-app/tasks/sampleorders.md --focus /repo/src/sample-app/tasks/sampleorders.md --exact-visible --no-autostart",
             label,
         )
         assertFalse(label.contains("agent-doc sync"))

@@ -301,7 +301,7 @@ fn evaluate_queue_continuation(
         facts.preflight.queue_continuation_required,
         facts.preflight.queue_drainable_head_count,
     ) {
-        (Some(true), Some(false), Some(count)) if count > 0 => result.recoverable(
+        (_, Some(false), Some(count)) if count > 0 => result.recoverable(
             "preflight reports a drainable queue but queue_continuation_required=false",
             vec!["agent-doc drain-claim <FILE> && agent-doc <FILE>".to_string()],
         ),
@@ -309,12 +309,15 @@ fn evaluate_queue_continuation(
             "active queue has no drainable head; remaining heads are operator-only or inert",
             operator_steps(invariant),
         ),
-        (Some(true), Some(true), Some(count)) if count > 0 => result.ok(format!(
+        (_, Some(false), Some(0)) => {
+            result.ok("queue continuation is not required and no drainable heads are visible")
+        }
+        (_, Some(true), Some(count)) if count > 0 => result.ok(format!(
             "queue continuation is required and {count} drainable head(s) are visible"
         )),
         (Some(false), _, _) => result.ok("queue is inactive"),
         _ => result.blocked_missing(
-            "preflight_json.queue_active/queue_continuation_required/queue_drainable_head_count",
+            "preflight_json.queue_continuation_required/queue_drainable_head_count",
             format!(
                 "agent-doc preflight {} --probe > /tmp/agent-doc-preflight.json",
                 file.display()
@@ -654,6 +657,27 @@ mod tests {
                 .missing_fact_sources
                 .contains(&"preflight_json.queue_continuation_required".to_string())
         );
+    }
+
+    #[test]
+    fn doctor_accepts_inactive_queue_without_legacy_queue_active_fact() {
+        let mut facts = WorkflowDoctorFacts::default();
+        facts.preflight.json_provided = true;
+        facts.preflight.queue_continuation_required = Some(false);
+        facts.preflight.queue_drainable_head_count = Some(0);
+
+        let report = evaluate_catalog(
+            Path::new("tasks/example.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert_eq!(queue.outcome, WorkflowDoctorOutcome::Ok);
+        assert!(queue.evidence.contains(
+            &"queue continuation is not required and no drainable heads are visible".to_string()
+        ));
     }
 
     #[test]

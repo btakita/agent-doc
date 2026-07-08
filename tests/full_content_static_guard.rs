@@ -72,7 +72,7 @@ fn assert_source_contains(path: &str, needle: &str) {
 fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
     let vscode = "editors/vscode/src/extension.ts";
     let command_plane = "editors/vscode/src/commandPlane.ts";
-    assert_source_contains(vscode, "runEditorRouteViaPcp");
+    assert_source_contains(vscode, "runEditorRouteViaProjectController");
     assert_source_contains(vscode, "command: 'editor_route'");
     assert_source_contains(vscode, "buildEditorRoutePayload");
     assert_source_contains(command_plane, "dispatch_only: true");

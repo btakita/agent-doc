@@ -158,6 +158,8 @@ use anyhow::Result;
 #[cfg(test)]
 use std::path::Path;
 #[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(test)]
 use std::time::Duration;
 #[cfg(test)]
 use std::time::Instant;
@@ -263,6 +265,34 @@ use agent_doc_session_registry_io::registration as sessions;
 #[cfg(test)]
 fn route_repair_closeout(file: &Path) -> Result<String> {
     agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
+}
+
+#[cfg(test)]
+static ROUTE_QUEUE_RETRY_WRITE_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+fn retry_once_crdt_merge_route_write_document(
+    file: &Path,
+    next_content: &str,
+    previous_content: &str,
+    _reason: &str,
+) -> Result<()> {
+    let call = ROUTE_QUEUE_RETRY_WRITE_CALLS.fetch_add(1, Ordering::SeqCst);
+    if call == 0 {
+        let concurrent = previous_content.replace(
+            "- existing queued prompt\n",
+            "- concurrent editor prompt\n- existing queued prompt\n",
+        );
+        std::fs::write(file, concurrent)?;
+        anyhow::bail!(
+            "project controller command `crdt_cpc_write` failed: CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+            file.display(),
+            agent_doc_hash::content_hash(previous_content),
+            agent_doc_hash::content_hash(next_content),
+        );
+    }
+    std::fs::write(file, next_content)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1094,6 +1124,69 @@ mod tests {
             "active-editor route queueing must not take a disk fallback:\n{ops_log}"
         );
     }
+
+    #[test]
+    fn route_enqueue_dispatch_prompt_retries_stale_crdt_relay_baseline() {
+        // Repro shape for JB Run Agent Doc failing with
+        // `crdt_cpc_write ... recovery=retry_crdt_merge`: the relay current changed
+        // between queue-read and writeback. Route must re-read and re-merge the
+        // queue prompt instead of surfacing the transient hash mismatch.
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- existing queued prompt\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        ROUTE_QUEUE_RETRY_WRITE_CALLS.store(0, Ordering::SeqCst);
+
+        let outcome = enqueue_route_dispatch_prompt(
+            &doc,
+            "manual preempt prompt",
+            "test_busy_actor",
+            true,
+            agent_doc_route_io::queue_dispatch::RouteQueueEffects {
+                write_document: retry_once_crdt_merge_route_write_document,
+            },
+        )
+        .expect("route enqueue should retry a stale relay baseline");
+
+        assert!(outcome.appended);
+        assert!(outcome.activated);
+        assert_eq!(2, ROUTE_QUEUE_RETRY_WRITE_CALLS.load(Ordering::SeqCst));
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(
+                "- :pushpin: manual preempt prompt\n- concurrent editor prompt\n- existing queued prompt"
+            ),
+            "retry must preserve concurrent editor queue edits while inserting manual dispatch:\n{updated}"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            updated,
+            "snapshot must match the retried queue write"
+        );
+        let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("route_dispatch_queue_retry")
+                && ops_log.contains("reason=retry_crdt_merge")
+                && ops_log.contains("route_dispatch_queued"),
+            "retry should be observable in ops log:\n{ops_log}"
+        );
+    }
+
     #[test]
     fn route_enqueue_dispatch_prompt_preserves_unparseable_queue_instead_of_crashing() {
         // Repro of "JB Run Agent Doc error: route queue dispatch: failed to parse

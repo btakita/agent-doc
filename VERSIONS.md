@@ -6,6 +6,28 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.69
 
+- **Editor turn-state status now reads the Project Controller lazily projection,
+  not sidecars.** JetBrains and VS Code call the Project Controller
+  `state_subscribe` endpoint, mirror the returned lazily snapshot/delta, and
+  derive the in-flight status-bar label from that mirror. The editor hot path no
+  longer reads or watches `.agent-doc/turn-scope/`, `.agent-doc/state/cycles/`,
+  or sidecar compatibility files; sidecars are reserved for crash recovery or a
+  documented exceptional path where they must be used. If the Project Controller
+  is unavailable, the editor status bar shows `agent-doc: Project Controller
+  disconnected` instead of silently falling back.
+
+- **JetBrains claim/run recovery now preserves the editor-selected document under
+  active editor authority races.** `Claim for Tmux Pane` keeps the just-written
+  claim scaffold/frontmatter/defaults as the next in-memory baseline instead of
+  re-reading through a typing-windowed editor model, records the previously
+  focused tmux document as already seen before a claim attempt, and only runs
+  layout sync after a successful claim so a failed `sitscape.md` claim cannot
+  recall the editor to the stale `haiven.md` pane. Route-owned queued dispatch
+  writes now retry a bounded CRDT merge on Project Controller relay
+  `recovery=retry_crdt_merge` hash mismatches, re-reading the authoritative
+  current queue and preserving concurrent editor queue edits before saving the
+  route snapshot.
+
 - **Session ownership now uses the SQLite durable registry instead of the
   legacy JSON registry/projection files.** `agent-doc-session-registry-io`
   reads and writes `.agent-doc/state.db` through `tmux-router`, while actor

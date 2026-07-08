@@ -50,4 +50,22 @@ class TmuxPaneFocusSyncTest {
         assertEquals(false, TmuxPaneFocusSync.focusReceiptFocused(json))
         assertEquals("outside_agent_doc_window", TmuxPaneFocusSync.focusReceiptReason(json))
     }
+
+    @Test
+    fun `unchanged tmux document is not selected again`() {
+        assertEquals(
+            false,
+            TmuxPaneFocusSync.shouldSelectTmuxDocument(
+                "/repo/tasks/haiven.md",
+                "/repo/tasks/haiven.md",
+            ),
+        )
+        assertEquals(
+            true,
+            TmuxPaneFocusSync.shouldSelectTmuxDocument(
+                "/repo/tasks/sitscape.md",
+                "/repo/tasks/haiven.md",
+            ),
+        )
+    }
 }

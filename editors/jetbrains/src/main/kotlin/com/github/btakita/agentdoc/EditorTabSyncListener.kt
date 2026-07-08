@@ -13,9 +13,10 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Reconciles tmux focus/layout with editor tab switches.
  *
- * Single-document tab-selection changes use PCP `focus_document_pane`; split-layout
- * tab selections submit non-destructive `sync_tmux_layout` work to CPC so a
- * selected pane can be rescued back out of stash into the agent-doc window.
+ * Single-document tab-selection changes use Project Controller `focus_document_pane`;
+ * split-layout tab selections submit non-destructive `sync_tmux_layout` work to the
+ * Project Controller so a selected pane can be rescued back out of stash into the
+ * agent-doc window.
  *
  * Guards against rapid-fire events:
  * - 100ms debounce so only the final burst state is acted upon
@@ -60,8 +61,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
 
-        internal fun formatCpcSyncLabel(columns: List<String>, focus: String): String =
-            "pcp:sync_tmux_layout " +
+        internal fun formatProjectControllerSyncLabel(columns: List<String>, focus: String): String =
+            "project-controller:sync_tmux_layout " +
                 columns.joinToString(" ") { "--col $it" } +
                 " --focus $focus --exact-visible --no-autostart"
 
@@ -169,7 +170,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
             // #panefocussteal: a pure focus change (same visible layout, the
             // operator just switched between open doc tabs) is the ONLY case that
-            // should move tmux focus — route it through PCP `focus_document_pane`.
+            // should move tmux focus — route it through Project Controller
+            // `focus_document_pane`.
             // `agent-doc sync` is layout-only and never
             // moves the operator's active pane (it neutralizes any internal
             // selection), so emitting Sync here would leave the doc-to-doc switch
@@ -308,7 +310,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     documentPath = snapshot.activeFile,
                 )
                 if (result.exitCode == 0) {
-                    log("focus: pcp submit accepted file=${snapshot.focusedRelativePath}")
+                    log("focus: Project Controller submit accepted file=${snapshot.focusedRelativePath}")
                 } else {
                     log("focus: skipped ${snapshot.focusedRelativePath}: ${result.output}")
                 }
@@ -411,12 +413,12 @@ class EditorTabSyncListener : FileEditorManagerListener {
         val (projectRoot, cmd) = when (plan.kind) {
             AutomaticCommandKind.Focus -> {
                 snapshot.focusedProjectRoot to listOf(
-                    "pcp:focus_document_pane",
+                    "project-controller:focus_document_pane",
                     snapshot.activeFile,
                 )
             }
             AutomaticCommandKind.Sync -> {
-                snapshot.syncProjectRoot to listOf("pcp:sync_tmux_layout")
+                snapshot.syncProjectRoot to listOf("project-controller:sync_tmux_layout")
             }
         }
 
@@ -537,7 +539,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 when (execution.plan.kind) {
                     AutomaticCommandKind.Focus -> log("submit: ${cmd.joinToString(" ")}")
                     AutomaticCommandKind.Sync -> {
-                        log("submit: ${formatCpcSyncLabel(execution.columns, execution.activeFile)}")
+                        log("submit: ${formatProjectControllerSyncLabel(execution.columns, execution.activeFile)}")
                         TerminalUtil.showHint(
                             project,
                             formatCpcSyncHint(execution.columns, execution.activeFile),

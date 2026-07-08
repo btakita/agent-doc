@@ -29,6 +29,9 @@ function routeSlot(): number {
 function patchSlot(): number {
     return 2002;
 }
+function closeoutSlot(): number {
+    return 2502;
+}
 function proofSlot(): number {
     return 3003;
 }
@@ -195,6 +198,59 @@ describe('StateGraphMirror (#r5at lazily-js reactive mirror)', () => {
             compactMirrorSummary({ proofMarkers: 0 }),
             'route=unknown pane=- transport=-:- proof_markers=0',
         );
+    });
+
+    it('turnProjection derives from the closeout cycle phase', () => {
+        const mirror = new StateGraphMirror();
+        assert.strictEqual(mirror.applyMessage(JSON.stringify({
+            type: 'snapshot',
+            epoch: 1,
+            document_hash: 'doc-turn',
+            nodes: [
+                {
+                    slot_id: closeoutSlot(),
+                    type_tag: AgentDocNodeType.CLOSEOUT_CYCLE,
+                    payload: payload({ phase: 'preflight_started' }),
+                },
+            ],
+            edges: [],
+            roots: [closeoutSlot()],
+        })), true);
+        assert.deepStrictEqual(mirror.turnProjection(), {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+        });
+
+        assert.strictEqual(mirror.applyMessage(JSON.stringify({
+            type: 'delta',
+            base_epoch: 1,
+            epoch: 2,
+            document_hash: 'doc-turn',
+            ops: [
+                { op: 'cell_set', slot_id: closeoutSlot(), payload: payload({ phase: 'write_applied' }) },
+            ],
+        })), true);
+        assert.deepStrictEqual(mirror.turnProjection(), {
+            state: 'persisting',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+        });
+
+        assert.strictEqual(mirror.applyMessage(JSON.stringify({
+            type: 'delta',
+            base_epoch: 2,
+            epoch: 3,
+            document_hash: 'doc-turn',
+            ops: [
+                { op: 'cell_set', slot_id: closeoutSlot(), payload: payload({ phase: 'committed' }) },
+            ],
+        })), true);
+        assert.deepStrictEqual(mirror.turnProjection(), {
+            state: 'idle',
+            turn_in_flight: false,
+            transition_authority: 'project_controller',
+        });
     });
 
     it('decodePayload decodes base64(serde_json(struct)) and fails safe', () => {

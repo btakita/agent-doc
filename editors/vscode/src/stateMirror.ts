@@ -70,6 +70,12 @@ export interface MirrorProjectionSummary {
     proofMarkers: number;
 }
 
+export interface MirrorTurnProjection {
+    state: 'idle' | 'awaiting_response' | 'persisting';
+    turn_in_flight: boolean;
+    transition_authority: 'project_controller';
+}
+
 /** Render the compact editor-visible status string (matches the kt `.compact()`). */
 export function compactMirrorSummary(summary: MirrorProjectionSummary): string {
     return `route=${summary.routeReadiness ?? 'unknown'} pane=${summary.routePaneId ?? '-'} `
@@ -96,6 +102,28 @@ function stringField(obj: Record<string, any> | null, key: string): string | und
     if (!obj) return undefined;
     const value = obj[key];
     return typeof value === 'string' ? value : undefined;
+}
+
+function turnProjectionFromPhase(phase: string | undefined): MirrorTurnProjection {
+    if (phase === 'preflight_started') {
+        return {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+        };
+    }
+    if (phase === 'response_captured' || phase === 'write_applied') {
+        return {
+            state: 'persisting',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+        };
+    }
+    return {
+        state: 'idle',
+        turn_in_flight: false,
+        transition_authority: 'project_controller',
+    };
 }
 
 /**
@@ -286,5 +314,10 @@ export class StateGraphMirror {
             latestTransportPhase,
             proofMarkers,
         };
+    }
+
+    turnProjection(): MirrorTurnProjection {
+        const closeout = this.payloadObject(AgentDocNodeType.CLOSEOUT_CYCLE);
+        return turnProjectionFromPhase(stringField(closeout, 'phase'));
     }
 }

@@ -1,6 +1,6 @@
-//! CPC → plugin turn-state projection.
+//! Project Controller → plugin turn-state projection.
 //!
-//! The CPC (project controller) owns the authoritative [`CyclePhase`] machine
+//! The Project Controller owns the authoritative [`CyclePhase`] machine
 //! (`transition_phase`). The editor plugin needs a coarse, stable view of the
 //! turn so it can (a) render turn-in-flight UI and (b) decide whether an
 //! operator prompt it is about to forward is a clean next-turn prompt or would
@@ -12,8 +12,9 @@
 //! declares which side is the authority for the transition **into** it, encoding
 //! the single-authority invariant — the two replicas never both drive the same
 //! transition, which is the source of the queue-consume / supervisor self-race
-//! wedges. Today the CPC is the authority for every transition; the enum exists
-//! so the invariant is explicit and testable rather than implied.
+//! wedges. Today the Project Controller is the authority for every transition;
+//! the enum exists so the invariant is explicit and testable rather than
+//! implied.
 //!
 //! Spec: `plan-crdt-scramble-and-disk-propagation.md` (turn-state chart, goal 1)
 //! and the state-chart discussion that opened this thread.
@@ -36,16 +37,17 @@ pub enum TurnState {
     Persisting,
 }
 
-/// Which replica is the authority for the transition **into** a phase. The CPC
-/// owns turn state; the plugin observes and proposes. A `Plugin` authority would
-/// mean the plugin may drive that transition directly — reserved, not used today.
+/// Which replica is the authority for the transition **into** a phase. The
+/// Project Controller owns turn state; the plugin observes and proposes. A
+/// `Plugin` authority would mean the plugin may drive that transition directly
+/// — reserved, not used today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransitionAuthority {
     /// The project controller drives this transition; the plugin only observes.
-    Cpc,
+    ProjectController,
     /// Reserved: the plugin drives this transition directly. Unused today — the
-    /// plugin always proposes through the CPC.
+    /// plugin always proposes through the Project Controller.
     Plugin,
 }
 
@@ -66,7 +68,7 @@ fn turn_steering_state_is_none(state: &TurnSteeringState) -> bool {
 }
 
 /// Realtime steering that changed the session document relative to the active
-/// turn baseline while the CPC turn is still in flight.
+/// turn baseline while the Project Controller turn is still in flight.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TurnSteeringProjection {
     #[serde(default, skip_serializing_if = "turn_steering_state_is_none")]
@@ -123,8 +125,9 @@ impl TurnProjection {
         Self {
             state,
             turn_in_flight: phase.is_open(),
-            // The CPC is authoritative for every turn-state transition today.
-            transition_authority: TransitionAuthority::Cpc,
+            // The Project Controller is authoritative for every turn-state
+            // transition today.
+            transition_authority: TransitionAuthority::ProjectController,
             realtime_steering: TurnSteeringProjection::none(),
         }
     }
@@ -150,11 +153,11 @@ impl TurnProjection {
     }
 }
 
-/// The single-authority invariant: the CPC owns every turn-state transition and
-/// the plugin never drives one directly. Pure, so the invariant is asserted in
-/// tests rather than left implicit.
+/// The single-authority invariant: the Project Controller owns every turn-state
+/// transition and the plugin never drives one directly. Pure, so the invariant
+/// is asserted in tests rather than left implicit.
 pub const fn transition_authority(_phase: CyclePhase) -> TransitionAuthority {
-    TransitionAuthority::Cpc
+    TransitionAuthority::ProjectController
 }
 
 #[cfg(test)]
@@ -220,19 +223,19 @@ mod tests {
     }
 
     #[test]
-    fn cpc_owns_every_turn_state_transition() {
+    fn project_controller_owns_every_turn_state_transition() {
         // The single-authority invariant: the plugin never drives a turn-state
         // transition. If a future phase hands a transition to the plugin, this
         // test must be updated deliberately — it is the wedge-prevention contract.
         for phase in ALL_PHASES {
             assert_eq!(
                 transition_authority(phase),
-                TransitionAuthority::Cpc,
-                "{phase:?} transition must be CPC-authoritative"
+                TransitionAuthority::ProjectController,
+                "{phase:?} transition must be Project Controller-authoritative"
             );
             assert_eq!(
                 TurnProjection::from_phase(phase).transition_authority,
-                TransitionAuthority::Cpc
+                TransitionAuthority::ProjectController
             );
         }
     }

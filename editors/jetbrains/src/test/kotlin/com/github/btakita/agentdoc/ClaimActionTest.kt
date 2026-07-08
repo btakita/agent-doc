@@ -1,7 +1,9 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClaimActionTest {
@@ -38,5 +40,16 @@ class ClaimActionTest {
     fun `returns null when a required field is missing`() {
         // Missing `configured` — must not half-parse into a misleading dialog.
         assertNull(ClaimAction.parseCrossSessionReject("[claim] cross-session-reject pane_id=%1 pane_session=2"))
+    }
+
+    @Test
+    fun `failed claim does not request layout sync`() {
+        assertFalse(ClaimAction.shouldSyncLayoutAfterClaim(1))
+        assertFalse(ClaimAction.shouldSyncLayoutAfterClaim(124))
+    }
+
+    @Test
+    fun `successful claim requests layout sync`() {
+        assertTrue(ClaimAction.shouldSyncLayoutAfterClaim(0))
     }
 }

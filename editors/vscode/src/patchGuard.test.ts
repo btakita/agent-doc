@@ -70,7 +70,7 @@ describe('patchGuard', () => {
         }
     });
 
-    it('leaves patch typing debounce to CPC', () => {
+    it('leaves patch typing debounce to the Project Controller', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const applyIdx = source.indexOf('const applied = await this.applyPatch(patch, uri.fsPath)');
         const repositionIdx = source.indexOf('this.repositionBoundaryNow(');

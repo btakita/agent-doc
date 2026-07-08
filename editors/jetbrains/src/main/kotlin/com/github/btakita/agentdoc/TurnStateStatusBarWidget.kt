@@ -9,7 +9,7 @@ import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
 
 /**
- * Status-bar widget that makes the CPC turn-state coordination VISIBLE in the
+ * Status-bar widget that makes Project Controller turn-state coordination visible in the
  * JetBrains editor (goal 1). Reads the project turn-state cache updated by the
  * event-driven [TurnStateBannerRefresher], so painting never calls native
  * projection APIs on a Swing timer. Parity with the VS Code status-bar indicator
@@ -31,7 +31,7 @@ class TurnStateStatusBarWidget(private val project: Project) :
         const val WIDGET_ID = "com.github.btakita.agentdoc.TurnStateStatusBar"
         private const val BRAND = "agent-doc"
         private const val DEFAULT_TOOLTIP =
-            "Agent Doc turn state — the CPC's authoritative turn phase for this document"
+            "Agent Doc turn state — the Project Controller's authoritative turn phase for this document"
         private val LOG = Logger.getInstance(TurnStateStatusBarWidget::class.java)
     }
 
@@ -70,8 +70,9 @@ class TurnStateStatusBarWidget(private val project: Project) :
         val file = FileEditorManager.getInstance(project).selectedFiles
             .firstOrNull { it.name.endsWith(".md") }
         // Always show a visible, non-empty indicator so the widget stays findable
-        // and never collapses to zero width: the CPC turn phase when a turn is in
-        // flight, "$BRAND: idle" on a markdown document, otherwise the bare brand.
+        // and never collapses to zero width: the Project Controller turn phase
+        // when a turn is in flight, "$BRAND: idle" on a markdown document,
+        // otherwise the bare brand.
         val presentation = file?.let {
             TurnStateBannerRefresher.getInstance(project).cachedPresentationFor(it.path)
         }

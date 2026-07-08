@@ -322,7 +322,7 @@ class SyncLayoutAction : AnAction() {
                         callerKind = if (noAutostart) "automatic" else "manual",
                     )
                     if (receipt.exitCode != 0) {
-                        LOG.warn("[sync] pcp async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")
+                        LOG.warn("[sync] Project Controller async submit failed projectRoot=$projectRoot focus=$focusedFile columns=$columns output=${receipt.output}")
                         if (notify) {
                             TerminalUtil.notifyError(
                                 project,
@@ -330,7 +330,7 @@ class SyncLayoutAction : AnAction() {
                             )
                         }
                     } else {
-                        LOG.info("[sync] pcp async submit accepted: ${receipt.output.take(500)}")
+                        LOG.info("[sync] Project Controller async submit accepted: ${receipt.output.take(500)}")
                     }
                 } catch (ex: Exception) {
                     if (notify) TerminalUtil.notifyError(project, "Failed to sync layout: ${ex.message}")

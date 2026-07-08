@@ -183,7 +183,9 @@ test:
 	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
 	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); \
+		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); then \
+			exit 1; \
+		fi; \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/agent-doc-doctest.XXXXXX.log"); \
 		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo test --workspace --doc --quiet >"$$log" 2>&1; then \
 			cat "$$log"; \

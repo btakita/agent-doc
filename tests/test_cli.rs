@@ -24774,10 +24774,11 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && ffi_source.contains("agent_doc_ops_log_io::log_op")
             && ffi_source.contains("agent_doc_ipc_io::socket_path(")
             && ffi_source.contains(
-                "agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))"
+                "agent_doc_controller_io::project_controller::load_state_backbone_projection("
             )
+            && !ffi_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(")
             && !ffi_source.contains("agent_doc_orchestration::ipc_socket"),
-        "FFI should call focused IPC IO directly, inject the ops-log sink, and use projection-aware cycle state for editor-facing turn projection"
+        "FFI should call focused IPC IO directly, inject the ops-log sink, and read the Project Controller state-backbone projection (sidecars demoted, #sidecardemote) for editor-facing turn projection"
     );
     for relative in [
         "agent-doc-preflight-runtime-io/src/lib.rs",
@@ -26199,13 +26200,15 @@ fn test_agent_doc_claim_io_routes_document_reads_through_runtime_authority() {
     for required in [
         "fn current_document_content(&self, file: &Path, source: &str) -> Result<String>",
         "fn atomic_write(&self, file: &Path, content: &str) -> Result<()>",
-        "effects.current_document_content(file, \"claim_empty_scaffold\")",
+        "let raw = effects.current_document_content(file, \"claim_empty_scaffold\")",
         "effects.atomic_write(file, &scaffold)?",
-        "effects\n        .current_document_content(file, \"claim_ensure_session\")",
+        "let (updated_content, session_id) = frontmatter::ensure_session(&content)?",
         "effects\n            .atomic_write(file, &updated_content)",
-        "effects\n            .current_document_content(file, \"claim_default_format\")",
+        "content = updated_content",
+        "default_format_and_write_content(&content)?",
         "effects.atomic_write(file, &updated).with_context(",
-        "effects\n            .current_document_content(file, \"claim_default_components\")",
+        "content = updated",
+        "scaffold_default_template_components(&content)?",
         "effects.atomic_write(file, &scaffolded).with_context(",
     ] {
         assert!(

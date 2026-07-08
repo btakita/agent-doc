@@ -81,6 +81,7 @@ class StateProjectionBridgeTest {
     private fun snapshotJson(
         epoch: Long,
         routePayload: String? = null,
+        closeoutPayload: String? = null,
         transportPatches: List<Pair<Long, String>> = emptyList(),
         proofMarkers: List<Long> = emptyList(),
     ): String {
@@ -91,6 +92,7 @@ class StateProjectionBridgeTest {
             if (payload != null) nodes.append(""","payload":"$payload"}""") else nodes.append("}")
         }
         if (routePayload != null) addNode(11, AgentDocNodeType.ROUTE, routePayload)
+        if (closeoutPayload != null) addNode(21, AgentDocNodeType.CLOSEOUT_CYCLE, closeoutPayload)
         transportPatches.forEach { (slot, payload) -> addNode(slot, AgentDocNodeType.TRANSPORT_PATCH, payload) }
         proofMarkers.forEach { slot -> addNode(slot, AgentDocNodeType.PROOF_MARKER, b64("{}")) }
         return """{"type":"snapshot","epoch":$epoch,"document_hash":"doc-a","nodes":[$nodes],"edges":[],"roots":[]}"""
@@ -181,6 +183,27 @@ class StateProjectionBridgeTest {
         assertNull(summary.routeReadiness)
         assertNull(summary.latestTransportPhase)
         assertEquals(0, summary.proofMarkers)
+    }
+
+    @Test
+    fun `mirror turn projection derives from closeout cycle phase`() {
+        val awaiting = StateGraphMirror().apply {
+            applyMessage(snapshotJson(epoch = 1, closeoutPayload = b64("""{"phase":"preflight_started"}""")))
+        }
+        assertEquals("awaiting_response", MirrorTurnProjection.fromMirror(awaiting).state)
+        assertTrue(MirrorTurnProjection.fromMirror(awaiting).turnInFlight)
+
+        val persisting = StateGraphMirror().apply {
+            applyMessage(snapshotJson(epoch = 2, closeoutPayload = b64("""{"phase":"response_captured"}""")))
+        }
+        assertEquals("persisting", MirrorTurnProjection.fromMirror(persisting).state)
+        assertTrue(MirrorTurnProjection.fromMirror(persisting).turnInFlight)
+
+        val idle = StateGraphMirror().apply {
+            applyMessage(snapshotJson(epoch = 3, closeoutPayload = b64("""{"phase":"committed"}""")))
+        }
+        assertEquals("idle", MirrorTurnProjection.fromMirror(idle).state)
+        assertEquals(false, MirrorTurnProjection.fromMirror(idle).turnInFlight)
     }
 
     @Test

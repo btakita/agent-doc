@@ -20,15 +20,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TURN_STATE_MIN_REFRESH_INTERVAL_MS = 1_500L
 private const val TURN_STATE_SLOW_PROJECTION_MS = 1_000L
-private const val TURN_STATE_SLOW_BACKOFF_MS = 5_000L
-private const val TURN_STATE_SLOW_BACKOFF_MAX_MS = 60_000L
 private const val TURN_STATE_MAX_PATHS_PER_DRAIN = 4
 private const val TURN_STATE_DRAIN_YIELD_MS = 50L
 
 /**
  * Per-project event loop that flips [TurnStateBannerProvider] on and off as the
- * CPC's turn phase changes. Native projection reads are queued only from IDE or
- * agent-doc events, then cached for banner/status-bar collection on the EDT.
+ * Project Controller turn phase changes. Project Controller projection reads are
+ * queued only from IDE or agent-doc events, then cached for banner/status-bar
+ * collection on the EDT.
  */
 @Service(Service.Level.PROJECT)
 class TurnStateBannerRefresher(private val project: Project) : Disposable {
@@ -44,8 +43,6 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val pendingPaths = ConcurrentHashMap.newKeySet<String>()
     private val delayedPaths = ConcurrentHashMap.newKeySet<String>()
     private val lastRefreshMs = ConcurrentHashMap<String, Long>()
-    private val backoffUntilMs = ConcurrentHashMap<String, Long>()
-    private val slowRefreshCounts = ConcurrentHashMap<String, Int>()
     private val presentations = ConcurrentHashMap<String, TurnStateBridge.TurnStatePresentation>()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
@@ -155,8 +152,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private fun refreshDelayMs(filePath: String): Long {
         val now = System.currentTimeMillis()
         val minIntervalUntil = (lastRefreshMs[filePath] ?: 0L) + TURN_STATE_MIN_REFRESH_INTERVAL_MS
-        val backoffUntil = backoffUntilMs[filePath] ?: 0L
-        return (maxOf(minIntervalUntil, backoffUntil) - now).coerceAtLeast(0L)
+        return (minIntervalUntil - now).coerceAtLeast(0L)
     }
 
     private fun drainPending(reason: String) {
@@ -183,13 +179,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         val now = System.currentTimeMillis()
         lastRefreshMs[filePath] = now
         if (elapsedMs >= TURN_STATE_SLOW_PROJECTION_MS) {
-            val slowCount = slowRefreshCounts.merge(filePath, 1) { old, _ -> (old + 1).coerceAtMost(16) } ?: 1
-            val backoffMs = slowBackoffMs(slowCount)
-            backoffUntilMs[filePath] = now + backoffMs
-            LOG.warn("[turn-state] backing off projection for $filePath after slow refresh elapsed_ms=$elapsedMs slow_count=$slowCount backoff_ms=$backoffMs")
-        } else {
-            slowRefreshCounts.remove(filePath)
-            backoffUntilMs.remove(filePath)
+            LOG.warn("[turn-state] slow Project Controller projection for $filePath elapsed_ms=$elapsedMs")
         }
         val previous = presentations.put(filePath, next)
         if (previous != next) {
@@ -213,8 +203,6 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         pendingPaths.clear()
         delayedPaths.clear()
         lastRefreshMs.clear()
-        backoffUntilMs.clear()
-        slowRefreshCounts.clear()
         presentations.clear()
         listeners.clear()
         executor.shutdownNow()
@@ -227,20 +215,15 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         private fun isMarkdown(file: VirtualFile): Boolean =
             file.name.endsWith(".md")
 
-        private fun slowBackoffMs(slowCount: Int): Long {
-            val step = (slowCount - 1).coerceAtLeast(0).coerceAtMost(6)
-            return (TURN_STATE_SLOW_BACKOFF_MS * (1L shl step)).coerceAtMost(TURN_STATE_SLOW_BACKOFF_MAX_MS)
-        }
-
         private fun backoffReason(reason: String): String =
-            "${baseReason(reason)}-backoff"
+            "${baseReason(reason)}-coalesced"
 
         private fun delayedReason(reason: String): String =
-            if (reason.contains("-backoff")) backoffReason(reason) else baseReason(reason)
+            if (reason.contains("-coalesced")) backoffReason(reason) else baseReason(reason)
 
         private fun baseReason(reason: String): String =
             reason
-                .substringBefore("-backoff")
+                .substringBefore("-coalesced")
                 .substringBefore("-delayed")
                 .ifBlank { "refresh" }
     }

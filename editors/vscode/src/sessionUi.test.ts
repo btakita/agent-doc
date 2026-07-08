@@ -219,7 +219,7 @@ describe('sessionUi', () => {
     });
 });
 
-describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
+describe('buildTurnStatePresentation (Project Controller turn-state coordination)', () => {
     it('is empty + ungated when idle or no projection', () => {
         assert.deepStrictEqual(buildTurnStatePresentation(null), {
             label: '',
@@ -228,7 +228,7 @@ describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
         const idle: TurnProjection = {
             state: 'idle',
             turn_in_flight: false,
-            transition_authority: 'cpc',
+            transition_authority: 'project_controller',
         };
         assert.deepStrictEqual(buildTurnStatePresentation(idle), {
             label: '',
@@ -240,7 +240,7 @@ describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
         const awaiting: TurnProjection = {
             state: 'awaiting_response',
             turn_in_flight: true,
-            transition_authority: 'cpc',
+            transition_authority: 'project_controller',
         };
         const a = buildTurnStatePresentation(awaiting);
         assert.ok(a.label.includes('awaiting response'));
@@ -249,7 +249,7 @@ describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
         const persisting: TurnProjection = {
             state: 'persisting',
             turn_in_flight: true,
-            transition_authority: 'cpc',
+            transition_authority: 'project_controller',
         };
         const p = buildTurnStatePresentation(persisting);
         assert.ok(p.label.includes('persisting'));
@@ -260,7 +260,7 @@ describe('buildTurnStatePresentation (CPC turn-state coordination)', () => {
         const deleted: TurnProjection = {
             state: 'awaiting_response',
             turn_in_flight: true,
-            transition_authority: 'cpc',
+            transition_authority: 'project_controller',
             realtime_steering: {
                 state: 'prompt_deleted',
                 preview: 'removed prompt',

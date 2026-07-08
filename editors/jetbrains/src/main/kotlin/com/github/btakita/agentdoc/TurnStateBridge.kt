@@ -6,12 +6,10 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Consumes the CPC's turn-state projection (the `agent_doc_turn_projection` FFI
- * export) into a plugin-facing status label plus the double-append forwarding
- * guard. This is how the JetBrains frontend COORDINATES with the CPC's
- * authoritative turn phase: the CPC owns the phase, the plugin observes this
- * projection. Parity with the VS Code `buildTurnStatePresentation`
- * (`specs/14-realtime-workflow.md` § Editor Parity Requirement).
+ * Consumes the Project Controller lazily state projection into a plugin-facing
+ * status label plus the double-append forwarding guard. The Project Controller
+ * owns the phase; the plugin observes the lazily mirror and never reads cycle
+ * sidecars on the editor hot path.
  */
 object TurnStateBridge {
     private val LOG = Logger.getInstance(TurnStateBridge::class.java)
@@ -25,7 +23,7 @@ object TurnStateBridge {
     )
 
     data class TurnStatePresentation(
-        /** Short status label reflecting the CPC turn phase (empty when idle). */
+        /** Short status label reflecting the Project Controller turn phase (empty when idle). */
         val label: String,
         /**
          * True when forwarding an operator prompt now would collide with an
@@ -39,30 +37,56 @@ object TurnStateBridge {
         val showBanner: Boolean = true,
     )
 
-    /** Raw turn-projection JSON for a document, or null when unavailable. */
-    fun turnProjectionJsonForFile(filePath: String): String? {
+    private data class ProjectControllerTurnRead(
+        val projectionJson: String?,
+        val connected: Boolean,
+        val error: String? = null,
+    )
+
+    /** Raw Project Controller turn-projection JSON for a document, or null when unavailable. */
+    fun turnProjectionJsonForFile(filePath: String): String? =
+        turnProjectionReadForFile(filePath).projectionJson
+
+    private fun turnProjectionReadForFile(filePath: String): ProjectControllerTurnRead {
         val started = System.nanoTime()
-        val lib = AgentDocLib.get() ?: return null
-        val ptr = try {
-            lib.agent_doc_turn_projection(filePath)
+        val file = File(filePath)
+        val root = findAgentDocProjectRoot(file)
+            ?: return ProjectControllerTurnRead(
+                projectionJson = null,
+                connected = false,
+                error = "No .agent-doc project root found for ${file.name}",
+            ).also { logProjectionTiming(filePath, started) }
+        val projection = try {
+            StateProjectionBridge.subscribeMirrorForFileViaProjectController(filePath, root)
+            StateProjectionBridge.mirrorTurnProjectionJsonForFile(filePath)
         } catch (e: Throwable) {
-            LOG.debug("[turn-projection] unavailable: ${e.message}")
-            logProjectionTiming(filePath, started)
-            return null
+            LOG.debug("[turn-projection] Project Controller unavailable: ${e.message}")
+            return ProjectControllerTurnRead(
+                projectionJson = null,
+                connected = false,
+                error = e.message ?: "Project Controller request failed",
+            ).also { logProjectionTiming(filePath, started) }
         }
-        try {
-            val raw = ptr?.getString(0) ?: return null
-            val projection = raw.takeUnless { it == "null" }
-            LOG.debug("[turn-projection] $filePath => ${projection ?: "null"}")
-            return projection
-        } finally {
-            lib.agent_doc_free_string(ptr)
-            logProjectionTiming(filePath, started)
-        }
+        LOG.debug("[turn-projection] $filePath => ${projection ?: "null"}")
+        logProjectionTiming(filePath, started)
+        return ProjectControllerTurnRead(
+            projectionJson = projection,
+            connected = true,
+        )
     }
 
     fun presentationForFile(filePath: String): TurnStatePresentation {
-        val turnState = turnProjectionJsonForFile(filePath)?.let(::presentation)
+        val read = turnProjectionReadForFile(filePath)
+        if (!read.connected) {
+            return routeFailurePresentationForFile(filePath)
+                ?: TurnStatePresentation(
+                    label = "agent-doc: Project Controller disconnected",
+                    guardPromptForwarding = false,
+                    tooltip = "Agent Doc Project Controller is not connected for this document.\n${read.error ?: "Start or reconnect the Project Controller."}",
+                    showBanner = false,
+                )
+        }
+        val turnState = read.projectionJson?.let(::presentation)
         if (turnState != null && turnState.label.isNotEmpty()) {
             return turnState
         }

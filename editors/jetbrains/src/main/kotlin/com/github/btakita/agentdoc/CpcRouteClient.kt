@@ -19,8 +19,13 @@ internal data class CpcTmuxLayoutSyncState(
     val reason: String,
 )
 
+internal data class ProjectControllerStateSubscribeResult(
+    val documentHash: String,
+    val messageJson: String,
+)
+
 /**
- * High-level editor route RPC over the CPC/project-controller socket.
+ * High-level editor route RPC over the Project Controller socket.
  */
 internal object CpcRouteClient {
     private val log = Logger.getInstance(CpcRouteClient::class.java)
@@ -67,10 +72,10 @@ internal object CpcRouteClient {
         return try {
             sendToSocket(socket, request)
         } catch (e: Exception) {
-            log.warn("[route] CPC editor_route request failed via ${socket.path}: ${e.message}")
+            log.warn("[route] Project Controller editor_route request failed via ${socket.path}: ${e.message}")
             CpcEditorRouteResult(
                 exitCode = 1,
-                output = "CPC editor_route request failed via ${socket.path}: ${e.message}",
+                output = "Project Controller editor_route request failed via ${socket.path}: ${e.message}",
             )
         }
     }
@@ -174,6 +179,31 @@ internal object CpcRouteClient {
             log.debug("[focus] tmux_focus_state request failed via ${socket.path}: ${e.message}")
             null
         }
+    }
+
+    fun stateSubscribe(
+        projectRoot: String,
+        filePath: String,
+        documentHash: String,
+        lastEpoch: Long,
+    ): ProjectControllerStateSubscribeResult {
+        val socket = cpcSocket(projectRoot)
+        val request = JsonObject().also {
+            it.addProperty("command", "state_subscribe")
+            it.addProperty("file", filePath)
+            it.addProperty("generation", lastEpoch)
+            it.addProperty(
+                "diagnostic_payload",
+                JsonObject().also { payload ->
+                    payload.addProperty("document_hash", documentHash)
+                }.toString(),
+            )
+        }
+        val data = sendRequestDataToSocket(socket, request)
+        val returnedHash = data.get("document_hash")?.asString ?: documentHash
+        val message = data.get("message")
+            ?: throw IllegalStateException("Project Controller state_subscribe response missing message")
+        return ProjectControllerStateSubscribeResult(returnedHash, message.toString())
     }
 
     // The `agent-doc.editor_route.v1` payload the controller consumes, shared by
@@ -408,13 +438,13 @@ internal object CpcRouteClient {
 
             val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
             val line = reader.readLine()
-                ?: throw IllegalStateException("CPC returned an empty response")
+                ?: throw IllegalStateException("Project Controller returned an empty response")
             val root = JsonParser.parseString(line).asJsonObject
             if (root.get("ok")?.asBoolean != true) {
-                throw IllegalStateException(root.get("error")?.asString ?: "CPC request failed")
+                throw IllegalStateException(root.get("error")?.asString ?: "Project Controller request failed")
             }
             return root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
-                ?: throw IllegalStateException("CPC response missing data")
+                ?: throw IllegalStateException("Project Controller response missing data")
         }
     }
 

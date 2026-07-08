@@ -47,8 +47,7 @@ const BUSY_CLEAR_SOURCE_REGEX = /source=([^,)]+)/s;
 const BUSY_CLEAR_COMMAND_REGEX = /current_command=([^,)]+)/s;
 const PROTECTED_CLEAR_REASON_REGEX = /reason=([^,)]+)/s;
 
-/** The CPC→plugin turn-state projection, as returned by the native
- * `agent_doc_turn_projection` FFI export (`turnProjectionForFile`). */
+/** The Project Controller→plugin turn-state projection consumed by editor UI. */
 export interface TurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
@@ -60,7 +59,7 @@ export interface TurnProjection {
 }
 
 export interface TurnStatePresentation {
-    /** Short status label reflecting the CPC turn phase ('' when idle). */
+    /** Short status label reflecting the Project Controller turn phase ('' when idle). */
     label: string;
     /** True when a forwarded operator prompt would collide with an in-flight
      * response (the `live_prompt_drift` double-append guard): the plugin queues it
@@ -71,9 +70,9 @@ export interface TurnStatePresentation {
 type TurnSteeringState = NonNullable<TurnProjection['realtime_steering']>['state'];
 
 /**
- * Consume the CPC's authoritative turn-state projection into a plugin-facing
+ * Consume the Project Controller's authoritative turn-state projection into a plugin-facing
  * status label + the double-append forwarding guard. This is how the plugin
- * COORDINATES with the CPC turn phase (Shared-Foundation: the CPC owns the phase,
+ * COORDINATES with the turn phase (the Project Controller owns the phase,
  * the plugin observes this projection). Parity with the JetBrains frontend
  * (`specs/14-realtime-workflow.md` § Editor Parity Requirement).
  */

@@ -259,7 +259,8 @@ fn resolve_admin_root(
 
 /// Record a file-backed typing projection.
 ///
-/// Plugins call this on document modifications as telemetry for CPC-owned
+/// Plugins call this on document modifications as telemetry for Project
+/// Controller-owned
 /// recovery paths. It is not authoritative editor state.
 ///
 /// # Safety
@@ -361,9 +362,9 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
 /// editor instance.
 ///
 /// Modern editor integrations publish content by applying local edits to their
-/// CRDT replica and sending `replica_update` through the CPC relay. This ABI
-/// remains as a wake/telemetry compatibility hook only; it must not write a
-/// separate editor-content channel.
+/// CRDT replica and sending `replica_update` through the Project Controller
+/// relay. This ABI remains as a wake/telemetry compatibility hook only; it must
+/// not write a separate editor-content channel.
 ///
 /// # Safety
 ///
@@ -629,7 +630,7 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
 /// Returns `true` if the indicator exists and was updated within `debounce_ms`.
 /// Returns `false` if no indicator file exists (plugin not active or no edits).
 ///
-/// Use this from CLI/CPC tools that run separately from the editor plugin.
+/// Use this from CLI/Project Controller tools that run separately from the editor plugin.
 ///
 /// # Safety
 ///
@@ -709,17 +710,16 @@ pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut 
         .into_raw()
 }
 
-/// Get the CPC→plugin turn-state projection for a document, as JSON.
+/// Get the Project Controller→plugin turn-state projection for a document, as JSON.
 ///
 /// Returns a NUL-terminated JSON string of `TurnProjection`:
-/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc","realtime_steering":{"state":"...","preview":"..."}}`.
-/// The CPC owns the authoritative turn phase; the plugin observes this projection
-/// to render turn-in-flight UI and to decide whether a forwarded operator prompt
-/// starts a fresh turn (`turn_in_flight == false`) or would collide with an
-/// in-flight response (the `live_prompt_drift` double-append guard). Defaults to
-/// the idle projection when no cycle state exists or on any error. Both the
-/// JetBrains and VS Code frontends consume this same export (Shared Foundation
-/// parity — `specs/14-realtime-workflow.md` § Editor Parity Requirement).
+/// `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"project_controller","realtime_steering":{"state":"...","preview":"..."}}`.
+/// The Project Controller owns the authoritative turn phase; the plugin observes
+/// this projection to render turn-in-flight UI and to decide whether a forwarded
+/// operator prompt starts a fresh turn (`turn_in_flight == false`) or would
+/// collide with an in-flight response (the `live_prompt_drift` double-append
+/// guard). Defaults to the idle projection when no cycle state exists or on any
+/// error.
 ///
 /// Caller must free with `agent_doc_free_string`.
 ///
@@ -738,21 +738,14 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         Ok(s) => s,
         Err(_) => return CString::new(idle_json()).unwrap().into_raw(),
     };
-    // `#sidecardemote`: the CPC document model (the actor's live state in the
-    // state store) is AUTHORITATIVE for whether a turn is in flight; the
-    // cycle-state sidecar is only a cold-start recovery snapshot + fine-label
-    // hint. So a stale/failed sidecar can neither assert a phantom in-flight turn
-    // (model idle → idle) nor hide a live one (model busy → in-flight even if the
-    // sidecar lags or was falsely abandoned).
-    let sidecar_phase =
-        agent_doc_cycle_state_io::load_with_closeout_projection(std::path::Path::new(path))
-            .ok()
-            .flatten()
-            .map(|state| state.phase)
-            .unwrap_or(agent_doc_turn::CyclePhase::Committed);
+    // The Project Controller/state-backbone projection is the editor-facing turn
+    // source. Cycle sidecars are recovery artifacts only and are intentionally
+    // not consulted here.
+    let projected_phase = state_backbone_closeout_phase(std::path::Path::new(path))
+        .unwrap_or(agent_doc_turn::CyclePhase::Committed);
     let phase = resolve_turn_phase(
         document_model_actor_state(std::path::Path::new(path)),
-        sidecar_phase,
+        projected_phase,
     );
     let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
     if proj.turn_in_flight {
@@ -769,41 +762,49 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         .into_raw()
 }
 
-/// `#sidecardemote` — resolve the turn phase for the projection with the CPC
-/// document model authoritative and the cycle-state sidecar demoted to a
-/// cold-start snapshot + fine-label hint. Pure so the authority policy is
-/// exhaustively unit-testable without a state store.
+/// Resolve the turn phase for the projection with the Project Controller
+/// document model authoritative and the lazily state-backbone closeout phase as
+/// the fine-label source. Pure so the authority policy is exhaustively
+/// unit-testable without a state store.
 ///
-/// - Model `Busy`/`Blocked` → a turn is live: keep the sidecar's phase for the
-///   awaiting/persisting label, but if the sidecar is stale/closed use a generic
-///   in-flight phase so a lagging or falsely-abandoned sidecar cannot hide it.
-/// - Model any other state → no turn is running: `Committed` (idle), so a stale
-///   sidecar cannot assert a phantom in-flight turn.
-/// - Model unavailable (`None`, cold start) → the sidecar snapshot, best-effort.
+/// - Model `Busy`/`Blocked` → a turn is live: keep the projected phase for the
+///   awaiting/persisting label, but if the projection is terminal use a generic
+///   in-flight phase so a lagging terminal projection cannot hide it.
+/// - Model any other state → no turn is running: `Committed` (idle).
+/// - Model unavailable (`None`, cold start) → the state-backbone projection.
 fn resolve_turn_phase(
     model_state: Option<agent_doc_sqlite::state_store::ActorState>,
-    sidecar_phase: agent_doc_turn::CyclePhase,
+    projected_phase: agent_doc_turn::CyclePhase,
 ) -> agent_doc_turn::CyclePhase {
     use agent_doc_sqlite::state_store::ActorState;
     match model_state {
         Some(ActorState::Busy | ActorState::Blocked) => {
-            if sidecar_phase.is_open() {
-                sidecar_phase
+            if projected_phase.is_open() {
+                projected_phase
             } else {
                 agent_doc_turn::CyclePhase::PreflightStarted
             }
         }
         Some(_) => agent_doc_turn::CyclePhase::Committed,
-        None => sidecar_phase,
+        None => projected_phase,
     }
 }
 
-/// `#sidecardemote` — the CPC document model's authoritative actor state for a
+fn state_backbone_closeout_phase(file: &Path) -> Option<agent_doc_turn::CyclePhase> {
+    let root = agent_doc_project_root_io::project_root_containing(file)?;
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    agent_doc_controller_io::project_controller::load_state_backbone_projection(&root)
+        .ok()?
+        .document(&document_hash)
+        .and_then(|document| document.closeout.phase)
+}
+
+/// The Project Controller document model's authoritative actor state for a
 /// document, read directly from the state store (a local sqlite read, NOT a
 /// controller RPC, so it stays cheap and works even while the controller is
 /// busy). `None` when there is no state store yet (cold start / never-registered)
-/// or the row is unreadable, so the projection falls back to the cycle-state
-/// sidecar snapshot — the sidecar's only sanctioned authority.
+/// or the row is unreadable, so the projection falls back to the state-backbone
+/// closeout phase.
 ///
 /// Reads WITHOUT creating the store (checks the path first), so a bare read from
 /// the editor plugin never materializes controller state as a side effect.
@@ -2422,7 +2423,7 @@ pub unsafe extern "C" fn agent_doc_admin_inspect_json(
     })())
 }
 
-/// Return the PCP-owned tmux focus projection for a project.
+/// Return the Project Controller-owned tmux focus projection for a project.
 ///
 /// The response reports an active document only when the configured tmux
 /// session's current window is `agent-doc`; other tmux windows intentionally
@@ -2444,7 +2445,7 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
     })())
 }
 
-/// Focus the actor pane for a document through the PCP.
+/// Focus the actor pane for a document through the Project Controller.
 ///
 /// This centralizes pane selection behind the controller so JetBrains does not
 /// run `agent-doc focus` or raw tmux commands for editor focus handoff.
@@ -2467,7 +2468,7 @@ pub unsafe extern "C" fn agent_doc_focus_document_pane_json(
     })())
 }
 
-/// Sync the tmux layout through the PCP/project controller.
+/// Sync the tmux layout through the Project Controller.
 ///
 /// `columns_json` is a JSON array of column strings using the same comma-joined
 /// column representation as `agent-doc sync --col`.
@@ -2899,8 +2900,8 @@ mod tests {
     fn resolve_turn_phase_makes_document_model_authoritative() {
         use agent_doc_sqlite::state_store::ActorState;
         use agent_doc_turn::CyclePhase;
-        // `#sidecardemote`: model Busy/Blocked + a stale/closed sidecar → in-flight
-        // (a lagging or falsely-abandoned sidecar cannot hide a live turn).
+        // Model Busy/Blocked + a terminal projection → in-flight; a lagging
+        // terminal projection cannot hide a live turn.
         assert_eq!(
             resolve_turn_phase(Some(ActorState::Busy), CyclePhase::Committed),
             CyclePhase::PreflightStarted
@@ -2909,12 +2910,12 @@ mod tests {
             resolve_turn_phase(Some(ActorState::Blocked), CyclePhase::Abandoned),
             CyclePhase::PreflightStarted
         );
-        // Model Busy + an open sidecar → keep the sidecar's fine awaiting/persisting label.
+        // Model Busy + an open projected phase → keep the fine awaiting/persisting label.
         assert_eq!(
             resolve_turn_phase(Some(ActorState::Busy), CyclePhase::ResponseCaptured),
             CyclePhase::ResponseCaptured
         );
-        // Model not-in-flight → idle regardless of a stale OPEN sidecar (no phantom turn).
+        // Model not-in-flight → idle regardless of a stale open projection.
         for st in [
             ActorState::Ready,
             ActorState::Closed,
@@ -2924,10 +2925,10 @@ mod tests {
             assert_eq!(
                 resolve_turn_phase(Some(st), CyclePhase::PreflightStarted),
                 CyclePhase::Committed,
-                "{st:?} must not let a stale sidecar assert an in-flight turn"
+                "{st:?} must not let a stale projection assert an in-flight turn"
             );
         }
-        // No document model (cold start) → best-effort sidecar snapshot, its only authority.
+        // No document model (cold start) → state-backbone projection.
         assert_eq!(
             resolve_turn_phase(None, CyclePhase::PreflightStarted),
             CyclePhase::PreflightStarted
@@ -2939,7 +2940,7 @@ mod tests {
     }
 
     #[test]
-    fn turn_projection_prefers_terminal_projection_over_stale_open_sidecar() {
+    fn turn_projection_uses_state_backbone_over_cycle_sidecar() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("session.md");
@@ -3170,7 +3171,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid projection JSON");
         assert_eq!(value["state"], "idle");
         assert_eq!(value["turn_in_flight"], false);
-        assert_eq!(value["transition_authority"], "cpc");
+        assert_eq!(value["transition_authority"], "project_controller");
     }
 
     #[test]

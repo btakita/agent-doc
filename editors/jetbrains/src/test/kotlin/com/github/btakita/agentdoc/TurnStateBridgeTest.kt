@@ -13,7 +13,7 @@ class TurnStateBridgeTest {
                 {
                   "state":"awaiting_response",
                   "turn_in_flight":true,
-                  "transition_authority":"cpc",
+                  "transition_authority":"project_controller",
                   "realtime_steering":{
                     "state":"prompt_deleted",
                     "preview":"removed prompt"

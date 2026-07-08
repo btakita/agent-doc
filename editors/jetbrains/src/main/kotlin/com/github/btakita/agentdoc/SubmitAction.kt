@@ -7,7 +7,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 /**
- * Action that routes the active document through the PCP/CPC editor_route RPC.
+ * Action that routes the active document through the Project Controller editor_route RPC.
  *
  * Triggered by Ctrl+Shift+Alt+A (configurable in Keymap settings).
  * Only enabled when the active editor has a .md file open.

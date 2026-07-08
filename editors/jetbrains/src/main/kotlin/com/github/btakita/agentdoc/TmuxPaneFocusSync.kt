@@ -50,9 +50,16 @@ class TmuxPaneFocusSync private constructor(
             lastDocumentPath = null
             return
         }
-        if (documentPath == lastDocumentPath) return
+        if (!shouldSelectTmuxDocument(documentPath, lastDocumentPath)) return
         lastDocumentPath = documentPath
         selectEditorDocument(documentPath)
+    }
+
+    private fun recordCurrentTmuxFocus() {
+        if (project.isDisposed) return
+        val projectRoots = candidateProjectRoots(project)
+        if (projectRoots.isEmpty()) return
+        lastDocumentPath = focusedDocumentPath(projectRoots)
     }
 
     private fun selectEditorDocument(documentPath: String) {
@@ -86,9 +93,19 @@ class TmuxPaneFocusSync private constructor(
             instances.computeIfAbsent(project) { TmuxPaneFocusSync(project) }
         }
 
+        fun recordCurrentTmuxFocus(project: Project) {
+            instances.computeIfAbsent(project) { TmuxPaneFocusSync(project) }
+                .recordCurrentTmuxFocus()
+        }
+
         fun disposeProject(project: Project) {
             instances.remove(project)?.let { Disposer.dispose(it) }
         }
+
+        internal fun shouldSelectTmuxDocument(
+            documentPath: String?,
+            lastDocumentPath: String?,
+        ): Boolean = documentPath != null && documentPath != lastDocumentPath
 
         internal fun isAgentDocWindowActive(projectRoot: String): Boolean? =
             CpcRouteClient.tmuxFocusState(projectRoot)?.let { json ->

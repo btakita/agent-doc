@@ -45,17 +45,21 @@ describe('editor UI thread budget', () => {
         assert.ok(source.includes('private async drainRequestedRemoteUpdates()'));
     });
 
-    it('VS Code watches CPC CRDT and turn-state signals instead of polling them', () => {
+    it('VS Code watches CRDT events and reads turn state from Project Controller lazily projection', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         assert.ok(source.includes("'.agent-doc', 'crdt-replica-events'"));
         assert.ok(source.includes('private onCrdtReplicaEvent('));
         assert.ok(source.includes('this.crdtReplicas?.requestRemoteDrain(event.file);'));
-        assert.ok(source.includes("'.agent-doc', 'turn-scope'"));
         assert.ok(source.includes('configureTurnStatusWatcher()'));
         assert.ok(source.includes('TURN_STATUS_MIN_REFRESH_INTERVAL_MS'));
-        assert.ok(source.includes('TURN_STATUS_SLOW_BACKOFF_MS'));
-        assert.ok(source.includes('function refreshTurnStatusNow('));
+        assert.ok(source.includes("command: 'state_subscribe'"));
+        assert.ok(source.includes('turnProjectionFromProjectController'));
+        assert.ok(source.includes('Project Controller disconnected'));
+        assert.ok(source.includes('async function refreshTurnStatusNow('));
         assert.ok(source.includes("refreshTurnStatus('active-editor', true)"));
+        assert.strictEqual(source.includes("'.agent-doc', 'turn-scope'"), false);
+        assert.strictEqual(source.includes('turnProjectionForFile('), false);
+        assert.strictEqual(source.includes('TURN_STATUS_SLOW_BACKOFF_MS'), false);
         assert.strictEqual(source.includes('const turnStatusInterval = setInterval'), false);
     });
 
@@ -65,16 +69,16 @@ describe('editor UI thread budget', () => {
         assert.ok(source.includes("'.agent-doc', 'controller.sock'"));
         assert.ok(source.includes('async function ensureProjectControllerRunning'));
         assert.ok(source.includes("['controller', 'status', '--project-root', projectRoot, '--ensure']"));
-        assert.ok(source.includes('async function runEditorRouteViaPcp('));
+        assert.ok(source.includes('async function runEditorRouteViaProjectController('));
         assert.ok(source.includes("command: 'editor_route'"));
-        assert.ok(source.includes("source: 'vscode_plugin'"));
+        assert.ok(source.includes('buildEditorRoutePayload(rel, routeKey, layoutArgs'));
 
         const start = source.indexOf('async function executeRunForDocument');
         assert.ok(start >= 0, 'executeRunForDocument should exist');
         const end = source.indexOf('// ---------------------------------------------------------------------------', start + 1);
         assert.ok(end > start, 'executeRunForDocument should precede next section marker');
         const runBody = source.slice(start, end);
-        assert.ok(runBody.includes('await runEditorRouteViaPcp(cwd, rel, filePath, routeKey, abortController.signal);'));
+        assert.ok(runBody.includes('await runEditorRouteViaProjectController(cwd, rel, filePath, routeKey, abortController.signal);'));
         assert.strictEqual(runBody.includes('buildRunRouteCommandArgs'), false);
         assert.strictEqual(runBody.includes("runCli(['route'"), false);
         assert.strictEqual(source.includes('function buildRunRouteCommandArgs'), false);

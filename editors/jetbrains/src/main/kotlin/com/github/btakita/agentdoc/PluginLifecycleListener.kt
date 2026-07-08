@@ -40,7 +40,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.
         EditorFocusSyncListener.install(project, editorTabSync)
-        // Mirror PCP-owned tmux focus back to the selected editor document while
+        // Mirror Project Controller-owned tmux focus back to the selected editor document while
         // the operator is focused on the agent-doc tmux window.
         TmuxPaneFocusSync.install(project)
         project.messageBus.connect().subscribe(

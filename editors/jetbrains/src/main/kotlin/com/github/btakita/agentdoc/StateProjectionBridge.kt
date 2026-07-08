@@ -123,6 +123,27 @@ object StateProjectionBridge {
         }
     }
 
+    fun subscribeMirrorForFileViaProjectController(filePath: String, projectRoot: File): String? {
+        val docHash = documentHash(filePath)
+        val mirror = mirrors.computeIfAbsent(docHash) { StateGraphMirror() }
+        val lastEpoch = if (mirror.isInitialized) mirror.epoch else 0L
+        val response = CpcRouteClient.stateSubscribe(
+            projectRoot = projectRoot.path,
+            filePath = filePath,
+            documentHash = docHash,
+            lastEpoch = lastEpoch,
+        )
+        if (response.documentHash != docHash) {
+            LOG.debug("[state-projection] Project Controller returned state for ${response.documentHash}, expected $docHash")
+            return null
+        }
+        return if (mirror.applyMessage(response.messageJson)) {
+            messageKind(response.messageJson)
+        } else {
+            null
+        }
+    }
+
     /**
      * Reactive summary derived from the per-document [StateGraphMirror]'s
      * tracked cells (`#lazilystatesync3`). Call after [subscribeMirrorForFile].
@@ -132,6 +153,12 @@ object StateProjectionBridge {
         val mirror = mirrors[documentHash(filePath)] ?: return null
         if (!mirror.isInitialized) return null
         return MirrorProjectionSummary.fromMirror(mirror)
+    }
+
+    fun mirrorTurnProjectionJsonForFile(filePath: String): String? {
+        val mirror = mirrors[documentHash(filePath)] ?: return null
+        if (!mirror.isInitialized) return null
+        return MirrorTurnProjection.fromMirror(mirror).toJsonString()
     }
 
     /** The current mirror epoch for [filePath], or null if never initialized. */

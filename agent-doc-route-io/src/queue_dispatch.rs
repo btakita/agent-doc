@@ -16,6 +16,8 @@ pub struct RouteQueueEffects {
     pub write_document: RouteWriteDocumentFn,
 }
 
+const ROUTE_QUEUE_MAX_WRITE_ATTEMPTS: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteQueueEnqueueOutcome {
     pub prompt_text: String,
@@ -40,69 +42,90 @@ pub fn enqueue_route_dispatch_prompt(
     effects: RouteQueueEffects,
 ) -> Result<RouteQueueEnqueueOutcome> {
     let _lock = acquire_route_queue_lock(file)?;
-    let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "route_dispatch_queue_enqueue",
-    )?;
-    let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
-        &original,
-        prompt_text,
-        priority,
-    )?;
-    if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
+    let mut attempt = 0usize;
+    loop {
+        attempt += 1;
+        let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "route_dispatch_queue_enqueue",
+        )?;
+        let update = agent_doc_queue::route_dispatch::prepare_route_dispatch_queue_update(
+            &original,
+            prompt_text,
+            priority,
+        )?;
+        if let Some(parse_err) = update.unparseable_queue_error.as_deref() {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
+                    file.display(),
+                    agent_doc_hash::content_hash(&update.prompt_text),
+                    parse_err
+                ),
+            );
+        }
+
+        let content = update.content;
+        let activated = content != original;
+        if activated {
+            match (effects.write_document)(file, &content, &original, "route_dispatch_queue") {
+                Ok(()) => {
+                    agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)
+                        .with_context(|| {
+                            format!(
+                                "failed to sync snapshot after queueing dispatch for {}",
+                                file.display()
+                            )
+                        })?;
+                }
+                Err(err)
+                    if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS
+                        && is_retryable_crdt_merge_error(&err) =>
+                {
+                    log_route_queue_write_retry(
+                        file,
+                        "route_dispatch_queue",
+                        attempt,
+                        &content,
+                        &original,
+                        &err,
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "failed to converge queued dispatch for {} through editor IPC/disk",
+                            file.display()
+                        )
+                    });
+                }
+            }
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_queue_dispatch_unparseable_preserved file={} prompt_hash={} reason={}",
+                "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
                 file.display(),
-                agent_doc_hash::content_hash(&update.prompt_text),
-                parse_err
+                source,
+                update.appended,
+                update.already_present,
+                update.superseded,
+                update.component_created,
+                activated,
+                update.prompt_text
             ),
         );
-    }
-
-    let content = update.content;
-    let activated = content != original;
-    if activated {
-        (effects.write_document)(file, &content, &original, "route_dispatch_queue").with_context(
-            || {
-                format!(
-                    "failed to converge queued dispatch for {} through editor IPC/disk",
-                    file.display()
-                )
-            },
-        )?;
-        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
-            || {
-                format!(
-                    "failed to sync snapshot after queueing dispatch for {}",
-                    file.display()
-                )
-            },
-        )?;
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "route_dispatch_queued file={} source={} appended={} already_present={} superseded={} component_created={} activated={} prompt={:?}",
-            file.display(),
-            source,
-            update.appended,
-            update.already_present,
-            update.superseded,
-            update.component_created,
+        return Ok(RouteQueueEnqueueOutcome {
+            prompt_text: update.prompt_text,
+            appended: update.appended,
+            already_present: update.already_present,
+            superseded: update.superseded,
+            component_created: update.component_created,
             activated,
-            update.prompt_text
-        ),
-    );
-    Ok(RouteQueueEnqueueOutcome {
-        prompt_text: update.prompt_text,
-        appended: update.appended,
-        already_present: update.already_present,
-        superseded: update.superseded,
-        component_created: update.component_created,
-        activated,
-    })
+        });
+    }
 }
 
 pub fn enqueue_exchange_slash_command_for_idle_drain(
@@ -192,46 +215,96 @@ pub fn activate_existing_route_queue_head(
     effects: RouteQueueEffects,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
     let _lock = acquire_route_queue_lock(file)?;
-    let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "route_queue_activation",
-    )?;
-    let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
-        return Ok(None);
-    };
-    let content =
-        agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
-    let activated = content != original;
-    if activated {
-        (effects.write_document)(file, &content, &original, "route_queue_activation")
-            .with_context(|| format!("failed to activate queue in {}", file.display()))?;
-        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op).with_context(
-            || {
-                format!(
-                    "failed to sync snapshot after activating queue for {}",
-                    file.display()
-                )
-            },
+    let mut attempt = 0usize;
+    loop {
+        attempt += 1;
+        let original = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "route_queue_activation",
         )?;
+        let Some(prompt_text) = inactive_route_queue_head_in_content(file, &original)? else {
+            return Ok(None);
+        };
+        let content =
+            agent_doc_queue::route_dispatch::activate_existing_route_queue_content(&original)?;
+        let activated = content != original;
+        if activated {
+            match (effects.write_document)(file, &content, &original, "route_queue_activation") {
+                Ok(()) => {
+                    agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)
+                        .with_context(|| {
+                            format!(
+                                "failed to sync snapshot after activating queue for {}",
+                                file.display()
+                            )
+                        })?;
+                }
+                Err(err)
+                    if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS
+                        && is_retryable_crdt_merge_error(&err) =>
+                {
+                    log_route_queue_write_retry(
+                        file,
+                        "route_queue_activation",
+                        attempt,
+                        &content,
+                        &original,
+                        &err,
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!("failed to activate queue in {}", file.display())
+                    });
+                }
+            }
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
+                file.display(),
+                source,
+                activated,
+                prompt_text
+            ),
+        );
+        return Ok(Some(RouteQueueEnqueueOutcome {
+            prompt_text,
+            appended: false,
+            already_present: true,
+            superseded: false,
+            component_created: false,
+            activated,
+        }));
     }
+}
+
+fn is_retryable_crdt_merge_error(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("recovery=retry_crdt_merge")
+}
+
+fn log_route_queue_write_retry(
+    file: &Path,
+    reason: &str,
+    attempt: usize,
+    attempted_content: &str,
+    expected_current: &str,
+    err: &anyhow::Error,
+) {
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_existing_queue_head_activated file={} source={} activated={} prompt={:?}",
+            "{reason}_retry file={} attempt={} max_attempts={} expected_hash={} attempted_hash={} reason=retry_crdt_merge error={}",
             file.display(),
-            source,
-            activated,
-            prompt_text
+            attempt,
+            ROUTE_QUEUE_MAX_WRITE_ATTEMPTS,
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(attempted_content),
+            agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
         ),
     );
-    Ok(Some(RouteQueueEnqueueOutcome {
-        prompt_text,
-        appended: false,
-        already_present: true,
-        superseded: false,
-        component_created: false,
-        activated,
-    }))
 }
 
 fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {

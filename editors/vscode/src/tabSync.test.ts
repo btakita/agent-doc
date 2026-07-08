@@ -14,7 +14,7 @@ import {
 } from './tabSync';
 
 describe('VS Code immediate focus handoff wiring', () => {
-    it('attempts PCP focus before tab-sync planner dedup can skip a rapid split switch', () => {
+    it('attempts Project Controller focus before tab-sync planner dedup can skip a rapid split switch', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
 
         const focusStart = source.indexOf('function focusExistingPaneForActiveEditor');

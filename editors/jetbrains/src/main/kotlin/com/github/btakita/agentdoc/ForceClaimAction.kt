@@ -41,6 +41,7 @@ class ForceClaimAction : AnAction() {
 
         Thread {
             try {
+                TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val cmd = mutableListOf(agentDoc, "claim", relativePath, "--force")
                 if (position != null) {
@@ -55,11 +56,10 @@ class ForceClaimAction : AnAction() {
                 val exitCode = process.waitFor()
                 if (exitCode == 0) {
                     TerminalUtil.showHint(project, output.ifEmpty { "Force-claimed $relativePath" })
+                    SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
                 } else {
                     TerminalUtil.notifyError(project, "Force claim failed (exit $exitCode):\n$output")
                 }
-
-                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim --force: ${ex.message}")
             }

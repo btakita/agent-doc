@@ -350,15 +350,19 @@ pub struct ControllerBootstrap {
 #[derive(Debug)]
 struct ControllerMemoryState {
     actor_store: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
+    state_ledger: agent_doc_state_backbone::EventLedger,
     state_projection: agent_doc_state_backbone::StateBackboneProjection,
     map_backend: &'static str,
 }
 
 impl ControllerMemoryState {
     fn load(project_root: &Path) -> Result<Self> {
+        let state_ledger = load_state_event_ledger(project_root)?;
+        let state_projection = state_ledger.project();
         Ok(Self {
             actor_store: load_actor_store(project_root)?,
-            state_projection: load_state_backbone_projection(project_root)?,
+            state_ledger,
+            state_projection,
             map_backend: "std_btree_map",
         })
     }
@@ -463,12 +467,26 @@ impl ControllerRuntime {
                 .memory
                 .lock()
                 .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+            memory.state_ledger.append(event.clone());
             memory.state_projection.apply(event);
             memory.state_projection.project_supervisor_recycle()
         };
         self.supervisor_recycle_graph.set(recycle);
         self.supervisor_recycle_waiters.notify_all();
         Ok(())
+    }
+
+    fn state_subscribe(
+        &self,
+        document_hash: &str,
+        last_epoch: u64,
+    ) -> Result<agent_doc_state_wire::WireSubscribe> {
+        self.memory
+            .lock()
+            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
+            .map(|memory| {
+                agent_doc_state_wire::subscribe(&memory.state_ledger, document_hash, last_epoch)
+            })
     }
 
     fn supervisor_recycle_projection(
@@ -6086,12 +6104,14 @@ agent:queue\n\
         // Construct directly (bypassing `ControllerRuntime::new`'s restart-recovery /
         // state-DB load) so the self-watchdog predicate is exercised in isolation.
         let state_projection = agent_doc_state_backbone::StateBackboneProjection::default();
+        let state_ledger = agent_doc_state_backbone::EventLedger::default();
         let supervisor_recycle_graph =
             ControllerSupervisorRecycleGraph::new(state_projection.project_supervisor_recycle());
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
                 actor_store: BTreeMap::new(),
+                state_ledger,
                 state_projection,
                 map_backend: "std_btree_map",
             }),

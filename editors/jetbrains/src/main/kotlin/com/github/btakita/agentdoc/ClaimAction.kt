@@ -63,6 +63,8 @@ class ClaimAction : AnAction() {
             val configured = fields["configured"] ?: return null
             return CrossSessionReject(paneId, paneSession, configured)
         }
+
+        internal fun shouldSyncLayoutAfterClaim(exitCode: Int): Boolean = exitCode == 0
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -91,6 +93,7 @@ class ClaimAction : AnAction() {
 
         Thread {
             try {
+                TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 val (exitCode, output) = runClaim(cwd, agentDoc, relativePath, position, force = false)
                 if (exitCode == 0) {
@@ -103,7 +106,6 @@ class ClaimAction : AnAction() {
                     promptCrossSessionChoice(project, cwd, agentDoc, relativePath, position, reject)
                 } else {
                     TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
-                    SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
                 }
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
@@ -187,6 +189,7 @@ class ClaimAction : AnAction() {
     ) {
         Thread {
             try {
+                TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 if (switchTo != null) {
                     val (setExit, setOut) = runSessionSet(cwd, agentDoc, switchTo)
                     if (setExit != 0) {
@@ -200,7 +203,9 @@ class ClaimAction : AnAction() {
                 } else {
                     TerminalUtil.notifyError(project, "Claim failed (exit $exitCode):\n$output")
                 }
-                SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
+                if (shouldSyncLayoutAfterClaim(exitCode)) {
+                    SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
+                }
             } catch (ex: Exception) {
                 TerminalUtil.notifyError(project, "Failed to run agent-doc claim: ${ex.message}")
             }

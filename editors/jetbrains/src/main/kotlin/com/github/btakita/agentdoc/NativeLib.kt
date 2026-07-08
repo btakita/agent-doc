@@ -199,18 +199,18 @@ interface AgentDocLib : Library {
         pane_id: String?,
     ): FfiJsonResult.ByValue
 
-    /** PCP-owned tmux focus projection. */
+    /** Project Controller-owned tmux focus projection. */
     fun agent_doc_tmux_focus_state_json(
         project_root: String?,
     ): FfiJsonResult.ByValue
 
-    /** PCP-owned document pane focus. */
+    /** Project Controller-owned document pane focus. */
     fun agent_doc_focus_document_pane_json(
         project_root: String?,
         document_path: String,
     ): FfiJsonResult.ByValue
 
-    /** PCP-owned tmux layout sync. */
+    /** Project Controller-owned tmux layout sync. */
     fun agent_doc_sync_tmux_layout_json(
         project_root: String?,
         columns_json: String,
@@ -476,8 +476,8 @@ interface AgentDocLib : Library {
     fun agent_doc_state_projection(documentHash: String): Pointer?
 
     /**
-     * Read the CPC→plugin turn-state projection JSON for a document path:
-     * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"cpc","realtime_steering":{...}}`.
+     * Read the Project Controller→plugin turn-state projection JSON for a document path:
+     * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"project_controller","realtime_steering":{...}}`.
      * The plugin observes this to render turn-in-flight UI and to decide whether a
      * forwarded operator prompt starts a fresh turn or would collide with an
      * in-flight response (the double-append guard). Defaults to the idle
@@ -607,7 +607,7 @@ interface AgentDocLib : Library {
      * client-id (mint one from a stable editor-process identity so two IDEs never
      * collide). When [init_state] is non-null/non-empty it bootstraps the replica
      * from that encoded state (e.g. the canonical bootstrap returned by the
-     * CPC `replica_register` ack). Returns 0 on success, negative on error.
+     * Project Controller `replica_register` ack). Returns 0 on success, negative on error.
      */
     fun agent_doc_replica_open(replica_id: Long, init_state: ByteArray?, init_len: Long): Int
 

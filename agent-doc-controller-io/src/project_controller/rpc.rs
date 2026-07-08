@@ -6742,6 +6742,7 @@ pub(crate) fn handle_request_locked(
         "tmux_layout_sync_state" => {
             controller_envelope(handle_tmux_layout_sync_state(&bootstrap_snapshot, request))
         }
+        "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "focus_document_pane" => {
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
@@ -6826,6 +6827,45 @@ pub(crate) fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<Str
             "error": format!("{err:#}")
         }))?),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct ControllerStateSubscribeResponse {
+    document_hash: String,
+    message: serde_json::Value,
+}
+
+fn handle_state_subscribe(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<ControllerStateSubscribeResponse> {
+    let file = request_file(&request)?;
+    let document_hash = request
+        .diagnostic_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|value| {
+            value
+                .get("document_hash")
+                .and_then(|hash| hash.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| agent_doc_hash::document_id_for_path(&file));
+    let last_epoch = request.generation.unwrap_or(0);
+
+    // Closeout writers still append state-backbone facts directly to the durable
+    // store in a few recovery-oriented paths. Refresh before serving editor
+    // state so the Project Controller projection remains the hot-path source and
+    // editor integrations never need to inspect sidecar files.
+    runtime.refresh_memory()?;
+    let message_json = runtime
+        .state_subscribe(&document_hash, last_epoch)?
+        .to_json();
+    let message = serde_json::from_str(&message_json).context("parse state_subscribe wire JSON")?;
+    Ok(ControllerStateSubscribeResponse {
+        document_hash,
+        message,
+    })
 }
 
 pub(crate) fn actor_record_from_authority(

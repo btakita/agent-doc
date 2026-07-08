@@ -485,6 +485,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-wire",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",

@@ -11,24 +11,144 @@ LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mol
 LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
 LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
 CRATES_IO_PUBLISH_ORDER = tmux-router \
-	agent-doc-element agent-doc-element-boundary agent-doc-element-icebox agent-doc-element-queue \
-	agent-doc-element-signals agent-doc-element-status agent-doc-element-unknown agent-doc-flow \
-	agent-doc-hash agent-doc-fs agent-doc-boundary-io agent-doc-lease agent-doc-log-time \
-	agent-doc-debounce agent-doc-markdown-ast agent-doc-ipc-protocol agent-doc-callback-io \
-	agent-doc-model-tier agent-doc-frontmatter agent-doc-config agent-doc-element-backlog \
-	agent-doc-element-done agent-doc-element-review agent-doc-memory agent-doc-merge \
-	agent-doc-project-config-io agent-doc-frontmatter-io agent-doc-prompt-cache \
-	agent-doc-prompt-cache-io agent-doc-prompt-lines agent-doc-diff agent-doc-element-exchange \
-	agent-doc-element-registry agent-doc-prompt-contract agent-doc-response-toc \
-	agent-doc-secret-redact agent-doc-session-accretion agent-doc-prompt-context agent-doc-sync \
-	agent-doc-syntax agent-doc-tmux agent-doc-tmux-commands agent-doc-tmux-io agent-doc-topic \
-	agent-doc-document agent-doc-queue agent-doc-template agent-doc-ffi agent-doc-turn \
-	agent-doc-owner-pane-io agent-doc-sqlite agent-doc-response-toc-io agent-doc-state-backbone \
-	agent-doc-document-realtime agent-doc-git agent-doc-git-io agent-doc-plugin-owner \
-	agent-doc-queue-io agent-doc-state-wire agent-doc-turn-executor agent-doc-turn-executor-tmux \
-	agent-doc-harness agent-doc-supervisor agent-doc-controller agent-doc-supervisor-io \
-	agent-doc-supervisor-process agent-doc-turn-scope-io agent-doc-turn-status-io \
-	agent-doc-watch-io agent-doc-work-graph agent-doc-workflow agent-doc-workflow-io \
+	agent-doc-element \
+	agent-doc-flow \
+	agent-doc-hash \
+	agent-doc-lease \
+	agent-doc-log-time \
+	agent-doc-prompt-cache \
+	agent-doc-secret-redact \
+	agent-doc-session-registry \
+	agent-doc-tmux \
+	agent-doc-tmux-commands \
+	agent-doc-topic \
+	agent-doc-debounce \
+	agent-doc-element-boundary \
+	agent-doc-element-icebox \
+	agent-doc-element-queue \
+	agent-doc-element-signals \
+	agent-doc-element-status \
+	agent-doc-element-unknown \
+	agent-doc-fs \
+	agent-doc-markdown-ast \
+	agent-doc-prompt-cache-io \
+	agent-doc-response-toc \
+	agent-doc-session-accretion \
+	agent-doc-syntax \
+	agent-doc-ipc-protocol \
+	agent-doc-lease-io \
+	agent-doc-markdown-lossless \
+	agent-doc-model-tier \
+	agent-doc-tmux-io \
+	agent-doc-callback-io \
+	agent-doc-frontmatter \
+	agent-doc-config \
+	agent-doc-element-backlog \
+	agent-doc-merge \
+	agent-doc-project-config-io \
+	agent-doc-turn-executor \
+	agent-doc-write-command-io \
+	agent-doc-element-done \
+	agent-doc-element-review \
+	agent-doc-frontmatter-io \
+	agent-doc-memory \
+	agent-doc-op-capture-io \
+	agent-doc-prompt-lines \
+	agent-doc-turn-executor-tmux \
+	agent-doc-work-graph \
+	agent-doc-diff \
+	agent-doc-diff-io \
+	agent-doc-element-exchange \
+	agent-doc-prompt-context \
+	agent-doc-prompt-contract \
+	agent-doc-element-registry \
+	agent-doc-harness \
+	agent-doc-document \
+	agent-doc-queue \
+	agent-doc-template \
+	agent-doc-ffi \
+	agent-doc-supervisor \
+	agent-doc-turn \
+	agent-doc-controller \
+	agent-doc-element-exchange-io \
+	agent-doc-memory-io \
+	agent-doc-owner-pane-io \
+	agent-doc-sqlite \
+	agent-doc-state-backbone \
+	agent-doc-sync \
+	agent-doc-turn-scope-io \
+	agent-doc-workflow \
+	agent-doc-document-realtime \
+	agent-doc-process-owner-io \
+	agent-doc-state-wire \
+	agent-doc-git \
+	agent-doc-plugin-owner \
+	agent-doc-git-io \
+	agent-doc-plugin-owner-io \
+	agent-doc-agent-io \
+	agent-doc-project-root-io \
+	agent-doc-admin-io \
+	agent-doc-archive-io \
+	agent-doc-ipc-forensics-io \
+	agent-doc-session-actor-io \
+	agent-doc-turn-status-io \
+	agent-doc-session-registry-io \
+	agent-doc-focus-io \
+	agent-doc-snapshot-io \
+	agent-doc-supervisor-io \
+	agent-doc-cycle-state-io \
+	agent-doc-gc-io \
+	agent-doc-merge-io \
+	agent-doc-ops-log-io \
+	agent-doc-run-context-io \
+	agent-doc-workflow-io \
+	agent-doc-capture-io \
+	agent-doc-element-backlog-io \
+	agent-doc-ipc-io \
+	agent-doc-session-accretion-io \
+	agent-doc-supervisor-process \
+	agent-doc-codex-hook-io \
+	agent-doc-crdt-relay-io \
+	agent-doc-state-observer-io \
+	agent-doc-supervisor-process-io \
+	agent-doc-watch-io \
+	agent-doc-compact-io \
+	agent-doc-controller-io \
+	agent-doc-queue-io \
+	agent-doc-sync-io \
+	agent-doc-test-support \
+	agent-doc-write-converge-io \
+	agent-doc-claim-io \
+	agent-doc-preflight-io \
+	agent-doc-flow-io \
+	agent-doc-document-realtime-io \
+	agent-doc-boundary-io \
+	agent-doc-element-backlog-runtime-io \
+	agent-doc-hooks-io \
+	agent-doc-lint-io \
+	agent-doc-prompt-io \
+	agent-doc-response-replay-io \
+	agent-doc-response-toc-io \
+	agent-doc-session-check-io \
+	agent-doc-status-io \
+	agent-doc-template-io \
+	agent-doc-prompt-context-io \
+	agent-doc-repair-io \
+	agent-doc-write-ipc-io \
+	agent-doc-commit-io \
+	agent-doc-run-io \
+	agent-doc-stream-io \
+	agent-doc-preflight-runtime-io \
+	agent-doc-start-io \
+	agent-doc-closeout-runtime-io \
+	agent-doc-start-runtime-io \
+	agent-doc-repair-runtime-io \
+	agent-doc-route-io \
+	agent-doc-run-runtime-io \
+	agent-doc-write-runtime-io \
+	agent-doc-codex-stop-io \
+	agent-doc-preflight-command-io \
+	agent-doc-repair-command-io \
 	agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"

@@ -310,12 +310,43 @@ Status as of 2026-07-05 in `src/agent-doc`:
   self-invocation detection; the preflight helper repairs also use the same
   current-document resolver. Session-check now has a crate-local
   `resolve_current_document` helper and the direct-patchback / JB cache-conflict /
-  late-IPC overapplication / unstarted prompt-bearing detectors use it. Remaining
-  direct document-I/O clusters are still load-bearing in commit, write,
-  write-converge, repair, preflight-io maintenance, session-check guard modules,
-  queue/backlog command IO, run/stream/compact adapters, sync/route/start helpers,
-  and command-only utilities; each must be classified as either realtime-current
-  document access, explicit detached-disk/audit access, or sidecar/metadata IO.
+  late-IPC overapplication / unstarted prompt-bearing detectors and committed
+  HEAD-response visibility checks use it. Remaining direct document-I/O clusters
+  are still load-bearing in commit, write, write-converge, repair, preflight-io
+  maintenance, sync helpers outside sync-status/frontmatter writeback, resync
+  finish-turn progress hashing, and pane-repair harness resolution, and
+  command-only utilities outside focused status writeback, claim, focused start
+  preparation/runtime helpers, queue-continuation production callers, and
+  session-check committed-response visibility, closeout pending-maintenance, and
+  Codex Stop-hook queue recovery, document hook frontmatter reads, and prompt
+  command IO, boundary command IO, response-TOC command IO, and response-replay
+  dedupe command IO, finalize lint-gate IO, read command IO, outline command
+  IO, and read-only root command adapters for `auto-dag`, cleanup fallback,
+  layout, parallel, and plan rendering, plus root mutation command adapters for
+  convert, exchange, migrate, mode, and patch, notify/history mutation
+  adapters, queue-dispatch context IO, reset command IO, and session-actor
+  committed-cycle dirty checks, sync status/frontmatter warning writeback,
+  resync finish-turn progress hashing, and pane-repair harness resolution.
+  Route/orchestrate handoff, ordered-task dispatch, backlog command IO,
+  queue-consume helper edges, claim command IO, boundary command IO,
+  stream/compact adapters, queue-continuation production callers, Codex Stop-hook
+  queue recovery, document hook frontmatter reads, prompt command IO,
+  response-TOC command IO, response-replay dedupe command IO, finalize lint-gate
+  IO, read command IO, outline command IO, read-only root command adapters for
+  `auto-dag`, cleanup fallback, layout, parallel, and plan rendering,
+  root mutation command adapters for convert, exchange, migrate, mode, and
+  patch, notify/history mutation adapters, queue-dispatch context IO,
+  reset command IO, session-actor committed-cycle dirty checks,
+  sync status/frontmatter warning writeback, resync finish-turn progress hashing,
+  pane-repair harness resolution, session-check guard-command production reads,
+  and the write-runtime
+  `run_entry` / write-IPC prewrite, payload, and retry helpers have started
+  using the current-document resolver/effect boundary. Each remaining direct
+  access must be classified as either realtime-current document access, explicit
+  detached-disk/audit access, or sidecar/metadata IO; the current remaining
+  root-crate raw-file matches are classified as artifact JSON/log scanning in
+  `ops_report`, bootstrap document creation in `init`, and `#[cfg(test)]`
+  orchestration fakes.
 - Closeout recovery diagnostics now use the projection-aware cycle view for
   stuck-captured-cycle detection, compacted committed-capture reconciliation,
   recovery-state classification, evidence summaries, and open-cycle recovery
@@ -333,6 +364,471 @@ Status as of 2026-07-05 in `src/agent-doc`:
   `session-check` command flow. They still use compatibility cycle fields for
   detailed pending/backlog payloads until those facts move into the backbone,
   but lazily phase/capture state wins over stale open JSON for guard evaluation.
+- Captured response guard payloads now have a typed closeout projection. The
+  `ResponseCaptured` closeout fact can carry the redacted response body,
+  `agent-doc-capture-io::capture_response` appends that payload into the state
+  backbone, and session-check guards for blocked follow-up, gated-phase split,
+  queue audit partial completion, pending capture/done, queue-head provenance,
+  partial closeout state, and write-time pending checks read the projected body
+  before falling back to capture JSON. A stale or missing capture sidecar can no
+  longer suppress those guards when matching lazily cycle/capture/body facts are
+  present.
+- Closeout recovery evidence gathering and stuck-captured-cycle detection now
+  read captured response text from the typed closeout projection before capture
+  JSON. Fresh recovery evidence and stuck-cycle warnings can still prove a
+  matching response body after the capture sidecar is missing. Captured-response
+  projection facts now also carry the response-time visible/snapshot baseline
+  hashes, so fresh queue-only drift proof no longer requires compatibility
+  capture JSON when matching lazily cycle/capture/body/hash facts are present.
+- Repair replay validation now uses the realtime-resolved current document that
+  repair already loaded instead of asking capture IO to reread `file` from disk.
+  `agent-doc-capture-io` exposes `validate_replay_with_current_content` and
+  `replay_baseline_drifted_with_current_content`, and repair uses those helpers
+  for already-applied dedupe validation, stale-capture retirement evidence, and
+  final replay-baseline validation. Repair commit-boundary recovery and
+  committed-historical repair also mark active capture state with
+  `mark_committed_with_current_content` so capture hash refreshes use the same
+  resolved current document. The legacy disk-reading wrappers remain for
+  unmigrated callers; the repair hot path no longer treats disk as the active
+  document authority for capture replay/commit checks.
+- Post-commit capture closeout now threads the same resolved current document
+  content used by `agent-doc-git-io` post-commit cleanup into capture state:
+  `PostCommitCleanupEffects::mark_capture_committed` requires caller-supplied
+  current content, and `agent-doc-commit-io` calls
+  `mark_committed_with_current_content` rather than letting capture IO reread
+  `file` from disk. The sync test runtime's pending/commit helpers also pass
+  current content into capture IO, keeping the compatibility wrappers isolated
+  to older or explicitly unmigrated callers.
+- Commit materialization guards now use the same typed captured-response
+  projection before active capture JSON. The already-current / staged-snapshot
+  guard and active response-target classifier can still fail closed on a missing
+  captured response when the capture sidecar has gone stale or missing, as long
+  as the lazily cycle/capture/body projection matches.
+- Queue-consume commit seam proof now reads captured response text from the
+  typed closeout projection before capture JSON. Answered free-text head
+  detection and prompt-drift response targeting can consume a matching
+  lazily cycle/capture/body projection even after the active capture sidecar is
+  stale or missing; capture JSON is retained only as a compatibility fallback.
+- Post-response hook metadata now reads active capture payloads from the typed
+  closeout projection before active capture JSON. `post_write` / `post_commit`
+  hook metadata and tsift memory closeout can still receive the matching
+  capture id, response hash, and response body when capture JSON is missing;
+  capture JSON remains the compatibility fallback for older projection gaps.
+- Document hook frontmatter reads now resolve the active session document
+  through `agent_doc_document_realtime_io::try_resolve_current_document_content`
+  before parsing configured `session_start`, `post_write`, and `post_commit`
+  hooks. Hook dispatch therefore sees the editor-current document model when an
+  editor owns the buffer instead of probing stale disk for hook configuration,
+  and static coverage rejects raw `std::fs::read_to_string(file)` in
+  `agent-doc-hooks-io`.
+- Prompt command IO now resolves the active session document through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` before
+  extracting the frontmatter session id for prompt polling and prompt-answer
+  navigation. Prompt parsing and tmux navigation stay in the focused tmux
+  adapters, but `agent-doc-prompt-io` no longer probes stale disk to decide the
+  target session. Static coverage rejects raw `std::fs::read_to_string(file)` in
+  `agent-doc-prompt-io`.
+- Boundary command IO now resolves and mutates the active session document
+  through `agent_doc_document_realtime_io` before inserting a boundary marker.
+  The command still owns the boundary-specific editor refresh signal, but it no
+  longer reads stale disk or uses a temp-file rename as the document write
+  authority. Static coverage rejects the old raw read/temp-write/rename pattern
+  in `agent-doc-boundary-io`.
+- Response-TOC command IO now resolves live response sections through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` for both
+  `response-toc` live entries and `response-fetch live:<n>` windows. Archive
+  lookups stay on the sqlite archive index, but live/current response inspection
+  no longer treats disk as the hot-path document authority. Static coverage
+  rejects raw active-document reads in `agent-doc-response-toc-io`.
+- Response-replay dedupe command IO now resolves the active session document
+  through `agent_doc_document_realtime_io::try_resolve_current_document_content`
+  before applying focused duplicate-response policy. The deduped write and
+  snapshot update remain injected command effects, but the command no longer
+  uses stale disk as the read authority for deciding whether a duplicate response
+  exists. Static coverage rejects raw active-document reads in
+  `agent-doc-response-replay-io`.
+- Finalize lint-gate IO now uses an explicit read-authority split before
+  applying frontmatter/project lint-mode policy and the in-process tagpath
+  dialect check: normal finalize resolves through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`, while
+  `--force-disk` finalize calls the named
+  `resolve_disk_current_document_content` path. Tagpath and lint-mode ownership
+  remain in their focused crates, and static coverage rejects raw active-document
+  reads in `agent-doc-lint-io`.
+- Read command IO now resolves the active session document through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` before
+  printing the full document or parsing a named component body. Static coverage
+  rejects raw active-document reads in `src/read.rs`.
+- Outline command IO now resolves the active session document through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` before
+  rendering markdown outline output. Static coverage rejects raw active-document
+  reads in `src/outline_cmd.rs`.
+- Read-only root command adapters for `auto-dag`, cleanup fallback
+  summarization, layout, parallel, and plan rendering now resolve active session
+  documents through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`.
+  Schedule/log sidecar reads remain ordinary file IO, while static coverage
+  rejects raw active-document reads in `src/auto_dag.rs`, `src/cleanup_cmd.rs`,
+  `src/layout.rs`, `src/parallel.rs`, and `src/plan.rs`.
+- Root mutation command adapters for convert, exchange, migrate, mode, and patch
+  now resolve active session documents through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` and
+  write document mutations through
+  `agent_doc_document_realtime_io::atomic_write_through_authority`. Snapshot and
+  schedule sidecar writes remain ordinary file IO. Static coverage rejects raw
+  active-document reads/writes in `src/convert.rs`, `src/exchange.rs`,
+  `src/migrate.rs`, `src/mode.rs`, and `src/patch.rs`.
+- Queue-dispatch context IO now resolves session/frontmatter routing state
+  through `agent_doc_document_realtime_io::try_resolve_current_document_content`
+  before selecting supervisor/tmux dispatch paths. Notify and history restore
+  command mutations also resolve active session documents through the realtime
+  resolver and write document mutations through
+  `agent_doc_document_realtime_io::atomic_write_through_authority`; git object
+  reads and snapshot sidecar writes remain ordinary file IO. Static coverage
+  rejects raw active-document reads/writes in `src/queue_dispatch.rs`,
+  `src/notify.rs`, and `src/history.rs`.
+- Reset command IO now routes normal and sidecar-rebuild current-document reads
+  through `agent_doc_document_realtime_io::try_resolve_current_document_content`
+  while keeping the explicit `--force-disk` escape hatch on the named
+  `resolve_disk_current_document_content` path. Session-actor committed-cycle
+  dirty checks now read the projection-aware committed cycle phase/hash and
+  compare the stored committed hash against realtime current-document authority
+  instead of raw disk. Static coverage rejects raw active-document reads in
+  `src/reset.rs` and `src/session_actor_cmd.rs`.
+- Sync status/frontmatter warning writeback now resolves and mutates the active
+  session document through the installed `SyncRuntimeEffects` document authority
+  callbacks. The CLI binds those callbacks to
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` and
+  `agent_doc_document_realtime_io::atomic_write_through_authority`, while tests
+  keep a disk-backed effect implementation. Static coverage rejects the old raw
+  production status read/write path in `agent-doc-sync-io/src/lib.rs` and
+  verifies the CLI realtime binding.
+- Resync finish-turn progress hashing and sync pane-repair harness resolution now
+  read active session documents through the same `SyncRuntimeEffects` document
+  authority callbacks instead of raw disk. Static coverage rejects raw production
+  active-document reads in `agent-doc-sync-io/src/resync.rs` and
+  `agent-doc-sync-io/src/sync/pane_repair.rs` while preserving disk-backed test
+  effects.
+- Write-runtime queue closeout and write-converge removal detection now read the
+  captured response body from the typed closeout projection before active
+  capture JSON. Queue-consumption permission, answered free-text strikes, and
+  active-response-removed convergence checks keep working when the matching
+  lazily cycle/capture/body projection exists but the capture sidecar is missing.
+- Missing-pane closeout recovery diagnostics now use the projection-aware cycle
+  view and check the typed captured-response projection before active capture
+  JSON when reporting durable capture presence. A stale or missing capture
+  sidecar no longer makes sync recovery logs claim `durable_capture=false` when
+  the matching lazily cycle/capture/body projection exists. Inspect-only
+  missing-pane repair phase reporting, dead-pane phase labels, and open-cycle
+  pane protection helpers also use the projection-aware cycle view, so stale
+  open JSON cannot report or protect a pending phase after a terminal closeout
+  projection exists.
+- Orchestrate route dispatch now closes preflight handoff cycles through the
+  projection-aware cycle view and snapshots the current document resolver image
+  rather than raw disk. Ordered task dispatch also parses frontmatter from the
+  current-document resolver after task injection, and fresh-agent launch /
+  streaming launch frontmatter resolution, batch-change closeout, and prompt
+  injection use the same resolver. Route task discovery for `--from-exchange`,
+  `--from-queue`, prompt-preset canonicalization, prompt preset block loading,
+  and exchange-source mutation checks also resolve current document content
+  through the realtime boundary instead of treating disk as the hot-path content
+  authority.
+- Route queue dispatch and route document preparation now resolve active session
+  documents through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` before
+  queue enqueue/activation, inactive-head checks, session-frontmatter
+  preparation, and duplicate prompt cleanup. Existing route write effects still
+  own convergence/write authority, while static coverage rejects raw
+  `std::fs::read_to_string(file)` active-document probes in
+  `agent-doc-route-io/src/queue_dispatch.rs` and
+  `agent-doc-route-io/src/document_prep.rs`.
+- Remaining route startup/dispatch closeout readers now use the same realtime
+  document authority for startup harness resolution, managed capability proof
+  frontmatter checks, authoritative actor expected-harness matching, and
+  closeout-block active queue-head classification. Static coverage rejects raw
+  active-document reads in `agent-doc-route-io/src/startup_harness.rs`,
+  `agent-doc-route-io/src/authoritative_actor.rs`, and
+  `agent-doc-route-io/src/closeout_drain.rs`; the remaining route raw write is
+  a `#[cfg(test)]` effect fixture.
+- Cycle-state pipeline frontmatter mirrors no longer read the active document
+  inside `agent-doc-cycle-state-io`. The `PipelineFrontmatterEffects` port now
+  requires a current-document read, and the runtime implementation resolves it
+  through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`.
+  Phase-event session logging consumes caller-supplied current content instead
+  of re-reading `file`; progress-only transitions without current content skip
+  the best-effort log rather than treating disk as authority. Static coverage
+  pins the port/realtime split and rejects raw production active-document reads
+  in `agent-doc-cycle-state-io/src/pipeline_frontmatter.rs` and the
+  cycle-state phase logger.
+- Status writeback now projects from `StatusWriteEffects::current_document_content`
+  on the normal `write --status` path, implemented by
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`, before
+  handing the mutation to write convergence. The `--force-disk` branch resolves
+  through the explicit disk-authority helper and still records provenance and
+  audit logging. A regression covers an editor-current status body being
+  preserved while stale disk status text is ignored, and the static ownership
+  guard now requires the realtime/disk read-authority split in
+  `agent-doc-status-io`.
+- Direct-run startup repair now classifies its malformed-frontmatter fix as an
+  explicit detached-disk read and authority-routed write: the helper reads
+  through `agent_doc_document_realtime_io::resolve_disk_current_document_content`
+  and persists the repaired frontmatter with
+  `agent_doc_document_realtime_io::atomic_write_through_authority` instead of
+  raw `std::fs` document I/O. Focused regressions cover tab-indentation repair
+  and missing-file no-op behavior, and the direct-run static guard now rejects
+  the old raw `read_to_string(file)` / repair `write(file, ...)` pattern.
+- Start runtime preparation now resolves the startup document through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`, writes
+  generated session frontmatter with
+  `agent_doc_document_realtime_io::atomic_write_through_authority`, and routes
+  crash-replayed queue-item merges through the same write authority. The
+  start-IO static guard rejects the old raw startup `read_to_string(file)` and
+  generated-session / queue-replay `write(file, ...)` patterns.
+- Start-runtime restart and idle-watch helpers now read through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` for
+  restart frontmatter, HEAD convergence, active queue head detection, and
+  forced context-reset reason checks. A regression proves an unsaved
+  editor-current buffer blocks HEAD convergence even when disk still matches
+  `HEAD`, and the start-runtime static guard rejects the old raw
+  `read_to_string(file)` shape in `run.rs` and `idle_watch.rs`.
+- Backlog command IO now reads the active session document through injected
+  `BacklogCommandEffects` instead of direct `std::fs::read_to_string(file)`.
+  The focused `agent-doc-element-backlog-runtime-io` provider maps normal
+  command reads to
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` and
+  maps `--force-disk` reads to
+  `agent_doc_document_realtime_io::resolve_disk_current_document_content`; the
+  remaining direct `std::fs::write(file, ...)` in `backlog_cmd.rs` is the
+  explicit detached-disk `--force-disk` write branch. CLI backlog/review
+  commands now reuse that focused runtime provider instead of a local duplicate,
+  and static ownership coverage rejects raw command document reads and
+  CLI-local backlog runtime effects.
+- Queue-consume helper edges no longer expose file-reading adapters for
+  diff-based consume decisions, skip diagnostics, or active-head response
+  targeting. Direct-run, write-runtime, and Codex Stop-hook callers now resolve
+  current document content through their existing realtime boundary and call the
+  pure queue policy on that content. `QueueConsumeWriteEffects::force_disk_document_content`
+  is implemented explicitly by the CLI and write-runtime force-disk paths via
+  `agent_doc_document_realtime_io::resolve_disk_current_document_content`, so a
+  force-disk queue consume is a named detached-disk read rather than a raw
+  `std::fs::read_to_string(file)` fallback. Static ownership coverage rejects
+  the removed queue file-reading adapters and requires runtime callers to resolve
+  current content before queue diagnostics.
+- Codex Stop-hook queue recovery now resolves active document content through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` before
+  active-session queue prompt detection, repeated queue response recovery, and
+  auto-close queue-completion proof. The remaining Stop-hook queue policy still
+  calls pure queue helpers, but it no longer probes the active session document
+  on disk to decide queue head identity or completion ids. Static coverage
+  rejects reintroducing raw `std::fs::read_to_string(file)` in
+  `agent-doc-codex-stop-io`.
+- Stream command IO now reads the active session document through
+  `StreamRuntimeEffects::current_document_content` instead of direct
+  `std::fs::read_to_string(file)`, and the CLI runtime maps those reads to
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`.
+  Session-id frontmatter creation, resume-id updates, stream content-ours
+  fallback, and direct flush fallback all route through the same runtime
+  authority boundary; the generated session frontmatter write continues through
+  `StreamRuntimeEffects::atomic_write`, implemented by the CLI with
+  `agent_doc_document_realtime_io::atomic_write_through_authority`. Static
+  coverage rejects the removed raw stream document read/write patterns and
+  requires the CLI stream effects provider to bind current-document reads to
+  realtime IO.
+- Stream final-response capture now also uses the runtime current-document
+  authority: `agent-doc-capture-io` exposes
+  `capture_response_with_current_content`, `agent-doc-repair-io` exposes
+  `save_pending_with_current_content`, and CLI stream/sync save-pending paths
+  pass realtime-resolved current content before writing capture/pending
+  projections. The legacy `capture_response(file, response)` wrapper remains for
+  unmigrated callers, but stream capture no longer forces capture IO to reread
+  the active document from disk.
+- Stream partial-response checkpoints now have the same current-content escape
+  hatch: `PartialCheckpointWriter::maybe_checkpoint_with_current_content`
+  persists checkpoint metadata from caller-supplied current document content,
+  and both `agent-doc-stream-io` plus orchestrated exchange streaming resolve
+  current content through realtime IO before calling capture IO. The legacy
+  `maybe_checkpoint` wrapper remains for old tests/callers; stream hot paths no
+  longer ask capture IO to read disk just to hash/parse checkpoint baselines.
+- Compact command IO now reads the active session document through
+  `CompactRuntimeEffects::current_document_content` on the normal path and
+  `CompactRuntimeEffects::force_disk_document_content` only for named
+  detached-disk probes: `--force-disk` initial parse, editor-buffer flush
+  polling, and post-write working-tree verification before commit. The CLI
+  runtime maps normal reads to
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`, maps
+  force-disk probes to
+  `agent_doc_document_realtime_io::resolve_disk_current_document_content`, and
+  keeps compact writes on
+  `agent_doc_document_realtime_io::atomic_write_through_authority`. Static
+  coverage rejects the removed raw compact document reads and requires the CLI
+  compact effects provider to bind current vs. disk authority explicitly.
+- Claim command IO now reads and mutates the active session document through
+  `ClaimRuntimeEffects::current_document_content` and
+  `ClaimRuntimeEffects::atomic_write` instead of direct
+  `std::fs::read_to_string(file)` / `std::fs::write(file, ...)` calls. Empty-file
+  auto-scaffolding, session UUID materialization, default template/CRDT
+  frontmatter insertion, and default component scaffolding all route through
+  the injected authority boundary; the CLI provider maps reads to
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` and
+  writes to `agent_doc_document_realtime_io::atomic_write_through_authority`.
+  Static coverage rejects the removed raw claim document reads/writes while
+  leaving claims-log and registry sidecar IO as ordinary sidecar/metadata IO.
+- Repair-runtime missing-committed-response and dedupe-only recovery callbacks
+  now read the active session document through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` instead
+  of direct `std::fs::read_to_string(file)`. Those runtime callbacks already
+  guard and write through `agent_doc_document_realtime_io` before snapshot/commit
+  closeout, and static coverage rejects reintroducing raw active-document reads
+  in `agent-doc-repair-runtime-io`.
+- Repair core's `--force-disk` override path now reads through
+  `agent_doc_document_realtime_io::resolve_disk_current_document_content` instead
+  of direct `std::fs::read_to_string(file)`, while the normal repair path keeps
+  using `try_resolve_current_document_content`. This makes the repair read
+  authority split explicit: realtime-current for normal repair and named
+  detached-disk authority only for force-disk repair overrides. Static coverage
+  rejects raw active-document reads in `agent-doc-repair-io`.
+- Write-runtime `run_entry` now routes its active document reads through named
+  current-vs-disk authority helpers. Normal append/template/stream prewrite and
+  merge checks, IPC consumed-content checks, and repair apply helpers use
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`; explicit
+  `--force-disk` append/template/stream prewrite and merge checks, force-disk
+  repair apply checks, and the file-IPC payload baseline reference use
+  `agent_doc_document_realtime_io::resolve_disk_current_document_content`. Static
+  coverage rejects raw active-document reads and direct bypasses of the helper
+  split in `agent-doc-write-runtime-io/src/run_entry.rs`, and a force-disk
+  finalize regression covers an editor-attached/model-missing document staying
+  on the named disk-authority path instead of failing through realtime-current
+  resolution.
+- Write-IPC payload and retry transport now routes active session-document reads
+  through a focused `agent-doc-write-ipc-io` authority helper. Patch synthesis,
+  reposition payload baseline/working-document reads, socket/file IPC baseline
+  capture, mid-turn cycle-state refresh, file-IPC dedupe, and post-delivery
+  before-content proof first try
+  `agent_doc_document_realtime_io::try_resolve_current_document_content` and then
+  fall back through named `resolve_disk_current_document_content` sources where
+  IPC retry material is allowed to use the visible file as explicit
+  detached-disk evidence. Static coverage rejects raw active-document reads in
+  `agent-doc-write-ipc-io/src/lib.rs` and `src/transport.rs`, while preserving
+  ordinary patch-file sidecar reads. The IPC timeout retry regression covers an
+  editor-attached/model-missing case retaining its queued patch for retry instead
+  of losing the response before file IPC can pick it up.
+- Queue-continuation production callers now resolve active document content at
+  their runtime/command boundary and pass it into
+  `agent_doc_queue_io::queue_continuation::detect_for_content`, which keeps
+  queue continuation policy, snapshot loading, and recycle-yield handling in
+  queue IO without letting those callers fall back to a raw file read.
+  Direct-run owned-pane deferral, session-check continuation reporting, route
+  busy-autoloop deferral, MCP session-check reporting, and session-actor
+  busy-clear preemption all use named realtime document-authority sources before
+  evaluating continuation. Static coverage requires those production callers to
+  use the content-based detector and leaves the file-backed detector as a
+  compatibility wrapper for test and legacy callers.
+- Session-check committed-response visibility now compares `HEAD` response
+  headings against content from the crate-local current-document resolver instead
+  of a preflight raw disk probe. The live-buffer tolerance for a latest committed
+  response that is visible in the editor, and the missing-response interruption
+  when it is not visible, now share the same realtime-current authority path.
+  Static coverage rejects reintroducing direct `std::fs::read_to_string(file)`
+  in `agent-doc-session-check-io/src/command.rs`.
+- Template IO no longer reads or writes active session documents directly for
+  template-info rendering, pending/backlog patch normalization, response-capture
+  canonicalization, or partial materialization retry diagnostics. Those readers
+  resolve through
+  `agent_doc_document_realtime_io::try_resolve_current_document_content`; the
+  pending/backlog normalization write keeps the visible-write idle guard and then
+  writes via `agent_doc_document_realtime_io::atomic_write_through_authority`.
+  Static coverage pins the realtime read/write calls and rejects direct active
+  document `read_to_string(file)` / `write(file, ...)` patterns in the template
+  IO production files.
+- Closeout pending-maintenance gating now records whether the preflight-current
+  document already required tracked-work maintenance as an optional typed
+  `PreflightStarted` / closeout-projection fact. `session-check` consumes that
+  fact before reading document content: `Some(true)` requires maintenance,
+  `Some(false)` authorizes status-only closeout skips, and missing legacy facts
+  fail through the current-document resolver without probing disk when editor
+  authority is unavailable. The previous non-authoritative disk negative probe
+  in `write_pending_checks.rs` is removed, and static coverage rejects raw
+  production `read_to_string(file)` probes in that module while preserving test
+  fakes.
+- Direct-run no-change, owner-pane queue-edit defer, and dispatch-timeout
+  diagnostics now read cycle phase/capture state through
+  `load_with_closeout_projection` before compatibility cycle JSON. A stale open
+  cycle sidecar can no longer be the sole authority for these direct-run
+  decisions after the lazily closeout projection has moved the cycle terminal.
+  Static ownership coverage pins these readers to the projection-aware loader
+  while leaving transition writers free to maintain the JSON projection.
+- Route closeout drain now also uses `load_with_closeout_projection` for the
+  initial open-cycle decision and the concurrent-finalize retry re-read. Route
+  dispatch therefore observes lazily terminal/advanced closeout facts before a
+  stale open JSON sidecar when deciding whether to drain, retry, or unblock
+  dispatch. Route cycle-ack polling, pane-resolution baselines, and fresh-start
+  startup baselines also use the projection-aware cycle view, so stale open JSON
+  cannot hide an acknowledged projected closeout or feed stale baseline state
+  into route dispatch policy.
+- Session-check command closeout handling now uses the shared
+  `load_with_closeout_projection` reader instead of manually loading the cycle
+  JSON and applying a private projection overlay. Projection-only open-cycle
+  diagnostics still use `load_closeout_projection`, but sidecar-backed phase and
+  capture decisions now flow through the same projection-aware loader as the
+  focused guard adapters.
+- State-observer advisory closeout snapshots now also use the projection-aware
+  cycle view, so `adstatechart_snapshot` observability follows committed or
+  abandoned closeout facts even when the compatibility cycle JSON is stale-open.
+- Ops-log turn attribution now reads the latest closeout projection before the
+  compatibility cycle sidecar. Diagnostic lines therefore carry the lazily
+  projected turn id even when the JSON sidecar is stale on an older cycle.
+- The editor-facing FFI turn projection now reads the projection-aware cycle
+  view before mapping cycle phase into the CPC turn projection. A stale open
+  cycle sidecar can no longer make plugins render an in-flight turn after a
+  terminal closeout projection exists.
+- Serve active-response polling and browser save routing now use the
+  projection-aware cycle view before compatibility cycle JSON. A stale open
+  sidecar can no longer make the web UI keep streaming a partial response or
+  send browser edits through `write --commit` after a terminal closeout
+  projection exists.
+- Response-capture IO now uses the projection-aware cycle view for partial
+  checkpoint writer cycle ids, checkpoint acceptance, capture ids, and active
+  capture lookup. A stale open cycle sidecar can no longer keep partial
+  checkpoints flowing after a committed closeout projection exists.
+- Write IPC payload and diagnostic cycle-id tags now read the latest closeout
+  projection before the compatibility cycle sidecar. Late socket/file IPC
+  payloads therefore fence against the projected current turn rather than an
+  older stale cycle JSON row.
+- Preflight route-queue snapshot recovery now uses the projection-aware cycle
+  view before deciding whether an existing cycle is still open. Stale open JSON
+  can no longer suppress snapshot-boundary auto-recovery after a terminal
+  closeout projection exists.
+- Workflow doctor cycle-state diagnostics now use the projection-aware cycle
+  view, so doctor output reports lazily terminal closeout facts instead of stale
+  open compatibility JSON.
+- Commit IO post-commit cleanup effects now use the projection-aware cycle view
+  for terminal-cycle checks before falling back to compatibility sidecar state.
+- Project-controller session-actor closeout persistence now uses the
+  projection-aware cycle view before writing closeout facts into SQLite. Stale
+  open cycle JSON can no longer make the controller persist an open phase after
+  a committed closeout projection exists.
+- The shared Lazily `CycleContext` cycle-state slot now reads through the
+  projection-aware loader, so callers of `rc.cycle_state()` observe terminal
+  closeout facts even when the compatibility sidecar is stale-open.
+- Watch-daemon in-flight suppression now uses the projection-aware cycle view
+  before applying freshness policy. Stale open cycle JSON can no longer suppress
+  reactive watch retries after a terminal closeout projection exists.
+- Route-owned supervisor completion polling now loads cycle state through a
+  projection-aware helper before deciding whether a route-owned cycle has
+  committed since startup. Stale open sidecars can no longer keep the owned pane
+  completion loop waiting after terminal closeout projection exists.
+- Session-actor debug cycle-phase reporting now reads the projection-aware
+  cycle view, so the debug dump reports terminal closeout facts instead of stale
+  open compatibility JSON.
+- Write-converge live-prompt drift recovery and visible-write payload cycle tags
+  now read projected closeout state before compatibility cycle JSON. Late
+  convergence retries therefore attach to the latest projected turn instead of
+  an older stale-open sidecar.
+- Preflight command open-cycle checks and the session-check
+  committed-without-response-body guard now read through the projection-aware
+  cycle loader. These production hot paths no longer re-read raw cycle JSON for
+  closeout phase or guard evidence after a projected closeout exists.
 
 The queue/supervisor bullets are Phase 3 sidecar-retirement slices for narrow
 gates. The Phase 1 hook closes the first raw preflight failure shape, but it is
@@ -440,9 +936,13 @@ Initial implementation status:
   classification now consumes projected response-body evidence before the
   `stuck_captured_cycle` sidecar path. Snapshot/head and snapshot/visible drift
   classification also consumes projected drift evidence before compatibility
-  snapshot reads. Remaining write/finalize work is to make every detailed
-  classifier and payload reader prefer those projections before compatibility
-  sidecars.
+  snapshot reads. Fresh recovery evidence gathering and stuck-cycle detection
+  now also prefer the captured-response projection before capture JSON for body
+  proof, fresh queue-only drift proof uses projected response baseline hashes
+  before capture JSON hashes, and write-runtime/converge response-body readers
+  do the same for queue closeout and active-response-removal checks. Remaining
+  write/finalize work is to make every detailed classifier and payload reader
+  prefer those projections before compatibility sidecars.
 - Closeout recovery diagnostics and command payloads now read the
   projection-aware cycle view before using cycle sidecar details. Projection-only
   open cycles produce `open_cycle` recovery and include the projected cycle id,
@@ -450,21 +950,42 @@ Initial implementation status:
   is to replace the remaining compatibility-only snapshot/capture/hash evidence
   readers with the new typed recovery-evidence projection where those facts are
   the real authority.
+- Repair preflight cancellation and stale-preflight repair now use a shared
+  captured-response proof helper that reads the typed closeout projection before
+  capture JSON compatibility files. A matching `ResponseCaptured` body
+  projection, or projected capture id plus response hash, protects the cycle even
+  when the capture sidecar is missing; stale empty-cycle repair only treats the
+  cycle as empty after that projection-first proof check fails.
+- Repair committed-capture materialization checks now read the projected
+  committed captured-response body before `latest_committed` capture JSON. A
+  committed closeout projection can prove the response body is already in HEAD
+  even after the committed capture sidecar is missing; the JSON record remains
+  the compatibility fallback for older projection gaps.
+- Repair historical committed-capture replay now uses the same committed
+  captured-response projection payload before `latest_committed` capture JSON.
+  Orphaned-prompt replay can recover from a committed closeout projection after
+  the committed capture sidecar is missing, while the legacy JSON record remains
+  only the fallback when no matching projected response body exists.
 - Session-check blocked-followup, gated-phase split, queue-audit
   partial-completion, pending, response, queue-head/provenance, partial-staging,
   write-time pending, and recoverable cache-conflict readers now use the
-  projection-aware cycle view. Remaining cutover: replace detailed
-  backlog/pending/hash/proof payload reads with typed backbone facts, then use
-  cycle/capture/snapshot sidecars only as compatibility projections or recovery
-  evidence.
+  projection-aware cycle view, and their captured-response body payloads now
+  prefer the typed closeout projection before capture JSON compatibility
+  fallback. Remaining cutover: replace detailed backlog/pending/hash/proof
+  payload reads with typed backbone facts, then use cycle/capture/snapshot
+  sidecars only as compatibility projections or recovery evidence.
 - Commit-proof status: the cycle-state bridge still emits a compatibility
   content-hash `CommitObserved` when that layer lacks git context, but the git
   closeout path now appends the exact `HEAD` SHA after real and no-op closeout.
   `agent-doc-cycle-state-io::load_latest_terminal_closeout_proof` exposes the
   typed terminal proof projection for structured readers; closeout and CLI
   assertions now prefer that projection instead of parsing the proof ledger.
-  Remaining cutover is to route any new production proof guard through that
-  projection proof instead of trusting terminal sidecar state.
+  Commit materialization checks now also prefer the typed captured-response
+  projection before active capture JSON, and queue-consume commit seam response
+  proof plus post-response hook metadata use the same projection before capture
+  JSON fallback. Remaining cutover is to route any new production proof guard
+  through terminal/captured-response projections instead of trusting terminal or
+  capture sidecar state.
 
 Each stage must have an explicit re-entry transition:
 

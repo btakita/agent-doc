@@ -1,7 +1,41 @@
 # Plan — harden component parsing against UTF-8 byte-boundary panics
 
 **Pending:** `#utf8p`
-**Status:** Draft
+**Status:** Implemented (immediate panic site) — see 2026-07-02 update
+
+## 2026-07-02 status update
+
+The immediate panic site is **already fixed and shipped**. During the module
+decomposition, `refactor: move component parser into element crate`
+(`95ea1b7a`, 2026-06-28) moved the parser from `src/component.rs` to
+`agent-doc-element/src/element.rs` and replaced the raw
+`&doc[peek_start..peek_start + 20]` peek with the char-boundary-safe
+`bounded_preview()` helper (`element.rs:628`). That commit also added the
+`regular_comments_with_multibyte_preview_boundary_ignored` regression.
+
+Follow-up hardening added 2026-07-02:
+- `bounded_preview_clamps_to_char_boundary_inside_multibyte` — unit-tests the
+  helper contract directly (a refactor that keeps `parse()` working but breaks
+  the helper is still caught).
+- `parse_does_not_panic_on_prompt_glyph_adjacent_to_agent_marker` — covers the
+  real live shape that crashed IntelliJ IDEA: `❯` prompt lines directly against
+  `agent:exchange` / `agent:boundary` markers (the `reitrades.md` document).
+
+**Why this still bit on 2026-07-02:** the live JetBrains JVM (pid 2674606) had
+loaded a **stale cdylib built before `95ea1b7a`** (the coredump panic path is
+the pre-refactor `src/component.rs:443`). Preflight's `stale_install` warning
+was the upstream signal. A `❯` glyph reparse during a post-commit boundary
+reposition hit the old raw slice → `panic` → cdylib `abort()` →
+JVM `SIGABRT` (see coredump for pid 2674606, thread `agent-doc-crdt-*`). The
+21:57 `make install` rebuilt the cdylib with the fix; the restarted IDE is safe.
+
+**Amplifier — separate follow-up:** the parser panic took down the *entire IDE*
+because the cdylib is built `panic = "abort"` (`Cargo.toml:279`) with no
+`catch_unwind` isolation. `bounded_preview` fixes this specific panic, but any
+future cdylib panic on any thread will still abort the host. Tracked in
+[`plan-cdylib-panic-isolation.md`](plan-cdylib-panic-isolation.md) (`#cdylibpanic`).
+
+## Original plan (Draft)
 
 ## Problem
 

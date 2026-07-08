@@ -2,9 +2,9 @@
 
 When a template-mode document has an `<!-- agent:backlog -->` (or legacy `<!-- agent:pending -->`) component, the agent mutates it
 through **granular flags** on `agent-doc write`. The optional `<!-- agent:review -->` component holds code-complete work waiting for human review. Full-replace via `<!-- replace:backlog -->`
-(or the deprecated `<!-- patch:pending -->` / `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
+(or `<!-- replace:pending -->`) is **forbidden** in normal response cycles — the
 binary rejects those blocks with a clear error. Compatibility note: the binary may normalize one accidental
-list-shaped `replace:pending` / `patch:pending` block internally before capture/replay so the cycle is not stranded,
+list-shaped `replace:pending` block internally before capture/replay so the cycle is not stranded,
 but agents must still treat that as a recovery backstop rather than a supported authoring path. See `src/agent-doc/specs/pending-system.md`
 for the full contract. `pending` remains a legacy compatibility term; new
 commands and guidance should use `backlog`.
@@ -80,8 +80,8 @@ fresh actionable backlog item) and `--done` the stale review entry so it leaves
 `agent:review`. Prefer automated completion detection (a log/state check the
 binary can evaluate) over a human-gated review item wherever the signal exists.
 
-`--pending-done <id>` and `--backlog-done <id>` are deprecated aliases for
-`--done <id>`; new guidance, plans, and recovery hints must emit `--done`.
+`--done <id>` is the tracked-work completion flag. New guidance, plans, and
+recovery hints must not emit removed completion-alias spellings.
 
 Use `--icebox-add*`, `--icebox-edit`, `--icebox-clear`, and
 `--icebox-reorder` for parked future work. Do not rewrite `agent:icebox` with
@@ -126,10 +126,9 @@ Rules:
 
 ## Reorder flag
 
-If preflight returns `backlog_reordered: true` (or legacy
-`pending_reordered: true`), the user just expressed a priority by reordering
-items. **Do NOT reorder this cycle** -- respect the user's intent for at least
-one cycle.
+If preflight returns `backlog_reordered: true`, the user just expressed a
+priority by reordering items. **Do NOT reorder this cycle** -- respect the
+user's intent for at least one cycle.
 
 ## Default ordering
 
@@ -296,6 +295,3 @@ NEXT: (1)… (2)…` so `review list --has-next` surfaces exactly what is action
 `--allow-replace-pending` (hidden flag, or `AGENT_DOC_ALLOW_REPLACE_PENDING=1`) permits
 `<!-- replace:pending -->` blocks. Only use during compaction, migration, or tests. Never in
 a normal response cycle.
-
-`--allow-patch-pending` and `<!-- patch:pending -->` are accepted as **deprecated aliases**
-for one release (tracked as #25ag) — the parser emits a stderr deprecation warning.

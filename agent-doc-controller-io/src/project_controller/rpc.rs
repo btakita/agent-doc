@@ -2003,6 +2003,45 @@ pub(crate) fn shutdown_stale_controller(project_root: &Path) {
     }
 }
 
+/// `#lazily-recycle-request` — record a pending recycle/restart REQUEST on the
+/// lazily statechart (phase `Requested`). This is the durable, subscribable
+/// replacement for the on-disk `recycle_request` marker: producers dual-write it
+/// alongside the marker; route callers observe the phase via the state
+/// subscription instead of polling the marker file.
+pub fn supervisor_recycle_requested(
+    project_root: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    ensure_controller_running(project_root, LaunchMode::Lazy)?;
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "supervisor_recycle_requested".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("supervisor".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+    )
+}
+
+pub fn supervisor_recycle_requested_for_file(
+    file: &Path,
+    reason: &str,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    supervisor_recycle_requested(&project_root, reason)
+}
+
 pub fn supervisor_recycle_started(
     project_root: &Path,
     reason: &str,
@@ -6576,6 +6615,11 @@ pub(crate) fn handle_request_locked(
             );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
+        "supervisor_recycle_requested" => controller_envelope(handle_supervisor_recycle_requested(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "supervisor_recycle_started" => controller_envelope(handle_supervisor_recycle_started(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -7498,6 +7542,46 @@ fn append_and_apply_state_event(
 ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
     append_apply_state_event(bootstrap, runtime, event)?;
     runtime.supervisor_recycle_projection()
+}
+
+pub(crate) fn handle_supervisor_recycle_requested(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
+    let current = runtime.supervisor_recycle_projection()?;
+    // The statechart only arms `Requested` from `Settled`; a request that races an
+    // already-requested or in-flight recycle is a no-op (idempotent), so don't burn
+    // an epoch or rewrite the reason.
+    if !matches!(
+        current.phase,
+        agent_doc_state_backbone::SupervisorRecyclePhase::Settled
+    ) {
+        return Ok(current);
+    }
+    let recycle_epoch = current.recycle_epoch.saturating_add(1);
+    let reason = request
+        .reason
+        .as_deref()
+        .unwrap_or("supervisor_recycle_requested");
+    let event = agent_doc_state_backbone::StateEvent::new(
+        supervisor_recycle_event_id("requested", recycle_epoch),
+        agent_doc_state_backbone::StateFact::SupervisorRecycleRequested {
+            document_hash: agent_doc_state_backbone::PROJECT_SUPERVISOR_DOCUMENT_HASH.to_string(),
+            reason: reason.to_string(),
+            recycle_epoch,
+            marked_secs: timestamp_secs(),
+        },
+    );
+    let projection = append_and_apply_state_event(bootstrap, runtime, event)?;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "supervisor_recycle_graph_requested reason={} recycle_epoch={} phase={:?}",
+            reason, projection.recycle_epoch, projection.phase
+        ),
+    );
+    Ok(projection)
 }
 
 pub(crate) fn handle_supervisor_recycle_started(

@@ -1713,6 +1713,33 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 )
                 .is_some();
                 let explicit_admin_recycle = recycle_requested;
+                // `#lazily-recycle-request`: mirror the pending recycle/restart request
+                // onto the lazily statechart (phase `Requested`) so route callers and
+                // the editor observe the intent through the state subscription instead
+                // of polling this marker file. Best-effort and idempotent — the
+                // controller handler no-ops unless the chart is `Settled`, so
+                // re-emitting while the request stays pending is cheap and burns no
+                // epochs. Every recycle cause (admin, stale-preflight, install fan-out,
+                // wedge) writes this marker, so this single point covers them all.
+                if recycle_requested
+                    && let Ok(canonical) = path.canonicalize()
+                {
+                    let reason = agent_doc_supervisor_io::recycle_request::read_recycle_request(
+                        &canonical.to_string_lossy(),
+                    )
+                    .map(|request| request.reason)
+                    .unwrap_or_else(|| "supervisor_recycle_requested".to_string());
+                    if let Err(err) =
+                        agent_doc_controller_io::project_controller::supervisor_recycle_requested_for_file(
+                            &canonical, &reason,
+                        )
+                    {
+                        eprintln!(
+                            "[agent-doc] idle-queue watch: failed to record recycle request on lazily statechart for {}: {err:#}",
+                            canonical.display()
+                        );
+                    }
+                }
                 // `#supselfheal` Phase 2 (`#supselfheal-wedgetrigger`): read the
                 // persisted editor-IPC wedge fact for the owned document. The
                 // write/converge closeout path latches `degraded` after repeated

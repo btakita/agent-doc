@@ -34,25 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260704-044432.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260708-012554.md`*
 
 Compacted content:
-- Archived 11 response topic(s): ensure VS Code parity; restart bleed observation + VS Code parity + cdylib-recycles-on-upgrade; Would a lazily-rs State Chart improve state management / observability / locatability?; 8 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): ensure VS Code parity
-❯ JB `Run Agent Doc` error:
-```
-[route] target tmux session: 0
-Error: route refusing to dispatch agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md into pane %81 for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because the composer contains protected prompt input (drafted prompt input) draft_preview="› Implement {feature}"; clear or submit that draft, then rerun agent-doc route snapshot_path=/home/brian/work/btakita/agent-loop/.age  nt-doc/logs/route-submit/1783140237213-direct_pane_protected_prompt_input-codex-_81-e43f523881f3.txt
-```
-
-### Re: JB Run Agent Doc protected draft input — gpt-5 (HEAD)
-
-This one is a correct fail-closed route refusal, not the older accepted-without-dispatch bug. The target Codex pane `%81` had an unsubmitted composer draft (`› Implement {feature}`), and the route code refused before injecting `agent-doc ...` so it would not overwrite or accidentally submit that draft. Immediate recovery: submit or clear that prompt in pane `%81`, then rerun JB **Run Agent Doc**; alternatively claim/start a fresh pane for the document.
-
-I checked the current code path: Rust records `direct_pane_protected_prompt_input`, and JetBrains already has `isProtectedPromptInputRouteFailure` plus `notifyRunAgentDocProtectedPromptInput`. Because the operator-visible result was still a raw "Run Agent Doc error", I added #jbrunprotectedprompt to verify/fix the installed JB action so this typed refusal is surfaced as the actionable protected-prompt warning, while keeping the route guard unchanged.
-
-No code changes this cycle; verification was context/log inspection only.
-<!-- agent:boundary:67a30b0a -->
+- Archived 1 response topic(s): JB Run Agent Doc protected draft input
+- Prior summary/context: prior compacted content: Archived 11 response topic(s): ensure VS Code parity; restart bleed observation + VS Code pa...
+<!-- agent:boundary:80be8013 -->
 <!-- /agent:exchange -->
 ## Queue
 

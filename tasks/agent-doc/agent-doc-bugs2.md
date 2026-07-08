@@ -40,7 +40,30 @@ done
 Compacted content:
 - Archived 1 response topic(s): JB Run Agent Doc protected draft input
 - Prior summary/context: prior compacted content: Archived 11 response topic(s): ensure VS Code parity; restart bleed observation + VS Code pa...
-<!-- agent:boundary:a75c60eb -->
+- `src/agent-doc`: `make tmux-ci` passed after fixing the target to build and pass `AGENT_DOC_BIN`.
+- `src/agent-doc`: `make check` passed with `7358` passed, `239` skipped.
+- `src/lazily-rs`: `make check` passed.
+- `src/tmux-router`: `cargo test` passed.
+❯ /goal Fix when I focused the editor or equityfundingsource.md: slow creation of the new pane and agent-doc start crash.
+### Re: zero-live relay document authority — gpt-5
+
+Changed paths:
+- `src/agent-doc/agent-doc-document-realtime-io/src/lib.rs`
+- `tasks/agent-doc/agent-doc-bugs2.md` via this response write
+
+Fixed the agent-doc cause visible in this document: a CRDT/controller `Current` result with `live_editors=0` was still treated as editor-buffer authority, so stale relay text could hide saved disk prompt and response lines. The resolver now demotes zero-live relay text to disk authority for current-document reads, visible-write reconcile, and durable buffer fallback.
+
+Code commit: `553904e8` in `src/agent-doc` (`fix: prefer disk when relay has no live editors`). I installed it with `make install-full`; the CLI and cdylib were replaced and the controller/supervisors were marked for recycle.
+
+Verification:
+- `cargo test -p agent-doc-document-realtime-io`
+- `cargo test -p agent-doc-write-runtime-io normalize_exchange_prefixes_for_targets -- --nocapture`
+- `make check` (7360 passed, 239 skipped)
+- `gh run list --workflow CI --limit 1` showed latest CI `completed success`
+- Installed `agent-doc read tasks/agent-doc/agent-doc-bugs2.md` byte-matches the on-disk document.
+
+Escalation: none. Confidence: high.
+<!-- agent:boundary:c27c98a2 -->
 <!-- /agent:exchange -->
 ## Queue
 

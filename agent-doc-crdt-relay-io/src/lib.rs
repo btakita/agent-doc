@@ -1084,6 +1084,50 @@ pub fn relay_replica_update_for_file(
 /// barrier has flushed inbound editor ops. That baseline check is the guard that
 /// keeps unsaved editor-buffer changes from being overwritten by a stale binary
 /// recovery response.
+/// Apply a CPC full-document replace against an already-resolved relay `hub`.
+///
+/// Shared by the first-attempt and durable-projection-recovery paths of
+/// [`apply_cpc_write_for_file`] so both enforce the identical commit-barrier and
+/// `expected_current` baseline guards. Fails closed (`retry_crdt_merge`) when the
+/// hub canonical diverges from `expected_current`, so recovering a hub from the
+/// durable projection can never overwrite unsaved editor state that the caller
+/// did not compact against.
+fn apply_cpc_write_on_hub(
+    hub: &mut RelayHub,
+    file: &Path,
+    authority: CrdtAuthority,
+    expected_current: &str,
+    content: &str,
+) -> Result<CpcRelayWrite> {
+    let ready = hub.commit_barrier_under_authority(authority)?;
+    if !ready {
+        anyhow::bail!(
+            "CPC relay write refused for {}: editor_sync_pending; disk is a non-authoritative projection",
+            file.display()
+        );
+    }
+    let canonical = hub.canonical_text();
+    if canonical != expected_current {
+        anyhow::bail!(
+            "CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+            file.display(),
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(&canonical)
+        );
+    }
+    let before_hash = agent_doc_hash::content_hash(&canonical);
+    let packet = hub.apply_canonical_replace(expected_current, content)?;
+    Ok(CpcRelayWrite {
+        applied: before_hash != agent_doc_hash::content_hash(content),
+        content_len: content.len(),
+        content_hash: agent_doc_hash::content_hash(content),
+        update_bytes: packet.update.len(),
+        targets: packet.targets.len(),
+        live_editors: hub.live_count(),
+        delivery_converged: hub.delivery_converged(),
+    })
+}
+
 pub fn apply_cpc_write_for_file(
     file: &Path,
     expected_current: &str,
@@ -1094,49 +1138,64 @@ pub fn apply_cpc_write_for_file(
     if !authority.editor_attached() {
         return Ok(None);
     }
-    let Some(result) = with_existing_hub(file, |hub| {
-        let ready = hub.commit_barrier_under_authority(authority)?;
-        if !ready {
-            anyhow::bail!(
-                "CPC relay write refused for {}: editor_sync_pending; disk is a non-authoritative projection",
-                file.display()
-            );
+    // First attempt against an already-registered live relay hub. When the editor
+    // is attached but this process has no registered replica (a transient gap after
+    // a controller recycle / editor restart, or the FFI replica dropped), the hub
+    // is absent and `with_existing_hub` returns `None`.
+    let result = if let Some(result) =
+        with_existing_hub(file, |hub| {
+            apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
+        })?
+    {
+        result
+    } else {
+        // Recover the hub from the durable `.yrs` projection before failing —
+        // symmetric with the read path
+        // ([`current_text_for_file_with_authority_recovering_projection`]). The
+        // projection is the last-known relay canonical, not raw disk, so this does
+        // not smuggle a non-authoritative disk image in: the `expected_current`
+        // baseline check inside [`apply_cpc_write_on_hub`] still fails closed with
+        // `retry_crdt_merge` if the recovered canonical diverges from what the
+        // caller compacted against. Without this, a compact/CPC write hard-fails
+        // the whole operation (observed: JB `Compact Exchange` →
+        // `crdt_cpc_write ... no registered replica yet`, #cpcwritemissingreplica).
+        let hash = agent_doc_fs::document_state_hash(file)?;
+        let recovered = recover_missing_hub_from_durable_projection(file, &hash)?;
+        match if recovered {
+            with_existing_hub(file, |hub| {
+                apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
+            })?
+        } else {
+            None
+        } {
+            Some(result) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_cpc_write_recovered_missing_replica file={} source={} authority=multi_replica doc_hash={} recovery=durable_projection",
+                        file.display(),
+                        source,
+                        hash,
+                    ),
+                );
+                result
+            }
+            None => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_cpc_write_deferred file={} source={} authority=multi_replica reason=missing_relay_model recovered_projection={} recovery=publish_live_buffer_register_crdt",
+                        file.display(),
+                        source,
+                        recovered,
+                    ),
+                );
+                anyhow::bail!(
+                    "CPC relay write unavailable for {}; editor is the current authority but the CRDT relay has no registered replica yet",
+                    file.display()
+                );
+            }
         }
-        let canonical = hub.canonical_text();
-        if canonical != expected_current {
-            anyhow::bail!(
-                "CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
-                file.display(),
-                agent_doc_hash::content_hash(expected_current),
-                agent_doc_hash::content_hash(&canonical)
-            );
-        }
-        let before_hash = agent_doc_hash::content_hash(&canonical);
-        let packet = hub.apply_canonical_replace(expected_current, content)?;
-        let write = CpcRelayWrite {
-            applied: before_hash != agent_doc_hash::content_hash(content),
-            content_len: content.len(),
-            content_hash: agent_doc_hash::content_hash(content),
-            update_bytes: packet.update.len(),
-            targets: packet.targets.len(),
-            live_editors: hub.live_count(),
-            delivery_converged: hub.delivery_converged(),
-        };
-        Ok(write)
-    })?
-    else {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_cpc_write_deferred file={} source={} authority=multi_replica reason=missing_relay_model recovery=publish_live_buffer_register_crdt",
-                file.display(),
-                source,
-            ),
-        );
-        anyhow::bail!(
-            "CPC relay write unavailable for {}; editor is the current authority but the CRDT relay has no registered replica yet",
-            file.display()
-        );
     };
     let result = result?;
     if result.targets > 0
@@ -2343,6 +2402,71 @@ mod tests {
             assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn cpc_relay_write_recovers_missing_replica_from_durable_projection() {
+        // Editor attached (authority) but this process has NO registered relay
+        // replica — the transient gap after a controller recycle / editor restart
+        // that made JB `Compact Exchange` hard-fail with
+        // `crdt_cpc_write ... no registered replica yet` (#cpcwritemissingreplica).
+        // With a durable `.yrs` projection on disk, the write must recover the hub
+        // from it (symmetric with the read path) and apply, rather than aborting.
+        let (_dir, doc) = temp_doc("cpc-missing-replica.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        register_replica_for_file(&doc, "intellij:cpc-recover")
+            .unwrap()
+            .expect("editor replica should attach");
+        let current = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        // Persist the durable projection, then evict the in-process hub to model the
+        // missing-replica state a recycle/restart leaves behind.
+        checkpoint_durable_projection_for_file(&doc, "test_missing_replica").unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            hub_registry().lock().unwrap().remove(&hash).is_some(),
+            "test setup should evict the live hub"
+        );
+        assert!(
+            agent_doc_snapshot_io::load_crdt(&doc).unwrap().is_some(),
+            "durable projection must exist for recovery"
+        );
+
+        let next = format!("{current}\n### Re: recovered — gpt-5\n\nAfter recycle.\n");
+        let result = apply_cpc_write_for_file(&doc, &current, &next, "test_cpc_relay")
+            .unwrap()
+            .expect("missing-replica CPC write should recover from projection and apply");
+        assert!(result.applied);
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
+    }
+
+    #[test]
+    fn cpc_relay_write_without_projection_still_fails_closed_on_missing_replica() {
+        // Missing replica AND no durable projection to recover from: the write must
+        // still fail closed with the actionable "no registered replica yet" error
+        // rather than fabricating a hub from raw disk.
+        let (_dir, doc) = temp_doc("cpc-no-projection.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            !hub_registry().lock().unwrap().contains_key(&hash),
+            "no hub should be allocated yet"
+        );
+        assert!(
+            agent_doc_snapshot_io::load_crdt(&doc).unwrap().is_none(),
+            "no durable projection should exist"
+        );
+
+        let err = apply_cpc_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cpc_relay")
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("no registered replica yet"),
+            "must fail closed without a projection to recover from: {err:#}"
+        );
     }
 
     #[test]

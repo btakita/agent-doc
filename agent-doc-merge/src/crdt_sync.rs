@@ -28,17 +28,6 @@ use anyhow::{Context, Result};
 use lazily::{TextCrdt, TextOp, TextVersionVector};
 use std::cell::RefCell;
 
-/// Convert a byte offset into a char index against `text`. Editor/diff offsets are
-/// byte offsets (char-aligned); lazily's [`TextCrdt`] is char-indexed. Saturates to
-/// the char count when out of range.
-fn byte_to_char(text: &str, byte_off: usize) -> usize {
-    if byte_off >= text.len() {
-        text.chars().count()
-    } else {
-        text[..byte_off].chars().count()
-    }
-}
-
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
 ///
@@ -85,18 +74,30 @@ impl ReplicaState {
         self.text.borrow().text()
     }
 
-    /// Apply a local edit: delete `delete_len` bytes at byte `offset`, then insert
-    /// `insert` there. Mirrors [`crate::crdt::CrdtDoc::apply_edit`].
+    /// Apply a local edit: delete `delete_len` chars at char `offset`, then insert
+    /// `insert` there. `offset` and `delete_len` are CODEPOINT (char) units — they
+    /// index lazily's char-indexed [`TextCrdt`] directly. Editor plugins convert
+    /// their UTF-16 offsets to codepoint offsets before calling the FFI
+    /// (`agent_doc_replica_apply_local`), so this must never re-interpret them as
+    /// byte offsets: `text[..byte_off]` slices mid-multibyte-character and panics,
+    /// which (under `panic = unwind` + the FFI `catch_unwind` guard) degrades the
+    /// editor sync for that file, or (under `panic = abort`) kills the host IDE.
+    /// Both values saturate to the current char count.
     pub fn apply_local_edit(&self, offset: u32, delete_len: u32, insert: &str) {
         let mut t = self.text.borrow_mut();
         let cur = t.text();
-        if offset == 0 && (cur.is_empty() || delete_len as usize >= cur.len()) {
+        let total_chars = cur.chars().count();
+        // Whole-buffer replace fast path: offset 0 deleting everything (or an
+        // empty doc) is a linear `replace_all`, avoiding the quadratic per-char
+        // delete path. `delete_len` is in codepoints, so compare against the
+        // codepoint count (NOT the byte length).
+        if offset == 0 && (total_chars == 0 || delete_len as usize >= total_chars) {
             t.replace_all(insert);
             return;
         }
-        let start_char = byte_to_char(&cur, offset as usize);
+        let start_char = (offset as usize).min(total_chars);
         if delete_len > 0 {
-            let end_char = byte_to_char(&cur, offset as usize + delete_len as usize);
+            let end_char = (start_char + delete_len as usize).min(total_chars);
             for _ in start_char..end_char {
                 t.delete(start_char);
             }
@@ -334,6 +335,32 @@ mod tests {
         a.apply_local_edit(0, 0, "roundtrip me");
         let restored = ReplicaState::from_encoded(7, &a.encode_state()).unwrap();
         assert_eq!(restored.text(), "roundtrip me");
+    }
+
+    #[test]
+    fn apply_local_edit_uses_codepoint_offsets_on_multibyte_text() {
+        // Editor plugins send CODEPOINT (char) offsets/lengths, NOT byte offsets.
+        // `あ` is 3 UTF-8 bytes; `✓` is 3 bytes. A byte-offset interpretation would
+        // slice `text[..1]` (mid-`あ`) and panic. Codepoint offsets must index the
+        // char-indexed TextCrdt directly. Regression for the IDEA SIGABRT crash
+        // where a multibyte README panicked inside the FFI `apply_local`.
+        let a = ReplicaState::new(1);
+        a.apply_local_edit(0, 0, "あb✓c"); // 4 codepoints, 9 bytes
+        assert_eq!(a.text(), "あb✓c");
+
+        // Insert at codepoint offset 1 (between あ and b): byte 1 is mid-`あ`.
+        a.apply_local_edit(1, 0, "X");
+        assert_eq!(a.text(), "あXb✓c");
+
+        // Delete one codepoint at offset 2 (the b). delete_len is in codepoints.
+        a.apply_local_edit(2, 1, "");
+        assert_eq!(a.text(), "あX✓c");
+
+        // Replace the whole buffer via the offset-0 + full-delete fast path:
+        // delete_len is a codepoint count and must compare against the codepoint
+        // count (4), not the byte length (8), else the fast path is skipped.
+        a.apply_local_edit(0, 4, "全文入れ替え");
+        assert_eq!(a.text(), "全文入れ替え");
     }
 
     #[test]

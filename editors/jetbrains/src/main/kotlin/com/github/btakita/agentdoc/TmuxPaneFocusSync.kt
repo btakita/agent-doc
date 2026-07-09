@@ -59,6 +59,27 @@ class TmuxPaneFocusSync private constructor(
             return
         }
         if (!shouldSelectTmuxDocument(documentPath, lastDocumentPath)) return
+
+        // #tmuxmirrorcrossroot: never yank the editor selection across project
+        // roots. When the operator is actively focused on a markdown doc owned by a
+        // different agent-doc project than the tmux-focused session (observed: a
+        // submodule's monsterrodholders.md while the superproject's agent-doc window
+        // has agent-doc-bugs2.md active), mirroring the foreign window's focus would
+        // steal their selection. Record the tmux focus so a later same-root change
+        // still mirrors, but do not move the editor now.
+        val editorFocusedMdPath = manager.selectedTextEditor?.virtualFile
+            ?.takeIf { it.name.endsWith(".md") }?.path
+            ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }?.path
+        if (!shouldMirrorTmuxFocusToEditor(
+                tmuxFocusedDocRoot = NativePatching.resolveProjectPath(documentPath)?.first,
+                editorFocusedDocRoot = editorFocusedMdPath
+                    ?.let { NativePatching.resolveProjectPath(it)?.first },
+            )
+        ) {
+            lastDocumentPath = documentPath
+            return
+        }
+
         lastDocumentPath = documentPath
         selectEditorDocument(documentPath)
     }
@@ -114,6 +135,23 @@ class TmuxPaneFocusSync private constructor(
             documentPath: String?,
             lastDocumentPath: String?,
         ): Boolean = documentPath != null && documentPath != lastDocumentPath
+
+        /**
+         * #tmuxmirrorcrossroot: whether a tmux-focused agent-doc document may move
+         * the IDE editor selection given the operator's currently-focused markdown
+         * document. Suppress the mirror only when both project roots are known and
+         * differ — that is the cross-project steal (a submodule doc in the editor vs
+         * the superproject's active agent-doc pane). When either root is unknown
+         * (no focused markdown editor, or an unresolvable path) the mirror still
+         * fires so single-project tmux→editor following is unchanged.
+         */
+        internal fun shouldMirrorTmuxFocusToEditor(
+            tmuxFocusedDocRoot: String?,
+            editorFocusedDocRoot: String?,
+        ): Boolean {
+            if (tmuxFocusedDocRoot == null || editorFocusedDocRoot == null) return true
+            return tmuxFocusedDocRoot == editorFocusedDocRoot
+        }
 
         internal fun isAgentDocWindowActive(projectRoot: String): Boolean? =
             CpcRouteClient.tmuxFocusState(projectRoot)?.let { json ->

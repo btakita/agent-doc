@@ -457,6 +457,36 @@ fn null_state(out_len: *mut usize) -> *mut u8 {
     ptr::null_mut()
 }
 
+/// Sentinel returned by a replica FFI call that panicked. This cdylib is loaded
+/// into the host IDE process, so an uncaught panic would `abort()` the whole
+/// editor (observed 2026-07-09: a SIGABRT from `agent_doc_replica_apply_local`
+/// killed IntelliJ IDEA). Every replica `extern "C"` export wraps its body in
+/// [`ffi_guard`] so a Rust panic degrades to this benign error — the editor
+/// plugin re-seeds the replica on failure — instead of crashing the host.
+/// Requires `panic = "unwind"` (the `release` profile no longer forces abort).
+const ERR_FFI_PANIC: i32 = -99;
+
+/// Run `$body` and return its value, or `$fallback` if it panicked, logging the
+/// panic payload to stderr first (per the "never swallow errors silently" rule).
+/// Mandatory at every `extern "C"` boundary: an uncaught panic unwinding into the
+/// JVM, or aborting under `panic = abort`, is fatal to the host IDE process.
+macro_rules! ffi_guard {
+    ($fallback:expr, $body:expr) => {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $body)) {
+            Ok(v) => v,
+            Err(payload) => {
+                let msg = payload
+                    .downcast_ref::<&'static str>()
+                    .copied()
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("<non-string panic>");
+                eprintln!("agent-doc FFI panic caught (degrading to fallback): {msg}");
+                $fallback
+            }
+        }
+    };
+}
+
 /// Open (or reset) the cdylib-hosted CRDT replica `replica_id`, optionally
 /// bootstrapping it from a previously encoded state (`init_state` / `init_len`;
 /// pass null / 0 for a fresh empty replica). `replica_id` is also the yrs client
@@ -472,22 +502,24 @@ pub unsafe extern "C" fn agent_doc_replica_open(
     init_state: *const u8,
     init_len: usize,
 ) -> i32 {
-    let replica = if init_state.is_null() || init_len == 0 {
-        ReplicaState::new(replica_id)
-    } else {
-        let bytes = unsafe { std::slice::from_raw_parts(init_state, init_len) };
-        match ReplicaState::from_encoded(replica_id, bytes) {
-            Ok(r) => r,
-            Err(_) => return -2,
+    ffi_guard!(ERR_FFI_PANIC, {
+        let replica = if init_state.is_null() || init_len == 0 {
+            ReplicaState::new(replica_id)
+        } else {
+            let bytes = unsafe { std::slice::from_raw_parts(init_state, init_len) };
+            match ReplicaState::from_encoded(replica_id, bytes) {
+                Ok(r) => r,
+                Err(_) => return -2,
+            }
+        };
+        match replica_registry().lock() {
+            Ok(mut reg) => {
+                reg.insert(replica_id, replica);
+                0
+            }
+            Err(_) => -1,
         }
-    };
-    match replica_registry().lock() {
-        Ok(mut reg) => {
-            reg.insert(replica_id, replica);
-            0
-        }
-        Err(_) => -1,
-    }
+    })
 }
 
 /// Apply a local edit to replica `replica_id` (the editor forwarding a local
@@ -503,24 +535,26 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
     delete_len: u32,
     insert: *const c_char,
 ) -> i32 {
-    let insert_str = if insert.is_null() {
-        ""
-    } else {
-        match unsafe { CStr::from_ptr(insert) }.to_str() {
-            Ok(s) => s,
-            Err(_) => return -2,
-        }
-    };
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => {
-                replica.apply_local_edit(offset, delete_len, insert_str);
-                0
+    ffi_guard!(ERR_FFI_PANIC, {
+        let insert_str = if insert.is_null() {
+            ""
+        } else {
+            match unsafe { CStr::from_ptr(insert) }.to_str() {
+                Ok(s) => s,
+                Err(_) => return -2,
             }
-            None => -3,
-        },
-        Err(_) => -1,
-    }
+        };
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => {
+                    replica.apply_local_edit(offset, delete_len, insert_str);
+                    0
+                }
+                None => -3,
+            },
+            Err(_) => -1,
+        }
+    })
 }
 
 /// The current text of replica `replica_id`, or null if not open / poisoned.
@@ -531,13 +565,15 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
 /// non-null, must be freed exactly once with [`agent_doc_free_string`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_text(replica_id: u64) -> *mut c_char {
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => CString::new(replica.text()).unwrap_or_default().into_raw(),
-            None => ptr::null_mut(),
-        },
-        Err(_) => ptr::null_mut(),
-    }
+    ffi_guard!(ptr::null_mut(), {
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => CString::new(replica.text()).unwrap_or_default().into_raw(),
+                None => ptr::null_mut(),
+            },
+            Err(_) => ptr::null_mut(),
+        }
+    })
 }
 
 /// The encoded state vector of replica `replica_id` (the compact causal summary a
@@ -551,13 +587,15 @@ pub unsafe extern "C" fn agent_doc_replica_state_vector(
     replica_id: u64,
     out_len: *mut usize,
 ) -> *mut u8 {
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => leak_state(replica.state_vector(), out_len),
-            None => null_state(out_len),
-        },
-        Err(_) => null_state(out_len),
-    }
+    ffi_guard!(null_state(out_len), {
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => leak_state(replica.state_vector(), out_len),
+                None => null_state(out_len),
+            },
+            Err(_) => null_state(out_len),
+        }
+    })
 }
 
 /// The incremental update replica `replica_id` should send a peer whose state
@@ -574,20 +612,22 @@ pub unsafe extern "C" fn agent_doc_replica_diff(
     their_sv_len: usize,
     out_len: *mut usize,
 ) -> *mut u8 {
-    if their_sv.is_null() {
-        return null_state(out_len);
-    }
-    let sv = unsafe { std::slice::from_raw_parts(their_sv, their_sv_len) };
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => match replica.diff(sv) {
-                Ok(update) => leak_state(update, out_len),
-                Err(_) => null_state(out_len),
+    ffi_guard!(null_state(out_len), {
+        if their_sv.is_null() {
+            return null_state(out_len);
+        }
+        let sv = unsafe { std::slice::from_raw_parts(their_sv, their_sv_len) };
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => match replica.diff(sv) {
+                    Ok(update) => leak_state(update, out_len),
+                    Err(_) => null_state(out_len),
+                },
+                None => null_state(out_len),
             },
-            None => null_state(out_len),
-        },
-        Err(_) => null_state(out_len),
-    }
+            Err(_) => null_state(out_len),
+        }
+    })
 }
 
 /// Apply a remote update to replica `replica_id` (the editor applying a peer's
@@ -602,20 +642,22 @@ pub unsafe extern "C" fn agent_doc_replica_apply_update(
     update: *const u8,
     update_len: usize,
 ) -> i32 {
-    if update.is_null() {
-        return -2;
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => match replica.apply_update(bytes) {
-                Ok(()) => 0,
-                Err(_) => -2,
+    ffi_guard!(ERR_FFI_PANIC, {
+        if update.is_null() {
+            return -2;
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => match replica.apply_update(bytes) {
+                    Ok(()) => 0,
+                    Err(_) => -2,
+                },
+                None => -3,
             },
-            None => -3,
-        },
-        Err(_) => -1,
-    }
+            Err(_) => -1,
+        }
+    })
 }
 
 /// The full encoded state of replica `replica_id` (a durable checkpoint, or the
@@ -629,13 +671,15 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
     replica_id: u64,
     out_len: *mut usize,
 ) -> *mut u8 {
-    match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => leak_state(replica.encode_state(), out_len),
-            None => null_state(out_len),
-        },
-        Err(_) => null_state(out_len),
-    }
+    ffi_guard!(null_state(out_len), {
+        match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => leak_state(replica.encode_state(), out_len),
+                None => null_state(out_len),
+            },
+            Err(_) => null_state(out_len),
+        }
+    })
 }
 
 /// Close (drop) replica `replica_id`. Returns 0 if it was open, -1 on poison,
@@ -645,16 +689,18 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
 /// Always safe to call (no pointer arguments).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
-    match replica_registry().lock() {
-        Ok(mut reg) => {
-            if reg.remove(&replica_id).is_some() {
-                0
-            } else {
-                -3
+    ffi_guard!(ERR_FFI_PANIC, {
+        match replica_registry().lock() {
+            Ok(mut reg) => {
+                if reg.remove(&replica_id).is_some() {
+                    0
+                } else {
+                    -3
+                }
             }
+            Err(_) => -1,
         }
-        Err(_) => -1,
-    }
+    })
 }
 
 /// Persist replica `replica_id` to a local file for crash safety (`#crdtauth4`,
@@ -673,24 +719,26 @@ pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
 /// `path` must be a valid NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const c_char) -> i32 {
-    if path.is_null() {
-        return -2;
-    }
-    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let state = match replica_registry().lock() {
-        Ok(reg) => match reg.get(&replica_id) {
-            Some(replica) => replica.encode_state(),
-            None => return -3,
-        },
-        Err(_) => return -1,
-    };
-    match atomic_write_bytes(std::path::Path::new(path_str), &state) {
-        Ok(()) => 0,
-        Err(_) => -2,
-    }
+    ffi_guard!(ERR_FFI_PANIC, {
+        if path.is_null() {
+            return -2;
+        }
+        let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+            Ok(s) => s,
+            Err(_) => return -2,
+        };
+        let state = match replica_registry().lock() {
+            Ok(reg) => match reg.get(&replica_id) {
+                Some(replica) => replica.encode_state(),
+                None => return -3,
+            },
+            Err(_) => return -1,
+        };
+        match atomic_write_bytes(std::path::Path::new(path_str), &state) {
+            Ok(()) => 0,
+            Err(_) => -2,
+        }
+    })
 }
 
 /// Recover (open) replica `replica_id` from a local durable recovery projection
@@ -705,28 +753,30 @@ pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const
 /// `path` must be a valid NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_recover(replica_id: u64, path: *const c_char) -> i32 {
-    if path.is_null() {
-        return -2;
-    }
-    let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return -2,
-    };
-    let bytes = match std::fs::read(path_str) {
-        Ok(b) => b,
-        Err(_) => return -2,
-    };
-    let replica = match ReplicaState::from_encoded(replica_id, &bytes) {
-        Ok(r) => r,
-        Err(_) => return -2,
-    };
-    match replica_registry().lock() {
-        Ok(mut reg) => {
-            reg.insert(replica_id, replica);
-            0
+    ffi_guard!(ERR_FFI_PANIC, {
+        if path.is_null() {
+            return -2;
         }
-        Err(_) => -1,
-    }
+        let path_str = match unsafe { CStr::from_ptr(path) }.to_str() {
+            Ok(s) => s,
+            Err(_) => return -2,
+        };
+        let bytes = match std::fs::read(path_str) {
+            Ok(b) => b,
+            Err(_) => return -2,
+        };
+        let replica = match ReplicaState::from_encoded(replica_id, &bytes) {
+            Ok(r) => r,
+            Err(_) => return -2,
+        };
+        match replica_registry().lock() {
+            Ok(mut reg) => {
+                reg.insert(replica_id, replica);
+                0
+            }
+            Err(_) => -1,
+        }
+    })
 }
 
 /// Atomically write `bytes` to `path` (sibling temp file + rename) so a crash
@@ -1283,5 +1333,46 @@ mod tests {
             unsafe { agent_doc_replica_recover(id, missing.as_ptr()) },
             -2
         );
+    }
+
+    #[test]
+    fn replica_ffi_apply_local_handles_multibyte_codepoint_offsets() {
+        // Regression for the IDEA SIGABRT crash (2026-07-09): the editor forwards
+        // CODEPOINT offsets through agent_doc_replica_apply_local. A byte-offset
+        // interpretation slices `text[..1]` (mid-`あ`) and panics inside the host
+        // IDE process. Codepoint offsets must index lazily's char-indexed CRDT.
+        let id: u64 = 0xC0DE;
+        assert_eq!(
+            unsafe { agent_doc_replica_open(id, std::ptr::null(), 0) },
+            0
+        );
+        let seed = std::ffi::CString::new("あb✓c").unwrap(); // 4 codepoints, 9 bytes
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(id, 0, 0, seed.as_ptr()) },
+            0
+        );
+        // Insert at codepoint offset 1 (between あ and b) — byte 1 is mid-`あ`.
+        let x = std::ffi::CString::new("X").unwrap();
+        assert_eq!(
+            unsafe { agent_doc_replica_apply_local(id, 1, 0, x.as_ptr()) },
+            0
+        );
+        let t = unsafe { agent_doc_replica_text(id) };
+        let text = unsafe { CStr::from_ptr(t) }.to_str().unwrap().to_string();
+        unsafe { agent_doc_free_string(t) };
+        assert_eq!(text, "あXb✓c");
+        assert_eq!(unsafe { agent_doc_replica_close(id) }, 0);
+    }
+
+    #[test]
+    fn ffi_guard_maps_a_panic_to_a_sentinel_instead_of_aborting() {
+        // The shipped cdylib runs inside the host IDE process; before this guard
+        // (plus the unwind release profile) a panic here aborted IntelliJ via
+        // SIGABRT. The guard must catch ANY panic and return ERR_FFI_PANIC.
+        let result: i32 = ffi_guard!(ERR_FFI_PANIC, panic!("simulated FFI panic"));
+        assert_eq!(result, ERR_FFI_PANIC);
+        // A non-panicking body returns its value unchanged.
+        let ok: i32 = ffi_guard!(ERR_FFI_PANIC, 42);
+        assert_eq!(ok, 42);
     }
 }

@@ -68,4 +68,48 @@ class TmuxPaneFocusSyncTest {
             ),
         )
     }
+
+    @Test
+    fun `tmux focus mirror is suppressed across project roots`() {
+        // Operator focused on a submodule doc while the superproject's agent-doc
+        // window is active must NOT have the editor yanked across roots.
+        assertEquals(
+            false,
+            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+                tmuxFocusedDocRoot = "/repo",
+                editorFocusedDocRoot = "/repo/src/boost-client",
+            ),
+        )
+    }
+
+    @Test
+    fun `tmux focus mirror fires within one project root`() {
+        assertEquals(
+            true,
+            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+                tmuxFocusedDocRoot = "/repo",
+                editorFocusedDocRoot = "/repo",
+            ),
+        )
+    }
+
+    @Test
+    fun `tmux focus mirror fires when a root is unknown`() {
+        // No focused markdown editor (or an unresolvable path) leaves single-project
+        // following unchanged.
+        assertEquals(
+            true,
+            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+                tmuxFocusedDocRoot = "/repo",
+                editorFocusedDocRoot = null,
+            ),
+        )
+        assertEquals(
+            true,
+            TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
+                tmuxFocusedDocRoot = null,
+                editorFocusedDocRoot = "/repo",
+            ),
+        )
+    }
 }

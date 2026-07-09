@@ -323,7 +323,12 @@ tempfile = "3"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# NOTE: `panic = "abort"` is intentionally NOT set. The shipped cdylib
+# (libagent_doc) is loaded into the host IDE process via JNA, and every
+# `extern "C"` replica export is wrapped in `catch_unwind`. With abort, a Rust
+# panic would `raise(SIGABRT)` and kill IntelliJ before catch_unwind can run;
+# unwinding lets the guard map a panic to a benign error code instead. (Crash
+# root cause, 2026-07-09: `agent_doc_replica_apply_local` → SIGABRT.)
 strip = true
 
 [profile.release-local]

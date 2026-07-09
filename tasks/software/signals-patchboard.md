@@ -15,6 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: stop
 ---
 
 ## Status
@@ -50,14 +51,12 @@ Critical path is 1 → 4 → 5 → 7; the main risk is the custom Slint node can
 **Vision doc updates**: modular-synth patchbay is now the leading metaphor ("music patchboard for signals, information, and logic"), the runtime table swaps Flutter for Slint (lazily-dart demoted to optional mobile companion), and a new **Realtime I/O** section specifies ingress/egress connectors with the gate + authority + timeline + no-secrets-in-document rules.
 
 Backlog now holds #spb1–#spb9 in priority order; each references the plan file. Top of backlog: **#spb1**.
-<!-- agent:boundary:48b7d994 -->
+<!-- agent:boundary:d4855fc2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- Read tasks/software/realtime-signals-patchboard.md. We will use Slint https://slint.dev/ for UI instead of Flutter. Please plan a full implementation of Signals Patchboard. Plan an engaging UI using Slint...where signals can be observed. We should also support state charts (State) in the UI. We should support deterministic logic + multi-layer perceptrons. Use signal-space as the domain interface. Build out signal-space-spec + signal-space-rs as needed. The goal is to integrate with services and other sources of information to bring life to the Signals Patchboard.
-- It should feel like a music Patchboard but for signals information + logic for people to use. There should be I/O as well, so other systems can be notified in realtime. Update realtime-signals-patchboard.md.
 <!-- /agent:queue -->
 
 ## Backlog

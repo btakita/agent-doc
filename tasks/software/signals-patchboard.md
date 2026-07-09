@@ -51,7 +51,7 @@ Critical path is 1 → 4 → 5 → 7; the main risk is the custom Slint node can
 **Vision doc updates**: modular-synth patchbay is now the leading metaphor ("music patchboard for signals, information, and logic"), the runtime table swaps Flutter for Slint (lazily-dart demoted to optional mobile companion), and a new **Realtime I/O** section specifies ingress/egress connectors with the gate + authority + timeline + no-secrets-in-document rules.
 
 Backlog now holds #spb1–#spb9 in priority order; each references the plan file. Top of backlog: **#spb1**.
-<!-- agent:boundary:d4855fc2 -->
+<!-- agent:boundary:981284fc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -62,18 +62,19 @@ Backlog now holds #spb1–#spb9 in priority order; each references the plan file
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#spb1] Spec 0.3.0: typed ports/jacks, stream telemetry, IoBinding in signal-space-spec + signal-space-rs — tasks/software/plan-signals-patchboard-full.md Phase 1
-- [ ] [#spb2] MlpMixer + Trainer (ndarray MLP beside LogisticMixer, replay/shadow/promote compatible) in patchboard — plan Phase 2
-- [ ] [#spb3] patchboard-io realtime connector host: webhook/websocket/file-tail/timer ingress, gated webhook/WS-delta/notify/exec/agent egress — plan Phase 3
-- [ ] [#spb4] patchboard-app Slint skeleton: workspace split, load+validate document, live rack render, scope panel, 3-pane layout — plan Phase 4
-- [ ] [#spb5] Patch canvas interactions: jack-to-jack cabling, palette, intent-validated edits, undo, music-patchboard aesthetics — plan Phase 5
-- [ ] [#spb6] State chart UI: statechart inspector tab, live current-state, gated fire-event intents, timeline scrub replay — plan Phase 6
-- [ ] [#spb7] Training/labeling/lifecycle UI: timeline labels, train candidate, replay compare, shadow, gated promote/rollback — plan Phase 7
-- [ ] [#spb8] Agent-supervisor wedge: git/CI/test/agent-doc/tsift/corky ingress adapters + supervisor rack recipe in shadow mode — plan Phase 8
-- [ ] [#spb9] Packaging + docs + demo: release builds, wasm browser observer over delta stream, recipe gallery — plan Phase 9
+- [x] [#spb1] Spec 0.3.0: typed ports/jacks, stream telemetry, IoBinding in signal-space-spec + signal-space-rs — tasks/software/plan-signals-patchboard-full.md Phase 1
+- [x] [#spb2] MlpMixer + Trainer (ndarray MLP beside LogisticMixer, replay/shadow/promote compatible) in patchboard — plan Phase 2
+- [x] [#spb3] patchboard-io realtime connector host: webhook/websocket/file-tail/timer ingress, gated webhook/WS-delta/notify/exec/agent egress — plan Phase 3
+- [x] [#spb4] patchboard-app Slint skeleton: workspace split, load+validate document, live rack render, scope panel, 3-pane layout — plan Phase 4
+- [x] [#spb5] Patch canvas interactions: jack-to-jack cabling, palette, intent-validated edits, undo, music-patchboard aesthetics — plan Phase 5
+- [x] [#spb6] State chart UI: statechart inspector tab, live current-state, gated fire-event intents, timeline scrub replay — plan Phase 6
+- [x] [#spb7] Training/labeling/lifecycle UI: timeline labels, train candidate, replay compare, shadow, gated promote/rollback — plan Phase 7
+- [x] [#spb8] Agent-supervisor wedge: git/CI/test/agent-doc/tsift/corky ingress adapters + supervisor rack recipe in shadow mode — plan Phase 8
+- [x] [#spb9] Packaging + docs + demo: release builds, wasm browser observer over delta stream, recipe gallery — plan Phase 9
 <!-- /agent:backlog -->
 
 ## Icebox
 
 <!-- agent:icebox -->
+- [ ] [#spbwasm] Wasm browser observer (deferred from #spb9): compile the read-only rack view to WebAssembly consuming the patchboard-io WebSocket Snapshot/Delta stream. Open decision: Slint-wasm vs signal-space-js; both reuse the same delta stream.
 <!-- /agent:icebox -->

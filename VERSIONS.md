@@ -4,6 +4,31 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.71
+
+- **Supervisor fd leak across self-`execve` recycles fixed (`#supfdleak`).** The
+  route-owned supervisor self-`execve`s on binary hot-reload, and `execve` does
+  not run `Drop` impls — so every non-`FD_CLOEXEC` helper fd survived each
+  recycle and accumulated as orphans until the process hit `Too many open files
+  (os error 24)`. Live telemetry showed supervisors holding 287–415 fds (267
+  `/dev/ptmx`, 45 `supervisor-stderr.log`, ~45 stop-signal pipe pairs) spanning
+  days of recycles, which then surfaced as the recurring
+  `[supervisor::ipc] accept error: Too many open files` and the multi-hour
+  controller-lookup timeout storm (the wedged supervisor could no longer accept
+  IPC). All pty-master dups now go through a new atomic
+  `dup_cloexec` (`F_DUPFD_CLOEXEC`): the shared inject writer's write fd
+  (`dup_write_fd`), the resize handle, and `AdoptedMaster::dup_file`. The
+  master-fd projection handed to the reexec path is now CLOEXEC too — which
+  matches the documented design ("the original fd closes on exec as usual"),
+  since the reexec already creates its *own* non-CLOEXEC dup for adoption. The
+  stop-signal pipe (`StopSignal`) and the auto-install child-stdio dups
+  (`auto_install_stream_dup_fd`) are CLOEXEC as well, as is the
+  `SupervisorStderrRedirect` saved-stderr dup. Sidecars-to-sqlite was *not* the
+  fix — the leaked fds were duped pty/log/pipe handles, not sidecar file
+  writes. Coverage: `dup_cloexec_sets_fd_cloexec`,
+  `pipe_cloexec_sets_cloexec_on_both_ends`,
+  `stop_signal_pipe_ends_are_cloexec`.
+
 ## 0.34.70
 
 - **Finalize/write now skips the editor-IPC cascade when the relay reports zero

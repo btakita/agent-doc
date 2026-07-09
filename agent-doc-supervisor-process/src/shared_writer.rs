@@ -17,6 +17,28 @@ pub struct SharedPtyWriter {
     raw_fd: Option<std::os::unix::io::RawFd>,
 }
 
+/// Create a pipe with `FD_CLOEXEC` set on both ends.
+///
+/// Used by the supervisor writer-thread stop signal. The dups must not survive
+/// a supervisor self-`execve` or they leak across each recycle; setting
+/// CLOEXEC lets `execve` reclaim them. macOS lacks `pipe2`, so this is
+/// `pipe` + per-end `F_SETFD` (the stop signal is created long before any
+/// execve, so the brief non-atomic window is safe).
+#[cfg(unix)]
+fn pipe_cloexec() -> std::io::Result<(std::os::unix::io::RawFd, std::os::unix::io::RawFd)> {
+    let mut fds = [0i32; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    for fd in fds {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags >= 0 {
+            unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+        }
+    }
+    Ok((fds[0], fds[1]))
+}
+
 /// Signal to stop the stdin-to-PTY writer thread.
 ///
 /// Uses a self-pipe: the writer thread polls both stdin and the pipe read end.
@@ -32,14 +54,9 @@ pub struct StopSignal {
 #[cfg(unix)]
 impl StopSignal {
     pub fn new() -> Result<Self> {
-        let mut fds = [0i32; 2];
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            anyhow::bail!("pipe() failed: {}", std::io::Error::last_os_error());
-        }
-        Ok(Self {
-            read_fd: fds[0],
-            write_fd: fds[1],
-        })
+        let (read_fd, write_fd) = pipe_cloexec()
+            .map_err(|e| anyhow::anyhow!("pipe() failed: {e}"))?;
+        Ok(Self { read_fd, write_fd })
     }
 
     /// Wake the writer thread so it exits.
@@ -274,5 +291,37 @@ mod tests {
 
         assert!(lock_writer_interruptibly(&writer, &stop).is_none());
         drop(guard);
+    }
+
+    /// `#supfdleak` — the stop-signal pipe ends must be `FD_CLOEXEC` so they
+    /// close on a supervisor self-`execve` instead of leaking across recycles.
+    #[cfg(unix)]
+    #[test]
+    fn stop_signal_pipe_ends_are_cloexec() {
+        let stop = StopSignal::new().unwrap();
+        for fd in [stop.read_fd, stop.write_fd] {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert!(flags >= 0, "F_GETFD failed for {fd}");
+            assert!(
+                flags & libc::FD_CLOEXEC != 0,
+                "stop-signal pipe fd {fd} must be FD_CLOEXEC (got {flags:#x})"
+            );
+        }
+    }
+
+    /// `#supfdleak` — `pipe_cloexec` must set `FD_CLOEXEC` on BOTH ends.
+    #[cfg(unix)]
+    #[test]
+    fn pipe_cloexec_sets_cloexec_on_both_ends() {
+        let (a, b) = super::pipe_cloexec().expect("pipe_cloexec");
+        for fd in [a, b] {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            assert!(flags >= 0, "F_GETFD failed for {fd}");
+            assert!(
+                flags & libc::FD_CLOEXEC != 0,
+                "pipe end {fd} must be FD_CLOEXEC (got {flags:#x})"
+            );
+            unsafe { libc::close(fd) };
+        }
     }
 }

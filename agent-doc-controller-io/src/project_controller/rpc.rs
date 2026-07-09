@@ -1674,11 +1674,12 @@ fn auto_install_stream_dup_fd(target_fd: std::os::fd::RawFd) -> std::process::St
     use std::process::Stdio;
 
     // NEVER inherit: a failed dup falls back to a discard sink, not fd1.
-    let fd = unsafe { libc::dup(target_fd) };
-    if fd < 0 {
-        Stdio::null()
-    } else {
-        unsafe { Stdio::from_raw_fd(fd) }
+    // CLOEXEC: the dup is only for this Command; it must not survive a
+    // supervisor self-execve or it leaks one log-fd per recycle.
+    let fd = agent_doc_supervisor_process::pty::dup_cloexec(target_fd);
+    match fd {
+        Ok(fd) => unsafe { Stdio::from_raw_fd(fd) },
+        Err(_) => Stdio::null(),
     }
 }
 

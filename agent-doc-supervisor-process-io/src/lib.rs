@@ -102,10 +102,8 @@ impl SupervisorStderrRedirect {
             .append(true)
             .open(&stderr_path)
             .with_context(|| format!("failed to open {}", stderr_path.display()))?;
-        let saved_fd = unsafe { libc::dup(libc::STDERR_FILENO) };
-        if saved_fd < 0 {
-            anyhow::bail!("dup(stderr) failed: {}", std::io::Error::last_os_error());
-        }
+        let saved_fd = agent_doc_supervisor_process::pty::dup_cloexec(libc::STDERR_FILENO)
+            .map_err(|e| anyhow::anyhow!("dup(stderr) failed: {e}"))?;
         let saved_stderr = unsafe { OwnedFd::from_raw_fd(saved_fd) };
         let redirected = unsafe { libc::dup2(log_file.as_raw_fd(), libc::STDERR_FILENO) };
         if redirected < 0 {

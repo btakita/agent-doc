@@ -59,6 +59,27 @@ use portable_pty::{
     Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, NativePtySystem, PtySize, PtySystem,
 };
 
+/// Duplicate `fd` with `FD_CLOEXEC` set atomically (`F_DUPFD_CLOEXEC`).
+///
+/// Plain `libc::dup` leaves the new fd non-CLOEXEC, so the dup survives an
+/// `execve`. The route-owned supervisor self-`execve`s on binary hot-reload,
+/// and `execve` does not run `Drop` impls — so every non-CLOEXEC helper dup
+/// (write fd, resize handle, master-fd projection, child-stdio dups) would
+/// leak across each recycle until the fd table exhausts (`Too many open
+/// files`). The only fd that should survive the execve is the intentionally
+/// preserved pty master that the new image adopts, and that one gets its own
+/// non-CLOEXEC dup with CLOEXEC explicitly cleared in the reexec path
+/// (`supervisor_perform_reexec`). All other dups must be CLOEXEC.
+#[cfg(unix)]
+pub fn dup_cloexec(fd: std::os::unix::io::RawFd) -> std::io::Result<std::os::unix::io::RawFd> {
+    let new_fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    if new_fd < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(new_fd)
+    }
+}
+
 /// A thread-safe handle for resizing a pty session from another thread.
 ///
 /// On Unix, stores the raw master fd and calls `TIOCSWINSZ` directly.
@@ -363,11 +384,10 @@ impl PtySession {
             .master
             .as_raw_fd()
             .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for resize"))?;
-        // dup the fd so the handle remains valid even if the session is dropped
-        let duped = unsafe { libc::dup(fd) };
-        if duped < 0 {
-            anyhow::bail!("dup(master_fd) failed: {}", std::io::Error::last_os_error());
-        }
+        // dup the fd so the handle remains valid even if the session is dropped.
+        // CLOEXEC: the dup must not survive a supervisor self-execve.
+        let duped = dup_cloexec(fd)
+            .map_err(|e| anyhow::anyhow!("dup(master_fd) failed: {e}"))?;
         Ok(ResizeHandle { fd: duped })
     }
 
@@ -392,13 +412,12 @@ impl PtySession {
             .master
             .as_raw_fd()
             .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for writing"))?;
-        let duped = unsafe { libc::dup(fd) };
-        if duped < 0 {
-            anyhow::bail!(
-                "dup master fd for write failed: {}",
-                std::io::Error::last_os_error()
-            );
-        }
+        // CLOEXEC: this dup backs the shared inject writer and the master-fd
+        // projection handed to the reexec path. The reexec creates its OWN
+        // non-CLOEXEC dup to preserve across execve, so this one must close on
+        // exec or it leaks one dup per recycle.
+        let duped = dup_cloexec(fd)
+            .map_err(|e| anyhow::anyhow!("dup master fd for write failed: {e}"))?;
         Ok(duped)
     }
 
@@ -474,13 +493,8 @@ impl AdoptedMaster {
     /// dropped writer does not EOF the slave out from under the live child.
     fn dup_file(&self) -> Result<std::fs::File> {
         use std::os::unix::io::FromRawFd;
-        let duped = unsafe { libc::dup(self.raw()) };
-        if duped < 0 {
-            anyhow::bail!(
-                "dup(adopted master fd) failed: {}",
-                std::io::Error::last_os_error()
-            );
-        }
+        let duped = dup_cloexec(self.raw())
+            .map_err(|e| anyhow::anyhow!("dup(adopted master fd) failed: {e}"))?;
         Ok(unsafe { std::fs::File::from_raw_fd(duped) })
     }
 }
@@ -717,6 +731,29 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
+
+    /// `#supfdleak` — every pty-master dup must carry `FD_CLOEXEC` so it cannot
+    /// survive a supervisor self-`execve`. Plain `dup` is non-CLOEXEC and leaks
+    /// one fd per recycle until `Too many open files`. This guards `dup_cloexec`
+    /// (which backs `dup_write_fd`, `resize_handle`, and `AdoptedMaster::dup_file`).
+    #[cfg(unix)]
+    #[test]
+    fn dup_cloexec_sets_fd_cloexec() {
+        use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+        // SAFETY: a throwaway dup of stderr; CLOEXEC status is independent of
+        // the source fd, this just needs a valid open fd to redup.
+        let probe = unsafe {
+            OwnedFd::from_raw_fd(libc::dup(libc::STDERR_FILENO))
+        };
+        let new_fd = super::dup_cloexec(probe.as_raw_fd()).expect("dup_cloexec");
+        let flags = unsafe { libc::fcntl(new_fd, libc::F_GETFD) };
+        assert!(flags >= 0, "F_GETFD failed");
+        assert!(
+            flags & libc::FD_CLOEXEC != 0,
+            "dup_cloexec must set FD_CLOEXEC so it closes on execve (got flags {flags:#x})"
+        );
+        unsafe { libc::close(new_fd) };
+    }
 
     /// Write a bash script to `dir/name.sh`, mark it executable, and return
     /// its absolute path. Used to build fake-claude fixtures without a

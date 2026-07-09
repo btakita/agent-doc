@@ -4,6 +4,24 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.72
+
+- **Idle-queue watch backs off a degraded project controller (`#idlewatchctrlbackoff`).**
+  The supervisor idle-watch polled the controller's CRDT-model read every 500ms
+  per owned document to check for a drainable queue head. When the controller
+  fell behind, every poll paid the full read timeout (0.8s) and re-saturated the
+  controller — observed live with three route-owned supervisors (2 reads/s each)
+  pinning the controller at ~82% CPU and producing a multi-hour
+  `document_model_controller_lookup_error` / `controller_crdt_current_text_read_unavailable`
+  timeout storm. The watch now records controller degradation (set when
+  `observe_live_editor_authority`'s controller RPC fails, read via the new
+  `controller_failed_within`) and, once degraded, reads the queue head from disk
+  for a 30s cooldown — the same disk authority the paused-queue path already
+  uses (`#qchurn`) — then probes the controller once per cooldown window. This
+  cuts per-document controller load from ~2/s to ~1/30s during a wedge without
+  losing queue-drain readiness, letting the controller recover instead of
+  feeding the feedback loop. Coverage: `controller_failed_within_is_true_after_degradation_recorded`.
+
 ## 0.34.71
 
 - **Supervisor fd leak across self-`execve` recycles fixed (`#supfdleak`).** The

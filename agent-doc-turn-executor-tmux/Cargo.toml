@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-turn-executor-tmux"
-version = "0.34.71"
+version = "0.34.72"
 edition = "2024"
 description = "Tmux turn executor adapter for agent-doc"
 license = "MIT"
@@ -10,6 +10,6 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_turn_executor_tmux"
 
 [dependencies]
-agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.71" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.71" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.72" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.72" }
 serde = { version = "1", features = ["derive"] }

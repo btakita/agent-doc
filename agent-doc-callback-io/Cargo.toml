@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-callback-io"
-version = "0.34.71"
+version = "0.34.72"
 edition = "2024"
 description = "Filesystem-backed callback request and response sidecars for agent-doc"
 license = "MIT"
@@ -10,9 +10,9 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_callback_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.71" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.71" }
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.71" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.72" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.72" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.72" }
 anyhow = "1"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

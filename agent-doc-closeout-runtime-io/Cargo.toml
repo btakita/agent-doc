@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-closeout-runtime-io"
-version = "0.34.71"
+version = "0.34.72"
 edition = "2024"
 description = "Closeout, session-check, and repair recovery runtime effects for agent-doc"
 license = "MIT"
@@ -19,13 +19,13 @@ test-support = [
 ]
 
 [dependencies]
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.71" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.71" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.71" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.71" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.71" }
-agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.71" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.71" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.71" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.71" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.72" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.72" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.72" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.72" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.72" }
+agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.72" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.72" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.72" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.72" }
 anyhow = "1"

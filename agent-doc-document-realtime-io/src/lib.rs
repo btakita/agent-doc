@@ -20,7 +20,7 @@
 //! - `durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk`
 //! - `durable_buffer_state_none_when_no_editor_feed`
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -31,6 +31,36 @@ use agent_doc_document_realtime::{
     write_policy::{self, VisibleWriteReconcile},
 };
 pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
+
+/// Wall-clock seconds (since UNIX epoch) of the last controller RPC failure
+/// observed by [`observe_live_editor_authority`] (the controller-timeout path).
+/// Hot polling paths — notably the supervisor idle-queue watch — read this via
+/// [`controller_failed_within`] to back off a degraded controller instead of
+/// paying the full read timeout on every poll and saturating it further
+/// (`#idlewatchctrlbackoff`). 0 means "no failure observed yet".
+static LAST_CONTROLLER_DEGRADED_SECS: AtomicI64 = AtomicI64::new(0);
+
+fn unix_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn record_controller_degraded() {
+    LAST_CONTROLLER_DEGRADED_SECS.store(unix_secs(), Ordering::Relaxed);
+}
+
+/// True when a controller RPC failed within the last `window`. Lets callers
+/// (the idle-queue watch) skip controller-bound reads while the controller is
+/// wedged, falling back to disk authority instead of timing out every poll.
+pub fn controller_failed_within(window: std::time::Duration) -> bool {
+    let last = LAST_CONTROLLER_DEGRADED_SECS.load(Ordering::Relaxed);
+    if last == 0 {
+        return false;
+    }
+    unix_secs().saturating_sub(last) <= window.as_secs().max(1) as i64
+}
 
 #[cfg(test)]
 use agent_doc_crdt_relay_io::deregister_replica_for_file as test_support_deregister_replica_for_file;
@@ -536,6 +566,9 @@ pub fn observe_live_editor_authority(
             Ok(current)
         }
         Err(e) => {
+            // Record controller degradation so hot polling paths (idle-queue
+            // watch) can back off and stop flooding a wedged controller.
+            record_controller_degraded();
             #[cfg(not(test))]
             {
                 agent_doc_ops_log_io::log_op(
@@ -1473,6 +1506,17 @@ fn resolve_disk_only_current_doc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#idlewatchctrlbackoff` — recording controller degradation must flip
+    /// [`controller_failed_within`] true so the idle-queue watch backs off.
+    #[test]
+    fn controller_failed_within_is_true_after_degradation_recorded() {
+        record_controller_degraded();
+        assert!(
+            controller_failed_within(std::time::Duration::from_secs(60)),
+            "controller_failed_within must report true right after a degradation was recorded"
+        );
+    }
 
     // ── Rung 2 (`#rtwfeed`) CPC-owned CRDT feed ──
 

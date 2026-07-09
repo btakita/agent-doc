@@ -62,6 +62,13 @@ fn show_pane_message(
 /// this is ~60 ticks.
 const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 
+/// `#idlewatchctrlbackoff`: once the project controller is observed degraded
+/// (its CRDT-model read RPCs time out), the idle-queue watch reads the queue
+/// head from disk for this long before probing the controller again. Long
+/// enough to let a saturated controller recover, short enough to keep
+/// queue-drain readiness prompt (~one probe per window per document).
+const IDLE_WATCH_CONTROLLER_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn supervisor_background_context_clear_enabled() -> bool {
     false
 }
@@ -628,6 +635,19 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // turn from a merely-stale sidecar (a stale sidecar must not interfere
             // with the live turn — the CRDT relay stays authoritative).
             let mut stalled_resolve_streak: u32 = 0;
+            // `#idlewatchctrlbackoff`: when the controller is degraded (its RPCs
+            // are timing out), the idle-watch would otherwise hammer it with a
+            // CRDT-model read every poll — paying the full read timeout each
+            // time AND saturating the controller further (observed live: three
+            // supervisors × 2 reads/s pinned the controller at ~82% CPU and
+            // produced multi-hour controller-lookup timeout storms). Instead,
+            // once a controller failure is observed we read the queue head from
+            // disk (the same authority the paused-queue path already uses,
+            // `#qchurn`) for a cooldown, then probe the controller once per
+            // cooldown window. This cuts per-doc controller load from ~2/s to
+            // ~1/30s during a wedge without losing queue-drain readiness.
+            let mut controller_degraded_until: Option<std::time::Instant> = None;
+            let mut controller_backoff_logged = false;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -710,10 +730,44 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // every poll just to prove an idle-watch skip; use the saved
                 // document to preserve the supervisor failsafe for drainable
                 // on-disk heads without hammering the controller (#qchurn).
-                let active_head = if queue_controller_paused {
+                //
+                // `#idlewatchctrlbackoff`: the same disk-authority skip applies
+                // while the controller is degraded, so a wedged controller is
+                // not flooded with a CRDT-model read every poll. The cooldown
+                // expires → one controller probe → if it failed again, renew.
+                let now = std::time::Instant::now();
+                let controller_in_cooldown = controller_degraded_until
+                    .is_some_and(|until| now < until);
+                let active_head = if queue_controller_paused || controller_in_cooldown {
                     idle_watch_paused_queue_head(&path)
                 } else {
-                    idle_watch_active_queue_head(&path)
+                    let head = idle_watch_active_queue_head(&path);
+                    if agent_doc_document_realtime_io::controller_failed_within(
+                        std::time::Duration::from_secs(2),
+                    ) {
+                        controller_degraded_until =
+                            Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                        if !controller_backoff_logged {
+                            controller_backoff_logged = true;
+                            log_event(
+                                &mut session_log,
+                                &format!(
+                                    "idle_queue_watch_controller_backoff pane={} cooldown_secs={} reason=controller_degraded",
+                                    shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                                    IDLE_WATCH_CONTROLLER_BACKOFF.as_secs(),
+                                ),
+                            );
+                            eprintln!(
+                                "[agent-doc] idle-queue watch: backing off degraded project controller for {}s (disk authority for queue head)",
+                                IDLE_WATCH_CONTROLLER_BACKOFF.as_secs()
+                            );
+                        }
+                    } else {
+                        // Controller responded cleanly — clear the one-shot
+                        // latch so a *later* degradation logs again.
+                        controller_backoff_logged = false;
+                    }
+                    head
                 };
                 if active_head.is_none() {
                     context_reset_in_flight = false;

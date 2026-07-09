@@ -47,6 +47,16 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
 - Prompt steering is Project Controller-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 
+## Editor Performance Parity
+
+VS Code must match the JetBrains plugin's editor-hot-path discipline so neither plugin can slow the host editor:
+
+- **Markdown-first filtering.** The visual highlighter (`scheduleRefresh`), the typing listener, and the CRDT local-change listener must short-circuit on `document.languageId !== 'markdown'` before any timer, map, or native work. Non-markdown documents must never pay per-keystroke churn for refresh scheduling, live-buffer reporting, or replica forwarding. (JetBrains parity: `VisualHighlighterManager` global listeners gate on markdown before scheduling.)
+- **No project-wide cache invalidation on document change.** VS Code has no PSI layer, so it must not introduce an equivalent whole-workspace re-parse/re-tokenize on a per-document change. Visual tokens come from the document text via `native.visualTokens`, never from a cached workspace index that is dropped and rebuilt on each change.
+- **No fixed-interval polling.** Turn state, CRDT remote delivery, tmux pane focus, and cdylib reload are event-driven (Project Controller `state_subscribe`, `.agent-doc/crdt-replica-events`, reload-broadcast file watch). VS Code must not add a `setInterval`/`pollRemoteUpdates` loop for any of these, including tmux pane focus mirroring (JetBrains gates its focus poll on at least one open markdown document).
+
+Static guards in `uiThreadBudget.test.ts` enforce the markdown-first filter, the deferred heavy work, and the absence of `setInterval`.
+
 ## Verification Requirements
 
 - Unit tests cover the per-document Run/Clear state machine, exact session-status display, `session clear` command wiring, interrupt-clear command wiring, busy/protected clear refusal parsing, restart refusal parsing, popup-menu parity, persistent route-failure presentation, typed save-document signal handling, Project Controller-only CRDT/event delivery, bounded turn-state refreshes, disabled full-content delivery, and absent reconnect-repair hooks. Static guards pin the JetBrains-compatible Run route flags and VS Code command contribution surface.

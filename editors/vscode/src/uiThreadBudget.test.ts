@@ -96,6 +96,27 @@ describe('editor UI thread budget', () => {
         assert.ok(scheduler.includes('handleLocalChangeDelta(fsPath, changes)'));
     });
 
+    it('VS Code visual highlighter defers non-markdown documents before scheduling refresh', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        // Parity with JetBrains VisualHighlighterManager: non-markdown documents
+        // must short-circuit before any timer/map work so per-keystroke churn is
+        // never paid for other file types.
+        const listenerMarker = 'vscode.workspace.onDidChangeTextDocument((event) => this.scheduleRefresh(event.document))';
+        assert.ok(source.includes(listenerMarker), 'highlighter onDidChangeTextDocument must route through scheduleRefresh');
+
+        const start = source.indexOf('private scheduleRefresh(document: vscode.TextDocument): void {');
+        assert.ok(start >= 0, 'highlighter scheduleRefresh should exist');
+        const end = source.indexOf('private refreshAll()', start);
+        assert.ok(end > start, 'highlighter scheduleRefresh should precede refreshAll');
+        const method = source.slice(start, end);
+
+        const guard = method.indexOf("document.languageId !== 'markdown'");
+        const firstTimerWork = method.indexOf('this.refreshTimers');
+        assert.ok(guard >= 0, 'scheduleRefresh must guard on markdown languageId');
+        assert.ok(firstTimerWork > guard, 'markdown guard must precede any refresh-timer work');
+        assert.ok(method.includes('setTimeout'));
+    });
+
     it('VS Code publish-live-buffer signal is read-only and off the typing listener', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         assert.ok(source.includes("'publish-live-buffer.signal'"));

@@ -226,7 +226,30 @@ None of that is wrong on its own, but stacked together it forms a recognizable f
 **My recommendation:** keep the *content and specifics*, but let me rewrite the *cadence* in a rougher, more first-person voice — break the parallelism, cut the neat closers, let a sentence run long or stop short the way you actually write. And swap Q2 for a genuinely personal pick. The substance is defensible in an interview because it's real; the goal is to make the writing sound like a person who happens to be precise, not a model that's being careful.
 
 Want me to (a) do a voice-rewrite pass on Q1 and Q3 to strip the tells, and (b) rebuild Q2 around a paper/source you actually name? Give me the Q2 source and I'll do all three.
-<!-- agent:boundary:c8cba22c -->
+❯ Rewrite Q1 + Q3 to strip the AI tells (Q1 base is my edited version above).
+
+### Re: Q1 + Q3, voice-rewritten — opus-4.8
+
+Kept every specific; broke the parallelism, dropped the aphoristic closers and the "not X; it's Y" beats, let sentences run uneven, and stayed in your `...` style. Both still under 300 words.
+
+**Q1 — how generative AI is changing your field**
+
+> Most of my career, writing software meant translating an idea into precise instructions, one line at a time, with the occasional copy/paste and autocomplete. That's changed. Now I mostly describe what I want in plain English and an AI writes the first draft, refactors it, or explains back code I'm reading... then I go over it and fix what's wrong. Think of it less as smarter autocomplete and more as a very fast, very literal teammate who never gets tired but doesn't have much judgment yet.
+>
+> The speedup is real but it's not the interesting part. What's changed is where the hard work went. When a machine can produce plausible code in seconds, the value moves to the things it can't do... figuring out what's actually worth building, noticing when a confident answer is quietly wrong, and keeping a system coherent as it grows. I write far less code by hand now and spend more of the day on architecture and on checking the machine.
+>
+> I've gone all in on this. I build tools that let AI agents edit real documents and move around large codebases safely, so a person stays in the loop while the agent does the grunt work. The catch with generative AI is that it fails in the worst way for software: it's fluent, so a wrong answer reads exactly like a right one. That's reshaping the job. The engineers who do well from here won't be the fastest typists, they'll be the ones who can tell when the model is right, who can schedule and orchestrate a fleet of agents, and who give enough architectural direction that the codebase grows with coherence instead of into a pile of plausible-looking parts.
+
+**Q3 — a complex problem you resolved recently**
+
+> A while back I chased down an intermittent deadlock in a small mutex I'd written for a high-performance concurrency library... a custom locking primitive. What tipped me off was the test suite. It passed almost every run, then every so often it would just hang. No crash, no error, no stack trace, nothing to point at. Any single run looked fine.
+>
+> The hard part was that the bug lived inside the lock itself, the piece of code everything else assumes is correct. The mutex kept an atomic value that told a thread whether anyone was waiting and needed waking. There was a narrow window where one thread released the lock at the same instant another was about to go to sleep, and the wakeup went to no one... the second thread sat waiting for a signal that had already fired. Because it hung on exact timing, I couldn't make it happen on demand, so stepping through it in a debugger was pointless.
+>
+> So I didn't try to catch it live. I worked through every possible ordering of the release-and-sleep sequence on paper until I found the hole. The fix turned out tiny: on unlock, mark the state "contested" instead of just marking it free, so a thread that lost the race still sees that someone's waiting and re-checks before it sleeps. That closed the window. The suite went green and stayed green. What stuck with me was how far the bug sat from where it showed up... it wasn't in the test that hung, it was in an assumption buried in the lock that I never knew I'd made.
+
+Remaining item: **Q2** still needs a source you'll actually stand behind. Give me the paper/article/talk (ideally something off the obvious path) and I'll build it around your real before/after. Nothing entered in the form yet.
+<!-- agent:boundary:40bc46f3 -->
 <!-- /agent:exchange -->
 
 ## Queue

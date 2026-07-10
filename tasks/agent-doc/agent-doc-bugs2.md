@@ -139,7 +139,135 @@ Spec (`specs/08-session-routing.md`) + AGENTS.md invariant added; 3 new determin
 Note: I did **not** tag or publish crates.io/PyPI — the `#spec-test-build-install-commit-push` preset stops at commit+push, consistent with the standing "no releases until per-cell CRDT" hold. Route-owned supervisors pick up 0.34.74 at their next idle-boundary recycle.
 
 Live JB proof left as `[operator-verify]` (needs a real editor + fresh pane).
-<!-- agent:boundary:616c85c9 -->
+Switching between editor documents does not sync the focused tmux pane.
+
+JB `Compact Exchange` failed:
+```
+agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/agent-doc-bugs2/pre-compact-21 Error: project controller command `crdt_cpc_write` failed: CPC relay write refused for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: expected_hash=2ceff42f141784546cdbee4292a27922fcb56f59968a016d6818164036a6a988 current_hash=ada9c43faadd616d11acd508028266b818602ecc5ed289531215c3fb3ab92736 recovery=retry_crdt_merge
+```
+
+JB `Run Agent Doc` error
+```
+java.lang.AssertionError
+	at com.intellij.util.io.storage.AbstractRecordsTable.createNewRecord(AbstractRecordsTable.java:108)
+	at com.intellij.history.core.LocalHistoryStorage.lambda$createNextRecord$10(LocalHistoryStorage.java:91)
+	at com.intellij.util.ConcurrencyUtil.withLock(ConcurrencyUtil.java:293)
+	at com.intellij.util.io.storage.AbstractStorage.withWriteLock(AbstractStorage.java:474)
+	at com.intellij.history.core.LocalHistoryStorage.createNextRecord(LocalHistoryStorage.java:89)
+	at com.intellij.history.core.ChangeListStorageImpl.writeNextSet(ChangeListStorageImpl.java:205)
+	at com.intellij.history.core.ChangeList.doEndChangeSet(ChangeList.kt:85)
+	at com.intellij.history.core.ChangeList.endChangeSet(ChangeList.kt:72)
+	at com.intellij.history.core.LocalHistoryFacade.endChangeSet(LocalHistoryFacade.kt:91)
+	at com.intellij.history.core.LocalHistoryFacade.endChangeSet$default(LocalHistoryFacade.kt:90)
+	at com.intellij.history.core.LocalHistoryFacade.addChange(LocalHistoryFacade.kt:137)
+	at com.intellij.history.core.LocalHistoryFacade.contentChanged(LocalHistoryFacade.kt:104)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher.beforeContentsChange(LocalHistoryEventDispatcher.kt:89)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher.handleBeforeEvent(LocalHistoryEventDispatcher.kt:94)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher.handleBeforeEvents$lambda$0(LocalHistoryEventDispatcher.kt:152)
+	at com.intellij.history.integration.IdeaGateway.runWithVfsEventsDispatchContext(IdeaGateway.java:172)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher.handleBeforeEvents(LocalHistoryEventDispatcher.kt:150)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher.access$handleBeforeEvents(LocalHistoryEventDispatcher.kt:27)
+	at com.intellij.history.integration.LocalHistoryEventDispatcher$LocalHistoryBulkFileListener.before(LocalHistoryEventDispatcher.kt:206)
+	at com.intellij.util.messages.impl.MessageBusImplKt.invokeMethod(MessageBusImpl.kt:831)
+	at com.intellij.util.messages.impl.MessageBusImplKt.invokeListener(MessageBusImpl.kt:771)
+	at com.intellij.util.messages.impl.MessageBusImplKt.executeOrAddToQueue(MessageBusImpl.kt:596)
+	at com.intellij.util.messages.impl.ToDirectChildrenMessagePublisher.publish$intellij_platform_core(CompositeMessageBus.kt:156)
+	at com.intellij.util.messages.impl.MessagePublisher.invoke(MessageBusImpl.kt:544)
+	at jdk.proxy2/jdk.proxy2.$Proxy250.before(Unknown Source)
+	at com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl.lambda$fireBeforeEvents$22(PersistentFSImpl.java:1678)
+	at com.intellij.openapi.vfs.newvfs.impl.VfsThreadingUtil.runActionOnEdtRegardlessOfCurrentThread(VfsThreadingUtil.java:18)
+	at com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl.lambda$fireBeforeEvents$23(PersistentFSImpl.java:1678)
+	at com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl.runSuppressing(PersistentFSImpl.java:1296)
+	at com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl.fireBeforeEvents(PersistentFSImpl.java:1676)
+	at com.intellij.openapi.vfs.newvfs.persistent.PersistentFSImpl$3.close(PersistentFSImpl.java:1191)
+	at com.intellij.openapi.fileEditor.impl.LoadTextUtil.write(LoadTextUtil.java:462)
+	at com.intellij.openapi.fileEditor.impl.LoadTextUtil.write(LoadTextUtil.java:473)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.lambda$doSaveDocumentInWriteAction$6(FileDocumentManagerImpl.java:472)
+	at com.intellij.pom.core.impl.PomModelImpl.guardPsiModificationsIn(PomModelImpl.java:352)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.doSaveDocumentInWriteAction(FileDocumentManagerImpl.java:459)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.lambda$doSaveDocument$2(FileDocumentManagerImpl.java:404)
+	at com.intellij.openapi.application.impl.AppImplKt$rethrowCheckedExceptions$2.invoke(appImpl.kt:126)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteActionBlocking(NestedLocksThreadingSupport.kt:997)
+	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteAction(ApplicationImpl.java:1183)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.doSaveDocument(FileDocumentManagerImpl.java:403)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.saveDocumentInWriteSafeEnvironment(FileDocumentManagerImpl.java:352)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.saveDocument(FileDocumentManagerImpl.java:347)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl.saveDocument(FileDocumentManagerImpl.java:337)
+	at com.github.btakita.agentdoc.SubmitAction.actionPerformed$lambda$0(SubmitAction.kt:50)
+	at com.intellij.openapi.application.TransactionGuardImpl.runWithWritingAllowed(TransactionGuardImpl.java:236)
+	at com.intellij.openapi.application.TransactionGuardImpl.access$100(TransactionGuardImpl.java:22)
+	at com.intellij.openapi.application.TransactionGuardImpl$1.run(TransactionGuardImpl.java:198)
+	at com.intellij.openapi.application.impl.AppImplKt$runnableUnitFunction$1.invoke(appImpl.kt:124)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:705)
+	at com.intellij.openapi.application.impl.ApplicationImpl.runIntendedWriteActionOnCurrentThread(ApplicationImpl.java:1094)
+	at com.intellij.openapi.application.impl.ApplicationImpl$7.lambda$run$0(ApplicationImpl.java:648)
+	at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:305)
+	at com.intellij.openapi.application.impl.ApplicationImpl$7.run(ApplicationImpl.java:646)
+	at com.intellij.util.concurrency.ChildContext$runInChildContext$1.invoke(propagation.kt:192)
+	at com.intellij.util.concurrency.ChildContext.runInChildContext(propagation.kt:198)
+	at com.intellij.util.concurrency.ChildContext.runInChildContext(propagation.kt:192)
+	at com.intellij.util.concurrency.ContextRunnable.lambda$run$0(ContextRunnable.java:26)
+	at com.intellij.concurrency.ThreadContext.resetThreadContext(threadContext.kt:294)
+	at com.intellij.util.concurrency.ContextRunnable.run(ContextRunnable.java:25)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1$0(NonBlockingFlushQueue.kt:334)
+	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:928)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1(NonBlockingFlushQueue.kt:333)
+	at com.intellij.concurrency.ThreadContext.resetThreadContext(threadContext.kt:294)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1(NonBlockingFlushQueue.kt:330)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.tryRunWriteIntentReadAction(NestedLocksThreadingSupport.kt:747)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent(NonBlockingFlushQueue.kt:326)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.flushNow(NonBlockingFlushQueue.kt:305)
+	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.FLUSH_NOW$lambda$0(NonBlockingFlushQueue.kt:167)
+	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:323)
+	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:732)
+	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:711)
+	at com.intellij.ide.IdeEventQueue.defaultDispatchEvent(IdeEventQueue.kt:721)
+	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:574)
+	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0$0$0(IdeEventQueue.kt:378)
+	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1111)
+	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:106)
+	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1111)
+	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:376)
+	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:416)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
+```
+
+Another attempt of JB `Run Agent Doc`
+```
+route found legacy pane-association evidence for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md, but the normal path will not re-elect ownership from %19.
+Inspect the candidate, claim it explicitly if it is authoritative, or kill it before rerouting.
+  - %19 session=0 window=@25 (agent-doc) cmd=claude sources=session-log
+    view: tmux capture-pane -pt %19 | tail -n 80
+    assign: agent-doc claim /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md --pane %19 --force
+    kill: tmux kill-pane -t %19
+```
+
+#spec-test-build-install-commit-push
+
+### Re: stuck cycle + churn — root cause fixed (0.34.75) — opus-4-8
+
+**The churn was my own finalize hitting the exact `retry_crdt_merge` class I was triaging.** Root cause found and fixed: the write path and read path **disagreed on authority when there are zero live editors.** The plugin-owner *lease* still claimed a JB editor was attached, but the editor had exited — the relay had `live_editors=0` while the CPC canonical stayed frozen at a longer, stale image (`authority=cpc_model relay_hash=51f9a895 (len 54310)` vs `disk_hash=0c17ecef (len 54125)`). The read path already resolves `authority=disk` on zero live editors; the write path (`apply_cpc_write_for_file`) derived authority from the lease sidecar instead, so it CAS-refused every finalize/compact write forever against a canonical that could never match `expected_current`.
+
+Fix (`#stale-lease-cpc-authority`, `agent-doc-crdt-relay-io`): when a hub exists but `live_count()==0`, there is no editor buffer to protect — resolve to disk authority (`Ok(None)`, logged `crdt_cpc_write_disk_authority_stale_lease … recovery=disk_authority_no_live_replica`) and let the caller commit to disk; the controller's disk-change watcher reconciles the stale canonical so it can't resurrect on re-attach. A missing hub stays the `#cpcwritemissingreplica` recovery path; a hub with a **live** replica still fails closed on a stale baseline (unsaved-buffer protection unchanged). Regression test `cpc_relay_write_stale_lease_zero_live_editors_resolves_to_disk_authority`. Shipped 0.34.75, full `make check` green, installed, controller recycled onto it.
+
+**That one fix resolves both the stuck cycle and the churn** — with no refusal, the cycle never strands in `response_captured`, preflight repair never re-refuses, and op-capture is consumed normally instead of re-wedging. The two churn *amplifiers* I hit are queued as self-healing follow-ups (they were only reachable *because* of the refusal): `#capturebacklogatomic` (a capture that recorded the response but not its `--backlog-add` mutations trips `requires_backlog_capture` on replay → forced manual `mv`-aside; recovery must capture the whole cycle intent and be able to supersede an uncommittable capture) and boundary accretion on wedged finalize (already `#boundaryaccum1`).
+
+**Is op-capture a sidecar source of truth? Yes — replace with lazily state (queued `#opcapturelazily`).** `.agent-doc/op-capture/<doc-hash>.json` (`agent-doc-op-capture-io`, `#qnodemerge4`) durably holds the editor's ordered `EditorOp`s + the `base_hash` they were captured against, and preflight repair / the CRDT merge **replay it as authority** ("replaying captured CRDT patchback"), then consume+clear it. It is base-hash-guarded so it is *safe* (a stale base disqualifies the ops), but it is a **bespoke JSON sidecar distinct from the lazily state backbone** — which is exactly why clearing `captures/` + `state/cycles/` aside didn't stop the replay this turn; op-capture was a third, separate authority I had to clear by hand. Migrating it onto the lazily state backbone (co-located with the cycle-phase state that already emits `state_backbone_response_captured`) makes captured-op authority one coherent, atomically-clearable model. It's a 96-ref cross-crate surface, so it folds into `#sidecarstate` as its own focused cycle rather than riding on this hot-path fix. Plan: `tasks/agent-doc/plan-op-capture-lazily-state-migration.md`.
+
+**The four JB bug reports — triaged, queued as actionable items:**
+
+- **Compact Exchange refused (CPC relay, `retry_crdt_merge`):** the *zero-live-editor* variant of this is **now fixed by `#stale-lease-cpc-authority`** (compact's converge goes through the same `apply_cpc_write` path). `#compactcrdtretry` remains for the genuine *live-editor concurrent-edit* case (operator typing while a real editor is attached) — that still needs a bounded CAS-retry with archive-idempotency. Plan `tasks/agent-doc/plan-compact-crdt-merge-retry.md`.
+- **Run Agent Doc → `java.lang.AssertionError` (IntelliJ `LocalHistoryStorage`):** IntelliJ-internal storage corruption surfaced by our `SubmitAction.kt:50` synchronous EDT force-save. Queued `#jblocalhistcrash` (wrap the forced save so a platform `Throwable` is caught/logged and dispatch proceeds). **Fix now:** File → Invalidate Caches / Restart clears the corrupt Local History store.
+- **Route won't re-elect ownership from `%19`:** fail-closed-by-design under ambiguous ownership. Queued `#routelegacypane` (add a pane-liveness probe so a dead candidate auto-reclaims; only prompt on a live/ambiguous one). **Unblock now:** `agent-doc claim tasks/agent-doc/agent-doc-bugs2.md --pane %19 --force` if authoritative, else `tmux kill-pane -t %19`.
+- **Switching editor documents doesn't sync the focused tmux pane:** new feature `#tmuxfocusfollow` (JB `selectionChanged` / VS Code `onDidChangeActiveTextEditor` → refocus the doc's route-owned pane, no-op when it owns none). Plan `tasks/agent-doc/plan-tmux-focus-follow-active-editor.md`.
+
+Per the `#spec-test-build-install-commit-push` preset: shipped spec+test+build+install+commit+push for the authority fix; **not** tagged/published (standing "no releases until per-cell CRDT" hold). Live JB re-proof of the fix is left as `[operator-verify]`.
+<!-- agent:boundary:85bcee34 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -230,6 +358,12 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#compactcrdtretry] [focused-cycle] #agent-doc-bug JB Compact Exchange refused (CPC relay, retry_crdt_merge). The ZERO-live-editor variant is now fixed by #stale-lease-cpc-authority (0.34.75, compact converge shares apply_cpc_write). REMAINING: the live-editor concurrent-edit case (operator typing while a real editor is attached) still needs a bounded CAS retry around compact converge with retry-idempotent archive creation; fail closed with an actionable document-changed-during-compaction message when the compacted component drifted. Distinct from #jbcompactcommit. Plan: tasks/agent-doc/plan-compact-crdt-merge-retry.md
+- [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md
+- [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
+- [ ] [#tmuxfocusfollow] [focused-cycle] #agent-doc-feature Switching the focused editor document does not sync/refocus the associated tmux pane. JB selectionChanged / VS Code onDidChangeActiveTextEditor should refocus the doc route-owned pane in the same session; no-op when the doc owns no pane. Distinct from #tmuxsynccrashlog and #claimnewpane. Plan: tasks/agent-doc/plan-tmux-focus-follow-active-editor.md
+- [ ] [#jblocalhistcrash] #agent-doc-bug JB Run Agent Doc aborts with java.lang.AssertionError from IntelliJ LocalHistoryStorage.createNewRecord during FileDocumentManagerImpl.saveDocument forced by SubmitAction.kt:50 - corrupt IDE local-history VFS storage surfaced by the plugin synchronous EDT force-save. Resilience: wrap the forced saveDocument so a platform Throwable is caught + logged and dispatch proceeds (document text is authoritative). Operator remediation: File > Invalidate Caches / Restart. JB plugin .kt + version bump; live proof operator-gated.
+- [ ] [#routelegacypane] #agent-doc-bug JB Run Agent Doc route finds legacy pane-association evidence (e.g. %19 cmd=claude sources=session-log) but will not re-elect ownership, failing and asking the operator to inspect/claim/kill. Fix: add a pane-liveness probe to the re-election gate so a dead/exited legacy candidate auto-reclaims; only prompt when the candidate pane is live/ambiguous. Cross-refs #claimnewpane, #5bzd/#64we, #r4gq. Remediation: agent-doc claim <FILE> --pane %19 --force or tmux kill-pane -t %19.
 - [ ] [#clippy197cleanup] #agent-doc-chore Clippy 1.97 (CI installs latest stable) flags test-target lints not caught by CI's non---all-targets `make clippy`: single_element_loop (tests/test_cli.rs:21000/24979/29579), assertions_on_constants (agent-doc-cycle-state-io/src/lib.rs:2135, src/session_actor_cmd.rs:4497), redundant assert! reference (agent-doc-sync-io/src/resync.rs:1896/1937/1964), needless_return (agent-doc-document-realtime-io/src/lib.rs:545). Lib sites already fixed (021e545a). Coordinate test_cli.rs fixes with the concurrent session that owns its WIP; consider pinning clippy via rust-toolchain.toml so CI toolchain bumps don't surprise-fail.
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
 - [ ] [#restartstderrbleed2] #restartstderrbleed2 #agent-doc-bug Fresh route-owned start bleeds CLI boot stderr into the agent pane (visible on first manual submit); distinct from shipped #restartstderrbleed. Plan: src/agent-doc/tasks/agent-doc/plan-fresh-start-stderr-bleed.md

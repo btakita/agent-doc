@@ -249,7 +249,24 @@ Kept every specific; broke the parallelism, dropped the aphoristic closers and t
 > So I didn't try to catch it live. I worked through every possible ordering of the release-and-sleep sequence on paper until I found the hole. The fix turned out tiny: on unlock, mark the state "contested" instead of just marking it free, so a thread that lost the race still sees that someone's waiting and re-checks before it sleeps. That closed the window. The suite went green and stayed green. What stuck with me was how far the bug sat from where it showed up... it wasn't in the test that hung, it was in an assumption buried in the lock that I never knew I'd made.
 
 Remaining item: **Q2** still needs a source you'll actually stand behind. Give me the paper/article/talk (ideally something off the obvious path) and I'll build it around your real before/after. Nothing entered in the form yet.
-<!-- agent:boundary:40bc46f3 -->
+❯ Please use Extreme Programming Explained: Embrace Change as the book I remember. It changed my understand about the software development process from a systemic point of view. Where each part of the process fortifies other parts of the process. So pair programming is continuous review while TDD ensures the tests are in place before the software is written...requiring less up front planning and more flexibility in developing software. It also got me thinking how the parts of the process can be modified to fit particular circumstances. The main takeaway is that an effective process fits in a context and absolute rididity of a process is not necessary in many circumstances.
+
+### Re: Q2 built around Extreme Programming Explained — opus-4.8
+
+Good pick — and a stronger one than *Out of the Tar Pit* for this form, precisely because it's genuinely yours: you can defend it in an interview from real experience, and the before/after you described is specific enough that it doesn't read as the safe canonical answer an LLM reaches for. I kept the voice rough to match Q1/Q3 — broke the parallelism, no neat closers, your `...` style. Under 300 words. Nothing entered in the form.
+
+**Q2 — something interesting you've read that made you think differently**
+
+> *Extreme Programming Explained: Embrace Change*, Kent Beck — https://en.wikipedia.org/wiki/Extreme_Programming_Explained
+>
+> Before I read it, I thought of software practices as a checklist of separately-good habits. Write tests, review each other's code, plan the work, keep it flexible... each one a thing you did because it was responsible, and you could pick off the ones you had time for. I didn't see much connecting them.
+>
+> The book made me look at the whole process as a system instead of a list. What stuck was how the pieces prop each other up. Pair programming gives you continuous review, because a second person is reading the code as it gets written instead of days later. TDD gets the tests in place before the code exists, and that's what lets you plan less up front and still stay flexible... you can change direction because the safety net is already there. Pull one practice out and the others get weaker. Keep them together and they reinforce each other.
+>
+> What changed most was how I think about rigor. I used to assume a good process meant following it strictly, and that bending it was cutting corners. Now I read a process as something that has to fit its context. The practices are worth understanding deeply, so you know what each one is actually buying you, and then you adapt them to the circumstances in front of you. Absolute rigidity usually isn't necessary. These days when a team argues about dropping some practice, the first thing I ask is what else that practice was quietly supporting.
+
+All three free-response answers are ready now (Q1 + Q3 voice-rewritten, Q2 above). Say the word and I'll type them into the Lore form fields via chromium-bridge — still leaving submit to you — or tighten anything first.
+<!-- agent:boundary:bc048607 -->
 <!-- /agent:exchange -->
 
 ## Queue

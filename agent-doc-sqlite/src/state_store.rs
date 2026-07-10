@@ -18,6 +18,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
@@ -603,6 +604,16 @@ fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Maximum retained `crash_recovery_markers` rows. Older markers are an audit
+/// trail recovery never consults. A count cap (rather than a time window) keeps
+/// the table bounded regardless of write bursts — the failure mode that produced
+/// an 11.5M-row / 3.5GB table was a burst that was days, not hours, old.
+const CRASH_RECOVERY_MARKER_MAX_ROWS: i64 = 20_000;
+
+/// Guards the once-per-process `crash_recovery_markers` retention prune so the
+/// per-request `open_state_db` path does not rescan the table on every RPC.
+static CRASH_RECOVERY_MARKERS_PRUNED: AtomicBool = AtomicBool::new(false);
+
 fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
     ensure_column(
         conn,
@@ -617,6 +628,81 @@ fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
         WHERE dedupe_key IS NOT NULL;
         "#,
     )?;
+    // `open_state_db` is called per request handler, so pruning on every open
+    // would rescan the table on every RPC. Prune once per process instead: the
+    // controller opens this on startup, drains the backlog, then serves cheaply.
+    // Retention is best-effort maintenance — never fail state-db open on it — but
+    // allow a later open to retry rather than latching the miss.
+    if !CRASH_RECOVERY_MARKERS_PRUNED.swap(true, Ordering::Relaxed)
+        && let Err(err) = prune_crash_recovery_markers(conn)
+    {
+        CRASH_RECOVERY_MARKERS_PRUNED.store(false, Ordering::Relaxed);
+        eprintln!("[agent-doc] warning: failed to prune crash_recovery_markers: {err:#}");
+    }
+    Ok(())
+}
+
+/// `#crashmarkerretention`: crash-recovery markers are an append-mostly audit
+/// trail (dispatch-receipt / supervisor-lease / controller-restart reconciles).
+/// Without retention they grow unbounded — a live controller accumulated 11.5M
+/// rows / 3.5GB, after which the
+/// `SELECT COUNT(*), MAX(...) WHERE marker_kind = 'dispatch_receipt_reconcile'`
+/// aggregate scan took tens of seconds, stalling every controller read and
+/// wedging editor/idle-watch supervisors on model-read timeouts. Cap the trail to
+/// the newest [`CRASH_RECOVERY_MARKER_MAX_ROWS`] rows on open. This runs against
+/// the freshly opened connection the controller owns, so there is no
+/// cross-process lock contention, and the `crash_recovery_markers_timestamp`
+/// index keeps the cap lookup and delete cheap. Delete in bounded batches so the
+/// one-time cleanup of a legacy backlog cannot balloon a single WAL frame or hold
+/// the write lock for the entire scan.
+fn prune_crash_recovery_markers(conn: &Connection) -> Result<()> {
+    prune_crash_recovery_markers_to(conn, CRASH_RECOVERY_MARKER_MAX_ROWS)
+}
+
+fn prune_crash_recovery_markers_to(conn: &Connection, max_rows: i64) -> Result<()> {
+    // Index `timestamp` up front so both the cap lookup and the batched delete run
+    // against it. Building it once over a legacy backlog is a bounded one-time
+    // cost; afterwards the capped table keeps it cheap to maintain.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS crash_recovery_markers_timestamp ON crash_recovery_markers(timestamp);",
+    )
+    .context("failed to index crash_recovery_markers.timestamp")?;
+    // The retention cutoff is the timestamp of the `max_rows`-th newest marker
+    // (0-based `OFFSET max_rows - 1`); rows strictly older are dropped, keeping the
+    // newest `max_rows` (plus any tie at the boundary). A non-positive cap or
+    // fewer than `max_rows` rows → nothing to prune.
+    if max_rows < 1 {
+        return Ok(());
+    }
+    let cutoff: Option<i64> = conn
+        .query_row(
+            "SELECT timestamp FROM crash_recovery_markers ORDER BY timestamp DESC LIMIT 1 OFFSET ?1",
+            [max_rows - 1],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("failed to resolve crash_recovery_markers retention cutoff")?;
+    let Some(cutoff) = cutoff else {
+        return Ok(());
+    };
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM crash_recovery_markers
+                WHERE rowid IN (
+                    SELECT rowid FROM crash_recovery_markers
+                    WHERE timestamp < ?1
+                    LIMIT 50000
+                )
+                "#,
+                [cutoff],
+            )
+            .context("failed to prune stale crash_recovery_markers")?;
+        if deleted == 0 {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -2248,6 +2334,40 @@ mod tests {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )?;
         assert_eq!(row, (1, 2, "blocked".to_string(), "second".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn crash_recovery_markers_prune_caps_to_newest_rows() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let base = sqlite_i64(timestamp_secs(), "base")?;
+        // Seed 100 markers with strictly increasing timestamps (oldest..newest).
+        for i in 0..100 {
+            conn.execute(
+                "INSERT INTO crash_recovery_markers (marker_kind, status, timestamp) VALUES ('dispatch_receipt_reconcile', 'seed', ?1)",
+                [base + i],
+            )?;
+        }
+        // Call the cap directly: the per-process once-guard in
+        // `ensure_crash_recovery_marker_columns` may already be latched by an
+        // earlier `open_state_db` in this test binary. Cap to the newest 10.
+        prune_crash_recovery_markers_to(&conn, 10)?;
+        let remaining: i64 =
+            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| r.get(0))?;
+        assert_eq!(remaining, 10, "only the newest `max_rows` markers survive");
+        let oldest_kept: i64 = conn.query_row(
+            "SELECT MIN(timestamp) FROM crash_recovery_markers",
+            [],
+            |r| r.get(0),
+        )?;
+        // Newest 10 of 0..100 are timestamps base+90 .. base+99.
+        assert_eq!(oldest_kept, base + 90);
+        // A second pass on an already-capped table is a no-op.
+        prune_crash_recovery_markers_to(&conn, 10)?;
+        let after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| r.get(0))?;
+        assert_eq!(after, 10);
         Ok(())
     }
 

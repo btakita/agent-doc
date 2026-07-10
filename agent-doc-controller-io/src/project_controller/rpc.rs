@@ -5533,45 +5533,79 @@ pub(crate) fn launch_detached_at(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
-    let exe = current_agent_doc_binary()?;
-    let mut command = Command::new(exe);
-    command
-        .current_dir(project_root)
-        .arg("controller")
-        .arg("serve")
-        .arg("--project-root")
-        .arg(project_root)
-        .arg("--launch-mode")
-        .arg(launch_mode.as_str());
-    if let Some(path) = listen_socket {
-        command.arg("--listen-socket").arg(path);
-    }
-    if let Some(generation) = controller_generation {
+    let build_command = |exe: &Path| -> Command {
+        let mut command = Command::new(exe);
         command
-            .arg("--controller-generation")
-            .arg(generation.to_string());
-    }
-    if let Some(pid) = previous_controller_pid {
+            .current_dir(project_root)
+            .arg("controller")
+            .arg("serve")
+            .arg("--project-root")
+            .arg(project_root)
+            .arg("--launch-mode")
+            .arg(launch_mode.as_str());
+        if let Some(path) = listen_socket {
+            command.arg("--listen-socket").arg(path);
+        }
+        if let Some(generation) = controller_generation {
+            command
+                .arg("--controller-generation")
+                .arg(generation.to_string());
+        }
+        if let Some(pid) = previous_controller_pid {
+            command
+                .arg("--previous-controller-pid")
+                .arg(pid.to_string());
+        }
+        if handoff_state != ControllerHandoffState::Stable {
+            command.arg("--handoff-state").arg(match handoff_state {
+                ControllerHandoffState::Stable => "stable",
+                ControllerHandoffState::Preparing => "preparing",
+                ControllerHandoffState::Promoted => "promoted",
+                ControllerHandoffState::Retiring => "retiring",
+                ControllerHandoffState::Failed => "failed",
+            });
+        }
+        close_inherited_fds_on_exec(&mut command);
         command
-            .arg("--previous-controller-pid")
-            .arg(pid.to_string());
-    }
-    if handoff_state != ControllerHandoffState::Stable {
-        command.arg("--handoff-state").arg(match handoff_state {
-            ControllerHandoffState::Stable => "stable",
-            ControllerHandoffState::Preparing => "preparing",
-            ControllerHandoffState::Promoted => "promoted",
-            ControllerHandoffState::Retiring => "retiring",
-            ControllerHandoffState::Failed => "failed",
-        });
-    }
-    close_inherited_fds_on_exec(&mut command);
-    let child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("failed to launch project controller")?;
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        command
+    };
+    // `#ctlrlaunchenoent`: a concurrent `cargo install` / `make install-full`
+    // atomically replaces the installed `agent-doc` binary (unlink + rename).
+    // `current_agent_doc_binary` already skips a deleted `current_exe` mapping and
+    // re-resolves the on-disk binary, but resolve→`spawn` is a TOCTOU window — the
+    // binary can be validated as launchable and then swapped out in the
+    // microseconds before `spawn()`, so the exec fails with a transient `ENOENT`.
+    // Retry across that brief replacement window (re-resolving each attempt so a
+    // freshly-installed path is picked up) instead of surfacing `failed to launch
+    // project controller: No such file or directory` and cascading into a 5s
+    // controller-response timeout during a fleet recycle.
+    const LAUNCH_ENOENT_RETRIES: u32 = 5;
+    const LAUNCH_ENOENT_BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
+    let mut attempt: u32 = 0;
+    let child = loop {
+        let exe = current_agent_doc_binary()?;
+        match build_command(&exe).spawn() {
+            Ok(child) => break child,
+            Err(err)
+                if err.kind() == std::io::ErrorKind::NotFound
+                    && attempt < LAUNCH_ENOENT_RETRIES =>
+            {
+                attempt += 1;
+                std::thread::sleep(LAUNCH_ENOENT_BACKOFF);
+                continue;
+            }
+            Err(err) => {
+                return Err(anyhow::Error::new(err).context(format!(
+                    "failed to launch project controller (binary={}, spawn_attempts={})",
+                    exe.display(),
+                    attempt + 1
+                )));
+            }
+        }
+    };
     // Reap the detached controller instead of dropping the handle: under a
     // long-lived launcher (the route-owned supervisor re-`ensure`ing every
     // reconcile tick) a replacement controller that immediately finds a live

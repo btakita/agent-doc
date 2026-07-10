@@ -1255,6 +1255,21 @@ pub fn try_resolve_current_document_content(
         })
 }
 
+/// True when a live editor plugin process currently owns `file` — a plugin-owner
+/// lease exists whose owner pid is still alive (`#6b5h`).
+///
+/// This is the cheap, controller-free signal that a
+/// [`try_resolve_current_document_content`] call would resolve to editor
+/// authority rather than disk. When it returns `false` the document has no live
+/// editor, so the controller CRDT model read would report `live_editors == 0`
+/// and reconcile straight back to disk: hot idle pollers can read disk directly
+/// and skip the project-controller round-trip entirely. Keys off pid liveness
+/// (not heartbeat freshness) so an idle-but-open real editor still reads as
+/// attached.
+pub fn live_editor_endpoint_attached_for_file(file: &std::path::Path) -> bool {
+    agent_doc_plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy())
+}
+
 /// Resolve the authoritative current document when the caller already has a
 /// detached-disk fallback snapshot from the real document file. Prefer
 /// [`try_resolve_current_doc_from_file`] in production hot paths so disk is not

@@ -18936,6 +18936,12 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
                 .contains("agent_doc_crdt_relay_io::consume_disk_change_reconcile("),
         "start-runtime idle-watch disk-change reconcile must go through CPC instead of mutating the CRDT hub locally"
     );
+    assert!(
+        orchestration_start_idle_watch
+            .contains("live_editor_endpoint_attached_for_file(file)")
+            && orchestration_start_idle_watch.contains("return idle_watch_disk_queue_head(file)"),
+        "idle-watch active-queue-head must skip the controller model read and read disk directly when no live editor is attached (#idlewatchdetacheddisk), so an editorless supervisor cannot wedge polling a slow/degraded controller"
+    );
     for required_snippet in [
         "pub enum AutoTriggerOutcome",
         "pub fn from_u8(value: u8) -> Self",

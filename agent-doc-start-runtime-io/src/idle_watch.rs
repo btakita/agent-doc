@@ -275,6 +275,20 @@ fn record_context_clear_prompt_for_hooks(
 /// re-inject a no-op `/agent-doc` drain trigger every idle boundary for a queue
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
 fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
+    // `#idlewatchdetacheddisk`: when no live editor plugin owns the document,
+    // disk is authoritative — a controller CRDT model read resolves back to disk
+    // anyway (`live_editors == 0`), so the round-trip is pure overhead. Skip it
+    // and read the on-disk queue head directly. Without this, an idle,
+    // editorless supervisor polls the project controller every
+    // `AUTO_TRIGGER_POLL_INTERVAL`; a slow/degraded controller then times out
+    // each probe and pins the idle-watch in a permanent timeout→backoff cycle
+    // even though the queue is fully drained (observed on a fully-committed
+    // recruit session whose controller had grown too slow to answer the 750ms
+    // model read). Only when a live editor is attached do we consult the
+    // controller so an unsaved editor-buffer queue edit is still observed.
+    if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
+        return idle_watch_disk_queue_head(file);
+    }
     let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "idle_watch_active_queue_head",
@@ -286,12 +300,21 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     )
 }
 
-fn idle_watch_paused_queue_head(file: &Path) -> Option<String> {
+/// Resolve the drainable active-queue continuation head straight from the
+/// on-disk document, bypassing the project controller. Shared by the
+/// controller-paused / degraded-cooldown path and the no-live-editor fast path
+/// (`#idlewatchdetacheddisk`); in every one of those states disk is the
+/// authoritative replica for the supervisor's continuation decision.
+fn idle_watch_disk_queue_head(file: &Path) -> Option<String> {
     let content = agent_doc_fs::read_optional_text(file).ok().flatten()?;
     agent_doc_queue::queue_continuation::live_drainable_continuation_head(
         &content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
     )
+}
+
+fn idle_watch_paused_queue_head(file: &Path) -> Option<String> {
+    idle_watch_disk_queue_head(file)
 }
 
 fn log_idle_queue_context_reset_submit(

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: opencode
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -119,7 +119,27 @@ Verification:
 Deploy: submodule pushed (`f62f968d`), superproject pointer pushed (`83f4f947d`), tag `v0.34.70` pushed, `agent-doc admin recycle` marked. JB plugin zip is built but not yet installed in the running IDEA — `[operator-verify]`: install `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.229-signed.zip` (uninstall → restart → install → restart for structural changes) and confirm the drain backoff holds when `controller.sock` is briefly unavailable.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:90aa4c38 -->
+❯ JB `Run Agent Doc` on sitscape.md without a tmux pane started a tmux pane, then agent-doc start, then added the prompt. But the prompt was not submitted. When I submitted this prompt, stderr bled through in the console. Fix the drift issues in sitscape.md session. #spec-test-build-install-commit-push
+
+### Re: JB Run Agent Doc left the sitscape.md prompt unsubmitted + stderr bleed — opus-4-8
+
+Fixed the "prompt added but not submitted" drift in the binary (agent-doc **0.34.74**, built + installed + pushed).
+
+**Root cause** (confirmed from the live `sitscape.md` input-event log, pane `%80`): JB `Run Agent Doc` on a no-pane document created the pane, typed `agent-doc start --route-owned` (submitted fine), then ~12s later dispatched the reopen trigger via supervisor IPC — but the submit never registered against the still-initializing Claude composer. The fresh-start no-ack classifier (`fresh_start_pane_idle_ready`) only checked for a dispatch-ready *prompt*, so it misread that stranded pane as a legitimate idle no-op and kept the session with your trigger typed-but-never-submitted.
+
+**Fix** (`#jbtsiftnosub2`):
+- `fresh_start_ack_outcome` now takes a `trigger_pending_in_composer` fact and returns a new `StrandedTriggerResubmit` outcome; `pane_composer_has_pending_trigger` (whitespace-insensitive, so a column-wrapped trigger still matches) detects the leftover draft from a single capture.
+- On that outcome, `route.rs`/`startup.rs` resubmit the stranded draft once with a bare harness `Enter` and re-check for a document-cycle ack — keep the session only if it acknowledges, otherwise record a `FreshStart` startup-miss and **fail closed** (visible + recoverable) instead of silently stranding it.
+- An empty dispatch-ready composer is still a legitimate idle no-op.
+
+Spec (`specs/08-session-routing.md`) + AGENTS.md invariant added; 3 new deterministic tests pass; full `make check` green (one unrelated load-flake, `detached_controller_exits...`, confirmed passing in isolation). Built via `make install-full` (installed + release binary both 0.34.74, so `.bin/agent-doc` is fresh). Submodule `4d47eae9` → `main`; superproject pointer `905f6da0`.
+
+**stderr bleed** is a *distinct* bug from the shipped `#restartstderrbleed` (that covers restart/auto-install children; this is the initial route-owned start's CLI boot diagnostics reaching the pane before `SupervisorStderrRedirect` installs). Queued as actionable `#restartstderrbleed2` with a grounded plan rather than bundling a second speculative hot-path change into this turn.
+
+Note: I did **not** tag or publish crates.io/PyPI — the `#spec-test-build-install-commit-push` preset stops at commit+push, consistent with the standing "no releases until per-cell CRDT" hold. Route-owned supervisors pick up 0.34.74 at their next idle-boundary recycle.
+
+Live JB proof left as `[operator-verify]` (needs a real editor + fresh pane).
+<!-- agent:boundary:ab1c5a2f -->
 <!-- /agent:exchange -->
 ## Queue
 

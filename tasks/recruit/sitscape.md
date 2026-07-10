@@ -175,7 +175,7 @@ Five stories, each anchored in real work and built to flex across 2-3 of the JD'
 | A weakness | Story 5 |
 
 **Two things to do before the interview:** (1) fill the bracketed specifics with real numbers/names and say them out loud twice each so they're smooth; (2) trim each to ~60-90 seconds spoken — the versions above are the full material, not the script. Next in the backlog is `#resumetailor` (align resume + statement of interest to the JD keywords) — say the word and I'll draft it.
-<!-- agent:boundary:dae25758 -->
+<!-- agent:boundary:beb0bd87 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -186,7 +186,6 @@ Five stories, each anchored in real work and built to flex across 2-3 of the JD'
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#52tg] #starstories Draft concrete STAR stories mapped to the JD competency table (proactive, fast-paced/multitasking, continuous learning, cross-functional, end-to-end ownership, teamwork) for the Brandee Gorby behavioral screen
 - [ ] [#gqkv] #resumetailor Tailor resume + statement of interest to the Senior React Front-End Developer JD keywords (interactive components, data visualization, React/hooks/TS, Redux reframe, end-to-end web process)
 <!-- /agent:backlog -->
 
@@ -194,3 +193,9 @@ Five stories, each anchored in real work and built to flex across 2-3 of the JD'
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-10 [#52tg] #starstories Draft concrete STAR stories mapped to the JD competency table (proactive, fast-paced/multitasking, continuous learning, cross-functional, end-to-end ownership, teamwork) for the Brandee Gorby behavioral screen
+<!-- /agent:done -->

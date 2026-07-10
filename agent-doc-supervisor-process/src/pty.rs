@@ -386,8 +386,7 @@ impl PtySession {
             .ok_or_else(|| anyhow::anyhow!("master pty does not expose a raw fd for resize"))?;
         // dup the fd so the handle remains valid even if the session is dropped.
         // CLOEXEC: the dup must not survive a supervisor self-execve.
-        let duped = dup_cloexec(fd)
-            .map_err(|e| anyhow::anyhow!("dup(master_fd) failed: {e}"))?;
+        let duped = dup_cloexec(fd).map_err(|e| anyhow::anyhow!("dup(master_fd) failed: {e}"))?;
         Ok(ResizeHandle { fd: duped })
     }
 
@@ -416,8 +415,8 @@ impl PtySession {
         // projection handed to the reexec path. The reexec creates its OWN
         // non-CLOEXEC dup to preserve across execve, so this one must close on
         // exec or it leaks one dup per recycle.
-        let duped = dup_cloexec(fd)
-            .map_err(|e| anyhow::anyhow!("dup master fd for write failed: {e}"))?;
+        let duped =
+            dup_cloexec(fd).map_err(|e| anyhow::anyhow!("dup master fd for write failed: {e}"))?;
         Ok(duped)
     }
 
@@ -742,9 +741,7 @@ mod tests {
         use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
         // SAFETY: a throwaway dup of stderr; CLOEXEC status is independent of
         // the source fd, this just needs a valid open fd to redup.
-        let probe = unsafe {
-            OwnedFd::from_raw_fd(libc::dup(libc::STDERR_FILENO))
-        };
+        let probe = unsafe { OwnedFd::from_raw_fd(libc::dup(libc::STDERR_FILENO)) };
         let new_fd = super::dup_cloexec(probe.as_raw_fd()).expect("dup_cloexec");
         let flags = unsafe { libc::fcntl(new_fd, libc::F_GETFD) };
         assert!(flags >= 0, "F_GETFD failed");

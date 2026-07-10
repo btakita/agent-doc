@@ -9918,24 +9918,33 @@ pub(crate) fn handle_operator_command(
             receipt.receipt_id
         );
     };
-    // A `Closed` actor is a valid target for recovery commands. `session_clear` /
-    // `session_interrupt_clear` reset a closed session, and `session_restart`
-    // SUPERSEDES it — blue/green drain-and-supersede (#supkill-bg): a restart must
-    // not fail closed against a dead/closed generation. The whole point of restart
-    // is to replace the superseded generation with the next one, so a `Closed`
-    // actor is exactly when restart is meaningful (the operator's
-    // `session restart-supervisor` hit `generation N is closed` here). Only
-    // `Blocked` (and non-recovery commands on a `Closed` actor) still reject.
-    let recovers_closed_actor = matches!(
+    // A `Closed` or `Blocked` actor is a valid target for recovery commands.
+    // `session_clear` / `session_interrupt_clear` reset a closed/blocked session,
+    // and `session_restart` SUPERSEDES it — blue/green drain-and-supersede
+    // (#supkill-bg): a restart must not fail closed against a dead/closed or
+    // stuck/blocked generation. The whole point of restart is to replace the
+    // superseded generation with the next one, so a `Closed` actor is exactly when
+    // restart is meaningful (the operator's `session restart-supervisor` hit
+    // `generation N is closed` here). A `Blocked` actor (starting-timeout) is the
+    // same kind of stuck state: rejecting the recovery command on exactly the
+    // state that needs recovery is self-defeating (#clear-blocked-actor). Only
+    // non-recovery commands on a `Closed` or `Blocked` actor still reject.
+    let is_recovery_command = matches!(
         command_kind.as_str(),
         "session_clear" | "session_interrupt_clear" | "session_restart"
-    ) && record.state
-        == agent_doc_sqlite::state_store::ActorState::Closed;
-    if matches!(
-        record.state,
-        agent_doc_sqlite::state_store::ActorState::Blocked
-    ) || (record.state == agent_doc_sqlite::state_store::ActorState::Closed
-        && !recovers_closed_actor)
+    );
+    let recovers_terminal_actor = is_recovery_command
+        && matches!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+                | agent_doc_sqlite::state_store::ActorState::Blocked
+        );
+    if !recovers_terminal_actor
+        && matches!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Blocked
+                | agent_doc_sqlite::state_store::ActorState::Closed
+        )
     {
         let failed_stage = record.state.as_str();
         let receipt = insert_dispatch_attempt_record(
@@ -9990,18 +9999,24 @@ pub(crate) fn handle_operator_command(
         ),
     );
     // #supkill-bg blue/green redirect proof: a `session_restart` that authorizes
-    // against a `Closed` actor is the supersede signal — record the prior (closed)
-    // generation and the next generation the restart drains toward so racing
-    // dispatch / log forensics can see the "superseded -> retry against N+1"
-    // redirect instead of the old `generation N is closed` hard reject.
+    // against a `Closed` or `Blocked` actor is the supersede signal — record the
+    // prior (closed/blocked) generation and the next generation the restart drains
+    // toward so racing dispatch / log forensics can see the "superseded -> retry
+    // against N+1" redirect instead of the old `generation N is closed` hard
+    // reject.
     if command_kind == "session_restart"
-        && record.state == agent_doc_sqlite::state_store::ActorState::Closed
+        && matches!(
+            record.state,
+            agent_doc_sqlite::state_store::ActorState::Closed
+                | agent_doc_sqlite::state_store::ActorState::Blocked
+        )
     {
         agent_doc_ops_log_io::log_op(
             &file,
             &format!(
-                "supervisor_restart_supersede file={} action=supersede_closed_actor prior_generation={} next_generation={} receipt_id={} caller=operator",
+                "supervisor_restart_supersede file={} action=supersede_{}_actor prior_generation={} next_generation={} receipt_id={} caller=operator",
                 file.display(),
+                record.state.as_str(),
                 record.generation,
                 record.generation.saturating_add(1),
                 receipt.receipt_id,

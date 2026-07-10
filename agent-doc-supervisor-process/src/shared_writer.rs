@@ -54,8 +54,8 @@ pub struct StopSignal {
 #[cfg(unix)]
 impl StopSignal {
     pub fn new() -> Result<Self> {
-        let (read_fd, write_fd) = pipe_cloexec()
-            .map_err(|e| anyhow::anyhow!("pipe() failed: {e}"))?;
+        let (read_fd, write_fd) =
+            pipe_cloexec().map_err(|e| anyhow::anyhow!("pipe() failed: {e}"))?;
         Ok(Self { read_fd, write_fd })
     }
 

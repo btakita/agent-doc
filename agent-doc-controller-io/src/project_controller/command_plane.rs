@@ -144,9 +144,14 @@ mod tests {
 
     #[test]
     fn payload_roundtrips_and_validates_type() {
-        let submit =
-            build_supervisor_recycle_submit("cmd-1", "supervisor", "root:recycle", "stale_binary", 7)
-                .unwrap();
+        let submit = build_supervisor_recycle_submit(
+            "cmd-1",
+            "supervisor",
+            "root:recycle",
+            "stale_binary",
+            7,
+        )
+        .unwrap();
         assert_eq!(submit.namespace, NAMESPACE);
         assert_eq!(submit.payload_type, SUPERVISOR_RECYCLE_PAYLOAD_TYPE);
         let decoded = SupervisorRecyclePayload::decode(&submit).unwrap();
@@ -166,15 +171,21 @@ mod tests {
         // The full command-plane RPC round-trip for the recycle op: submit → the
         // call stays Pending until the controller's terminal receipt folds in.
         let mut client = CommandRpcClient::new(VecTransport { sent: Vec::new() });
-        let submit =
-            build_supervisor_recycle_submit("cmd-9", "supervisor", "root:recycle", "admin_recycle", 3)
-                .unwrap();
+        let submit = build_supervisor_recycle_submit(
+            "cmd-9",
+            "supervisor",
+            "root:recycle",
+            "admin_recycle",
+            3,
+        )
+        .unwrap();
         let id = client.submit(submit.clone()).unwrap();
         assert_eq!(client.poll_call(&id), CallState::Pending);
 
         // The controller services it (folds Requested onto the statechart) and emits
         // an applied receipt — the terminal authority that resolves the call.
-        let receipt = supervisor_recycle_receipt(&submit, "rcpt-1", "project-controller", 3, Ok(()));
+        let receipt =
+            supervisor_recycle_receipt(&submit, "rcpt-1", "project-controller", 3, Ok(()));
         client.ingest_receipt(&receipt);
         match client.poll_call(&id) {
             CallState::Resolved(entry) => assert_eq!(entry.status, CommandStatus::Applied),
@@ -186,7 +197,8 @@ mod tests {
     fn rejected_recycle_request_resolves_rejected() {
         let mut client = CommandRpcClient::new(VecTransport { sent: Vec::new() });
         let submit =
-            build_supervisor_recycle_submit("cmd-r", "supervisor", "root:recycle", "wedge", 4).unwrap();
+            build_supervisor_recycle_submit("cmd-r", "supervisor", "root:recycle", "wedge", 4)
+                .unwrap();
         let id = client.submit(submit.clone()).unwrap();
         let receipt = supervisor_recycle_receipt(
             &submit,

@@ -5881,6 +5881,137 @@ agent:queue\n\
         );
         assert_eq!(envelope.data.unwrap().accepted_stage, "operator_closed");
     }
+
+    #[test]
+    fn controller_session_recovery_commands_accept_blocked_actor_generation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/blocked-clear.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-blocked-clear\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut should_stop = false;
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-blocked-clear",
+            "%41",
+            "@1",
+            1,
+        )
+        .unwrap();
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-blocked-clear",
+            "%41",
+            Some(1),
+            agent_doc_sqlite::state_store::ActorState::Blocked,
+            "route",
+            "starting_actor_timeout",
+        )
+        .unwrap();
+
+        // #clear-blocked-actor: a `Blocked` actor (starting-timeout) is a stuck
+        // state that recovery commands must be able to fix, not a wall that
+        // rejects them. `session_clear` must accept it just like a `Closed`
+        // actor.
+        let clear = ControllerRequest {
+            command: "operator_command".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("session_clear".to_string()),
+            diagnostic_payload: Some("test clear blocked actor".to_string()),
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&clear).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "session_clear should accept blocked actors: {:?}",
+            envelope.error
+        );
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_blocked");
+
+        let interrupt_clear = ControllerRequest {
+            command_kind: Some("session_interrupt_clear".to_string()),
+            ..clear.clone()
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&interrupt_clear).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "session_interrupt_clear should accept blocked actors: {:?}",
+            envelope.error
+        );
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_blocked");
+
+        let restart = ControllerRequest {
+            command_kind: Some("session_restart".to_string()),
+            ..clear.clone()
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&restart).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            envelope.ok,
+            "session_restart should supersede a blocked actor (blue/green #supkill-bg): {:?}",
+            envelope.error
+        );
+        assert_eq!(envelope.data.unwrap().accepted_stage, "operator_blocked");
+
+        let ops_log =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops_log.contains("supersede_blocked_actor"),
+            "restart on a blocked actor must record the supersede redirect:\n{ops_log}"
+        );
+
+        // A non-recovery command must still be rejected on a Blocked actor.
+        let non_recovery = ControllerRequest {
+            command_kind: Some("dispatch".to_string()),
+            ..clear
+        };
+        let response = handle_request(
+            &(serde_json::to_string(&non_recovery).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<DispatchAuthorization> =
+            serde_json::from_str(&response).unwrap();
+        assert!(
+            !envelope.ok,
+            "non-recovery dispatch must still be rejected on a blocked actor"
+        );
+    }
+
     #[test]
     fn controller_attach_pane_creates_manual_attach_generation() {
         let dir = tempfile::TempDir::new().unwrap();

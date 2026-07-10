@@ -4594,7 +4594,10 @@ pub fn mark_ipc_wedge_recycle_attempted(project_root: &Path, file: &Path) -> Res
         return Ok(());
     };
     if let Some(obj) = value.as_object_mut() {
-        obj.insert("recycle_attempted".to_string(), serde_json::Value::Bool(true));
+        obj.insert(
+            "recycle_attempted".to_string(),
+            serde_json::Value::Bool(true),
+        );
     }
     let marker = ipc_dewedge_marker_path(project_root, file)?;
     atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;

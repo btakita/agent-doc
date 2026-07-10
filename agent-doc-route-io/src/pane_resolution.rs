@@ -495,20 +495,38 @@ pub fn resolve_or_create_pane_dispatch_only(
     if let agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } =
         &associated_resolution
     {
+        // #routelegacypane: a legacy association whose candidate panes are all DEAD
+        // (the pane exited) is stale ownership evidence, not a live ambiguity. Do not
+        // force a manual claim/kill prompt — auto-reclaim by falling through to the
+        // normal cold-start route path. Only a LIVE (or ambiguous) candidate is real
+        // contested ownership that needs an explicit operator decision.
+        let any_candidate_alive = tmux.pane_alive(&winner.pane_id)
+            || redundant.iter().any(|c| tmux.pane_alive(&c.pane_id));
+        if any_candidate_alive {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                    file_path,
+                    winner.pane_id,
+                    winner.source_summary()
+                ),
+            );
+            anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
+                file.display(),
+                winner,
+                redundant
+            ));
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_dispatch_only_associated_pane_requires_manual_claim file={} pane={} sources={}",
+                "route_associated_pane_dead_auto_reclaim file={} pane={} sources={} recovery=fall_through_normal_route",
                 file_path,
                 winner.pane_id,
                 winner.source_summary()
             ),
         );
-        anyhow::bail!(agent_doc_tmux::format_associated_pane_selected_error(
-            file.display(),
-            winner,
-            redundant
-        ));
     }
 
     let claimed_panes: std::collections::HashSet<String> = load_dispatch_registry(file_path)

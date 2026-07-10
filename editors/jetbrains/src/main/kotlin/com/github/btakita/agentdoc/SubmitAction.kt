@@ -47,8 +47,23 @@ class SubmitAction : AnAction() {
             val document = fdm.getDocument(file)
             if (document != null) {
                 attempt.recordIfCurrent("save_active_document")
-                fdm.saveDocument(document)
-                attempt.recordIfCurrent("active_document_saved")
+                // #jblocalhistcrash: IntelliJ's Local History VFS storage can throw an
+                // internal java.lang.AssertionError (AbstractRecordsTable.createNewRecord)
+                // during saveDocument when its local-history store is corrupt. That
+                // recording is best-effort — the document text is authoritative and the
+                // Run Agent Doc dispatch must still proceed, so catch + log and continue
+                // rather than aborting the whole action. Operator remediation for the
+                // corrupt store: File > Invalidate Caches / Restart.
+                try {
+                    fdm.saveDocument(document)
+                    attempt.recordIfCurrent("active_document_saved")
+                } catch (t: Throwable) {
+                    LOG.warn(
+                        "[run] saveDocument failed (best-effort local-history record; continuing dispatch): ${t.message}",
+                        t,
+                    )
+                    attempt.recordIfCurrent("active_document_save_failed")
+                }
             } else {
                 attempt.recordIfCurrent("document_not_loaded")
         }

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-signals"
-version = "0.34.75"
+version = "0.34.76"
 edition = "2024"
 description = "Signals element descriptor for agent-doc"
 license = "MIT"
@@ -10,4 +10,4 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_signals"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.75" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.76" }

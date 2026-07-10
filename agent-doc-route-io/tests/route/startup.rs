@@ -1570,6 +1570,77 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "route should not dispatch into the stale registered pane either: {stale_content}"
         );
     }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn dead_legacy_associated_pane_auto_reclaims_instead_of_failing_closed() {
+        // #routelegacypane: a legacy associated pane whose process has EXITED is
+        // stale ownership evidence, not a live ambiguity. Route must auto-reclaim
+        // (fall through to the normal cold-start path) rather than fail closed with
+        // "will not re-elect ownership from ...", which forced a manual claim/kill.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = IsolatedTmux::new("route-test-dead-legacy-pane-reclaim");
+        let session = "claude";
+        let cwd = test_cwd();
+
+        // A pane that once owned the document, recorded in the session log...
+        let dead_pane = iso.auto_start(session, &cwd).unwrap();
+        let doc = dir.path().join("session.md");
+        let snapshot =
+            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let current = format!("{snapshot}❯ follow-up question\n");
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(snapshot),
+            Some(snapshot),
+        )
+        .unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        agent_doc_supervisor_io::startup_miss::append_session_log_event(
+            &doc,
+            "route-dead-legacy",
+            &format!(
+                "session_start file={} pane={} session=route-dead-legacy",
+                doc.display(),
+                dead_pane
+            ),
+        )
+        .unwrap();
+
+        // ...but the pane has since exited. The only ownership evidence is now stale.
+        let _ = iso.raw_cmd(&["kill-pane", "-t", &dead_pane]);
+        assert!(
+            !iso.pane_alive(&dead_pane),
+            "test setup: the legacy associated pane must be dead"
+        );
+
+        // Route must not fail closed on the dead candidate — it auto-reclaims.
+        let result = resolve_or_create_pane(
+            &iso,
+            &doc,
+            None,
+            &[],
+            "route-dead-legacy",
+            &file_path,
+            session,
+            &HarnessConfig::codex(),
+            &mut Vec::new(),
+        );
+        if let Err(err) = &result {
+            assert!(
+                !err.to_string().contains("will not re-elect ownership"),
+                "dead legacy associated pane must auto-reclaim, not force a manual claim/kill: {err:#}"
+            );
+        }
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_prefers_authoritative_actor_dispatch_target() {

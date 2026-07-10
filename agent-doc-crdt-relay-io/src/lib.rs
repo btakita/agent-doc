@@ -81,6 +81,17 @@ const DOCUMENT_MODEL_ENSURE_POLL_MS: u64 = 25;
 const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 150;
 #[cfg(not(test))]
 const DOCUMENT_MODEL_ENSURE_TIMEOUT_MS: u64 = 5_000;
+// `#missingreplicarecycle`: an editor that holds the document but registered no
+// CRDT replica gets only this brief window to answer the publish request before
+// the model is recycled from the durable projection. Kept well under the 750ms
+// controller read timeout so a stale/half-synced editor cannot wedge the
+// single-threaded controller (a full-timeout wait per read starves every other
+// reader). `EditorSyncPending` — a hub that already exists mid-flush — still uses
+// the full [`DOCUMENT_MODEL_ENSURE_TIMEOUT_MS`].
+#[cfg(test)]
+const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
+#[cfg(not(test))]
+const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
 // `send_publish_live_buffer` can spend 3s connecting and 6s waiting for a
 // receipt. Keep the cross-process lock fresh across that whole window so a slow
 // or wedged editor listener cannot cause competing recovery attempts.
@@ -486,8 +497,29 @@ fn ensure_document_model_with_current_text_observer_inner(
         return Err(err);
     }
 
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
+    // `#missingreplicarecycle`: bound how long we wait before recycling the
+    // document model from the durable projection. `EditorAttachedMissingReplica`
+    // means the editor holds the document (a live plugin-owner lease) but no CRDT
+    // replica is registered at all — the registry has no hub for this doc. A
+    // healthy editor registers its replica on open, so a *persistently* missing
+    // replica is a stale/half-synced editor (e.g. a JetBrains buffer that
+    // heartbeats its lease and pulls, yet never publishes a replica). Waiting the
+    // full publish timeout on every read then wedges the single-threaded controller
+    // and times out every other reader (idle-watch reads give up at 750ms). Give
+    // such an editor only a brief window to answer the publish request above, then
+    // recycle from the durable `.yrs` projection — the last-known relay canonical,
+    // a valid CRDT authority (not disk). If the editor does come alive its
+    // `register_replica` merges into the recovered hub
+    // (`with_hub_seeded_from_file` adds to the existing hub, never clobbers it).
+    // `EditorSyncPending` keeps the full window: there a hub already exists with the
+    // editor's un-flushed ops that are worth waiting for.
+    let ensure_timeout_ms = if matches!(first, CurrentText::EditorAttachedMissingReplica) {
+        DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS
+    } else {
+        DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
+    };
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
     loop {
@@ -2691,6 +2723,56 @@ mod tests {
             }
             other => panic!("expected projection-backed current text, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ensure_document_model_recycles_missing_replica_within_short_window() {
+        let (_dir, doc) = temp_doc("ensure-model-missing-replica-recycle.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
+        let editor = mint_client_id("intellij:missing-replica-recycle");
+        prior.register(editor).unwrap();
+        prior
+            .apply_local(editor, 0, 0, "recycled from projection")
+            .unwrap();
+        agent_doc_snapshot_io::save_crdt(&doc, &prior.projection_bytes()).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let poll_count = Arc::new(Mutex::new(0usize));
+        let poll_count_for_observer = Arc::clone(&poll_count);
+        // The editor never registers a replica (stale/half-synced): the strict
+        // observer stays at EditorAttachedMissingReplica forever.
+        let current = ensure_document_model_with_current_text_recovery_observer(
+            &doc,
+            "test_missing_replica_recycle",
+            CurrentText::EditorAttachedMissingReplica,
+            || {
+                *poll_count_for_observer.lock().unwrap() += 1;
+                Ok(CurrentText::EditorAttachedMissingReplica)
+            },
+            || {
+                current_text_for_file_with_authority_recovering_projection(
+                    &doc,
+                    CrdtAuthority::MultiReplica,
+                )
+            },
+        )
+        .expect("missing-replica ensure should recycle the model from the durable projection");
+
+        match current {
+            CurrentText::Current { text, .. } => assert_eq!(text, "recycled from projection"),
+            other => panic!("expected projection-recycled current text, got {other:?}"),
+        }
+        // `#missingreplicarecycle`: the missing-replica case uses the short window
+        // (`DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS` = 60ms in test /
+        // `DOCUMENT_MODEL_ENSURE_POLL_MS` = 25ms → ~2-3 polls), well under the full
+        // `DOCUMENT_MODEL_ENSURE_TIMEOUT_MS` (150ms → ~6 polls), so a stale editor
+        // cannot block the single-threaded controller for the full window.
+        let polls = *poll_count.lock().unwrap();
+        assert!(
+            (1..=4).contains(&polls),
+            "missing-replica ensure should poll only within the short window, got {polls}"
+        );
     }
 
     #[test]

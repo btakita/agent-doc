@@ -2920,16 +2920,12 @@ fn wait_for_operator_text_authority_refresh(
     mut latest_missing: agent_doc_debounce::LiveBufferSnapshot,
 ) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
     for _ in 0..20 {
-        match agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
+        let still_missing = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
             indicator_path,
             content,
-        ) {
-            Some(still_missing) => {
-                latest_missing = still_missing;
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-            None => return None,
-        }
+        )?;
+        latest_missing = still_missing;
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
     Some(latest_missing)
 }

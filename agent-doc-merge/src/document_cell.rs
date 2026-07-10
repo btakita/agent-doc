@@ -1775,19 +1775,15 @@ pub fn route_ops_to_cells(
                             s.span.end == *offset && !spans.iter().any(|o| o.span.start == *offset)
                         })
                     });
-                match found {
-                    Some(s) => (s.node_key.clone(), s.span),
-                    None => return None,
-                }
+                let s = found?;
+                (s.node_key.clone(), s.span)
             }
             EditorOp::Delete { offset, len } => {
                 let hi = offset.checked_add(*len)?;
                 // The WHOLE delete range must lie within one item span.
                 let found = spans.iter().find(|s| s.span.contains_range(*offset, hi));
-                match found {
-                    Some(s) => (s.node_key.clone(), s.span),
-                    None => return None,
-                }
+                let s = found?;
+                (s.node_key.clone(), s.span)
             }
         };
         let local = translate_to_cell_local(op, span.start)?;

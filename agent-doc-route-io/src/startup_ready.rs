@@ -3,6 +3,7 @@
 use agent_doc_controller::dispatch::{
     AutoStartDispatchBlock, AutoStartDispatchReadyFacts, FreshStartAckOutcome,
     classify_auto_start_dispatch_ready_block, fresh_start_ack_outcome,
+    pane_composer_has_pending_trigger,
 };
 use agent_doc_harness::HarnessConfig;
 use anyhow::Result;
@@ -151,15 +152,32 @@ pub fn wait_for_agent_ready_outcome(
 
 /// Whether a no-cycle fresh start returned to a dispatch-ready prompt.
 pub fn fresh_start_pane_idle_ready(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> bool {
+    matches!(
+        fresh_start_no_ack_outcome(tmux, pane, harness, ""),
+        FreshStartAckOutcome::IdleNoOpKeep
+    )
+}
+
+/// (#jbtsiftnosub2) Classify a no-cycle fresh start from a single pane capture.
+///
+/// Distinguishes a legitimate idle no-op (`IdleNoOpKeep`) from a stranded
+/// "typed but not submitted" trigger (`StrandedTriggerResubmit`) by checking
+/// whether the injected `trigger` is still visible unsubmitted in the composer.
+/// Pass an empty `trigger` to skip the pending-composer check (idle-vs-miss only).
+pub fn fresh_start_no_ack_outcome(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+    trigger: &str,
+) -> FreshStartAckOutcome {
     match agent_doc_tmux_io::capture_pane(tmux, pane) {
-        Ok(content) => matches!(
-            fresh_start_ack_outcome(
-                false,
-                agent_doc_harness::ready_prompt_candidate(&content, harness).is_some(),
-            ),
-            FreshStartAckOutcome::IdleNoOpKeep
-        ),
-        Err(_) => false,
+        Ok(content) => {
+            let pane_dispatch_ready =
+                agent_doc_harness::ready_prompt_candidate(&content, harness).is_some();
+            let trigger_pending = pane_composer_has_pending_trigger(&content, trigger);
+            fresh_start_ack_outcome(false, pane_dispatch_ready, trigger_pending)
+        }
+        Err(_) => fresh_start_ack_outcome(false, false, false),
     }
 }
 

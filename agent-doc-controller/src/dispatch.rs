@@ -1315,20 +1315,55 @@ pub fn decide_fresh_dispatch_target_after_ready_wait(
 pub enum FreshStartAckOutcome {
     CycleAcknowledged,
     IdleNoOpKeep,
+    /// (#jbtsiftnosub2) A no-cycle fresh start whose pane is back at a
+    /// dispatch-ready prompt **but still shows the injected trigger sitting
+    /// unsubmitted in the composer**. This is the JB-created-fresh-pane
+    /// "prompt added but not submitted" drift: `wait_for_agent_ready` proved a
+    /// transient ready prompt, the supervisor-IPC inject typed the trigger, but
+    /// the submit key never registered against the still-initializing composer.
+    /// The trigger must be resubmitted, not silently kept as a healthy idle
+    /// no-op (which strands the operator's request forever).
+    StrandedTriggerResubmit,
     GenuineMissReap,
 }
 
 pub const fn fresh_start_ack_outcome(
     cycle_acknowledged: bool,
     pane_dispatch_ready: bool,
+    trigger_pending_in_composer: bool,
 ) -> FreshStartAckOutcome {
     if cycle_acknowledged {
         FreshStartAckOutcome::CycleAcknowledged
+    } else if pane_dispatch_ready && trigger_pending_in_composer {
+        FreshStartAckOutcome::StrandedTriggerResubmit
     } else if pane_dispatch_ready {
         FreshStartAckOutcome::IdleNoOpKeep
     } else {
         FreshStartAckOutcome::GenuineMissReap
     }
+}
+
+/// (#jbtsiftnosub2) Detect whether a freshly-created pane's capture still shows
+/// the injected routed trigger sitting **unsubmitted** in the harness composer.
+///
+/// The capture is expected to already be ANSI-free (`capture_pane`, not the
+/// `_with_ansi` variant). ALL whitespace is stripped from both sides before the
+/// substring test so a trigger wrapped across terminal columns — tmux splits a
+/// long token onto the next line with a newline and no space — still matches.
+/// On a genuinely-submitted turn the harness clears the composer and a document
+/// cycle is acknowledged (so this branch is never reached); on a brand-new fresh
+/// pane the only way the trigger literal can appear is the just-injected,
+/// not-yet-submitted draft, so a whitespace-insensitive match cannot false-fire.
+pub fn pane_composer_has_pending_trigger(pane_content: &str, trigger: &str) -> bool {
+    let stripped_trigger = strip_all_whitespace(trigger);
+    if stripped_trigger.is_empty() {
+        return false;
+    }
+    strip_all_whitespace(pane_content).contains(&stripped_trigger)
+}
+
+fn strip_all_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3705,20 +3740,64 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     #[test]
     fn fresh_start_ack_outcome_keeps_idle_no_op_and_reaps_genuine_miss() {
         assert_eq!(
-            fresh_start_ack_outcome(true, false),
+            fresh_start_ack_outcome(true, false, false),
             FreshStartAckOutcome::CycleAcknowledged,
             "a document cycle ack is a normal fresh start regardless of pane prompt state"
         );
         assert_eq!(
-            fresh_start_ack_outcome(false, true),
+            fresh_start_ack_outcome(false, true, false),
             FreshStartAckOutcome::IdleNoOpKeep,
-            "a no-cycle fresh start that returns to dispatch-ready is a legitimate idle no-op"
+            "a no-cycle fresh start that returns to dispatch-ready with an empty composer is a legitimate idle no-op"
         );
         assert_eq!(
-            fresh_start_ack_outcome(false, false),
+            fresh_start_ack_outcome(false, false, false),
             FreshStartAckOutcome::GenuineMissReap,
             "a no-cycle fresh start without dispatch-ready proof is a genuine startup miss"
         );
+    }
+
+    #[test]
+    fn fresh_start_ack_outcome_resubmits_stranded_unsubmitted_trigger() {
+        // (#jbtsiftnosub2) The JB-created-fresh-pane drift: pane is back at a
+        // dispatch-ready prompt but the injected trigger is still sitting
+        // unsubmitted in the composer. This must NOT be kept as an idle no-op.
+        assert_eq!(
+            fresh_start_ack_outcome(false, true, true),
+            FreshStartAckOutcome::StrandedTriggerResubmit,
+            "a dispatch-ready pane still showing the unsubmitted trigger is a stranded prompt, not a no-op"
+        );
+        // A cycle ack always wins even if the trigger echo lingers in scrollback.
+        assert_eq!(
+            fresh_start_ack_outcome(true, true, true),
+            FreshStartAckOutcome::CycleAcknowledged,
+        );
+        // No dispatch-ready prompt is still a genuine miss regardless of composer state.
+        assert_eq!(
+            fresh_start_ack_outcome(false, false, true),
+            FreshStartAckOutcome::GenuineMissReap,
+        );
+    }
+
+    #[test]
+    fn pane_composer_pending_trigger_matches_wrapped_and_ignores_absent() {
+        let trigger = "/agent-doc tasks/recruit/sitscape.md";
+        // Exact match in the composer.
+        assert!(pane_composer_has_pending_trigger(
+            "╭─────────╮\n│ > /agent-doc tasks/recruit/sitscape.md │\n╰─────────╯",
+            trigger,
+        ));
+        // Column-wrapped trigger (newline mid-path) still matches after whitespace collapse.
+        assert!(pane_composer_has_pending_trigger(
+            "> /agent-doc tasks/recruit/\nsitscape.md",
+            trigger,
+        ));
+        // Empty / cleared composer does not match.
+        assert!(!pane_composer_has_pending_trigger(
+            "╭─────────╮\n│ >  │\n╰─────────╯",
+            trigger,
+        ));
+        // Empty trigger never matches (guards against a false stranded classification).
+        assert!(!pane_composer_has_pending_trigger("anything at all", "   "));
     }
 
     #[test]

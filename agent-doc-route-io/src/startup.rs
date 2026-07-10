@@ -17,10 +17,10 @@ use crate::session_resolution::{
 };
 use crate::startup_harness::resolve_harness_for_file;
 use crate::startup_locks::{StartupLockAcquire, StartupLockMode, acquire_startup_locks};
-use crate::startup_ready::{fresh_start_pane_idle_ready, wait_for_agent_ready};
+use crate::startup_ready::{fresh_start_no_ack_outcome, wait_for_agent_ready};
 use agent_doc_controller::dispatch::{
-    DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, RoutedDispatchStartProof,
-    duplicate_pane_policy_error_message, fresh_route_start_ack_timeout,
+    DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAckOutcome,
+    RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_start_ack_timeout,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_tmux::is_first_column;
@@ -632,68 +632,109 @@ pub fn auto_start_in_session_with_lock_mode(
                 );
                 let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             }
-            None if fresh_start_pane_idle_ready(tmux, &dispatch_pane, harness) => {
-                // (#route-reaps-idle-fresh-start) The trigger was proven dispatched
-                // above, and the pane has returned to a dispatch-ready prompt: the
-                // first cycle was a legitimate no-op (empty/halted queue, preflight
-                // `no_changes`) — there was simply nothing to acknowledge. Keep the
-                // live idle session instead of reaping a healthy start (the "I
-                // cannot start lazily-rs.md, killed immediately" symptom). Genuine
-                // misses (pane never ready / hung) still fall through to the reap
-                // branch below.
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "fresh_route_start_idle_no_op file={} pane={} harness={} timeout_secs={} note=trigger dispatched, pane dispatch-ready, no-op first cycle kept as idle session",
-                        file.display(),
-                        dispatch_pane,
-                        harness.binary,
-                        ack_timeout.as_secs()
-                    ),
-                );
-                eprintln!(
-                    "[route] fresh {} start for {} produced a no-op first cycle (nothing queued); pane {} is idle and dispatch-ready — keeping the live idle session",
-                    harness.binary,
-                    file.display(),
-                    dispatch_pane
-                );
-                let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
-            }
             None => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "fresh_route_start_missing file={} pane={} harness={} timeout_secs={}",
-                        file.display(),
-                        dispatch_pane,
-                        harness.binary,
-                        ack_timeout.as_secs()
-                    ),
-                );
-                let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
-                let _ = agent_doc_supervisor_io::startup_miss::record_startup_miss(
-                    file,
-                    &dispatch_pane,
-                    session_id,
-                    &harness.binary,
-                    agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
-                    baseline_id,
-                );
-                (effects.route_cycle_ack_effects.emit_startup_miss_diagnostic)(
-                    tmux,
-                    &dispatch_pane,
-                    file,
-                    &format!(
-                        "fresh start: trigger {} but no document cycle started",
-                        dispatch_start.dispatch_stage_label()
-                    ),
-                );
-                anyhow::bail!(
-                    "fresh {} start for {} never acknowledged with a document cycle after trigger {}",
-                    harness.binary,
-                    file.display(),
-                    dispatch_start.startup_miss_label()
-                );
+                // (#jbtsiftnosub2) Classify the no-ack pane from a single
+                // capture. A dispatch-ready pane whose composer STILL shows the
+                // injected trigger unsubmitted is the JB-created-fresh-pane
+                // "prompt added but not submitted" drift — resubmit it once
+                // before deciding, instead of misreading a stranded request as a
+                // legitimate idle no-op.
+                let trigger = harness.trigger_command(file_path);
+                let mut outcome =
+                    fresh_start_no_ack_outcome(tmux, &dispatch_pane, harness, &trigger);
+                if matches!(outcome, FreshStartAckOutcome::StrandedTriggerResubmit) {
+                    outcome = resubmit_stranded_fresh_start_trigger(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        harness,
+                        &trigger,
+                        cycle_baseline.as_ref(),
+                        ack_timeout,
+                    );
+                }
+                match outcome {
+                    FreshStartAckOutcome::CycleAcknowledged => {
+                        // The resubmit landed a document cycle.
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "fresh_route_start_acknowledged_after_resubmit file={} pane={} harness={} timeout_secs={} #jbtsiftnosub2",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                ack_timeout.as_secs()
+                            ),
+                        );
+                        let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+                    }
+                    FreshStartAckOutcome::IdleNoOpKeep => {
+                        // (#route-reaps-idle-fresh-start) The trigger was proven
+                        // dispatched above, and the pane has returned to a
+                        // dispatch-ready prompt with an empty composer: the first
+                        // cycle was a legitimate no-op (empty/halted queue,
+                        // preflight `no_changes`) — there was simply nothing to
+                        // acknowledge. Keep the live idle session instead of
+                        // reaping a healthy start (the "I cannot start
+                        // lazily-rs.md, killed immediately" symptom).
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "fresh_route_start_idle_no_op file={} pane={} harness={} timeout_secs={} note=trigger dispatched, pane dispatch-ready, no-op first cycle kept as idle session",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                ack_timeout.as_secs()
+                            ),
+                        );
+                        eprintln!(
+                            "[route] fresh {} start for {} produced a no-op first cycle (nothing queued); pane {} is idle and dispatch-ready — keeping the live idle session",
+                            harness.binary,
+                            file.display(),
+                            dispatch_pane
+                        );
+                        let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+                    }
+                    FreshStartAckOutcome::StrandedTriggerResubmit
+                    | FreshStartAckOutcome::GenuineMissReap => {
+                        // Genuine miss: pane never ready / hung, or the trigger is
+                        // still stuck unsubmitted even after a resubmit attempt.
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "fresh_route_start_missing file={} pane={} harness={} timeout_secs={}",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                ack_timeout.as_secs()
+                            ),
+                        );
+                        let baseline_id = cycle_baseline.as_ref().map(|b| b.cycle_id.as_str());
+                        let _ = agent_doc_supervisor_io::startup_miss::record_startup_miss(
+                            file,
+                            &dispatch_pane,
+                            session_id,
+                            &harness.binary,
+                            agent_doc_supervisor::startup_miss::StartupMissOrigin::FreshStart,
+                            baseline_id,
+                        );
+                        (effects.route_cycle_ack_effects.emit_startup_miss_diagnostic)(
+                            tmux,
+                            &dispatch_pane,
+                            file,
+                            &format!(
+                                "fresh start: trigger {} but no document cycle started",
+                                dispatch_start.dispatch_stage_label()
+                            ),
+                        );
+                        anyhow::bail!(
+                            "fresh {} start for {} never acknowledged with a document cycle after trigger {}",
+                            harness.binary,
+                            file.display(),
+                            dispatch_start.startup_miss_label()
+                        );
+                    }
+                }
             }
         }
     }
@@ -712,6 +753,62 @@ pub fn auto_start_in_session_with_lock_mode(
     };
     let _ = file; // suppress unused warning
     Ok(Some(final_pane))
+}
+
+/// (#jbtsiftnosub2) Resubmit a fresh-start trigger that the harness composer
+/// typed but never submitted, then re-classify the pane.
+///
+/// Sends one bare harness submit key (`Enter`) to the stranded composer draft
+/// and waits a bounded ack window. Returns `CycleAcknowledged` when the resubmit
+/// finally starts a document cycle; otherwise re-captures the pane and returns
+/// the fresh classification (`IdleNoOpKeep` if the composer cleared into a
+/// genuine no-op, or `StrandedTriggerResubmit`/`GenuineMissReap` if the trigger
+/// is still stuck), so the caller records a startup-miss and fails closed
+/// instead of silently keeping the operator's request unsubmitted.
+#[allow(clippy::too_many_arguments)]
+fn resubmit_stranded_fresh_start_trigger(
+    tmux: &Tmux,
+    file: &Path,
+    dispatch_pane: &str,
+    harness: &HarnessConfig,
+    trigger: &str,
+    cycle_baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+    ack_timeout: Duration,
+) -> FreshStartAckOutcome {
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "fresh_route_stranded_trigger_resubmit file={} pane={} harness={} submit_key={} #jbtsiftnosub2 note=trigger typed into composer but never submitted; resending submit key",
+            file.display(),
+            dispatch_pane,
+            harness.binary,
+            submit_key
+        ),
+    );
+    eprintln!(
+        "[route] fresh {} start for {} left the trigger unsubmitted in the composer; resending {} to submit",
+        harness.binary,
+        file.display(),
+        submit_key
+    );
+    if let Err(e) = agent_doc_tmux_io::send_key_logged(
+        tmux,
+        dispatch_pane,
+        submit_key,
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
+        "route.stranded_trigger_resubmit",
+    ) {
+        eprintln!(
+            "[route] warning: failed to resend submit key to stranded pane {}: {}",
+            dispatch_pane, e
+        );
+        return FreshStartAckOutcome::GenuineMissReap;
+    }
+    match wait_for_start_ack(file, cycle_baseline, ack_timeout) {
+        Some(_) => FreshStartAckOutcome::CycleAcknowledged,
+        None => fresh_start_no_ack_outcome(tmux, dispatch_pane, harness, trigger),
+    }
 }
 
 #[cfg(test)]

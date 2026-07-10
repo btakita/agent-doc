@@ -94,7 +94,88 @@ Since she's Ops/HR, lead every answer with **outcome + how you worked with peopl
 
 Follow-ups queued in the backlog: draft the actual STAR stories against this table, and tailor your resume + statement of interest to the JD's keywords. Say the word and I'll draft either.
 do starstories
-<!-- agent:boundary:773e5b46 -->
+
+### Re: STAR stories for the Brandee Gorby behavioral screen — opus-4-8
+
+Five stories, each anchored in real work and built to flex across 2-3 of the JD's competency bullets so you don't need a separate story per prompt. Lead each answer with **outcome + how you worked with people** (she's Ops/HR), keep the tech concrete but brief. Where I've bracketed `[…]`, drop in your real number/name — approximate is fine, but say the same figure every time.
+
+---
+
+#### Story 1 — "Fixed the data-loss bug nobody had filed"
+**Flexes to:** Proactive/initiative · Continuous learning · Security/reliability mindset
+
+- **S** — I build a real-time collaborative document tool where two people (or an AI agent and a person) edit the same file live. Under concurrent edits, edits were occasionally getting silently dropped — no error, no crash, just a lost paragraph. No one had reported it as a bug because it looked like "user forgot to save."
+- **T** — I decided it was a correctness problem worth stopping for: silent data loss in a collaboration tool erodes all trust in it. I took it on before it was ever assigned or prioritized.
+- **A** — I traced it to how concurrent changes were merged at the document level and reproduced it deterministically in a test harness. I had to learn CRDT (conflict-free merge) internals properly rather than patch symptoms, then re-scoped the merge to isolate each edited region so two people's edits couldn't clobber each other. I shipped it with a regression test that recreates the exact race.
+- **R** — The lost-edit class was eliminated and the merge stayed stable under concurrent load. More importantly it set a bar: I now write a failing repro before I call a concurrency bug "fixed."
+
+*Why it lands with her:* shows you self-direct, you learn deep tech on demand, and you treat reliability/data-integrity as non-negotiable — exactly the "mission-critical" posture Sitscape sells.
+
+---
+
+#### Story 2 — "Shipped a lending platform end-to-end on a hard deadline"
+**Flexes to:** Entire web-dev process (design→dev→deploy) · Collaborate with back-end · Fast-paced/multitasking
+
+- **S** — An accredited-investor lending platform: React-style front-end, a serverless back-end (Cloudflare Workers), and a SQL database, with a real deal/funding flow investors and lenders move through.
+- **T** — Deliver a working investor→lender deal flow — the UI deal cards, the API behind them, the data model, and the production deploy — on a compressed timeline.
+- **A** — I built the interactive deal-card UI, wired it to the worker APIs, wrote the DB migrations, and owned the deploy. Mid-stream we changed the model — cut an entire "funding-commit" step so the selected lender wires the whole loan — which meant coordinating the schema change across the UI and the back-end at once and re-verifying the flow on production before calling it done.
+- **R** — Shipped the simplified flow to production the same day the decision was made, verified live (not just in tests), with the old stage cleanly removed.
+
+*Why it lands with her:* this is the JD's "entire web development process" and "collaborate with back-end developers" bullets, plus proof you keep shipping when requirements shift under you.
+
+---
+
+#### Story 3 — "Built the reusable component library others compose with"
+**Flexes to:** Interactive components / data-viz (the actual job) · Continuous learning · Team idea-sharing
+
+- **S** — I maintain a reactive-UI primitive library — the lazy/reactive engine that redraws only what changed — and I ship it across [several] languages so different teams can use one mental model.
+- **T** — Make the core fast and reusable enough that other developers build their interactive, real-time views on top of it instead of reinventing state management each time.
+- **A** — I designed the reactive primitives and a zero-copy data path, profiled the hot recompute path, and cut the cold-recalculation cost that was the bottleneck for large live views. I documented it so teammates could adopt the same pattern rather than hand-rolling their own.
+- **R** — Reusable building blocks that power drag-and-drop/real-time UIs with far less redraw overhead — and a shared pattern the team reuses.
+
+*Why it lands with her:* Sitscape's product IS a no-code builder — you build *the components other people compose*. This is your most direct "here's the interactive component / data-viz I built" answer if she asks you to make the tech concrete.
+
+---
+
+#### Story 4 — "Caught a stale-read authorization bug before it burned a customer"
+**Flexes to:** Security/reliability mindset · Proactive · Attention to detail
+
+- **S** — On the lending platform, gating logic (who's allowed to advance a deal) was reading an investor's accreditation status from a field that could be stale — a denormalized copy that didn't always reflect the latest verified record.
+- **T** — A stale read here isn't cosmetic: it can either wrongly block a legitimate customer or wrongly let one through a compliance gate. I flagged it as a real risk rather than a minor data quirk.
+- **A** — I tracked every place the gate and the deal cards read that status, changed them to read the authoritative record (via a `COALESCE` onto the live accreditation source), added a migration, and verified the corrected behavior on production against a real login.
+- **R** — The "false pending / wrong gate" behavior went away and access decisions now key off the true record — closing a quiet compliance-risk gap before any customer hit it.
+
+*Why it lands with her:* compliance-aware, careful with authorization and data integrity — this is the language of a government/defense-adjacent shop, and it's her wheelhouse as an ops/compliance manager.
+
+---
+
+#### Story 5 — "Pulled back from over-engineering after honest feedback"
+**Flexes to:** Handling difficult feedback/disagreement · Teamwork · Fast-paced (don't gold-plate)
+
+- **S** — I have a genuine failure mode: I can spiral into a big refactor to make something "right" when the situation only needed a targeted fix. On [project], I'd started down exactly that path.
+- **T** — The feedback — from [teammate/stakeholder] — was blunt: this is scope you didn't need, ship the smaller thing. I had to actually hear it instead of defending the elegant version.
+- **A** — I stopped, scoped it back to the change that solved the real problem, and adopted a rule for myself: spike/prototype behind a small experiment first and set a conviction gate before committing to a big rewrite. I now flag "this is turning into a refactor" out loud so the team can veto early.
+- **R** — I shipped the smaller fix on time, and the guardrail has kept later work from ballooning. Turning that critique into a repeatable habit is the part I'm most comfortable telling on myself.
+
+*Why it lands with her:* behavioral screens always probe conflict/feedback, and self-awareness beats a humble-brag. At an 18-year-old, "very stable" 20-person shop, showing you *won't* gold-plate and *do* take feedback directly answers her real question — will he fit and stay.
+
+---
+
+#### Quick mapping cheat-sheet (which story for which prompt)
+
+| If she asks about… | Lead with |
+|---|---|
+| Taking initiative / proactivity | Story 1 (or 4) |
+| Fast pace / juggling priorities | Story 2 |
+| Learning something new / sharing with the team | Story 3 (or 1) |
+| Working with back-end / non-eng partners | Story 2 |
+| Owning something end-to-end | Story 2 (or 3) |
+| Catching a risk / reliability | Story 4 (or 1) |
+| Conflict / hard feedback / a failure | Story 5 |
+| A weakness | Story 5 |
+
+**Two things to do before the interview:** (1) fill the bracketed specifics with real numbers/names and say them out loud twice each so they're smooth; (2) trim each to ~60-90 seconds spoken — the versions above are the full material, not the script. Next in the backlog is `#resumetailor` (align resume + statement of interest to the JD keywords) — say the word and I'll draft it.
+<!-- agent:boundary:dae25758 -->
 <!-- /agent:exchange -->
 
 ## Queue

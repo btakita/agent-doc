@@ -139,7 +139,7 @@ Spec (`specs/08-session-routing.md`) + AGENTS.md invariant added; 3 new determin
 Note: I did **not** tag or publish crates.io/PyPI — the `#spec-test-build-install-commit-push` preset stops at commit+push, consistent with the standing "no releases until per-cell CRDT" hold. Route-owned supervisors pick up 0.34.74 at their next idle-boundary recycle.
 
 Live JB proof left as `[operator-verify]` (needs a real editor + fresh pane).
-<!-- agent:boundary:8ec11c05 -->
+<!-- agent:boundary:616c85c9 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -230,6 +230,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#clippy197cleanup] #agent-doc-chore Clippy 1.97 (CI installs latest stable) flags test-target lints not caught by CI's non---all-targets `make clippy`: single_element_loop (tests/test_cli.rs:21000/24979/29579), assertions_on_constants (agent-doc-cycle-state-io/src/lib.rs:2135, src/session_actor_cmd.rs:4497), redundant assert! reference (agent-doc-sync-io/src/resync.rs:1896/1937/1964), needless_return (agent-doc-document-realtime-io/src/lib.rs:545). Lib sites already fixed (021e545a). Coordinate test_cli.rs fixes with the concurrent session that owns its WIP; consider pinning clippy via rust-toolchain.toml so CI toolchain bumps don't surprise-fail.
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
 - [ ] [#restartstderrbleed2] #restartstderrbleed2 #agent-doc-bug Fresh route-owned start bleeds CLI boot stderr into the agent pane (visible on first manual submit); distinct from shipped #restartstderrbleed. Plan: src/agent-doc/tasks/agent-doc/plan-fresh-start-stderr-bleed.md
 - [ ] [#5bzd] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%25 actor_generation=1137 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=12773 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783437151060-direct_pane_dispatch_start_unproven-codex-_25-9831ae756eb0.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]

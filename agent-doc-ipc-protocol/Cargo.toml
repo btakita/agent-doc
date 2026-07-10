@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ipc-protocol"
-version = "0.34.74"
+version = "0.34.75"
 edition = "2024"
 description = "Pure IPC protocol classification policy for agent-doc"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_ipc_protocol"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.74" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.74" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.75" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.75" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

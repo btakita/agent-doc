@@ -1170,6 +1170,35 @@ pub fn apply_cpc_write_for_file(
     if !authority.editor_attached() {
         return Ok(None);
     }
+    // #stale-lease-cpc-authority: the plugin-owner lease still claims editor
+    // attachment, but real write authority requires a LIVE registered replica. When
+    // a hub exists yet reports zero live editors, the editor exited without
+    // releasing the lease — the CPC canonical is a frozen, non-authoritative
+    // projection whose text will never match `expected_current`, so every write
+    // CAS-refuses forever with `retry_crdt_merge`. That is the wedge that strands
+    // finalize/compact in `response_captured` and churns preflight repair (the live
+    // repro: `authority=cpc_model live_editors=0`, disk drifted from a stale relay
+    // canonical). Mirror the read path
+    // (`realtime_doc_resolve_crdt_no_live_editors_disk_authority`): with no live
+    // replica there is no editor buffer to protect, so resolve to disk authority
+    // (`Ok(None)`) and let the caller commit the write to disk. The controller's
+    // disk-change watcher then reconciles the stale relay canonical against the new
+    // disk content, so it cannot resurrect over disk when an editor re-attaches. A
+    // missing hub (`with_existing_hub` → `None`) is a different case
+    // (#cpcwritemissingreplica) handled by the durable-projection recovery below.
+    if with_existing_hub(file, |hub| hub.live_count() == 0)?.unwrap_or(false) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_cpc_write_disk_authority_stale_lease file={} source={} live_editors=0 content_len={} content_hash={} recovery=disk_authority_no_live_replica",
+                file.display(),
+                source,
+                content.len(),
+                agent_doc_hash::content_hash(content),
+            ),
+        );
+        return Ok(None);
+    }
     // First attempt against an already-registered live relay hub. When the editor
     // is attached but this process has no registered replica (a transient gap after
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
@@ -2403,6 +2432,47 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    #[test]
+    fn cpc_relay_write_stale_lease_zero_live_editors_resolves_to_disk_authority() {
+        // Regression for the finalize/compact `response_captured` churn: the
+        // plugin-owner lease still claims editor attachment, but the editor exited
+        // and no replica is live (`live_count() == 0`). The CPC canonical is a
+        // frozen stale projection whose text will never match `expected_current`.
+        // The write MUST NOT CAS-refuse with `retry_crdt_merge` (which wedges the
+        // cycle); it must mirror the read path and resolve to disk authority
+        // (`Ok(None)`) so the caller commits the write to disk. (#stale-lease-cpc-authority)
+        let (_dir, doc) = temp_doc("cpc-stale-lease.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        register_replica_for_file(&doc, "intellij:cpc-stale")
+            .unwrap()
+            .expect("editor replica should attach");
+        let baseline = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        // Editor exits without releasing the lease: the member goes offline
+        // (`live=false`), the canonical stays frozen at `baseline`, but the lease
+        // still reports `editor_attached`.
+        let client_id = mint_client_id("intellij:cpc-stale");
+        with_hub(&doc, |hub| {
+            assert!(hub.disconnect(client_id), "disconnect should mark member offline");
+            assert_eq!(hub.live_count(), 0, "editor disconnected -> zero live editors");
+        })
+        .unwrap();
+
+        // Finalize computes `expected_current` from DISK, which has drifted from the
+        // frozen stale relay canonical — the exact CAS mismatch that used to refuse.
+        let stale_expected = format!("{baseline}\ndrifted disk tail\n");
+        let next = format!("{baseline}\n### Re: unstuck — gpt-5\n\nDisk authority.\n");
+        let result = apply_cpc_write_for_file(&doc, &stale_expected, &next, "test_cpc_relay")
+            .expect("stale-lease zero-live write must not error with retry_crdt_merge");
+        assert!(
+            result.is_none(),
+            "zero live editors under a stale lease must resolve to disk authority (Ok(None)), not CAS-refuse"
+        );
     }
 
     #[test]

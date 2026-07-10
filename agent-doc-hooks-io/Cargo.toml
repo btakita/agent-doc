@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-hooks-io"
-version = "0.34.74"
+version = "0.34.75"
 edition = "2024"
 description = "Hook registry and document-hook I/O adapters for agent-doc"
 license = "MIT"
@@ -10,14 +10,14 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_hooks_io"
 
 [dependencies]
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.74" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.74" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.74" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.74" }
-agent-doc-lease-io = { path = "../agent-doc-lease-io", version = "0.34.74" }
-agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.34.74" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.74" }
-agent-doc-plugin-owner-io = { path = "../agent-doc-plugin-owner-io", version = "0.34.74" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.75" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.75" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.75" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.75" }
+agent-doc-lease-io = { path = "../agent-doc-lease-io", version = "0.34.75" }
+agent-doc-memory-io = { path = "../agent-doc-memory-io", version = "0.34.75" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.75" }
+agent-doc-plugin-owner-io = { path = "../agent-doc-plugin-owner-io", version = "0.34.75" }
 agent-kit = { version = "0.4.1", features = ["hooks"] }
 serde_json = "1"
 

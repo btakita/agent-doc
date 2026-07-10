@@ -94,7 +94,7 @@ Since she's Ops/HR, lead every answer with **outcome + how you worked with peopl
 
 Follow-ups queued in the backlog: draft the actual STAR stories against this table, and tailor your resume + statement of interest to the JD's keywords. Say the word and I'll draft either.
 do starstories
-<!-- agent:boundary:d7c91d92 -->
+<!-- agent:boundary:773e5b46 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -105,8 +105,8 @@ do starstories
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] #starstories Draft concrete STAR stories mapped to the JD competency table (proactive, fast-paced/multitasking, continuous learning, cross-functional, end-to-end ownership, teamwork) for the Brandee Gorby behavioral screen
-- [ ] #resumetailor Tailor resume + statement of interest to the Senior React Front-End Developer JD keywords (interactive components, data visualization, React/hooks/TS, Redux reframe, end-to-end web process)
+- [ ] [#52tg] #starstories Draft concrete STAR stories mapped to the JD competency table (proactive, fast-paced/multitasking, continuous learning, cross-functional, end-to-end ownership, teamwork) for the Brandee Gorby behavioral screen
+- [ ] [#gqkv] #resumetailor Tailor resume + statement of interest to the Senior React Front-End Developer JD keywords (interactive components, data visualization, React/hooks/TS, Redux reframe, end-to-end web process)
 <!-- /agent:backlog -->
 
 ## Icebox

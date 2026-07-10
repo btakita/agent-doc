@@ -17,6 +17,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Char-boundary-safe 8-char session prefix for logs and status lines.
+///
+/// A document may carry a legacy, migrated, or hand-edited `session:`
+/// frontmatter value that is shorter than 8 bytes (including empty) or whose
+/// 8th byte falls inside a multibyte UTF-8 character. A bare `&session_id[..8]`
+/// panics on either — and because this runs inside the pane-spawned
+/// `agent-doc start --route-owned` CLI (no FFI `catch_unwind`, no panic hook),
+/// that panic surfaces as a raw backtrace in the freshly created pane: the
+/// "agent-doc start crash". `str::get` returns `None` instead of panicking.
+fn session_id_short(session_id: &str) -> &str {
+    session_id.get(..8).unwrap_or(session_id)
+}
+
 pub struct StartRuntime {
     pub session_id: String,
     pub fm: frontmatter::Frontmatter,
@@ -500,7 +513,7 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
             "session_start file={} pane={} session={} generation={}",
             file.display(),
             pane_id,
-            &session_id[..8],
+            session_id_short(&session_id),
             start_generation
         ),
     );
@@ -527,7 +540,7 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         route_owned,
         format!(
             "Registered session {} -> pane {}",
-            &session_id[..8],
+            session_id_short(&session_id),
             pane_id
         ),
     );
@@ -1109,6 +1122,22 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn session_id_short_never_panics_on_short_or_multibyte_sessions() {
+        // Full UUID: normal 8-char prefix.
+        assert_eq!(
+            session_id_short("bec81dd7-71a1-488e-b716-8a0622713142"),
+            "bec81dd7"
+        );
+        // Shorter than 8 bytes (legacy/hand-edited) — must not panic.
+        assert_eq!(session_id_short("abc"), "abc");
+        assert_eq!(session_id_short(""), "");
+        // Multibyte char straddling byte 8 — `str::get(..8)` returns None, so we
+        // fall back to the whole id instead of panicking on a char boundary.
+        let multibyte = "sessioné-xyz"; // 'é' is 2 bytes, spanning bytes 7..9
+        assert_eq!(session_id_short(multibyte), multibyte);
+    }
 
     #[test]
     fn start_console_status_suppresses_route_owned_stderr_by_default() {

@@ -1893,6 +1893,75 @@ fn run_with_options_internal(
     )
 }
 
+/// Resolve `project_root` to its canonical nearest `.agent-doc` root so
+/// cross-root comparisons in [`document_belongs_to_sync_root`] are stable.
+fn canonical_sync_project_root(project_root: &Path) -> PathBuf {
+    agent_doc_fs::find_project_root_canonical(project_root)
+        .or_else(|| project_root.canonicalize().ok())
+        .unwrap_or_else(|| project_root.to_path_buf())
+}
+
+/// A document belongs to this sync's project root only when its nearest
+/// `.agent-doc` ancestor is that same root (`#sync-cross-root-autostart`).
+///
+/// A document under a nested/submodule project root (its own `.agent-doc/`,
+/// e.g. `src/boost-client/tasks/...`) is owned by that root's own controller
+/// and sync. Auto-starting or remembering it from the superproject provisions a
+/// mis-rooted pane: `agent-doc start` runs against the wrong root, the pane is
+/// slow to prove ownership, and it dies on start — the operator-visible "slow
+/// creation of the new pane and agent-doc start crash". `sync_project_root`
+/// must already be canonical (see [`canonical_sync_project_root`]).
+///
+/// A document with no resolvable `.agent-doc` ancestor (unmanaged/scaffold, or a
+/// path that does not yet exist on disk) is treated as belonging so same-root
+/// scaffolding is never blocked.
+fn document_belongs_to_sync_root(file: &Path, sync_project_root: &Path) -> bool {
+    match agent_doc_fs::find_project_root_canonical(file) {
+        Some(owning) => owning == *sync_project_root,
+        None => true,
+    }
+}
+
+/// Drop remembered layout columns that belong to a *different* project root so
+/// the cross-root document is neither restored into a visible column nor
+/// re-persisted into this root's layout memory. A column whose files are all
+/// cross-root becomes an empty placeholder (preserving column index positions
+/// the remembered-layout math relies on); a mixed column keeps only its
+/// same-root files. Returns the sanitized layout plus the paths that were
+/// dropped (for diagnostics).
+fn sanitize_cross_root_layout(
+    saved_layout: Vec<String>,
+    sync_project_root: &Path,
+) -> (Vec<String>, Vec<String>) {
+    let mut dropped: Vec<String> = Vec::new();
+    let sanitized = saved_layout
+        .into_iter()
+        .map(|col| {
+            let files: Vec<&str> = col
+                .split(',')
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+                .collect();
+            if files.is_empty() {
+                return col;
+            }
+            let kept: Vec<&str> = files
+                .iter()
+                .copied()
+                .filter(|f| {
+                    let belongs = document_belongs_to_sync_root(Path::new(f), sync_project_root);
+                    if !belongs {
+                        dropped.push((*f).to_string());
+                    }
+                    belongs
+                })
+                .collect();
+            kept.join(",")
+        })
+        .collect();
+    (sanitized, dropped)
+}
+
 fn run_with_options_internal_at_root(
     project_root: &Path,
     col_args: &[String],
@@ -2012,6 +2081,31 @@ fn run_with_options_internal_at_root(
                     .unwrap_or_default()
             }
         };
+
+    // Cross-root guard (`#sync-cross-root-autostart`): remembered layout state can
+    // accumulate documents that live under a nested/submodule project root with
+    // its own `.agent-doc/` (e.g. `src/boost-client/tasks/...`). Restoring or
+    // auto-starting them from this root provisions a mis-rooted pane that dies on
+    // start. Sanitize the remembered layout at load so the cross-root document is
+    // neither restored into a column nor re-persisted; this self-heals memory that
+    // was polluted before the guard existed.
+    let sync_project_root = canonical_sync_project_root(project_root);
+    let saved_layout = {
+        let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_project_root);
+        for path in &dropped {
+            eprintln!(
+                "[sync] dropping cross-root document from remembered layout: {} (sync root {})",
+                path,
+                sync_project_root.display()
+            );
+            sync_log(&format!(
+                "cross_root_layout_dropped file={} sync_root={}",
+                path,
+                sync_project_root.display()
+            ));
+        }
+        sanitized
+    };
 
     let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
     let column_memory = agent_doc_tmux::apply_column_memory(
@@ -2416,6 +2510,24 @@ fn run_with_options_internal_at_root(
             .or_else(|| window.and_then(|w| session_name_for_target_window(tmux, w)));
         for file_path in &all_files {
             if !file_path.exists() {
+                continue;
+            }
+            // Cross-root guard (`#sync-cross-root-autostart`): never provision a
+            // pane for a document owned by a different (nested/submodule) project
+            // root — its own controller manages it. Defense-in-depth for a
+            // cross-root path passed directly via col_args, in addition to the
+            // remembered-layout sanitization above.
+            if !document_belongs_to_sync_root(file_path, &sync_project_root) {
+                eprintln!(
+                    "[sync] skipping cross-root auto-start: {} is owned by another project root (sync root {}) — its own controller starts it (#sync-cross-root-autostart)",
+                    file_path.display(),
+                    sync_project_root.display()
+                );
+                sync_log(&format!(
+                    "cross_root_autostart_skipped file={} sync_root={}",
+                    file_path.display(),
+                    sync_project_root.display()
+                ));
                 continue;
             }
             let content = match std::fs::read_to_string(file_path) {
@@ -4776,6 +4888,62 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    // `#sync-cross-root-autostart`: a superproject sync must not restore or
+    // auto-start a document owned by a nested/submodule `.agent-doc` root.
+    #[test]
+    fn cross_root_document_does_not_belong_to_superproject_sync_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        // Superproject root + a same-root doc.
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/research")).unwrap();
+        let same_root_doc = root.join("tasks/research/monsterrodholders.md");
+        std::fs::write(&same_root_doc, "---\n---\n").unwrap();
+        // Nested submodule root (its own `.agent-doc`) + a cross-root doc.
+        std::fs::create_dir_all(root.join("src/boost-client/.agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("src/boost-client/tasks")).unwrap();
+        let cross_root_doc = root.join("src/boost-client/tasks/monsterrodholders.md");
+        std::fs::write(&cross_root_doc, "---\n---\n").unwrap();
+
+        let sync_root = canonical_sync_project_root(&root);
+        assert!(
+            document_belongs_to_sync_root(&same_root_doc, &sync_root),
+            "same-root document must belong to the sync root"
+        );
+        assert!(
+            !document_belongs_to_sync_root(&cross_root_doc, &sync_root),
+            "submodule-owned document must NOT belong to the superproject sync root"
+        );
+    }
+
+    #[test]
+    fn sanitize_cross_root_layout_drops_submodule_columns_and_keeps_same_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
+        let same_root_doc = root.join("tasks/agent-doc/agent-doc-bugs2.md");
+        std::fs::write(&same_root_doc, "---\n---\n").unwrap();
+        std::fs::create_dir_all(root.join("src/boost-client/.agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("src/boost-client/tasks")).unwrap();
+        let cross_root_doc = root.join("src/boost-client/tasks/monsterrodholders.md");
+        std::fs::write(&cross_root_doc, "---\n---\n").unwrap();
+
+        let sync_root = canonical_sync_project_root(&root);
+        // Mirrors the observed polluted `layout_states` row: [same-root, cross-root].
+        let saved_layout = vec![
+            same_root_doc.to_string_lossy().to_string(),
+            cross_root_doc.to_string_lossy().to_string(),
+        ];
+        let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_root);
+        assert_eq!(dropped.len(), 1, "exactly the submodule doc is dropped");
+        assert!(dropped[0].contains("boost-client"));
+        // Same-root column preserved; cross-root column blanked to hold its slot.
+        assert_eq!(sanitized.len(), 2);
+        assert_eq!(sanitized[0], same_root_doc.to_string_lossy());
+        assert_eq!(sanitized[1], "", "cross-root column becomes an empty placeholder");
+    }
 
     struct TestPipelineFrontmatterEffects;
 

@@ -38,6 +38,47 @@ const CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_ENV: &str =
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str =
     agent_doc_state_backbone::QUEUE_CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED;
 
+/// A tmux pane that has passed the `#stale-actor-pane-collision` provenance check and
+/// is therefore a safe target for **injected input** (clear / interrupt / resubmit /
+/// prompt dispatch). The only ways to obtain one are the provenance-gated constructors
+/// below, so any function that requires `&ProvenPane` cannot be called with an
+/// unchecked pane. This makes the recurring bug class behind 0.34.82 / 0.34.83 — a
+/// code path that submits into a pane without verifying it is still ours (and not a
+/// foreign session that reused it) — a *compile error* instead of a runtime hazard.
+///
+/// Prototype scope: currently threaded through the direct-submit path
+/// (`resolve_direct_submit_pane` → `send_clear_to_pane`). Rolling it out to every
+/// pane-input site (route dispatch, tmux submit helpers) is the follow-up that fully
+/// retires the manual provenance checks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProvenPane(String);
+
+impl ProvenPane {
+    pub(crate) fn pane_id(&self) -> &str {
+        &self.0
+    }
+
+    /// Prove a recorded-owner pane (authoritative actor / registry): succeeds only when
+    /// `recorded_owner_pane_is_safe_target` holds (reachable supervisor, or the recorded
+    /// child/registry pid still lives in the pane's process tree).
+    fn from_recorded_owner(
+        ctx: &SessionContext,
+        tmux: &Tmux,
+        pane: &str,
+        source: &'static str,
+    ) -> Option<ProvenPane> {
+        recorded_owner_pane_is_safe_target(ctx, tmux, pane, source)
+            .then(|| ProvenPane(pane.to_string()))
+    }
+
+    /// A pane already proven the live owner by the sync resolver
+    /// (`find_normal_path_owner_pane` verifies process provenance internally), so it is
+    /// admitted directly.
+    fn from_verified_live_owner(pane: String) -> ProvenPane {
+        ProvenPane(pane)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DirectSubmitPaneSource {
     AuthoritativeActor,
@@ -807,6 +848,7 @@ fn send_clear_to_resolved_pane(
         return Ok(false);
     };
     send_clear_to_pane(tmux, &pane, &ctx.canonical_file, &ctx.harness)?;
+    let pane = pane.pane_id();
     let submit_mode = tmux_submit_mode_for_harness(&ctx.harness);
     let fallback_suffix = fallback_reason
         .map(|reason| format!(" fallback_reason={reason}"))
@@ -841,7 +883,9 @@ fn reconcile_idle_projection_before_clear(
     tmux: &Tmux,
 ) -> Result<ClearPreflightOutcome> {
     let evidence = resolve_direct_submit_pane(ctx, tmux)
-        .map(|(pane, source)| live_pane_evidence_for_pane(ctx, tmux, pane, source.as_str()))
+        .map(|(pane, source)| {
+            live_pane_evidence_for_pane(ctx, tmux, pane.pane_id().to_string(), source.as_str())
+        })
         .unwrap_or_else(|| live_pane_evidence(ctx, tmux));
     let protected_reason = if evidence.state == LivePaneState::AliveBusy {
         protected_clear_input_reason(ctx, tmux, &evidence)
@@ -1820,7 +1864,10 @@ fn harness_clear_command(harness: &str) -> &'static str {
     agent_doc_harness::HarnessConfig::from_agent_name(harness).context_clear_command()
 }
 
-fn send_clear_to_pane(tmux: &Tmux, pane: &str, file: &Path, harness: &str) -> Result<()> {
+fn send_clear_to_pane(tmux: &Tmux, pane: &ProvenPane, file: &Path, harness: &str) -> Result<()> {
+    // `ProvenPane` guarantees this pane passed the collision provenance check; shadow to
+    // the raw id for the existing send/logging below.
+    let pane = pane.pane_id();
     let command = harness_clear_command(harness);
     let pre_delivery_capture_hash = capture_context_clear_submit_content_hash(tmux, pane);
     agent_doc_tmux_io::send_submitted_text_for_harness_logged(
@@ -2288,14 +2335,14 @@ fn wait_for_interrupt_clear_settle(
 fn resolve_direct_submit_pane(
     ctx: &SessionContext,
     tmux: &Tmux,
-) -> Option<(String, DirectSubmitPaneSource)> {
-    if let Some(pane) = ctx
+) -> Option<(ProvenPane, DirectSubmitPaneSource)> {
+    if let Some(proven) = ctx
         .actor_record
         .as_ref()
         .map(|record| record.pane_id.as_str())
-        .filter(|pane| recorded_owner_pane_is_safe_target(ctx, tmux, pane, "authoritative_actor"))
+        .and_then(|pane| ProvenPane::from_recorded_owner(ctx, tmux, pane, "authoritative_actor"))
     {
-        return Some((pane.to_string(), DirectSubmitPaneSource::AuthoritativeActor));
+        return Some((proven, DirectSubmitPaneSource::AuthoritativeActor));
     }
 
     if let Some(pane) = agent_doc_sync_io::sync::find_normal_path_owner_pane(
@@ -2303,14 +2350,17 @@ fn resolve_direct_submit_pane(
         &ctx.canonical_file,
         &ctx.session_id,
     ) {
-        return Some((pane, DirectSubmitPaneSource::LiveOwner));
+        return Some((
+            ProvenPane::from_verified_live_owner(pane),
+            DirectSubmitPaneSource::LiveOwner,
+        ));
     }
 
     ctx.registry_entry
         .as_ref()
         .map(|entry| entry.pane.as_str())
-        .filter(|pane| recorded_owner_pane_is_safe_target(ctx, tmux, pane, "registry"))
-        .map(|pane| (pane.to_string(), DirectSubmitPaneSource::Registry))
+        .and_then(|pane| ProvenPane::from_recorded_owner(ctx, tmux, pane, "registry"))
+        .map(|proven| (proven, DirectSubmitPaneSource::Registry))
 }
 
 fn guard_destructive_operator_on_live_busy_pane(
@@ -5039,7 +5089,13 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
 
-        send_clear_to_pane(&iso, &pane, Path::new("/tmp/doc.md"), "claude").unwrap();
+        send_clear_to_pane(
+            &iso,
+            &ProvenPane::from_verified_live_owner(pane.clone()),
+            Path::new("/tmp/doc.md"),
+            "claude",
+        )
+        .unwrap();
         for _ in 0..40 {
             if done_path.exists() {
                 break;
@@ -5175,7 +5231,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(
             resolve_direct_submit_pane(&ctx, &iso),
-            Some((actor_pane, DirectSubmitPaneSource::AuthoritativeActor))
+            Some((
+                ProvenPane::from_verified_live_owner(actor_pane),
+                DirectSubmitPaneSource::AuthoritativeActor
+            ))
         );
     }
 
@@ -5238,7 +5297,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
         assert_eq!(
             resolve_direct_submit_pane(&ctx, &iso),
-            Some((registry_pane, DirectSubmitPaneSource::Registry))
+            Some((
+                ProvenPane::from_verified_live_owner(registry_pane),
+                DirectSubmitPaneSource::Registry
+            ))
         );
     }
 

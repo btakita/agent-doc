@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-preflight-runtime-io"
-version = "0.34.83"
+version = "0.34.84"
 edition = "2024"
 description = "Runtime preflight maintenance write adapters for agent-doc"
 license = "MIT"
@@ -18,31 +18,31 @@ test-support = [
 ]
 
 [dependencies]
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.83" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.83" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.83" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.83" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.83" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.83" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.83" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.83" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.83" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.83" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.83" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.83" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.83" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.83" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.83" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.83" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.83" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.83" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.83" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.83" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.83" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.84" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.84" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.84" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.84" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.84" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.84" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.84" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.84" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.84" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.84" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.84" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.84" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.84" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.84" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.84" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.84" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.84" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.84" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.84" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.84" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.84" }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.83", features = ["test-support"] }
-agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.83" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.84", features = ["test-support"] }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.84" }
 tempfile = "3"

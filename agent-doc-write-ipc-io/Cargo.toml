@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-write-ipc-io"
-version = "0.34.83"
+version = "0.34.84"
 edition = "2024"
 description = "High-level write IPC transport adapters for agent-doc"
 license = "MIT"
@@ -10,33 +10,33 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_write_ipc_io"
 
 [dependencies]
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.83" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.83" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.83" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.83" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.83" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.83" }
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.83" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.83" }
-agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.34.83" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.83" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.83" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.83" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.83" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.83" }
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.83" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.83" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.83" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.83" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.83" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.83" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.83" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.83" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.83" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.84" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.84" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.84" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.84" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.84" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.84" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.84" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.84" }
+agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.34.84" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.84" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.84" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.84" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.84" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.84" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.84" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.84" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.84" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.84" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.84" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.84" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.34.84" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.84" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.84" }
 anyhow = "1"
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.83" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.84" }
 tempfile = "3"

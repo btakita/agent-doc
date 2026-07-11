@@ -26,7 +26,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -268,7 +267,7 @@ Fix (`#stale-lease-cpc-authority`, `agent-doc-crdt-relay-io`): when a hub exists
 - **Switching editor documents doesn't sync the focused tmux pane:** new feature `#tmuxfocusfollow` (JB `selectionChanged` / VS Code `onDidChangeActiveTextEditor` → refocus the doc's route-owned pane, no-op when it owns none). Plan `tasks/agent-doc/plan-tmux-focus-follow-active-editor.md`.
 
 Per the `#spec-test-build-install-commit-push` preset: shipped spec+test+build+install+commit+push for the authority fix; **not** tagged/published (standing "no releases until per-cell CRDT" hold). Live JB re-proof of the fix is left as `[operator-verify]`.
-<!-- agent:boundary:b2a12863 -->
+<!-- agent:boundary:e13bde40 -->
 <!-- /agent:exchange -->
 ## Queue
 

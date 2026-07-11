@@ -140,12 +140,65 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   backbone Transport projection so `authority_for_projection` agrees. When `is_open(doc)` but the
   relay `live_count()==0`, **repair** (re-register/reconnect the replica) instead of demoting —
   this is the detach/attach mapping the earlier S2 question was really about.
+  - **PREREQUISITE (verified 2026-07-11, blocker) — `editor_open_docs` is process-local and
+    only fed FFI-side.** The `EditorOpenDocs` registry is populated exclusively in the *plugin*
+    process via FFI events (`ffi.rs:597` `mark_closed`, `ffi.rs:1019` `mark_open_with`). The
+    *controller* process (where the `agent-doc-crdt-relay-io` resolver runs) never calls
+    `mark_open`/`reconcile`, so `is_open(doc)` is **always false controller-side** today — the
+    reactive graph is process-local (plan §"FFI-first"). S2b must FIRST wire a controller-side
+    `editor_open_docs().reconcile(open_set)` fed by the durable live-buffer sidecar scan (the same
+    `.agent-doc/live-buffer` evidence `live_buffer_guard` already reads), otherwise the repair
+    branch is dead code in the resolver and demote-to-disk still fires. Both demote sites gate on
+    this: read path `realtime_doc_resolve_crdt_no_live_editors_disk_authority` and write path
+    `crdt_cpc_write_disk_authority_stale_lease` (`lib.rs:1219`).
 - **S3 — resolver observes backbone.** `agent-doc-crdt-relay-io` resolver derives
   authority from the reactive projection (open-docs + backbone), not a raw `live_count()` poll.
   Preserve the `crdt_relay_no_live_editors` / `live_editors=` log fields (regression-visible).
 - **S4 — push to remaining consumers.** `live_buffer_guard`, `plugin-owner` observe
   the signal. Reconcile stale-lease heal so a live-but-lease-expired plugin re-lives
   reactively (kills the phantom-0 wedge that caused the symptom).
+
+## Missing reactive components in the lazily plugins (#plugin-reactive-core)
+
+Audit (2026-07-11): the editor plugins are **thin reactive mirrors**, not lazily
+reactive-core participants, and they do **not** ride lazily's `Bridge`. This is
+correct for the FFI-first "Shared Foundation" intent (Rust owns the authoritative
+graph; plugins are views) but leaves three concrete reactive components unbuilt.
+Each is a candidate stage; none is a regression, all are parity gaps.
+
+**Where reactive state lives today**
+- **Authority (reactive):** lazily-rs `ThreadSafeStateChart` in `agent-doc-state-backbone`
+  — the single source of truth. ✅
+- **Wire:** `agent-doc-state-wire` emits lazily-spec-shaped `snapshot`/`delta`
+  (`cell_set`/`slot_value`/`invalidate`/…) over agent-doc's own Unix-socket IPC + FFI
+  (`agent_doc_state_subscribe` → controller `state_subscribe` RPC). ✅ but bespoke.
+- **Plugin mirrors (NOT reactive-core):** JB `StateGraphMirror.kt` is a gson hand-fold
+  that cannot import lazily-kt (`#lzpkgwire`: IntelliJ Kotlin 1.9/JBR17 vs lazily-kt
+  Kotlin 2/JVM21); VSCode `stateMirror.ts` is a bespoke adapter because `@lazily/js`
+  ships only the FFI consumer + IPC helpers, no reactive core. Both are conformance-pinned
+  1:1 to the lazily reference but are *deterministic folds*, not live reactive graphs.
+- **Document content (NOT the reactive graph):** a separate yrs CRDT path
+  (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches/<hash>.json`).
+
+**Missing components (proposed stages, sequence-independent of S2b–S4)**
+- **S5 — real lazily reactive-core mirror in each plugin.** Replace the hand-rolled folds
+  with an actual lazily reactive graph instance so plugin UI derives from tracked cells
+  natively. Blocked upstream by `#lzpkgwire`: needs a lazily-kt build consumable by the
+  IntelliJ 1.9/JBR17 toolchain (or a shaded/relocated artifact) and a lazily-js reactive-core
+  export (or the JB/VSCode plugin adopting the lazily-rs core over FFI instead of a native
+  port). Until then the conformance-pinned fold is the sanctioned stand-in — keep the pins.
+- **S6 — adopt (or explicitly reject) lazily `Bridge` for the plugin transport.** Decide
+  between lazily's multichannel `BridgeHub`/`IpcSink`/`IpcSource` (webrtc feature) and the
+  current bespoke `snapshot`/`delta` wire. If adopting, the reactive graph bridges across the
+  FFI/socket boundary with lazily-owned inbound `CellSet` enforcement + re-derive semantics
+  instead of agent-doc re-implementing envelope folding; if rejecting, record why the bespoke
+  wire wins (CommonJS/ESM + toolchain constraints, per-doc epoch batching unlike single-step
+  lazily-IPC deltas) so the gap is a decision, not an omission.
+- **S7 — unify (or deliberately keep split) the content CRDT and the reactive projection.**
+  The yrs content replica and the lazily state projection are two independent substrates over
+  the same IPC socket. Document whether they stay split (yrs for text convergence, lazily for
+  UI-state projection) or converge onto one reactive transport once `#live-editor-reactive`
+  liveness is observed end-to-end (S3/S4).
 
 ### Test conventions (per operator feedback)
 - SimWorld over mocks for sync/tmux; deterministic model + shared pure decision fn.

@@ -943,6 +943,46 @@ pub fn guard_visible_write_reconcile_with_target(
         }) => {
             let relay_hash = agent_doc_hash::content_hash(&relay_text);
             if live_editors == 0 {
+                // #live-editor-reactive (S2b/S3): zero live replicas is a repairable
+                // derived signal, not ground truth. If the editor still has this document
+                // open, the relay canonical is authoritative — re-merge the captured
+                // response against it and NEVER read disk (which would clobber the open
+                // editor buffer). Only a genuinely closed editor falls through to the disk
+                // replica below.
+                if resolve_zero_live_editors(reconcile_and_observe_editor_open(file))
+                    == ZeroLiveResolution::KeepEditorAuthority
+                {
+                    if visible_write_content_matches(&relay_text, expected_current) {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "visible_write_crdt_stale_lease_editor_open_clean file={} source={} expected_len={} expected_hash={} live_editors=0 delivery_converged={} recovery=keep_editor_authority_no_live_replica",
+                                file.display(),
+                                source,
+                                expected_current.len(),
+                                agent_doc_hash::content_hash(expected_current),
+                                delivery_converged,
+                            ),
+                        );
+                        return Ok(VisibleWriteReconcile::Clean);
+                    }
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "visible_write_crdt_stale_lease_editor_open_drift file={} source={} expected_len={} expected_hash={} current_len={} current_hash={} live_editors=0 delivery_converged={} recovery=keep_editor_authority_no_live_replica",
+                            file.display(),
+                            source,
+                            expected_current.len(),
+                            agent_doc_hash::content_hash(expected_current),
+                            relay_text.len(),
+                            relay_hash,
+                            delivery_converged,
+                        ),
+                    );
+                    return Ok(VisibleWriteReconcile::DiskDrifted {
+                        fresh_current: relay_text,
+                    });
+                }
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -1279,6 +1319,58 @@ pub fn try_resolve_current_doc(file: &std::path::Path, disk: &str) -> Result<Rec
     try_resolve_current_doc_with_disk(file, Some(disk), "resolve_current_doc")
 }
 
+/// #live-editor-reactive (S2b/S3): the pure authority decision for a resolved relay
+/// canonical that currently has **zero live replicas**. Kept pure (no IO) so the
+/// repair-vs-demote rule is deterministically testable and shared by the resolve path.
+///
+/// `live_editors == 0` is a *repairable derived* signal, not ground truth. The ground
+/// truth is the editor's open-file set: a file open in an editor can diverge from disk
+/// (editor-authoritative), a file open in no editor cannot (disk-authoritative).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZeroLiveResolution {
+    /// The editor still has this document open (ground-truth open set), so the relay
+    /// canonical is the editor-authoritative projection — keep editor authority. The
+    /// dropped replica re-registers on the editor's next edit (`relay_replica_update`
+    /// phantom-heal); demoting to disk here would be the phantom-`live_editors=0` wedge.
+    KeepEditorAuthority,
+    /// The editor is genuinely closed (no live-buffer sidecar), so no editor buffer can
+    /// diverge from disk — disk is the authoritative replica.
+    DiskAuthority,
+}
+
+pub fn resolve_zero_live_editors(editor_open: bool) -> ZeroLiveResolution {
+    if editor_open {
+        ZeroLiveResolution::KeepEditorAuthority
+    } else {
+        ZeroLiveResolution::DiskAuthority
+    }
+}
+
+/// #live-editor-reactive (S2b/S3): reconcile the reactive `EditorOpenDocs` registry from
+/// the durable live-buffer sidecar ground truth for THIS document, then return the
+/// reactive `is_open` observation that drives [`resolve_zero_live_editors`].
+///
+/// The registry is fed FFI-side in the *plugin* process, but the controller/resolver
+/// process never sees those events, so its `is_open` would be permanently false without
+/// this reconcile (the reactive graph is process-local). The ground truth is the editor's
+/// open-file set, proved by a live-buffer sidecar whose owning pid is still alive
+/// (`live_editor_endpoint_attached` — the `#6b5h` real-editor-buffer predicate). Marking
+/// the registry keeps `is_open` and the derived `open_count` truthful for backbone
+/// observers and routes the authority decision through the reactive projection instead of
+/// a raw poll.
+fn reconcile_and_observe_editor_open(file: &std::path::Path) -> bool {
+    let path = file.display().to_string();
+    let registry = agent_doc_document_realtime::editor_open_docs::editor_open_docs();
+    if agent_doc_plugin_owner::live_editor_endpoint_attached(&path) {
+        // The relay resolve path only ever handles agent-doc session documents, so an
+        // open document here is an agent-doc by construction.
+        registry.mark_open_with(&path, || true);
+    } else {
+        registry.mark_closed(&path);
+    }
+    registry.is_open(&path)
+}
+
 fn try_resolve_current_doc_with_disk(
     file: &std::path::Path,
     disk: Option<&str>,
@@ -1364,6 +1456,37 @@ fn try_resolve_current_doc_with_disk_inner(
             delivery_converged,
         } => {
             if live_editors == 0 {
+                // #live-editor-reactive (S2b/S3): route the zero-live-replica decision
+                // through the reactive open-docs projection (reconciled controller-side
+                // from the durable live-buffer sidecar ground truth) instead of demoting
+                // on the raw `live_editors == 0` poll. An editor that still has the doc
+                // open keeps editor authority — demoting to disk here is the phantom-
+                // `live_editors=0` wedge that stranded pane sync and logged `authority=disk`
+                // every second while the plugin was alive. Only a genuinely closed editor
+                // falls through to disk.
+                if resolve_zero_live_editors(reconcile_and_observe_editor_open(file))
+                    == ZeroLiveResolution::KeepEditorAuthority
+                {
+                    let reconciliation = Reconciliation {
+                        authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
+                        content: text,
+                        diverged: false,
+                        reason: "crdt_relay_stale_lease_editor_open",
+                    };
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
+                            reconciliation.authority.as_str(),
+                            reconciliation.reason,
+                            reconciliation.diverged,
+                            file.display(),
+                            live_editors,
+                            delivery_converged,
+                        ),
+                    );
+                    return Ok(reconciliation);
+                }
                 let relay_len = text.len();
                 let relay_hash = agent_doc_hash::content_hash(&text);
                 let disk = match disk {
@@ -1792,8 +1915,16 @@ mod tests {
         );
     }
 
+    // #live-editor-reactive (S2b/S3): a LIVE plugin-owner lease (editor still has the doc
+    // open, pid alive) with a relay hub that has zero live replicas is the phantom-
+    // `live_editors=0` wedge — the in-process replica dropped (e.g. after a controller
+    // recycle) but the editor is genuinely open. The resolver must KEEP editor authority
+    // (the relay canonical, which the editor re-syncs on its next edit via the phantom-
+    // heal), NOT demote to disk. Demoting here was the bug that stranded pane sync and
+    // logged `authority=disk` every second while the plugin was alive. Out-of-band disk
+    // changes reconcile through the disk-change watcher, not by overriding the live editor.
     #[test]
-    fn current_resolve_prefers_disk_when_relay_current_has_no_live_editors() {
+    fn current_resolve_keeps_editor_authority_when_editor_open_despite_zero_live_replicas() {
         let relay_text = "\
 ## Exchange
 
@@ -1816,7 +1947,7 @@ mod tests {
         let owner = "test-zero-live-current-resolve";
         assert!(
             agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
-            "test setup should acquire a live plugin-owner lease"
+            "test setup should acquire a live plugin-owner lease (editor open)"
         );
         test_support_register_replica_for_file(&file, owner)
             .unwrap()
@@ -1828,29 +1959,41 @@ mod tests {
         std::fs::write(&file, disk_prompt).unwrap();
 
         let resolved = try_resolve_current_doc_from_file(&file)
-            .expect("zero-live relay current should fall back to disk");
+            .expect("open editor with zero live replicas keeps editor authority");
         assert_eq!(
             resolved.authority,
-            agent_doc_document_realtime::DocAuthority::Disk
+            agent_doc_document_realtime::DocAuthority::EditorBuffer,
+            "live editor open → relay canonical stays authority, no disk demote"
         );
-        assert_eq!(resolved.reason, "crdt_relay_no_live_editors");
-        assert_eq!(resolved.content, disk_prompt);
+        assert_eq!(resolved.reason, "crdt_relay_stale_lease_editor_open");
         assert!(
-            resolved
+            !resolved
                 .content
-                .contains("/goal keep the saved disk prompt visible")
+                .contains("/goal keep the saved disk prompt visible"),
+            "resolved content is the relay canonical, not the disk replica"
         );
-        assert!(!resolved.content.contains("agent:boundary:old"));
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("realtime_doc_resolve_crdt_no_live_editors_disk_authority"),
-            "zero-live relay demotion should be auditable:\n{log}"
+            log.contains(
+                "reason=crdt_relay_stale_lease_editor_open"
+            ) && log.contains("recovery=keep_editor_authority_no_live_replica"),
+            "keep-editor-authority repair should be auditable and preserve live_editors= field:\n{log}"
+        );
+        assert!(
+            log.contains("live_editors=0"),
+            "regression-visible live_editors= field preserved:\n{log}"
         );
         agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
     }
 
+    // #live-editor-reactive (S2b/S3): the visible-write reconcile must NOT read disk when
+    // the editor still has the doc open (live lease) but the relay has zero live replicas.
+    // The relay canonical is authoritative; since it matches `expected_current`, the write
+    // is Clean and the drifted disk replica is correctly ignored (reading it would clobber
+    // the open editor buffer).
     #[test]
-    fn visible_write_reconcile_prefers_disk_when_relay_current_has_no_live_editors() {
+    fn visible_write_reconcile_keeps_editor_authority_when_editor_open_despite_zero_live_replicas()
+    {
         let relay_text = "\
 <!-- agent:exchange patch=append -->
 ### Session Summary
@@ -1869,7 +2012,7 @@ mod tests {
         let owner = "test-zero-live-visible-write";
         assert!(
             agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
-            "test setup should acquire a live plugin-owner lease"
+            "test setup should acquire a live plugin-owner lease (editor open)"
         );
         test_support_register_replica_for_file(&file, owner)
             .unwrap()
@@ -1886,18 +2029,22 @@ mod tests {
             relay_text,
             None,
         )
-        .expect("zero-live relay current should use disk drift reconciliation");
+        .expect("open editor with zero live replicas keeps editor authority");
         match outcome {
-            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
-                assert_eq!(fresh_current, disk_prompt);
-            }
-            VisibleWriteReconcile::Clean => panic!("expected disk drift from saved prompt"),
+            VisibleWriteReconcile::Clean => {}
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => panic!(
+                "expected Clean against the editor-authoritative relay canonical, got disk drift: {fresh_current}"
+            ),
         }
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_crdt_no_live_editors_disk_authority")
-                && log.contains("visible_write_disk_drift_reconcilable"),
-            "zero-live visible-write demotion should be auditable:\n{log}"
+            log.contains("visible_write_crdt_stale_lease_editor_open_clean")
+                && log.contains("recovery=keep_editor_authority_no_live_replica"),
+            "keep-editor-authority repair should be auditable and NOT read disk:\n{log}"
+        );
+        assert!(
+            !log.contains("visible_write_crdt_no_live_editors_disk_authority"),
+            "open editor must not demote the visible write to disk:\n{log}"
         );
         agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
     }
@@ -2589,5 +2736,49 @@ scratch
             "plain body\n",
             15
         ));
+    }
+
+    // #live-editor-reactive (S2b/S3): zero-live-replica authority is decided by the
+    // ground-truth open-file set, not the raw `live_editors == 0` poll.
+    #[test]
+    fn zero_live_editors_keeps_editor_authority_when_open_else_disk() {
+        assert_eq!(
+            resolve_zero_live_editors(true),
+            ZeroLiveResolution::KeepEditorAuthority,
+            "editor open → relay canonical stays editor authority (no demote)"
+        );
+        assert_eq!(
+            resolve_zero_live_editors(false),
+            ZeroLiveResolution::DiskAuthority,
+            "editor closed → disk is the authoritative replica"
+        );
+    }
+
+    // SimWorld-style: drive the reactive open-docs registry through an open/close/reopen
+    // sequence and assert the derived zero-live resolution flips deterministically. Uses
+    // a unique path key so the process-global registry singleton cannot cross-contaminate
+    // other tests (deferral-not-dealloc keeps keys present).
+    #[test]
+    fn reactive_open_docs_drives_zero_live_resolution() {
+        let reg = agent_doc_document_realtime::editor_open_docs::editor_open_docs();
+        let path = "/tmp/agent-doc-s2b-reactive-open-drive-7f3a.md";
+        reg.mark_open_with(path, || true);
+        assert_eq!(
+            resolve_zero_live_editors(reg.is_open(path)),
+            ZeroLiveResolution::KeepEditorAuthority,
+            "open editor keeps editor authority even with zero live replicas"
+        );
+        reg.mark_closed(path);
+        assert_eq!(
+            resolve_zero_live_editors(reg.is_open(path)),
+            ZeroLiveResolution::DiskAuthority,
+            "closing the editor demotes to disk authority"
+        );
+        reg.mark_open_with(path, || true);
+        assert_eq!(
+            resolve_zero_live_editors(reg.is_open(path)),
+            ZeroLiveResolution::KeepEditorAuthority,
+            "reopening flips back to editor authority (repair, not permanent demote)"
+        );
     }
 }

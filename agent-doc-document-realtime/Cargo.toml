@@ -24,7 +24,7 @@ agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.
 agent-doc-template = { path = "../agent-doc-template", version = "0.34.84" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.84" }
 anyhow = "1"
-lazily = { version = "0.21.6", features = ["thread-safe"] }
+lazily = { version = "0.29.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 similar = "3"

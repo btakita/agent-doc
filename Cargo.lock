@@ -498,7 +498,7 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "interprocess",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "libc",
  "rusqlite",
  "serde",
@@ -628,7 +628,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "sha2 0.11.0",
  "similar 3.1.1",
@@ -770,7 +770,7 @@ name = "agent-doc-element-queue"
 version = "0.34.84"
 dependencies = [
  "agent-doc-element",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
 ]
 
@@ -1105,7 +1105,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-merge",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "serde_json",
 ]
@@ -1148,7 +1148,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-markdown-lossless",
  "anyhow",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "serde_json",
  "similar 3.1.1",
@@ -1448,7 +1448,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-session-accretion",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "serde_json",
 ]
@@ -1756,7 +1756,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "tempfile",
  "tmux-router",
 ]
@@ -2105,7 +2105,7 @@ name = "agent-doc-state-backbone"
 version = "0.34.84"
 dependencies = [
  "agent-doc-turn",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "serde_json",
 ]
@@ -2198,7 +2198,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-tmux-commands",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "serde_json",
 ]
@@ -2397,7 +2397,7 @@ dependencies = [
 name = "agent-doc-tmux"
 version = "0.34.84"
 dependencies = [
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "serde",
  "tempfile",
 ]
@@ -2439,7 +2439,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-template",
- "lazily 0.21.6",
+ "lazily 0.29.0",
  "proptest",
  "regex",
  "serde",
@@ -3960,9 +3960,9 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.21.6"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ccd94e5de618919866159b7bc7df7322977a59b1b33c93c48488727f8b10702"
+checksum = "e9af102cc7c9748b094df430037e1c011fd0572142a9d6dfb52842cc0fe777c9"
 dependencies = [
  "arc-swap",
  "lazily-macros",
@@ -3973,9 +3973,9 @@ dependencies = [
 
 [[package]]
 name = "lazily-macros"
-version = "0.21.6"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cda2df12d5eb57f3bedc028260abf7f0976ccd06095199814ad33cc578a7c6a"
+checksum = "f3e07e53899f332e931df5d90f0a03937db4e43630a0820cc77703b2d7631749"
 dependencies = [
  "proc-macro2",
  "quote",

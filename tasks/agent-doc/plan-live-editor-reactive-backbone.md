@@ -198,6 +198,36 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   - **Other consumers unchanged (no demote bug):** `live_buffer_guard`'s `commit_barrier_ready`
     routes through the controller model and **fails closed**; `plugin-owner` is the lease writer.
     Converting them to reactive subscription is a no-behavioral-change refinement, deferred.
+- **S4b — the editor-attached GATE (`authority_for_file`) still reads the lease on the hot path.
+  Left in place ON PURPOSE: it is the crash-detection backstop. (verified 2026-07-11)**
+  `agent_doc_plugin_owner::crdt_authority::authority_for_file` → `ownership_liveness_for_file` →
+  `read_plugin_owner_lease` is a filesystem lease read at the top of *every* CRDT op
+  (register/deregister/update/resolve, ~30 sites). It decides `MultiReplica` (editor attached) vs
+  `GitAuthoritative` (detached). It is **not** safe to make this reactive-cached the way S4 did the
+  open-docs decision, because the reactive event stream cannot observe an editor **crash**: a
+  crashed editor sends no `deregister`, so a cached `MultiReplica` would go stale and wrongly hold
+  editor authority (blocking disk commits / stranding closeout). The lease's **pid-liveness** check
+  is the only prompt crash signal. In fact S4 is *safe precisely because* this gate still polls:
+  a crashed editor becomes `Detached` here, so the resolver never reaches S4's (reactive) zero-live
+  branch. `plugin-owner` already depends on `document-realtime`, so the dependency allows a reactive
+  read — the blocker is crash detection, not layering.
+  - **To move this off the hot path safely (future work), one of:**
+    (a) an **off-hot-path pid-liveness reaper** — a periodic controller sweep that marks
+    `editor_open_docs` closed when an open doc's owner pid is dead — so the gate can read pure
+    reactive state with cold-miss lease recovery; or
+    (b) **cache the owner pid in `DocOpenState`** (from the cold-miss lease read / a pid-bearing
+    register event) and check crash via a cheap `kill(pid,0)` **syscall** on the hot path (a pid
+    syscall is not a *sidecar* read), reading the lease file only on a cold miss.
+  Both are real additional components with real regression risk across the gate's ~30 call sites;
+  deferred rather than shipped unsafely. Until then the lease poll at `authority_for_file`
+  is a deliberate backstop, and the S4 directive ("sidecars off the hot path") holds for the
+  open-docs *liveness decision* but not yet for the *editor-attached gate*.
+  - **Second reason a pid-only cache is insufficient:** the lease read detects *two* transitions the
+    reactive event stream misses — an editor **crash** (pid death, no `deregister`) AND a **graceful
+    lease release without a paired deregister**. The gate needs lease *presence*, not just pid
+    liveness. (It also shows up in tests, where the "owner pid" is the test process itself and never
+    dies, so a pid-only crash check cannot distinguish "lease released" from "editor alive".) The
+    safe reaper/cache design must therefore reconcile on lease *absence* too, not just pid death.
 
 ## Missing reactive components in the lazily plugins (#plugin-reactive-core)
 

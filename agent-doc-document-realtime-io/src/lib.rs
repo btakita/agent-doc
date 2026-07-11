@@ -1353,8 +1353,8 @@ pub fn resolve_zero_live_editors(editor_open: bool) -> ZeroLiveResolution {
 /// The registry is fed FFI-side in the *plugin* process, but the controller/resolver
 /// process never sees those events, so its `is_open` would be permanently false without
 /// this reconcile (the reactive graph is process-local). The ground truth is the editor's
-/// open-file set, proved by a live-buffer sidecar whose owning pid is still alive
-/// (`live_editor_endpoint_attached` — the `#6b5h` real-editor-buffer predicate). Marking
+/// open-file set, proved by the durable plugin-owner lease whose owning pid is still alive
+/// (`live_editor_endpoint_attached` — the `#6b5h` live-editor-endpoint predicate). Marking
 /// the registry keeps `is_open` and the derived `open_count` truthful for backbone
 /// observers and routes the authority decision through the reactive projection instead of
 /// a raw poll.

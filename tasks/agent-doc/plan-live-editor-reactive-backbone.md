@@ -156,8 +156,11 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   - **PREREQUISITE (verified 2026-07-11) — CLOSED by S2b.** `EditorOpenDocs` was fed only in the
     *plugin* process via FFI (`ffi.rs:597`/`1019`), so `is_open` was always false in the
     *controller*/resolver process. `reconcile_and_observe_editor_open` now marks the registry from
-    the `.agent-doc/live-buffer` sidecar ground truth before each zero-live decision, making
-    `is_open`/`open_count` truthful controller-side.
+    the durable **plugin-owner lease** ground truth (`live_editor_endpoint_attached`, pid-live)
+    before each zero-live decision, making `is_open`/`open_count` truthful controller-side. (Note:
+    the lease is distinct from the `.agent-doc/live-buffer/` sidecars used by `#lbreap` reaping;
+    both are durable, cross-process filesystem records of editor liveness — see the sidecar-vs-
+    lazily-state note below.)
   - **CPC-write demote (`crdt-relay-io` `crdt_cpc_write_disk_authority_stale_lease`, `lib.rs:1219`)
     deliberately unchanged.** With zero live replicas there is no replica to write through; forcing
     editor authority there reintroduces the documented CAS `retry_crdt_merge` strand wedge, and disk
@@ -221,6 +224,29 @@ Each is a candidate stage; none is a regression, all are parity gaps.
   CommonJS/ESM + IntelliJ-toolchain constraints that block S5 block importing lazily's bridge crate
   plugin-side. Revisit only if/when S5 lands a real reactive core in the plugins (a bridge without a
   plugin-side reactive graph to bridge into buys nothing).
+**Can the durable filesystem sidecars be replaced by lazily state? (analysis 2026-07-11)**
+The editor-liveness truth crosses **two OS processes** (plugin ⇄ controller). Today the durable
+carriers are filesystem sidecars: the **plugin-owner lease** (`live_editor_endpoint_attached`,
+pid-live — what S2b reconciles from) and the **`.agent-doc/live-buffer/` sidecars** (`#lbreap`
+per-editor buffer markers). These are not competing authorities with lazily state — they are the
+**durable, cross-process persistence+transport layer** *under* the reactive projection:
+`sidecar/lease (durable cross-process truth) → reconcile → editor_open_docs (reactive projection)
+→ resolver decision`. lazily `editor_open_docs` is the in-process reactive *view*, not a second
+source of truth. Replacing the sidecars with lazily state needs three things that don't exist yet:
+1. **Cross-process reactive transport** — lazily graphs are process-local; carrying an open-set
+   *cell* from the plugin process to the controller process is exactly lazily's `Bridge` (S6,
+   currently rejected — and a bridge buys nothing until the plugins host a real reactive core, S5,
+   blocked by `#lzpkgwire`).
+2. **Durability across a controller recycle** — the phantom-0 scenario *is* a controller restart
+   that loses in-memory state; the sidecar/lease survive on disk, which is why they can't be
+   dropped. lazily state would need a durable projection (or re-derivation from the socket
+   handshake on restart).
+3. **Origin ownership in the plugin's reactive graph** — S5's real plugin reactive core so the
+   open-set cell is authored reactively rather than written as a lease file.
+   So: replacing the sidecars with pure lazily state is the **north-star end-state**, gated on
+   S5 + S6 + a durability story. Until then the durable lease/sidecar remains the correct
+   cross-process ground truth and `editor_open_docs` its reactive projection.
+
 - **S7 — content CRDT vs reactive projection. DECISION: keep split (two substrates, one socket).**
   The yrs content replica (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches`) and
   the lazily state projection (`state_subscribe` snapshot/delta) serve different jobs — conflict-free

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-diff-io"
-version = "0.34.79"
+version = "0.34.80"
 edition = "2024"
 description = "Snapshot-backed diff IO adapters for agent-doc"
 license = "MIT"
@@ -10,10 +10,10 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_diff_io"
 
 [dependencies]
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.79" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.79" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.79" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.79" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.80" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.80" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.80" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.80" }
 anyhow = "1"
 
 [dev-dependencies]

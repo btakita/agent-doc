@@ -90,6 +90,10 @@ impl SimWorld {
                 56 => SimCommand::SupervisorHeartbeatReattach,
                 57 => SimCommand::PostCommitIpcRepositionSignal,
                 58 => SimCommand::SyncFocusStashedMoveBeforeSelect,
+                // `SyncExactVisibleFocus*` are deterministic (not fuzz-sensitive)
+                // and are covered by dedicated targeted tests; they are intentionally
+                // NOT wired into the random corpus so the fixed-seed schedule (and its
+                // coverage thresholds) stays stable.
                 _ => SimCommand::SupervisorHeartbeatStale,
             };
             world.apply(command)?;
@@ -466,6 +470,12 @@ impl SimWorld {
                 self.sync.focus_doc_move_before_select("requested");
                 self.coverage.sync_move_before_select_focuses += 1;
             }
+            SimCommand::SyncExactVisibleFocusResolvesOffscreenOwner => {
+                self.apply_sync_exact_visible_focus_offscreen_owner(true);
+            }
+            SimCommand::SyncExactVisibleFocusUnprovenPreserve => {
+                self.apply_sync_exact_visible_focus_offscreen_owner(false);
+            }
             SimCommand::StartBlockingSyncAfterKillPane => {
                 self.start_blocking_sync_after_kill_pane();
             }
@@ -731,6 +741,36 @@ impl SimWorld {
         self.sync = SyncProjection::protected_growth_case();
         self.sync.active = Some("sibling".to_string());
         self.record_sync_outcome(SyncOutcome::PreservedLayoutAndFocused);
+    }
+
+    /// `#exact-visible-focus-swap`: model a deliberate exact-visible passive focus
+    /// on a document whose owned pane is alive but off-screen (stashed). The shared
+    /// eligibility gate + the live-owner proof decide whether the reconcile resolves
+    /// the pane (swaps it into view) or falls back to preserving the stale layout.
+    /// `proves_live_owner=false` models the mid-recycle case where ownership cannot
+    /// be proven — the safe fallback.
+    pub(crate) fn apply_sync_exact_visible_focus_offscreen_owner(&mut self, proves_live_owner: bool) {
+        self.sync = SyncProjection::exact_visible_offscreen_owner_case();
+        let eligible =
+            agent_doc_sync_io::sync::exact_visible_focus_eligible_for_owned_pane_resolve(
+                true,  // exact-visible --no-autostart
+                true,  // the off-screen owned pane is alive
+                false, // not claimed by another document this run
+            );
+        if eligible && proves_live_owner {
+            // Resolve the off-screen owned pane so the reconcile swaps it into view:
+            // `focused` becomes visible+active, the previously-visible `onscreen`
+            // pane is stashed (process preserved).
+            let outcome = self.sync.apply_requested_projection(
+                &["focused"],
+                "focused",
+                SyncMode::SafePassive,
+            );
+            self.record_sync_outcome(outcome);
+        } else {
+            // Ownership unproven → do not borrow/swap; preserve the current layout.
+            self.record_sync_outcome(SyncOutcome::PreservedLayoutAndFocused);
+        }
     }
 
     pub(crate) fn apply_sync_rerequest_visible_editor(&mut self, mode: SyncMode) {

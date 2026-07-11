@@ -207,6 +207,16 @@ enum SimCommand {
     SyncRerequestVisibleEditorManual,
     SyncRerequestVisibleEditorPassive,
     SyncFocusStashedMoveBeforeSelect,
+    /// `#exact-visible-focus-swap`: a deliberate editor tab/focus change emits
+    /// `sync --focus <file> --exact-visible --no-autostart`. The focused document's
+    /// owned pane is alive but parked off-screen and still proves ownership, so the
+    /// reconcile must swap it into view (not preserve the stale layout).
+    SyncExactVisibleFocusResolvesOffscreenOwner,
+    /// `#exact-visible-focus-swap` (unproven-owner fallback): the focused
+    /// document's off-screen pane can NOT prove ownership (e.g. supervisor identity
+    /// unavailable mid-recycle), so the exact-visible sync falls back to the safe
+    /// layout-preserving behavior instead of borrowing/swapping a pane.
+    SyncExactVisibleFocusUnprovenPreserve,
     /// `#recyclerestart-agent`: a killed/recycling pane left a manual
     /// `Sync Tmux Layout` subprocess holding the plugin sync guard.
     StartBlockingSyncAfterKillPane,
@@ -611,6 +621,21 @@ impl SyncProjection {
             protected_open_cycle: BTreeSet::new(),
             stashed: BTreeSet::from(["requested".to_string()]),
             active: Some("agent-doc".to_string()),
+        }
+    }
+
+    /// `#exact-visible-focus-swap`: a deliberate editor tab/focus change emits
+    /// `sync --focus <file> --exact-visible --no-autostart`. The focused document
+    /// (`focused`) owns a LIVE pane that is currently off-screen (parked in a stash
+    /// window), while another document (`onscreen`) holds the visible pane. The
+    /// exact-visible path must resolve the off-screen owned pane so the reconcile
+    /// swaps it into view — not leave the old pane in place.
+    fn exact_visible_offscreen_owner_case() -> Self {
+        Self {
+            visible: vec!["onscreen".to_string()],
+            protected_open_cycle: BTreeSet::new(),
+            stashed: BTreeSet::from(["focused".to_string()]),
+            active: Some("onscreen".to_string()),
         }
     }
 }
@@ -5784,6 +5809,61 @@ fn sync_sim_tmuxbudget_seed_3005_rejects_duplicate_editor_pane_for_rerequested_d
         vec!["editor".to_string()],
         "safe-passive sync must share the same single-editor-pane decision"
     );
+    world.assert_structural_invariants().unwrap();
+}
+
+#[test]
+fn sync_sim_exact_visible_focus_swaps_offscreen_owned_pane_into_view() {
+    // `#exact-visible-focus-swap`: a deliberate editor tab/focus change emits
+    // `sync --focus <file> --exact-visible --no-autostart`. Regression: focusing a
+    // document whose owned pane was alive but off-screen left the previously-visible
+    // document's pane in place — exact-visible sync blocked every file and preserved
+    // the stale layout instead of reaching the reconcile. With a proven-live owner,
+    // the off-screen pane must be swapped into view.
+    let mut world = SimWorld::new(3_006);
+    world
+        .apply(SimCommand::SyncExactVisibleFocusResolvesOffscreenOwner)
+        .unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["focused".to_string()],
+        "exact-visible focus must swap the off-screen owned pane into the visible layout"
+    );
+    assert!(
+        world.sync.stashed.contains("onscreen"),
+        "the previously-visible document's pane must be stashed, not left on screen"
+    );
+    assert_eq!(
+        world.sync.active.as_deref(),
+        Some("focused"),
+        "the focused document's pane must become the active pane"
+    );
+    assert_eq!(world.coverage.sync_detachable_replacements, 1);
+    assert_eq!(world.coverage.sync_focus_handoffs, 1);
+    // `active` must never point at a stashed pane.
+    world.assert_structural_invariants().unwrap();
+}
+
+#[test]
+fn sync_sim_exact_visible_focus_preserves_layout_when_owner_unproven() {
+    // `#exact-visible-focus-swap` safe fallback: when the off-screen pane cannot
+    // prove ownership (e.g. the supervisor identity is unavailable mid-recycle),
+    // exact-visible sync must preserve the current layout instead of borrowing or
+    // swapping a pane — never cold-start or steal a pane on an unproven owner.
+    let mut world = SimWorld::new(3_007);
+    world
+        .apply(SimCommand::SyncExactVisibleFocusUnprovenPreserve)
+        .unwrap();
+    assert_eq!(
+        world.sync.visible,
+        vec!["onscreen".to_string()],
+        "unproven-owner exact-visible focus must preserve the visible layout"
+    );
+    assert!(
+        world.sync.stashed.contains("focused"),
+        "the unproven off-screen pane must stay stashed"
+    );
+    assert_eq!(world.coverage.sync_preserve_layout_blocks, 1);
     world.assert_structural_invariants().unwrap();
 }
 

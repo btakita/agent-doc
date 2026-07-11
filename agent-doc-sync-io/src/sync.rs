@@ -1547,6 +1547,24 @@ fn exact_visible_safe_passive(
     matches!(auto_start_mode, AutoStartMode::SafePassive) && exact_visible_projection
 }
 
+/// `#exact-visible-focus-swap` eligibility (cheap gate): whether an exact-visible
+/// passive focus sync MAY resolve an existing off-screen owned pane — so the
+/// reconcile can swap it into view — instead of blocking every file and preserving
+/// the stale layout. This covers the cheap, always-safe-to-evaluate terms; the
+/// caller still confirms ownership with the (expensive) live-owner proof before
+/// resolving, so the full rule is `eligible && proves_live_owner`. We only reuse a
+/// pane that already EXISTS (never cold-start a missing pane under no-autostart)
+/// and never borrow a pane another document already claimed this sync run. Kept as
+/// a pure function so the SimWorld projection model and the live sync path share
+/// one decision rule.
+pub fn exact_visible_focus_eligible_for_owned_pane_resolve(
+    exact_visible_no_autostart: bool,
+    registered_pane_alive: bool,
+    claimed_by_other_document: bool,
+) -> bool {
+    exact_visible_no_autostart && registered_pane_alive && !claimed_by_other_document
+}
+
 fn skip_sync_status_updates_for_mode(auto_start_mode: AutoStartMode) -> bool {
     matches!(auto_start_mode, AutoStartMode::SafePassive)
 }
@@ -2994,6 +3012,52 @@ fn run_with_options_internal_at_root(
                             .insert(file_path.to_path_buf());
                     }
                 }
+                continue;
+            }
+
+            // `#exact-visible-focus-swap`: a deliberate editor tab/focus change emits
+            // `sync --focus <file> --exact-visible --no-autostart`. Without resolving
+            // existing panes this path blocked EVERY file (`registered_live_owner`
+            // forced false under `skip_autostart_diagnostics`) and early-returned at
+            // the layout-preservation guard before the `tmux_router` reconcile — so a
+            // focused document whose owned pane is merely stashed never got swapped
+            // into view (observed: focusing `equityfundingsource.md` left another
+            // document's pane in the visible column). Resolve a proven-live registered
+            // owner (including a stashed pane) so it enters the reconcile and the
+            // `tmux_router` SWAP fast path brings it into the exact-visible columns.
+            // We still never cold-start a MISSING pane under no-autostart — this only
+            // reuses a pane that already exists and still proves ownership, so the
+            // no-autostart / no-borrow-visible contract is preserved.
+            if let Some(pane_id) = registered_pane.as_ref()
+                && exact_visible_focus_eligible_for_owned_pane_resolve(
+                    skip_autostart_diagnostics,
+                    tmux.pane_alive(pane_id),
+                    claimed_owner.is_some(),
+                )
+                // Proof is the expensive term — only evaluated once the cheap
+                // eligibility gate holds (Rust `&&` short-circuits).
+                && registered_pane_proves_live_owner(
+                    tmux,
+                    file_path,
+                    &session_id,
+                    pane_id,
+                    &proof_cache,
+                )
+            {
+                eprintln!(
+                    "[sync] exact-visible focus: resolving live owner pane {} for {} so the reconcile can swap it into view",
+                    pane_id,
+                    file_path.display()
+                );
+                sync_log(&format!(
+                    "safe_passive_exact_visible_resolve_live_pane file={} pane={} action=resolve_for_reconcile",
+                    file_path.display(),
+                    pane_id
+                ));
+                reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
+                safe_passive_resolved_files
+                    .borrow_mut()
+                    .insert(file_path.to_path_buf());
                 continue;
             }
 
@@ -4983,6 +5047,28 @@ mod tests {
         ));
         assert!(!exact_visible_safe_passive(AutoStartMode::Full, true));
         assert!(!exact_visible_safe_passive(AutoStartMode::Full, false));
+    }
+
+    #[test]
+    fn exact_visible_focus_resolve_eligibility_rule() {
+        // `#exact-visible-focus-swap`: eligible only for an exact-visible sync with a
+        // live, unclaimed registered pane. The (expensive) live-owner proof is a
+        // separate short-circuited guard the caller applies after this gate.
+        assert!(exact_visible_focus_eligible_for_owned_pane_resolve(
+            true, true, false
+        ));
+        assert!(
+            !exact_visible_focus_eligible_for_owned_pane_resolve(false, true, false),
+            "a non-exact-visible sync keeps its own resolution path"
+        );
+        assert!(
+            !exact_visible_focus_eligible_for_owned_pane_resolve(true, false, false),
+            "a dead pane is never resolved (we never cold-start under no-autostart)"
+        );
+        assert!(
+            !exact_visible_focus_eligible_for_owned_pane_resolve(true, true, true),
+            "a pane another document already claimed this run must not be borrowed"
+        );
     }
 
     #[test]

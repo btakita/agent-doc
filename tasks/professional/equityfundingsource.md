@@ -159,7 +159,24 @@ Investigated all four call items; **most had already shipped** since the 2026-07
 - **Surface all loan info** — already done: `PreferredLoanTerms` shows property value, loan amount, LTV, lien position, and borrower/property info in the lender's Loan Package view.
 
 Suite 1428 pass / 7 pre-existing baseline fails, zero new failures. The photo/placeholder/loan-info surfaces would benefit from a quick live-portal eyeball, but they're wired correctly in code.
-<!-- agent:boundary:7222555b -->
+
+### Re: do #1j5y — homepage copy — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#1j5y]
+
+
+Verified — **all of the 2026-07-10 homepage copy decisions are already live in the code**, so no change was needed:
+
+- Step 3 reads **"Fund & close"** (`home/index.ts:91`) — the "close and fund" → "fund and close" flip.
+- Funded-deals CTA reads **"View More Funded Deals"** (`home/index.ts:152`) — the "all" → "more" change.
+- Contact CTA reads **"Send us your details for a quick approval."** (`contact/index.ts:302`).
+- Rate range reads **"8.99% to 14%"** (`public_content/repo.ts:263`, `home/index.ts:146`), with "LTV varies by lien position and total encumbrance."
+- Theme/colors: the gold-palette contrast correction already shipped (split-by-surface gold tokens, live `/styleguide`), which is the "I've got to fix this color" item from the call.
+
+Closing `#1j5y` as done-verified. If a specific color still looks off on the live site, that's a quick eyeball-and-tweak — point me at the element.
+<!-- agent:boundary:666a8494 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -168,7 +185,7 @@ Suite 1428 pass / 7 pre-existing baseline fails, zero new failures. The photo/pl
 - ~~do [#nga4]~~
 - ~~do [#e2n0]~~
 - ~~do [#nyeb]~~
-- do [#1j5y]
+- ~~do [#1j5y]~~
 - do [#faxz]
 - do [#91d8]
 - do [#nw77]
@@ -202,7 +219,6 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
-- [ ] [#1j5y] Homepage copy: step-3 'fund and close'; funded-deals CTA 'View more funded deals'; contact CTA 'Send us your details for a quick approval'; rate range 8.99-14%; fix theme/colors. [followups: Homepage copy]
 - [ ] [#faxz] Funded-deals page: add more funded deals + admin curate / 'featured transactions'. [followups: Homepage copy]
 - [ ] [#91d8] Document types: seed remembered custom types LOE (credit + exit-strategy) and Business Purpose Letter; add a preset 'request missing documents' email (refi/purchase variants) with explanations. [followups: Document requirements]
 - [ ] [#nw77] Deal notes: rename 'workflow notes' -> 'deal notes', scope per-deal (per lender per deal), convert to an append-only log with timestamps + author attribution. [followups: Deal notes]

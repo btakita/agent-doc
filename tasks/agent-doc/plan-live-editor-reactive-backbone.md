@@ -211,23 +211,35 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   a crashed editor becomes `Detached` here, so the resolver never reaches S4's (reactive) zero-live
   branch. `plugin-owner` already depends on `document-realtime`, so the dependency allows a reactive
   read — the blocker is crash detection, not layering.
-  - **To move this off the hot path safely (future work), one of:**
-    (a) an **off-hot-path pid-liveness reaper** — a periodic controller sweep that marks
-    `editor_open_docs` closed when an open doc's owner pid is dead — so the gate can read pure
-    reactive state with cold-miss lease recovery; or
-    (b) **cache the owner pid in `DocOpenState`** (from the cold-miss lease read / a pid-bearing
-    register event) and check crash via a cheap `kill(pid,0)` **syscall** on the hot path (a pid
-    syscall is not a *sidecar* read), reading the lease file only on a cold miss.
-  Both are real additional components with real regression risk across the gate's ~30 call sites;
-  deferred rather than shipped unsafely. Until then the lease poll at `authority_for_file`
-  is a deliberate backstop, and the S4 directive ("sidecars off the hot path") holds for the
-  open-docs *liveness decision* but not yet for the *editor-attached gate*.
-  - **Second reason a pid-only cache is insufficient:** the lease read detects *two* transitions the
-    reactive event stream misses — an editor **crash** (pid death, no `deregister`) AND a **graceful
-    lease release without a paired deregister**. The gate needs lease *presence*, not just pid
-    liveness. (It also shows up in tests, where the "owner pid" is the test process itself and never
-    dies, so a pid-only crash check cannot distinguish "lease released" from "editor alive".) The
-    safe reaper/cache design must therefore reconcile on lease *absence* too, not just pid death.
+  - **Preferred fix — an OS process-exit EVENT, not a poll (`#s4b-pidfd`).** The missing signal is
+    "editor crashed" (pid death sends no `deregister`). Get it as an event:
+    - **`pidfd` (fits the current connect-per-request transport):** `pidfd_open(2)` (Linux 5.3+)
+      returns a pollable fd that becomes readable the instant the target process exits (crash OR
+      clean), and works across process trees (the editor is not the controller's child, so
+      `SIGCHLD`/`waitpid` don't apply — `pidfd` does). The controller opens one pidfd per attached
+      editor (pid learned once at register/attach — an event, not a per-decision poll), registers it
+      on the existing accept-loop epoll (`rpc.rs:5782`), and on the exit event calls
+      `editor_open_docs.mark_closed`. macOS equivalent: `kqueue` `EVFILT_PROC`/`NOTE_EXIT`.
+    - **Persistent-connection socket `HUP` (cleaner, but a transport change):** today the JB
+      transport does `SocketChannel.open(...).use{}` — a fresh connection per ~6s poll, so there is
+      no long-lived fd to watch. If the editor held ONE persistent Unix-domain-socket connection, the
+      controller's epoll `POLLHUP`/EOF would be the crash/disconnect event and the connection would
+      *be* the liveness lease (no pid bookkeeping, no lease file for liveness at all). Bigger change;
+      the better long-term shape.
+    With `pidfd`/`HUP` events + the existing `deregister` events both driving `mark_closed`, the gate
+    can read pure reactive state on the hot path and read the lease **only on a cold miss**.
+  - **Per-doc close vs whole-editor death:** `pidfd`/`HUP` detect *whole-editor* death; a graceful
+    per-doc close (editor stays alive, closes one buffer) is covered by the explicit `deregister`
+    event. Together they replace the lease poll entirely, leaving the lease as pure cold-miss/durable
+    backup — the operator's model. (A graceful lease *release* with no `deregister` and no exit is the
+    only residual; it should not occur if close always sends `deregister`.)
+  - **Test note:** a pid-only `kill(pid,0)` cache is insufficient AND untestable in-process (the
+    test's "owner pid" is the test process, which never dies). A `pidfd`/`HUP` event source is
+    injectable in a SimWorld (feed synthetic exit events), so the gate conversion stays deterministically
+    testable. This remains real work across the gate's ~30 call sites; deferred to its own stage, not
+    shipped unsafely. Until then the lease poll at `authority_for_file` is a deliberate backstop, and
+    the S4 directive holds for the open-docs *liveness decision* but not yet for the *editor-attached
+    gate*.
 
 ## Missing reactive components in the lazily plugins (#plugin-reactive-core)
 

@@ -3020,6 +3020,46 @@ fn live_pane_evidence_for_pane(
         };
     }
 
+    // `#stale-actor-pane-collision`: a live pane is NOT proof of OUR live actor. When
+    // no reachable supervisor can vouch for the pane (Unreachable/NoSocket) and the
+    // evidence pane came from a recorded owner (`authoritative_actor` / `registry`),
+    // the pane may have been reused by a DIFFERENT session after our supervised child
+    // exited — observed: agent-doc-bugs2.md's supervised claude exited (clean_exit),
+    // pane %85 was relaunched as another Claude session, yet the stale actor record
+    // still claimed %85, so status/sync/focus reported it `alive-idle` and treated a
+    // foreign pane as our live actor. Require the recorded child/registry pid to still
+    // live inside the pane's process tree; otherwise the pane is a foreign reuse, not
+    // our actor — report a stale projection so resync reclaims it instead of pointing
+    // dispatch at someone else's pane.
+    let recorded_owner_pid = ctx
+        .supervisor_runtime
+        .child_pid
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pid));
+    // Only probe the (expensive) pane process tree once the cheap terms already
+    // qualify; a healthy/reachable supervisor is authoritative on its own.
+    let pane_owned_by_recorded_pid = match (
+        evidence_pane_reuse_cheap_gate(source, &ctx.supervisor_runtime.health),
+        recorded_owner_pid,
+    ) {
+        (true, Some(recorded_pid)) => pane_process_tree_contains_pid(tmux, &pane_id, recorded_pid),
+        _ => true,
+    };
+    if evidence_pane_is_foreign_reuse(
+        source,
+        &ctx.supervisor_runtime.health,
+        recorded_owner_pid,
+        pane_owned_by_recorded_pid,
+    ) {
+        return LivePaneEvidence {
+            pane_id: Some(pane_id),
+            source,
+            state: LivePaneState::ProjectionStale,
+            current_command: None,
+            prompt_ready: Some(false),
+            tail: None,
+        };
+    }
+
     let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
     let captured = agent_doc_tmux_io::capture_pane(tmux, &pane_id).unwrap_or_default();
     let prompt_ready = live_pane_prompt_ready(&harness, &captured);
@@ -3035,6 +3075,45 @@ fn live_pane_evidence_for_pane(
         prompt_ready: Some(prompt_ready),
         tail: last_meaningful_pane_line(&captured),
     }
+}
+
+/// True if the pane's process tree still contains `recorded_pid` (our supervised
+/// child / registry-recorded process). Conservative on inability to resolve the pane
+/// pid — returns `true` so we never wrongly downgrade a genuinely-live actor when the
+/// tmux query fails. See `#stale-actor-pane-collision`.
+fn pane_process_tree_contains_pid(tmux: &Tmux, pane_id: &str, recorded_pid: u32) -> bool {
+    let Some(pane_pid) = agent_doc_tmux_io::pane_pid(tmux, pane_id) else {
+        return true;
+    };
+    agent_doc_process_owner_io::process_tree_contains_pid(&pane_pid.to_string(), recorded_pid)
+}
+
+/// Cheap (no syscalls) precondition for the `#stale-actor-pane-collision` probe: the
+/// evidence pane came from a recorded owner AND no reachable supervisor can vouch for
+/// it. Only when this holds is it worth probing the pane's process tree.
+fn evidence_pane_reuse_cheap_gate(source: &str, health: &SupervisorHealth) -> bool {
+    matches!(source, "authoritative_actor" | "registry")
+        && matches!(
+            health,
+            SupervisorHealth::Unreachable | SupervisorHealth::NoSocket
+        )
+}
+
+/// Pure decision for `#stale-actor-pane-collision`: a live pane that came from a
+/// recorded owner is a FOREIGN reuse (not our live actor) when no reachable supervisor
+/// vouches for it, we have a recorded child/registry pid, and that pid no longer lives
+/// in the pane's process tree. In that case the pane belongs to a different session
+/// that reused it after ours exited, so it must be reported as a stale projection
+/// rather than `alive-idle`.
+fn evidence_pane_is_foreign_reuse(
+    source: &str,
+    health: &SupervisorHealth,
+    recorded_owner_pid: Option<u32>,
+    pane_owned_by_recorded_pid: bool,
+) -> bool {
+    evidence_pane_reuse_cheap_gate(source, health)
+        && recorded_owner_pid.is_some()
+        && !pane_owned_by_recorded_pid
 }
 
 fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) {
@@ -3554,6 +3633,70 @@ fn timestamp_secs() -> u64 {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    // `#stale-actor-pane-collision`: bugs2's supervised claude exited and its pane
+    // %85 was reused by another Claude session while the stale actor record still
+    // claimed it. With no reachable supervisor to vouch for the pane, a recorded pid
+    // that no longer lives in the pane's process tree means a foreign reuse, so the
+    // evidence must be a stale projection, not `alive-idle`.
+    #[test]
+    fn foreign_reuse_when_unreachable_supervisor_and_recorded_pid_absent_from_pane() {
+        assert!(evidence_pane_is_foreign_reuse(
+            "authoritative_actor",
+            &SupervisorHealth::Unreachable,
+            Some(605459),
+            false, // recorded pid no longer in the pane's process tree
+        ));
+        // NoSocket + registry-sourced pane is the same collision.
+        assert!(evidence_pane_is_foreign_reuse(
+            "registry",
+            &SupervisorHealth::NoSocket,
+            Some(605459),
+            false,
+        ));
+    }
+
+    #[test]
+    fn not_foreign_reuse_when_recorded_pid_still_owns_pane() {
+        assert!(!evidence_pane_is_foreign_reuse(
+            "authoritative_actor",
+            &SupervisorHealth::Unreachable,
+            Some(605459),
+            true, // recorded pid still lives in the pane
+        ));
+    }
+
+    #[test]
+    fn not_foreign_reuse_when_supervisor_reachable() {
+        // A healthy/reachable supervisor is authoritative on its own; never downgrade.
+        assert!(!evidence_pane_is_foreign_reuse(
+            "authoritative_actor",
+            &SupervisorHealth::Healthy,
+            Some(605459),
+            false,
+        ));
+        assert!(!evidence_pane_reuse_cheap_gate(
+            "authoritative_actor",
+            &SupervisorHealth::Healthy
+        ));
+    }
+
+    #[test]
+    fn not_foreign_reuse_without_recorded_pid_or_from_live_session_log() {
+        // No recorded owner pid to check against → keep prior aliveness evidence.
+        assert!(!evidence_pane_is_foreign_reuse(
+            "authoritative_actor",
+            &SupervisorHealth::Unreachable,
+            None,
+            true,
+        ));
+        // A pane resolved from the live session log (not a recorded owner) is not
+        // subject to the recorded-owner provenance check.
+        assert!(!evidence_pane_reuse_cheap_gate(
+            "session_log",
+            &SupervisorHealth::Unreachable
+        ));
+    }
 
     fn empty_operator_status(
         record: Option<agent_doc_sqlite::state_store::ActorRecord>,

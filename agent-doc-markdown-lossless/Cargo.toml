@@ -1,14 +1,14 @@
 [package]
 name = "agent-doc-markdown-lossless"
-version = "0.34.80"
+version = "0.34.82"
 edition = "2024"
 license = "MIT"
 description = "Phase 0 lossless-tree adapter for agent-doc markdown session documents (#lzlosstree): parses a document into a lazily LosslessTreeCrdt whose leaves own every byte, so render(parse(doc)) == doc. Shadow projection only — not an authority path."
 repository = "https://github.com/btakita/agent-doc"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.80" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.80" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.82" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.82" }
 lazily = { version = "0.21.6", features = ["lossless-tree", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,7 +16,7 @@ serde_json = "1"
 [dev-dependencies]
 # Cross-check the tree's bounded component-body replace against the real element
 # parser's replace_content, proving byte-parity for the drop-in (#lzlosstree Phase 2).
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.80" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.82" }
 # Cross-check the tree's 3-way merge against the authoritative yrs-backed
 # merge_by_component on clean, non-conflicting cases (#lzlosstree merge layer).
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.80" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.82" }

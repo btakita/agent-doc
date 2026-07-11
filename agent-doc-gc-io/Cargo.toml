@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-gc-io"
-version = "0.34.80"
+version = "0.34.82"
 edition = "2024"
 description = "Garbage collection IO boundary for agent-doc"
 license = "MIT"
@@ -10,11 +10,11 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_gc_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.80" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.80" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.80" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.80" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.80" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.82" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.82" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.82" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.82" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.82" }
 anyhow = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 

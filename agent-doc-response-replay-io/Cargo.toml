@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-response-replay-io"
-version = "0.34.80"
+version = "0.34.82"
 edition = "2024"
 description = "Response replay file-effect adapters for agent-doc"
 license = "MIT"
@@ -10,9 +10,9 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_response_replay_io"
 
 [dependencies]
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.80" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.80" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.80" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.82" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.82" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.82" }
 anyhow = "1"
 
 [dev-dependencies]

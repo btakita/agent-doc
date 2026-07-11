@@ -26,7 +26,14 @@ private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 60_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 300_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
-private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 5_000L
+// `#crdt-drain-idle-quiet`: the no-op drain-all loop must keep polling so purely-remote
+// CRDT updates (a peer edits with no local event here) still get pulled — but an idle
+// replica set does not need a 5s cadence. Cap the idle reschedule at 30s so a workspace
+// full of parked session-doc replicas stops waking every 5s (observed steady-state
+// churn across ~9 attached replicas). Active editing / authority-publish / open-document
+// events still trigger an immediate drain, so only passive remote-only observation on an
+// otherwise-idle doc sees up to 30s of extra latency.
+private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
 
 /**
  * Production editor-as-CRDT-replica wiring (`#crdtauth5`, realtime phase 3).

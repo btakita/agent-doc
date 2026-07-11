@@ -1,5 +1,15 @@
 # Plan — live_editor pipeline onto the lazily reactive backbone (#live-editor-reactive)
 
+## Status (2026-07-11) — core COMPLETE
+S1 (reactive RelayHub liveness core, 824a2632), S2 (reactive editor open-docs registry),
+S2b + S3 (resolver/visible-write repair-not-demote through the reactive open-docs projection,
+55d91244) are **DONE** — the observed phantom-`live_editors=0` wedge is fixed: an open editor
+with zero live replicas keeps editor authority instead of demoting to disk. S4 core is delivered
+by S2b/S3 (the only wrongly-demoting consumer was the resolver); its residual poll→subscribe
+refactor is deferred (no behavioral bug, fail-closed-guard risk). S5/S6 are blocked upstream on
+lazily (`#lzpkgwire`) / decided against for now; S7 is decided (keep the content-CRDT vs
+state-projection split). See the staged section for per-stage detail. `make check`: 7415 passed.
+
 ## Problem
 
 `live_editor` liveness is **imperative and polled**, so a stale editor lease strands
@@ -135,28 +145,41 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   frontmatter classify, first-open only); `agent_doc_document_closed_for_editor` → `mark_closed`
   once no live-buffer sidecar remains. SimWorld: open/close sequence vs reference model; open
   agent-doc subset; reconcile close-dropped/open-new. **DONE (this commit).**
-- **S2b — authority from open-docs + liveness repair.** Derive per-doc authority from
-  `is_open(doc)` (editor-authoritative when open, disk when not) and reconcile it with the
-  backbone Transport projection so `authority_for_projection` agrees. When `is_open(doc)` but the
-  relay `live_count()==0`, **repair** (re-register/reconnect the replica) instead of demoting —
-  this is the detach/attach mapping the earlier S2 question was really about.
-  - **PREREQUISITE (verified 2026-07-11, blocker) — `editor_open_docs` is process-local and
-    only fed FFI-side.** The `EditorOpenDocs` registry is populated exclusively in the *plugin*
-    process via FFI events (`ffi.rs:597` `mark_closed`, `ffi.rs:1019` `mark_open_with`). The
-    *controller* process (where the `agent-doc-crdt-relay-io` resolver runs) never calls
-    `mark_open`/`reconcile`, so `is_open(doc)` is **always false controller-side** today — the
-    reactive graph is process-local (plan §"FFI-first"). S2b must FIRST wire a controller-side
-    `editor_open_docs().reconcile(open_set)` fed by the durable live-buffer sidecar scan (the same
-    `.agent-doc/live-buffer` evidence `live_buffer_guard` already reads), otherwise the repair
-    branch is dead code in the resolver and demote-to-disk still fires. Both demote sites gate on
-    this: read path `realtime_doc_resolve_crdt_no_live_editors_disk_authority` and write path
-    `crdt_cpc_write_disk_authority_stale_lease` (`lib.rs:1219`).
-- **S3 — resolver observes backbone.** `agent-doc-crdt-relay-io` resolver derives
-  authority from the reactive projection (open-docs + backbone), not a raw `live_count()` poll.
-  Preserve the `crdt_relay_no_live_editors` / `live_editors=` log fields (regression-visible).
-- **S4 — push to remaining consumers.** `live_buffer_guard`, `plugin-owner` observe
-  the signal. Reconcile stale-lease heal so a live-but-lease-expired plugin re-lives
-  reactively (kills the phantom-0 wedge that caused the symptom).
+- **S2b — authority from open-docs + liveness repair. DONE (2026-07-11, commit 55d91244).**
+  Ground truth is the editor's open-file set, proved by a live-buffer sidecar with a live pid
+  (`live_editor_endpoint_attached` / `#6b5h`). The resolver reconciles the reactive `editor_open_docs`
+  registry from that sidecar ground truth **controller-side** (`reconcile_and_observe_editor_open`
+  in `agent-doc-document-realtime-io`) — closing the process-local prerequisite below — and keeps
+  editor authority when the editor is open + `live_count()==0` instead of demoting. The dropped
+  replica re-registers on the editor's next edit (existing phantom-heal in
+  `relay_replica_update_for_file`), so an explicit re-register in the resolver is unneeded.
+  - **PREREQUISITE (verified 2026-07-11) — CLOSED by S2b.** `EditorOpenDocs` was fed only in the
+    *plugin* process via FFI (`ffi.rs:597`/`1019`), so `is_open` was always false in the
+    *controller*/resolver process. `reconcile_and_observe_editor_open` now marks the registry from
+    the `.agent-doc/live-buffer` sidecar ground truth before each zero-live decision, making
+    `is_open`/`open_count` truthful controller-side.
+  - **CPC-write demote (`crdt-relay-io` `crdt_cpc_write_disk_authority_stale_lease`, `lib.rs:1219`)
+    deliberately unchanged.** With zero live replicas there is no replica to write through; forcing
+    editor authority there reintroduces the documented CAS `retry_crdt_merge` strand wedge, and disk
+    clobber is already prevented downstream by `disk_write_permitted_for_file`. Recorded as a scope
+    decision, not an omission.
+- **S3 — resolver observes reactive projection. DONE (same commit 55d91244).** Both the read
+  resolve (`try_resolve_current_doc_with_disk_inner`) and the visible-write reconcile
+  (`guard_visible_write_reconcile_with_target`) route the zero-live authority decision through the
+  reactive `editor_open_docs().is_open` projection (pure `resolve_zero_live_editors` decision fn)
+  instead of a raw `live_count()` demote. The `crdt_relay_no_live_editors` / `live_editors=` log
+  fields are preserved; the repair path adds `crdt_relay_stale_lease_editor_open` /
+  `recovery=keep_editor_authority_no_live_replica`. SimWorld: reactive-registry-driven transition
+  test + two integration tests updated to keep-editor-authority semantics.
+- **S4 — remaining consumers. Core delivered by S2b/S3; residual poll→subscribe refactor deferred.**
+  The phantom-0 wedge is fully killed: the *only* consumer that wrongly demoted on `live_count()==0`
+  was the resolver (S2b/S3). Audited the other two named consumers — neither has the demote bug:
+  `live_buffer_guard`'s `commit_barrier_ready` routes through
+  `commit_barrier_via_controller_model_for_doc` and **fails closed** (blocks the disk commit,
+  protecting the editor buffer), and `plugin-owner` *is* the ground-truth lease source. Converting
+  them from the current (already-correct) model/ground-truth reads to reactive signal subscription is
+  a pure architectural refinement with **no behavioral bug to fix** and real fail-closed-guard
+  regression risk, so it is deferred, not implemented, until a concrete need justifies it.
 
 ## Missing reactive components in the lazily plugins (#plugin-reactive-core)
 
@@ -180,25 +203,31 @@ Each is a candidate stage; none is a regression, all are parity gaps.
 - **Document content (NOT the reactive graph):** a separate yrs CRDT path
   (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches/<hash>.json`).
 
-**Missing components (proposed stages, sequence-independent of S2b–S4)**
-- **S5 — real lazily reactive-core mirror in each plugin.** Replace the hand-rolled folds
-  with an actual lazily reactive graph instance so plugin UI derives from tracked cells
-  natively. Blocked upstream by `#lzpkgwire`: needs a lazily-kt build consumable by the
-  IntelliJ 1.9/JBR17 toolchain (or a shaded/relocated artifact) and a lazily-js reactive-core
-  export (or the JB/VSCode plugin adopting the lazily-rs core over FFI instead of a native
-  port). Until then the conformance-pinned fold is the sanctioned stand-in — keep the pins.
-- **S6 — adopt (or explicitly reject) lazily `Bridge` for the plugin transport.** Decide
-  between lazily's multichannel `BridgeHub`/`IpcSink`/`IpcSource` (webrtc feature) and the
-  current bespoke `snapshot`/`delta` wire. If adopting, the reactive graph bridges across the
-  FFI/socket boundary with lazily-owned inbound `CellSet` enforcement + re-derive semantics
-  instead of agent-doc re-implementing envelope folding; if rejecting, record why the bespoke
-  wire wins (CommonJS/ESM + toolchain constraints, per-doc epoch batching unlike single-step
-  lazily-IPC deltas) so the gap is a decision, not an omission.
-- **S7 — unify (or deliberately keep split) the content CRDT and the reactive projection.**
-  The yrs content replica and the lazily state projection are two independent substrates over
-  the same IPC socket. Document whether they stay split (yrs for text convergence, lazily for
-  UI-state projection) or converge onto one reactive transport once `#live-editor-reactive`
-  liveness is observed end-to-end (S3/S4).
+**Missing components (decisions recorded 2026-07-11)**
+- **S5 — real lazily reactive-core mirror in each plugin. BLOCKED UPSTREAM (decision: defer,
+  keep the conformance-pinned fold).** Replacing the hand-rolled folds with an actual lazily
+  reactive graph instance needs (a) a lazily-kt build consumable by the IntelliJ 1.9/JBR17
+  toolchain — a shaded/relocated artifact — since the plugin cannot bump to lazily-kt's Kotlin
+  2/JVM21 (`#lzpkgwire`), and (b) a lazily-js reactive-core export (`@lazily/js` currently ships
+  only the FFI consumer + IPC helpers, and the extension is CommonJS vs the package's ESM). Neither
+  exists today. Until lazily ships those consumable reactive cores, the conformance-pinned fold
+  (`StateGraphMirrorTest` / `stateMirrorConformance.test.ts`) is the sanctioned stand-in — **keep
+  the pins so drift is a review catch.** Tracked against lazily, not agent-doc.
+- **S6 — lazily `Bridge` for the plugin transport. DECISION: reject for now, keep the bespoke wire.**
+  agent-doc keeps its own lazily-spec-shaped `snapshot`/`delta` wire over the existing Unix-socket
+  IPC + FFI rather than lazily's `BridgeHub`/`IpcSink`/`IpcSource` (webrtc feature). Rationale: the
+  wire carries **per-doc epoch-batched** delta sets (an accepted-event count), unlike single-step
+  lazily-IPC deltas; the plugin transports already exist and are conformance-pinned; and the same
+  CommonJS/ESM + IntelliJ-toolchain constraints that block S5 block importing lazily's bridge crate
+  plugin-side. Revisit only if/when S5 lands a real reactive core in the plugins (a bridge without a
+  plugin-side reactive graph to bridge into buys nothing).
+- **S7 — content CRDT vs reactive projection. DECISION: keep split (two substrates, one socket).**
+  The yrs content replica (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches`) and
+  the lazily state projection (`state_subscribe` snapshot/delta) serve different jobs — conflict-free
+  *text* convergence vs *UI-state* projection — and yrs is the right tool for the former. They are
+  deliberately not unified; `#live-editor-reactive` liveness (now observed end-to-end at the resolver
+  via S2b/S3) does not require merging the transports. Revisit only if a single reactive transport
+  becomes a concrete requirement.
 
 ### Test conventions (per operator feedback)
 - SimWorld over mocks for sync/tmux; deterministic model + shared pure decision fn.

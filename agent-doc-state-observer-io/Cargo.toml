@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-state-observer-io"
-version = "0.34.78"
+version = "0.34.79"
 edition = "2024"
 description = "Read-only state observer adapters for agent-doc"
 license = "MIT"
@@ -10,13 +10,13 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_state_observer_io"
 
 [dependencies]
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.78" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.78" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.78" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.78" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.78" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.78" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.78" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.78" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.78" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.78" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.79" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.79" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.79" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.79" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.79" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.79" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.79" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.79" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.79" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.79" }

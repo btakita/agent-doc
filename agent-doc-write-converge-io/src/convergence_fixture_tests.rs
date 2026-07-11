@@ -334,6 +334,57 @@ mod core_tests {
             "a converged compaction must not also take the disk fallback:\n{log}"
         );
     }
+    #[test]
+    fn try_compact_editor_converge_stale_lease_zero_live_replica_resolves_to_disk() {
+        // `#stale-lease-cpc-authority` (write-converge mirror): a JB editor had the
+        // doc open (plugin-owner lease + live replica), then the controller/supervisor
+        // recycled (`#statedbgc`) and the editor never re-registered its replica. The
+        // lease survives — so the endpoint still looks "live" — but the recovered hub
+        // has ZERO live replicas. The old behavior ACK/rejected against this phantom
+        // endpoint and then refused the disk write forever (`no_visible_write_receipt`,
+        // the reported JB `Compact Exchange` exit-1). It must instead resolve to the
+        // guarded disk write, mirroring the relay's own disk-authority resolution.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
+        let doc = dir.path().join("plan.md");
+
+        let source = agent_doc_test_support::compact_convergence_source();
+        let compacted = agent_doc_test_support::compact_convergence_compacted();
+        fs::write(&doc, &source).unwrap();
+
+        // Editor opened the doc, then the controller recycled leaving a stale lease
+        // over a recovered hub with zero live replicas (the phantom editor).
+        agent_doc_test_support::seed_stale_editor_lease_zero_live_replica(&doc, "intellij:phantom");
+
+        // A receipt-without-content listener stands in for the phantom endpoint that
+        // ACKs the socket but never produces a visible-write receipt.
+        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
+        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+
+        let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
+        assert!(
+            converged,
+            "a stale-lease zero-live-replica phantom endpoint must resolve to the guarded disk write, not wedge"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            compacted,
+            "the compacted target must land on disk once the phantom editor is demoted"
+        );
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("transport=disk_stale_lease")
+                && log.contains("action=demote_phantom_editor"),
+            "the demotion to disk authority must be observable in ops.log:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=no_visible_write_receipt"),
+            "a stale-lease zero-live-replica endpoint must not be refused as an unproven editor delivery:\n{log}"
+        );
+    }
+
     /// Pre-consume document with a `go` queue head an operator could be concurrently
     /// editing while the queue is struck.
     /// Post-consume document: only the `queue` head is struck; every other

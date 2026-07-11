@@ -1073,7 +1073,37 @@ pub fn relay_replica_update_for_file(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let packet = with_hub_seeded_from_file(file, |hub| hub.relay_update(client_id, update))??;
+    // `#stale-lease-cpc-authority` / phantom-editor auto-heal: after a
+    // controller/supervisor recycle (`#statedbgc`), the in-process `hub_registry`
+    // restarts empty and the hub is rebuilt from the durable `.yrs` projection with
+    // ONLY the canonical replica (`live_count() == 0`). The editor is genuinely
+    // still open — its FFI replica keeps shipping `replica_update`s for its stable
+    // client-id — but the hub no longer knows that client, so the relay used to
+    // hard-fail with "replica {id} is not registered", leaving the editor a phantom
+    // (zero live replicas) forever until it was re-opened. Since the caller proved
+    // `editor_attached()` and provided the editor's stable `identity`, re-register
+    // the dropped replica (seeded from the recovered canonical) before relaying. The
+    // editor's update — encoded as "everything a fresh peer is missing" — then
+    // integrates idempotently and `live_count()` returns to 1, healing the phantom
+    // on the editor's next edit with no plugin round-trip.
+    let mut reattached = false;
+    let packet = with_hub_seeded_from_file(file, |hub| {
+        if !hub.is_registered(client_id) {
+            hub.register(client_id)?;
+            reattached = true;
+        }
+        hub.relay_update(client_id, update)
+    })??;
+    if reattached {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=reregister_dropped_replica",
+                file.display(),
+                client_id,
+            ),
+        );
+    }
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
     if !packet.targets.is_empty()
@@ -2543,6 +2573,59 @@ mod tests {
             .expect("missing-replica CPC write should recover from projection and apply");
         assert!(result.applied);
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
+    }
+
+    #[test]
+    fn relay_update_reattaches_dropped_replica_after_recycle() {
+        // Phantom-editor heal: a JB editor was open (lease + live replica), then the
+        // controller/supervisor recycled (`#statedbgc`). The in-process hub restarts
+        // empty and is rebuilt from the durable projection with ONLY the canonical
+        // replica (`live_count()==0`) — but the editor is still open and its FFI
+        // replica keeps shipping `replica_update`s for its stable client-id. The relay
+        // must re-register the dropped replica (not hard-fail "not registered"), apply
+        // the editor's update, and return `live_count()` to 1 — healing the phantom on
+        // the editor's next edit with no plugin round-trip.
+        let (_dir, doc) = temp_doc("relay-reattach.md");
+        let file_str = doc.display().to_string();
+        seed_live_plugin_owner_lease(&file_str);
+        let identity = "intellij:reattach";
+        let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        // The editor makes a local edit against its FFI replica and would ship the
+        // encoded state to the hub.
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let base_chars = replica.text().chars().count() as u32;
+        replica.apply_local_edit(base_chars, 0, "\n### Re: after recycle — gpt-5\n\nEDITOR EDIT\n");
+        let editor_update = replica.encode_state();
+
+        // Model the recycle: persist the durable projection, then evict the live hub
+        // so the next hub access recovers a canonical-only hub with zero live editors.
+        checkpoint_durable_projection_for_file(&doc, "test_reattach").unwrap();
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        assert!(
+            hub_registry().lock().unwrap().remove(&hash).is_some(),
+            "test setup should evict the live hub"
+        );
+
+        let fan_out = relay_replica_update_for_file(&doc, identity, &editor_update)
+            .expect("a dropped-replica update must re-register and relay, not fail closed")
+            .expect("editor-attached authority must relay the reattached update");
+        assert_eq!(fan_out.origin, client_id);
+        with_hub(&doc, |hub| {
+            assert_eq!(
+                hub.live_count(),
+                1,
+                "re-registering the dropped replica must restore one live editor"
+            );
+            assert!(
+                hub.canonical_text().contains("EDITOR EDIT"),
+                "the editor's post-recycle edit must integrate into the canonical text"
+            );
+        })
+        .unwrap();
     }
 
     #[test]

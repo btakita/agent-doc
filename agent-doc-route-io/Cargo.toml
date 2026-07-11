@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-route-io"
-version = "0.34.78"
+version = "0.34.79"
 edition = "2024"
 description = "Route target session and pane resolution I/O for agent-doc"
 license = "MIT"
@@ -10,62 +10,62 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_route_io"
 
 [dependencies]
-agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.34.78" }
-agent-doc-config = { path = "../agent-doc-config", version = "0.34.78" }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.78" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.78" }
-agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.78" }
-agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.78" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.78" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.78" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.78" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.78" }
-agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.78" }
-agent-doc-element-backlog-runtime-io = { path = "../agent-doc-element-backlog-runtime-io", version = "0.34.78" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.78" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.78" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.78" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.78" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.78" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.78" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.78" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.78" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.78" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.78" }
-agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.78" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.78" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.78" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.78" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.78" }
-agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.78" }
-agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.78" }
-agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.34.78" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.78" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.78" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.78" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.78" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.78" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.78" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.78" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.78" }
-agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.78" }
-agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.78" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.78" }
-agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.78" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.78" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.78" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.78" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.78" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.78" }
+agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.34.79" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.34.79" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.79" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.79" }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.79" }
+agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.34.79" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.79" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.79" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.79" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.79" }
+agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.34.79" }
+agent-doc-element-backlog-runtime-io = { path = "../agent-doc-element-backlog-runtime-io", version = "0.34.79" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.79" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.79" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.79" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.79" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.79" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.79" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.79" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.79" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.79" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.79" }
+agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.34.79" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.79" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.79" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.79" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.79" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.79" }
+agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.79" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.34.79" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.79" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.79" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.79" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.79" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.79" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.79" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.34.79" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.34.79" }
+agent-doc-sync = { path = "../agent-doc-sync", version = "0.34.79" }
+agent-doc-sync-io = { path = "../agent-doc-sync-io", version = "0.34.79" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.79" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.79" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.79" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.79" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.79" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.79" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.79" }
 anyhow = "1"
 fs2 = "0.4"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 tracing = "0.1"
 
 [dev-dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.78" }
-agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.34.78" }
-agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.78" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.78" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.79" }
+agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.34.79" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.34.79" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.34.79" }
 serde_json = "1"
 tempfile = "3"

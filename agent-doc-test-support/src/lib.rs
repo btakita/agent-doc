@@ -458,6 +458,41 @@ pub fn seed_live_plugin_owner_lease(file: &str) {
     );
 }
 
+/// Model the "phantom editor" state a controller/supervisor recycle leaves
+/// behind: a JB editor genuinely had the document open (a live plugin-owner
+/// lease + a registered CRDT replica), but after the controller recycled the
+/// editor never re-registered its replica. The lease survives — so
+/// `editor_attached()` still reports a live editor — while the recovered hub
+/// carries the canonical text with ZERO live replicas (`live_count() == 0`,
+/// delivery converged). This is the exact input to `#stale-lease-cpc-authority`.
+///
+/// Registers a live replica (which also acquires the plugin-owner lease and marks
+/// the test-local CRDT relay), then deregisters it so the hub keeps the canonical
+/// but reports zero live editors. The lease is left held.
+pub fn seed_stale_editor_lease_zero_live_replica(file: &Path, editor_id: &str) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    mark_test_local_crdt_relay(&canonical);
+    let canonical_key = canonical.to_string_lossy().to_string();
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(
+            &canonical_key,
+            editor_id,
+            std::process::id(),
+        ),
+        "test setup should acquire a live plugin-owner lease"
+    );
+    let identity = format!("{editor_id}:{canonical_key}");
+    agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
+        .expect("test editor should register through CRDT relay")
+        .expect("test editor should attach under plugin-owner authority");
+    let removed = agent_doc_crdt_relay_io::deregister_replica_for_file(&canonical, &identity)
+        .expect("test editor deregister should succeed");
+    assert!(
+        removed,
+        "deregistering the only live replica should drop the hub mirror to zero live editors"
+    );
+}
+
 pub fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {
     agent_doc_template::PatchBlock::new("exchange", format!("{heading}\n\nbody line one\n"))
 }

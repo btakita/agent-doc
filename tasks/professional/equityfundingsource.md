@@ -133,14 +133,22 @@ Fixed the diagnosable defect and pushed (`equityfundingsource-dev` e8b8fdd).
 **Fix:** every notify site now logs why an email didn't go out — `log_email_result_(context, ...)` for skipped/failed results across all four paths (party, admins-of-party, admin-of-borrower, borrower-of-admin), plus an explicit "disabled" log on the investor→admin path (the bug path). Added `#nga4` coverage to `tests/borrower-message-notify.test.ts`; full suite 1427 pass / 7 pre-existing baseline fails (my change adds one passing test, zero new failures).
 
 **Likely real cause is prod config, not code:** the recent Resend removal churn (`c5af4aa` revert, `d6f8fd8` remove stale config) probably left `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` off or the Cloudflare sender unconfigured in prod. I can't verify prod env vars from here, so I filed a follow-up — the new logs will now name the exact reason in `wrangler tail`.
-<!-- agent:boundary:dcb1ebd2 -->
+
+### Re: do #e2n0 — per-deal required documents — opus-4-8
+
+Fixed and pushed (`equityfundingsource-dev` 25a8828).
+
+**Root cause:** adding a custom required document from a deal created a **global** catalogue type with `default_required=1`, so it immediately became required on *every* deal — Brian's "oh, this makes it required for everybody" from the call.
+
+**Fix:** `POST /api/admin/document-types` now accepts an optional `deal_id`. When present it creates the type **global-optional** (`default_required=0`) and requires it **only for the originating deal** via the existing per-deal override (`deal_required_document_types`). The deal documents tab (`deal_detail.tsx`) passes `deal_id`; the global settings page omits it and keeps catalogue-wide behavior — so a type is still "remembered" in the catalogue for reuse, just not force-required everywhere. Added `#e2n0` coverage (deal A requires it, deal B untouched); suite 1428 pass / 7 pre-existing baseline fails, zero new failures.
+<!-- agent:boundary:2bcdfe38 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tcb0]~~
 - ~~do [#nyc5]~~
 - 🚧 do [#nga4]
-- do [#e2n0]
+- ~~do [#e2n0]~~
 - do [#nyeb]
 - do [#1j5y]
 - do [#faxz]
@@ -174,9 +182,8 @@ After 20:30
 
 ## Backlog
 
-<!-- agent:backlog preset="#spec-test-commit-push-deploy" priority queue go -->
+<!-- agent:backlog priority queue -->
 - [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
-- [ ] [#e2n0] Bug: adding a custom required document makes it required for everybody — scope required documents per-deal, not global. [followups: Document requirements]
 - [ ] [#nyeb] Loan Package: drop the loan number (reference by property address), add the front property photo, replace the blue placeholder image, surface all loan info in the Loan Package view. [followups: Loan Package]
 - [ ] [#1j5y] Homepage copy: step-3 'fund and close'; funded-deals CTA 'View more funded deals'; contact CTA 'Send us your details for a quick approval'; rate range 8.99-14%; fix theme/colors. [followups: Homepage copy]
 - [ ] [#faxz] Funded-deals page: add more funded deals + admin curate / 'featured transactions'. [followups: Homepage copy]

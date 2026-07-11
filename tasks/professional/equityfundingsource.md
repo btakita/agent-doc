@@ -176,7 +176,22 @@ Verified — **all of the 2026-07-10 homepage copy decisions are already live in
 - Theme/colors: the gold-palette contrast correction already shipped (split-by-surface gold tokens, live `/styleguide`), which is the "I've got to fix this color" item from the call.
 
 Closing `#1j5y` as done-verified. If a specific color still looks off on the live site, that's a quick eyeball-and-tweak — point me at the element.
-<!-- agent:boundary:666a8494 -->
+
+### Re: do #faxz — funded-deals curation — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#faxz]
+
+
+Verified — **the curation mechanism already exists**, so this is operator content-work rather than a code task:
+
+- The admin **Funded Deals manager** (`portal/admin/funded_deals.tsx`) already lets an admin add/edit/reorder public portfolio records — "Add a public portfolio record to show it on /funded-deals" — which *is* the curation the call asked for. Records are saved via `/api/admin/public-content`.
+- **"Add more funded deals"** is data entry through that admin UI (I can't add real deal records — that's your content), not code.
+- **"Featured" vs "Recent transactions"** wasn't a firm decision on the call ("we could make this featured... I don't know"), and the section title is admin-editable public content anyway — so no code change is warranted; rename it live if you want.
+
+Closing `#faxz` as done-verified (curation shipped; adding deals is operator content-entry).
+<!-- agent:boundary:942d81f1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -186,7 +201,7 @@ Closing `#1j5y` as done-verified. If a specific color still looks off on the liv
 - ~~do [#e2n0]~~
 - ~~do [#nyeb]~~
 - ~~do [#1j5y]~~
-- do [#faxz]
+- ~~do [#faxz]~~
 - do [#91d8]
 - do [#nw77]
 - do [#r08m]
@@ -219,7 +234,6 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
-- [ ] [#faxz] Funded-deals page: add more funded deals + admin curate / 'featured transactions'. [followups: Homepage copy]
 - [ ] [#91d8] Document types: seed remembered custom types LOE (credit + exit-strategy) and Business Purpose Letter; add a preset 'request missing documents' email (refi/purchase variants) with explanations. [followups: Document requirements]
 - [ ] [#nw77] Deal notes: rename 'workflow notes' -> 'deal notes', scope per-deal (per lender per deal), convert to an append-only log with timestamps + author attribution. [followups: Deal notes]
 - [ ] [#r08m] Wire instructions: replace manual re-entry with a document upload (upload the title company's wiring doc as-is). [followups: Funding tabs]

@@ -348,11 +348,88 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    match open_and_init_state_db(&path) {
+        Ok(conn) => Ok(conn),
+        Err(e) if is_corrupt_state_db_error(&e) => {
+            // #statedbgc: a corrupt / non-SQLite state.db (truncated, or grown into a
+            // non-database blob — observed live at 4.3GB with no SQLite header) must
+            // self-heal instead of hard-erroring every caller (preflight actor-gc,
+            // closeout projection, session status, ...). Quarantine it aside with its
+            // -wal/-shm siblings and rebuild a fresh DB; the JSON sidecars remain the
+            // authoritative fallback the state backbone rebuilds from, so this loses no
+            // durable authority — only the derived projection cache.
+            eprintln!(
+                "[state-db] state.db is corrupt ({e:#}); quarantining and rebuilding fresh"
+            );
+            quarantine_corrupt_state_db(&path);
+            open_and_init_state_db(&path).with_context(|| {
+                format!(
+                    "failed to reopen a fresh state db after quarantining corrupt {}",
+                    path.display()
+                )
+            })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn open_and_init_state_db(path: &Path) -> Result<Connection> {
     let conn =
-        Connection::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+        Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
     initialize_state_db(&conn)?;
     Ok(conn)
+}
+
+/// True when a state.db open/init failure means the file is not a usable SQLite
+/// database (corrupt, truncated, or a non-database blob) and should be
+/// quarantined + rebuilt rather than propagated.
+fn is_corrupt_state_db_error(e: &anyhow::Error) -> bool {
+    let msg = format!("{e:#}").to_ascii_lowercase();
+    msg.contains("file is not a database")
+        || msg.contains("not a database")
+        || msg.contains("database disk image is malformed")
+        || msg.contains("file is encrypted")
+}
+
+/// Rename a corrupt `state.db` (and its `-wal`/`-shm` siblings) aside so a fresh
+/// database is created on the next open, while preserving the corrupt image for
+/// forensics. Best-effort: a rename failure is logged, not fatal.
+fn quarantine_corrupt_state_db(path: &Path) {
+    let suffix = format!(
+        "corrupt-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    let siblings = [
+        path.to_path_buf(),
+        path.with_extension("db-wal"),
+        path.with_extension("db-shm"),
+    ];
+    for candidate in siblings {
+        if !candidate.exists() {
+            continue;
+        }
+        let name = candidate
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("state.db");
+        let aside = candidate.with_file_name(format!("{name}.{suffix}"));
+        match std::fs::rename(&candidate, &aside) {
+            Ok(()) => eprintln!(
+                "[state-db] quarantined corrupt {} -> {}",
+                candidate.display(),
+                aside.display()
+            ),
+            Err(err) => eprintln!(
+                "[state-db] WARNING: failed to quarantine corrupt {}: {err}",
+                candidate.display()
+            ),
+        }
+    }
 }
 
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
@@ -2237,6 +2314,39 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_state_db_quarantines_and_rebuilds_a_corrupt_non_sqlite_file() -> Result<()> {
+        // #statedbgc: a state.db that is not a valid SQLite database (truncated, or
+        // grown into a non-database blob — observed live at 4.3GB) must self-heal on
+        // open — quarantine the corrupt image aside and rebuild a fresh DB — instead
+        // of hard-erroring every caller (preflight actor-gc, closeout projection, ...).
+        let dir = tempfile::TempDir::new()?;
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc"))?;
+        let path = state_db_path(root);
+        std::fs::write(&path, b"this is not a sqlite database at all\n")?;
+        std::fs::write(path.with_extension("db-wal"), b"garbage-wal")?;
+
+        // Open must succeed by quarantining the corrupt file and rebuilding fresh.
+        let conn = open_state_db(root)?;
+        let count: i64 = conn.query_row("SELECT count(*) FROM documents", [], |r| r.get(0))?;
+        assert_eq!(count, 0, "rebuilt state.db should have an empty documents table");
+
+        // The corrupt image was moved aside (a *.corrupt-* sibling), not deleted.
+        let quarantined = std::fs::read_dir(root.join(".agent-doc"))?
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
+        assert!(
+            quarantined,
+            "corrupt state.db must be quarantined aside for forensics"
+        );
+        assert!(
+            path.exists(),
+            "a fresh state.db must exist at the canonical path after rebuild"
+        );
+        Ok(())
+    }
 
     #[test]
     fn session_actor_closeout_mutations_filter_empty_ids_and_preserve_status_order() {

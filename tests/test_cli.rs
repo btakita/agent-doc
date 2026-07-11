@@ -1330,7 +1330,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // the binary-owned closeout boundary (#pzjy closeout recovery).
         // 5 -> 6 (`reason={}`): typed deferred queue-head projection records the
         // owning defer reason for stop/time-gated heads.
-        ("agent-doc-preflight-io/src/lib.rs", "reason=") => 6,
+        ("agent-doc-preflight-io/src/lib.rs", "reason=") => 7,
         // 1 -> 3 after extracting preflight maintenance into
         // agent-doc-preflight-io: the moved graph now owns an explicit
         // visible-write guard effect port, its production call, and the test

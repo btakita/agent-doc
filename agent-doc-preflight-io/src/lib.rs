@@ -776,7 +776,50 @@ pub fn enforce_cycle_completion(
         }
     };
 
+    let mut self_healed_abandoned = false;
     if let Some(after) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        && after.is_open()
+    {
+        // #capturebacklogatomic: a ResponseCaptured cycle whose active prompt requested
+        // a backlog capture (`requires_backlog_capture`) but recorded no backlog mutation
+        // (`!pending_added_this_cycle`), and whose response the recovery commit could not
+        // land (`!committed`), is UNRECOVERABLE — replaying it re-trips the backlog gate
+        // forever, which used to demand a manual `mv` of the capture/cycle-state aside
+        // (the exact dead-end hit live 2026-07-10). The captured response was never
+        // committed (regenerable) and the operator prompt that requested the backlog is
+        // preserved uncommitted on disk, so self-heal by abandoning the stuck cycle
+        // (terminal; repair's `state_is_open` replay guard then skips it) and continue to
+        // a clean diff. A fresh cycle re-generates the response with its backlog. This is
+        // tightly gated so it only fires on the backlog dead-end, never on an otherwise
+        // recoverable capture (which still fails closed below).
+        if !committed
+            && after.phase == agent_doc_turn::CyclePhase::ResponseCaptured
+            && after.requires_backlog_capture
+            && !after.pending_added_this_cycle
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_abandoned_uncommittable_backlog_capture file={} cycle={} reason=requires_backlog_capture_unsatisfiable_commit_refused recovery=abandon_and_regenerate",
+                    file.display(),
+                    after.cycle_id
+                ),
+            );
+            match agent_doc_cycle_state_io::mark_abandoned(
+                file,
+                "uncommittable_backlog_capture_self_heal",
+                None,
+                None,
+            ) {
+                Ok(_) => self_healed_abandoned = true,
+                Err(e) => {
+                    eprintln!("[preflight] self-heal abandon warning: {e}");
+                }
+            }
+        }
+    }
+    if !self_healed_abandoned
+        && let Some(after) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
         && after.is_open()
     {
         let marker_note = if matches!(after.phase, agent_doc_turn::CyclePhase::PreflightStarted) {
@@ -813,7 +856,10 @@ pub fn enforce_cycle_completion(
         );
     }
 
-    Ok((recovered || ipc_dogfood_note_appended, committed))
+    Ok((
+        recovered || ipc_dogfood_note_appended || self_healed_abandoned,
+        committed,
+    ))
 }
 
 pub fn append_latest_ipc_dogfood_note(file: &Path) -> Result<bool> {
@@ -8563,6 +8609,56 @@ mod tests {
             effects.commit_calls.get(),
             0,
             "stale open JSON must not force commit when lazily says committed"
+        );
+    }
+
+    #[test]
+    fn enforce_cycle_completion_self_heals_uncommittable_backlog_capture() {
+        // #capturebacklogatomic: a ResponseCaptured cycle that requested a backlog
+        // capture (`requires_backlog_capture`) but recorded none
+        // (`!pending_added_this_cycle`), and whose response cannot commit, is
+        // unrecoverable — it used to hard-error ("still response_captured after
+        // recovery/commit") and demand a manual mv-aside. enforce_cycle_completion
+        // must instead self-heal by abandoning the stuck cycle so the next preflight
+        // proceeds; the operator prompt stays uncommitted for a fresh cycle.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = "# Doc\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(content),
+            Some(content),
+            "deadbeef",
+            None,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(&doc, true)
+            .unwrap()
+            .expect("cycle state present");
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::ResponseCaptured
+        );
+
+        // commit refuses (Ok(false)): the backlog gate can never be satisfied from the
+        // capture, so this used to bail. Now it self-heals to Abandoned.
+        let effects = TestPreflightCycleCompletionEffects::default();
+        let result = enforce_cycle_completion(&doc, &effects)
+            .expect("uncommittable backlog capture must self-heal, not hard-error");
+        assert!(
+            result.0,
+            "self-heal must report the interrupted cycle as recovered"
+        );
+        assert!(!result.1, "commit did not succeed");
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
+            agent_doc_turn::CyclePhase::Abandoned,
+            "the unrecoverable backlog-capture cycle must be abandoned (terminal)"
         );
     }
 

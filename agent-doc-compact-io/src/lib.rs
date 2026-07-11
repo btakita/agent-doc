@@ -799,6 +799,67 @@ fn assert_non_exchange_markers_preserved(
     )
 }
 
+/// Bounded editor-convergence retries for a compact write that hits
+/// `retry_crdt_merge` (#compactcrdtretry). Small: only the transient in-flight
+/// editor-delta race is retried; a genuine concurrent edit fails closed.
+const COMPACT_CONVERGE_MAX_ATTEMPTS: usize = 3;
+
+/// True when a compact editor-convergence error is the CRDT compare-and-swap
+/// baseline refusal (`recovery=retry_crdt_merge`), i.e. the live canonical text
+/// drifted from the base the compaction was computed against.
+fn is_retryable_crdt_merge_error(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("recovery=retry_crdt_merge")
+}
+
+/// Converge `compacted` through the editor path with bounded `retry_crdt_merge`
+/// handling (#compactcrdtretry). Retries only when the live canonical text has
+/// re-settled to `source_content` (a transient in-flight editor delta) — it never
+/// rewrites the now-stale `compacted` over a genuine concurrent operator edit.
+/// A real edit (live text != `source_content`) fails closed with an actionable
+/// "re-run when the editor is idle" message instead of the raw CPC error.
+fn converge_compacted_with_retry(
+    effects: &dyn CompactRuntimeEffects,
+    file: &Path,
+    compacted: &str,
+    source_content: &str,
+) -> Result<()> {
+    let mut attempt = 0usize;
+    loop {
+        attempt += 1;
+        match effects.try_editor_converge(file, compacted, source_content, "compact") {
+            Ok(_) => return Ok(()),
+            Err(err)
+                if attempt < COMPACT_CONVERGE_MAX_ATTEMPTS
+                    && is_retryable_crdt_merge_error(&err) =>
+            {
+                let current = effects
+                    .current_document_content(file, "compact_converge_retry")
+                    .unwrap_or_default();
+                if current != source_content {
+                    anyhow::bail!(
+                        "compact: document changed during compaction; re-run compact when the editor is idle (the live buffer no longer matches the compacted base). Underlying: {err:#}"
+                    );
+                }
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_converge_retry file={} attempt={} max_attempts={} reason=retry_crdt_merge",
+                        file.display(),
+                        attempt,
+                        COMPACT_CONVERGE_MAX_ATTEMPTS
+                    ),
+                );
+            }
+            Err(err) if is_retryable_crdt_merge_error(&err) => {
+                anyhow::bail!(
+                    "compact: could not converge the compacted document after {COMPACT_CONVERGE_MAX_ATTEMPTS} attempts (the live canonical kept drifting from the compacted base); re-run compact when the editor is idle. Underlying: {err:#}"
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 fn apply_compacted_document(
     file: &Path,
     compacted: &str,
@@ -847,7 +908,17 @@ fn apply_compacted_document(
         // If no live editor owns the document, `try_editor_converge` may use the
         // guarded DetachedDisk path, but only after rechecking that the current
         // visible file still matches the compact input.
-        runtime_effects()?.try_editor_converge(file, compacted, source_content, "compact")?;
+        //
+        // #compactcrdtretry: a `retry_crdt_merge` refusal means the live canonical
+        // text drifted from `source_content` (the base this compaction was computed
+        // against). Retry a bounded number of times, but ONLY when the live text has
+        // re-settled to `source_content` (a transient in-flight editor delta) — never
+        // rewrite the now-stale `compacted` over a genuine concurrent operator edit.
+        // If the text truly changed, fail closed with an actionable message so the
+        // operator re-runs compact when the editor is idle, instead of surfacing the
+        // raw CPC error (the reported JB `Compact Exchange` exit-1). The zero-live
+        // editor case is already resolved to disk authority by #stale-lease-cpc-authority.
+        converge_compacted_with_retry(runtime_effects()?, file, compacted, source_content)?;
     }
 
     agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
@@ -1226,6 +1297,99 @@ mod tests {
     use agent_doc_topic::parse_topic_sections;
     use anyhow::Context;
     use std::process::Command;
+
+    /// Configurable compact effects double for the `#compactcrdtretry` converge tests:
+    /// fails `retry_crdt_merge` for the first `fail_times` converge attempts, then
+    /// succeeds; `current` is what `current_document_content` reports on a retry.
+    struct RetryConvergeEffects {
+        fail_times: std::sync::atomic::AtomicUsize,
+        current: String,
+        converge_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CompactRuntimeEffects for RetryConvergeEffects {
+        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            Ok(self.current.clone())
+        }
+        fn force_disk_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            Ok(self.current.clone())
+        }
+        fn commit_with_outcome(&self, _file: &Path) -> Result<CompactCommitOutcome> {
+            unimplemented!("not exercised by converge-retry tests")
+        }
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            unimplemented!("not exercised by converge-retry tests")
+        }
+        fn try_editor_converge(
+            &self,
+            file: &Path,
+            _content: &str,
+            _source: &str,
+            _origin: &str,
+        ) -> Result<bool> {
+            use std::sync::atomic::Ordering;
+            self.converge_calls.fetch_add(1, Ordering::Relaxed);
+            let remaining = self.fail_times.load(Ordering::Relaxed);
+            if remaining > 0 {
+                self.fail_times.store(remaining - 1, Ordering::Relaxed);
+                anyhow::bail!(
+                    "CPC relay write refused for {}: expected_hash=a current_hash=b recovery=retry_crdt_merge",
+                    file.display()
+                );
+            }
+            Ok(true)
+        }
+        fn guard_no_stale_snapshot_reset_drift(
+            &self,
+            _file: &Path,
+            _projected: Option<&str>,
+            _visible: &str,
+            _stage: &str,
+        ) -> Result<bool> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn converge_compacted_retries_transient_resettled_crdt_merge_then_succeeds() {
+        // #compactcrdtretry: one retry_crdt_merge refusal, but the live text has
+        // re-settled to the compacted base (`current == source`), so the bounded retry
+        // converges instead of surfacing the raw CPC error.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let base = "prompt\n";
+        let effects = RetryConvergeEffects {
+            fail_times: AtomicUsize::new(1),
+            current: base.to_string(),
+            converge_calls: AtomicUsize::new(0),
+        };
+        let doc = std::path::Path::new("/tmp/does-not-matter.md");
+        converge_compacted_with_retry(&effects, doc, "compacted\n", base)
+            .expect("transient re-settled retry_crdt_merge must converge on retry");
+        assert_eq!(
+            effects.converge_calls.load(Ordering::Relaxed),
+            2,
+            "should retry exactly once after the transient refusal"
+        );
+    }
+
+    #[test]
+    fn converge_compacted_fails_closed_on_genuine_concurrent_edit() {
+        // #compactcrdtretry: retry_crdt_merge with the live text CHANGED from the
+        // compacted base (a real concurrent operator edit) must NOT rewrite the stale
+        // compacted output — it fails closed with an actionable re-run message.
+        let effects = RetryConvergeEffects {
+            fail_times: std::sync::atomic::AtomicUsize::new(3),
+            current: "prompt\noperator typed more\n".to_string(),
+            converge_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let doc = std::path::Path::new("/tmp/does-not-matter.md");
+        let err = converge_compacted_with_retry(&effects, doc, "compacted\n", "prompt\n")
+            .expect_err("a genuine concurrent edit must fail closed, not rewrite the stale compaction");
+        assert!(
+            err.to_string().contains("document changed during compaction"),
+            "unexpected error: {err:#}"
+        );
+    }
 
     const COMPACTDROPITEM_DOC: &str = concat!(
         "---\nagent_doc_session: drop-test\nagent_doc_format: template\n---\n\n",

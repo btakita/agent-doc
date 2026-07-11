@@ -228,6 +228,23 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
       the better long-term shape.
     With `pidfd`/`HUP` events + the existing `deregister` events both driving `mark_closed`, the gate
     can read pure reactive state on the hot path and read the lease **only on a cold miss**.
+  - **Reactive topology (`#s4b-liveness-cell`) — the OS event feeds a lazily source cell; authority
+    is a DERIVED slot.** Do not treat the pidfd/HUP exit as an imperative `mark_closed` callback;
+    treat it as a **source-cell write** so process liveness becomes a first-class node ON the reactive
+    graph and authority derives reactively (the S1 `RelayHub` liveness pattern lifted to this layer):
+    - `alive: ThreadSafeCellFamily<pid, bool>` — the reactive INPUT. `pidfd_open(pid)` exit event →
+      `set_cell(alive[pid], false)`; register / cold-miss lease seed → `true`.
+    - `registered: CellFamily<(doc, pid), bool>` — driven by `replica_register` / `deregister`.
+    - `is_open(doc)` / authority = `computed(...)` — a derived slot: *any registered `(doc, pid)`
+      whose `alive[pid]` is true*. `authority_for_file` reads this slot: pure in-memory reactive read,
+      zero filesystem.
+    Two payoffs: (1) **whole-editor death cascades reactively** — one `set_cell(alive[pid], false)`
+    recomputes every doc that pid owned to closed (the derived slot fans out); per-doc close stays the
+    `deregister` cell write; the lease drops to a pure cold-miss seed. (2) **the crash-detection
+    blocker dissolves** — the crash is just another reactive input, so the gate can read the derived
+    slot with no lease poll. The OS-event source stays SimWorld-injectable (feed synthetic
+    `set_cell(alive[pid], false)`), so the derived authority is deterministically testable without
+    real process death — which a `kill(pid,0)` poll never could be.
   - **Per-doc close vs whole-editor death:** `pidfd`/`HUP` detect *whole-editor* death; a graceful
     per-doc close (editor stays alive, closes one buffer) is covered by the explicit `deregister`
     event. Together they replace the lease poll entirely, leaving the lease as pure cold-miss/durable

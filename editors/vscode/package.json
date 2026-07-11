@@ -225,6 +225,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "bundle": "node esbuild.js",
+    "bundle:watch": "node esbuild.js --watch",
+    "check-types": "tsc -p ./ --noEmit",
+    "vscode:prepublish": "npm run check-types && node esbuild.js --production",
     "test": "tsc -p ./ && node --test out/native.test.js out/stateMirror.test.js out/stateMirrorConformance.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/sessionUi.test.js out/popupMenu.test.js out/crossSession.test.js out/saveSignal.test.js out/editorCommandState.test.js out/crdtReplica.test.js out/uiThreadBudget.test.js out/libReloadBroadcast.test.js",
     "package": "vsce package",
     "publish": "vsce publish"
@@ -235,6 +239,7 @@
   "devDependencies": {
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.3.0",
     "@vscode/vsce": "^3.0.0"
   }

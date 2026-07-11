@@ -1,32 +1,33 @@
 /**
- * lazily-js reactive mirror graph for the agent-doc FFI state backbone
- * (`#r5at` / `#lazilystatesync4`).
+ * agent-doc VS Code state mirror — thin consumer of the lazily-js library
+ * `StateGraphMirror` (`#r5at` / `#lazilystatesync4` / `#s5`).
  *
- * The VS Code counterpart of the JetBrains `StateGraphMirror.kt` /
- * `MirrorProjectionSummary` (`#n529` / `#n529b`, `#lazilystatesync3`). The binary
- * (lazily-rs) owns the authoritative reactive state graph; this mirror applies
- * the `agent_doc_state_subscribe` snapshot/delta messages so editor UI
- * (dispatch-ready / busy / queue indicators) derives from tracked cells instead
- * of re-rendering the full projection JSON on every observed event.
+ * S5: the reactive mirror graph now lives IN the lazily-js library
+ * (`src/lazily-js/src/state-graph-mirror.js`) as a real reactive graph on
+ * lazily-js primitives (a `Context` holding per-`slot_id` reactive cells + a
+ * memoized projection summary). This extension module is now a thin consumer:
+ * the `StateGraphMirror` class here DELEGATES every apply/read to a lazily-js
+ * instance, preserving the exact public surface the extension's other
+ * consumers (`native.ts`, `extension.ts`) depend on.
  *
- * #lzpkgwire: like the JB plugin, the VS Code extension keeps a plugin-local
- * canonical mirror. `@lazily/js` is the FFI *consumer* + IPC helper package, NOT
- * a reactive-core port (per its own package description), so it ships no mirror
- * graph to depend on. The extension is also compiled as CommonJS while
- * `@lazily/js` is ESM. The pure helpers (`documentHash`, `buildStateEvent`,
- * `projectionSummary`, `compactProjectionSummary`) stay pinned to `@lazily/js`
- * via `native.test.ts` so the duplicate adapter cannot silently drift; the
- * mirror's *apply* behavior is pinned 1:1 to the kt `StateGraphMirror` design.
+ * lazily-js is ESM + unpublished. The production `out/extension.js` is bundled
+ * by **esbuild** (`esbuild.js`), which statically resolves the relative import
+ * below from the monorepo tree and INLINES lazily-js's source into the single
+ * CJS bundle — so the packaged `.vsix` is self-contained (no dangling
+ * `../../../../lazily-js` runtime path, no ESM/CJS resolution at load time).
+ * For the tsc test build (`out/*.test.js`) the same static import compiles to a
+ * `require()` that Node's `require(ESM)` support resolves against the sibling
+ * source. Either way the constructor is bound at module load; `initStateMirror`
+ * stays for API/ordering compatibility (it resolves synchronously).
  *
- * Wire shapes match `agent-doc-orchestration/src/state_wire.rs` and
- * `src/lazily-spec/schemas/{snapshot,delta}.json`:
- * - snapshot: { type:"snapshot", epoch, document_hash, nodes[], edges[], roots[] }
- * - delta:    { type:"delta", base_epoch, epoch, document_hash, ops[] }
- *
- * Because the projection is a pure fold of deduped events, delta application is
- * deterministic and idempotent — a no-op delta (re-emit) leaves the mirror
- * unchanged (`#qdedupsync` property).
+ * `MirrorTurnProjection` (idle/awaiting_response/persisting) has no lazily-js
+ * equivalent; it is still computed here from the delegated mirror's
+ * `closeout.cycle` payload.
  */
+
+// esbuild inlines this at build time; tsc emits a `require()` resolved by
+// Node's require(ESM). The 4-up path reaches `src/lazily-js` in the monorepo.
+import { StateGraphMirror as LazilyStateGraphMirrorImpl } from '../../../../lazily-js/src/state-graph-mirror.js';
 
 /** The agent-doc state node `type_tag`s (cross-language vocabulary). */
 export const AgentDocNodeType = {
@@ -54,13 +55,6 @@ export interface MirrorNode {
 /**
  * Reactive projection summary derived from a {@link StateGraphMirror}'s tracked
  * cells instead of re-parsing the full projection JSON (`#lazilystatesync4`).
- *
- * Reads `agent_doc.route`, `agent_doc.transport.patch`, and
- * `agent_doc.proof.marker` nodes. The wire node does not carry the transport
- * patch `entity_key` (patch_id); the binary's full-snapshot `transport` section
- * does, so `latestTransportPatchId` stays null on the warm path (the cold-read
- * `projectionSummary` supplies it). The phase — the signal that drives
- * busy/dispatch-ready — is always available.
  */
 export interface MirrorProjectionSummary {
     routeReadiness?: string;
@@ -85,7 +79,7 @@ export function compactMirrorSummary(summary: MirrorProjectionSummary): string {
 
 /**
  * Decode a `base64(serde_json(struct))` payload to a JSON object, or null on
- * failure / unset payload. Pure (no FFI) — exported for tests.
+ * failure / unset payload. Pure (no FFI) — exported for tests + consumers.
  */
 export function decodePayload(payload: string | null | undefined): Record<string, any> | null {
     if (payload == null || payload === '') return null;
@@ -98,7 +92,7 @@ export function decodePayload(payload: string | null | undefined): Record<string
     }
 }
 
-function stringField(obj: Record<string, any> | null, key: string): string | undefined {
+function stringField(obj: Record<string, any> | null | undefined, key: string): string | undefined {
     if (!obj) return undefined;
     const value = obj[key];
     return typeof value === 'string' ? value : undefined;
@@ -126,37 +120,84 @@ function turnProjectionFromPhase(phase: string | undefined): MirrorTurnProjectio
     };
 }
 
+/** The lazily-js `StateGraphMirror` surface this module delegates to. */
+interface LazilyStateGraphMirror {
+    readonly epoch: number;
+    readonly documentHash: string | null;
+    readonly isInitialized: boolean;
+    readonly nodeCount: number;
+    applySnapshot(snapshot: any): boolean;
+    applyDelta(delta: any): boolean;
+    applyMessage(raw: string): boolean;
+    nodesOfType(typeTag: string): MirrorNode[];
+    singletonNode(typeTag: string): MirrorNode | null;
+    payloadObject(typeTag: string): Record<string, any> | null;
+    summary(): MirrorProjectionSummary;
+}
+
+type LazilyMirrorCtor = new () => LazilyStateGraphMirror;
+
 /**
- * The pure, FFI-free mirror graph the VS Code extension holds per document.
+ * The lazily-js `StateGraphMirror` constructor, bound at module load from the
+ * static import above (inlined by esbuild in the bundle; `require`d by tsc in
+ * tests).
+ */
+let LazilyMirror: LazilyMirrorCtor | null =
+    (LazilyStateGraphMirrorImpl as unknown as LazilyMirrorCtor) ?? null;
+
+/**
+ * Ensure the lazily-js `StateGraphMirror` constructor is bound. With the static
+ * import it is already bound at module load, so this resolves synchronously;
+ * it is kept as an awaitable seam so `activate()`/test setup can order it before
+ * the per-doc mirror registries construct mirrors, and so a future dynamic load
+ * strategy stays source-compatible. Idempotent.
+ */
+export async function initStateMirror(): Promise<void> {
+    if (!LazilyMirror) {
+        LazilyMirror = LazilyStateGraphMirrorImpl as unknown as LazilyMirrorCtor;
+    }
+}
+
+/**
+ * The per-document mirror the VS Code extension holds. A thin delegating
+ * wrapper over the lazily-js reactive `StateGraphMirror`: apply/read all go to
+ * the library instance; only `turnProjection()` (no lazily-js equivalent) is
+ * computed here from the delegated closeout-cycle payload.
  *
- * TS analog of the kt `StateGraphMirror`: applies `agent_doc_state_subscribe`
- * snapshot/delta messages verbatim in emission order. The binary owns the
- * authoritative graph; this mirror only applies deltas + derives the summary.
+ * Requires {@link initStateMirror} to have resolved first — the ctor throws a
+ * clear error otherwise (the FFI/registry construction sites run after
+ * activation, when the constructor is already cached).
  */
 export class StateGraphMirror {
-    private nodes = new Map<number, MirrorNode>();
-    private edges = new Set<string>();
-    private declaredHash: string | null = null;
+    private inner: LazilyStateGraphMirror;
+
+    constructor() {
+        if (!LazilyMirror) {
+            throw new Error(
+                'StateGraphMirror used before initStateMirror() resolved; ' +
+                'await initStateMirror() in activate()/test setup before constructing a mirror',
+            );
+        }
+        this.inner = new LazilyMirror();
+    }
 
     /** Monotonic frontier — the highest lazily-spec epoch applied so far. */
-    epoch = 0;
+    get epoch(): number {
+        return this.inner.epoch;
+    }
 
     /** The document hash declared by the last applied snapshot/delta, or null. */
     get documentHash(): string | null {
-        return this.declaredHash;
+        return this.inner.documentHash;
     }
 
     /** True until at least one snapshot/delta has been applied. */
     get isInitialized(): boolean {
-        return this.declaredHash !== null;
+        return this.inner.isInitialized;
     }
 
     get nodeCount(): number {
-        return this.nodes.size;
-    }
-
-    private static edgeKey(dependent: number, dependency: number): string {
-        return `${dependent}:${dependency}`;
+        return this.inner.nodeCount;
     }
 
     /** Apply a cold-read snapshot JSON, replacing the whole graph image. */
@@ -167,32 +208,10 @@ export class StateGraphMirror {
         } catch {
             return false;
         }
-        if (!root || typeof root !== 'object') return false;
-        if (typeof root.document_hash === 'string') this.declaredHash = root.document_hash;
-        this.nodes.clear();
-        this.edges.clear();
-        if (Array.isArray(root.nodes)) {
-            for (const node of root.nodes) {
-                if (!node || typeof node.slot_id !== 'number' || typeof node.type_tag !== 'string') continue;
-                const payload = typeof node.payload === 'string' ? node.payload : null;
-                this.nodes.set(node.slot_id, { slotId: node.slot_id, typeTag: node.type_tag, payload });
-            }
-        }
-        if (Array.isArray(root.edges)) {
-            for (const edge of root.edges) {
-                if (!edge || typeof edge.dependent !== 'number' || typeof edge.dependency !== 'number') continue;
-                this.edges.add(StateGraphMirror.edgeKey(edge.dependent, edge.dependency));
-            }
-        }
-        if (typeof root.epoch === 'number') this.epoch = root.epoch;
-        return true;
+        return this.inner.applySnapshot(root);
     }
 
-    /**
-     * Apply a warm delta JSON. Ops are applied verbatim in emission order; the
-     * frontier advances to the delta's epoch. A no-op delta (empty ops) only
-     * advances the epoch.
-     */
+    /** Apply a warm delta JSON. Ops applied verbatim in emission order. */
     applyDeltaJson(raw: string): boolean {
         let root: any;
         try {
@@ -200,51 +219,7 @@ export class StateGraphMirror {
         } catch {
             return false;
         }
-        if (!root || typeof root !== 'object') return false;
-        if (typeof root.document_hash === 'string') this.declaredHash = root.document_hash;
-        if (Array.isArray(root.ops)) {
-            for (const op of root.ops) {
-                if (!op || typeof op.op !== 'string') continue;
-                switch (op.op) {
-                    case 'node_add': {
-                        if (typeof op.slot_id !== 'number' || typeof op.type_tag !== 'string') break;
-                        const payload = typeof op.payload === 'string' ? op.payload : null;
-                        this.nodes.set(op.slot_id, { slotId: op.slot_id, typeTag: op.type_tag, payload });
-                        break;
-                    }
-                    case 'cell_set':
-                    case 'slot_value': {
-                        if (typeof op.slot_id !== 'number') break;
-                        const existing = this.nodes.get(op.slot_id);
-                        if (existing) {
-                            existing.payload = typeof op.payload === 'string' ? op.payload : null;
-                        }
-                        break;
-                    }
-                    case 'invalidate':
-                        // Derived recompute is plugin-side; the mirror holds the
-                        // stale payload until a cell_set arrives.
-                        break;
-                    case 'node_remove':
-                        if (typeof op.slot_id === 'number') this.nodes.delete(op.slot_id);
-                        break;
-                    case 'edge_add':
-                        if (typeof op.dependent === 'number' && typeof op.dependency === 'number') {
-                            this.edges.add(StateGraphMirror.edgeKey(op.dependent, op.dependency));
-                        }
-                        break;
-                    case 'edge_remove':
-                        if (typeof op.dependent === 'number' && typeof op.dependency === 'number') {
-                            this.edges.delete(StateGraphMirror.edgeKey(op.dependent, op.dependency));
-                        }
-                        break;
-                    default:
-                        break;
-                }
-            }
-        }
-        if (typeof root.epoch === 'number') this.epoch = Math.max(this.epoch, root.epoch);
-        return true;
+        return this.inner.applyDelta(root);
     }
 
     /**
@@ -253,71 +228,38 @@ export class StateGraphMirror {
      * when the message cannot be parsed.
      */
     applyMessage(raw: string): boolean {
-        let root: any;
-        try {
-            root = JSON.parse(raw);
-        } catch {
-            return false;
-        }
-        if (!root || typeof root !== 'object' || typeof root.type !== 'string') return false;
-        if (root.type === 'snapshot') return this.applySnapshotJson(raw);
-        if (root.type === 'delta') return this.applyDeltaJson(raw);
-        return false;
+        return this.inner.applyMessage(raw);
     }
 
     /** All tracked nodes of [typeTag] (stable insertion order). */
     nodesOfType(typeTag: string): MirrorNode[] {
-        const out: MirrorNode[] = [];
-        for (const node of this.nodes.values()) {
-            if (node.typeTag === typeTag) out.push(node);
-        }
-        return out;
+        return this.inner.nodesOfType(typeTag);
     }
 
     /** The single document-level node for [typeTag], or null. */
     singletonNode(typeTag: string): MirrorNode | null {
-        for (const node of this.nodes.values()) {
-            if (node.typeTag === typeTag) return node;
-        }
-        return null;
+        return this.inner.singletonNode(typeTag);
     }
 
     /** Decode a node payload (`base64(serde_json(struct))`) as a JSON object, or null. */
     payloadObject(typeTag: string): Record<string, any> | null {
-        const node = this.singletonNode(typeTag);
-        return node ? decodePayload(node.payload) : null;
+        return this.inner.payloadObject(typeTag);
     }
 
     /**
-     * Reactive summary derived from this mirror's tracked cells (the TS analog of
-     * the kt `MirrorProjectionSummary.fromMirror`).
+     * Reactive summary derived from the delegated mirror's tracked cells (the
+     * lazily-js analog of the kt `MirrorProjectionSummary.fromMirror`).
      */
     summary(): MirrorProjectionSummary {
-        const route = this.payloadObject(AgentDocNodeType.ROUTE);
-        const routeReadiness = stringField(route, 'readiness');
-        const routePaneId = stringField(route, 'pane_id');
-
-        const patches = this.nodesOfType(AgentDocNodeType.TRANSPORT_PATCH);
-        const latest = patches.length > 0
-            ? patches.reduce((a, b) => (b.slotId > a.slotId ? b : a))
-            : undefined;
-        const latestTransportPhase = latest
-            ? stringField(decodePayload(latest.payload), 'phase')
-            : undefined;
-
-        const proofMarkers = this.nodesOfType(AgentDocNodeType.PROOF_MARKER).length;
-
-        return {
-            routeReadiness,
-            routePaneId,
-            latestTransportPatchId: undefined,
-            latestTransportPhase,
-            proofMarkers,
-        };
+        return this.inner.summary();
     }
 
+    /**
+     * Turn projection (idle/awaiting_response/persisting) — no lazily-js
+     * equivalent; computed here from the delegated closeout-cycle phase.
+     */
     turnProjection(): MirrorTurnProjection {
-        const closeout = this.payloadObject(AgentDocNodeType.CLOSEOUT_CYCLE);
+        const closeout = this.inner.payloadObject(AgentDocNodeType.CLOSEOUT_CYCLE);
         return turnProjectionFromPhase(stringField(closeout, 'phase'));
     }
 }

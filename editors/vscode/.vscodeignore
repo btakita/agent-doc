@@ -1,4 +1,9 @@
 .gitignore
+.vscodeignore
 src/**
 tsconfig.json
+esbuild.js
 node_modules/**
+out/**/*.test.js
+out/**/*.test.js.map
+out/**/*.map

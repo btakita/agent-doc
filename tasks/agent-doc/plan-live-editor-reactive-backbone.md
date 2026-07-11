@@ -1,6 +1,6 @@
 # Plan — live_editor pipeline onto the lazily reactive backbone (#live-editor-reactive)
 
-## Status (2026-07-11) — COMPLETE (S1–S4 + S4b); S5/S6 blocked upstream, S7 decided
+## Status (2026-07-11) — COMPLETE (S1–S4 + S4b + S5); S6 rejected, S7 decided
 S1 (reactive RelayHub liveness core, 824a2632), S2 (reactive editor open-docs registry),
 S2b + S3 (resolver/visible-write route through the reactive open-docs authority, 55d91244),
 **S4 (lazily `editor_open_docs` is the authority; the durable lease is crash-recovery backup
@@ -15,7 +15,10 @@ directly — no lease read. The reactive registries are driven by explicit in-pr
 (replica register/update → open+attach, deregister → close+detach) in `agent-doc-crdt-relay-io`, so
 steady-state decisions touch no filesystem. With S4b the **last** per-decision lease poll on the CRDT
 op hot path is gone: `authority_for_file` no longer reads the plugin-owner lease on every op.
-S5/S6 remain blocked upstream on lazily (`#lzpkgwire`) / decided against for now; S7 decided (keep the
+S5 is now DONE too (both plugins delegate to a real lazily reactive `StateGraphMirror` — JB toolchain
+bumped to K2/JVM21/2024.2 to consume lazily-kt; a StateGraphMirror was ported into lazily-js for the
+VS Code extension). S6 stays rejected (bespoke wire) — a Bridge buys nothing until the transport itself
+moves; S7 decided (keep the
 content-CRDT vs state-projection split). See the staged section for per-stage detail.
 
 ## Problem
@@ -313,15 +316,31 @@ Each is a candidate stage; none is a regression, all are parity gaps.
   (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches/<hash>.json`).
 
 **Missing components (decisions recorded 2026-07-11)**
-- **S5 — real lazily reactive-core mirror in each plugin. BLOCKED UPSTREAM (decision: defer,
-  keep the conformance-pinned fold).** Replacing the hand-rolled folds with an actual lazily
-  reactive graph instance needs (a) a lazily-kt build consumable by the IntelliJ 1.9/JBR17
-  toolchain — a shaded/relocated artifact — since the plugin cannot bump to lazily-kt's Kotlin
-  2/JVM21 (`#lzpkgwire`), and (b) a lazily-js reactive-core export (`@lazily/js` currently ships
-  only the FFI consumer + IPC helpers, and the extension is CommonJS vs the package's ESM). Neither
-  exists today. Until lazily ships those consumable reactive cores, the conformance-pinned fold
-  (`StateGraphMirrorTest` / `stateMirrorConformance.test.ts`) is the sanctioned stand-in — **keep
-  the pins so drift is a review catch.** Tracked against lazily, not agent-doc.
+- **S5 — real lazily reactive-core mirror in each plugin. DONE (2026-07-11).** Both plugins now
+  delegate the snapshot/delta state graph to a real lazily reactive-core `StateGraphMirror` instead
+  of a hand-rolled fold. The two `#lzpkgwire` blockers were resolved, not deferred:
+  - **JB / lazily-kt:** the earlier framing (needs a shaded artifact for IntelliJ 1.9/JBR17) is
+    superseded — `#lzpkgwire` was two version gaps (JVM 21 bytecode + Kotlin 2.0 metadata), and the
+    real fix was to **bump the plugin toolchain** to Kotlin 2.0 / JVM 21 / IntelliJ **2024.2+**
+    (`sinceBuild 242`; drops 2024.1). lazily-kt uses no JDK-21-only APIs, so no lazily-kt change was
+    needed. The plugin's `StateGraphMirror` is now a thin adapter delegating to
+    `io.github.lazily.StateGraphMirror` (Gson parses the wire → constructs lazily-kt's public
+    `WireSnapshot`/`WireDelta` → `inner.applySnapshot`/`applyDelta`; `decodeSubscribe` stays
+    `internal`). Wired via a **conditional Gradle composite build** (`includeBuild` the sibling
+    lazily-kt when present, else `mavenLocal`/GitHub Packages — standalone-safe). Only
+    `lazily-kt-<v>.jar` is bundled; every platform-provided transitive (kotlinx-coroutines —
+    **must not** be bundled — kotlin-stdlib, kotlinx-serialization, annotations, jna) is excluded.
+    `StateGraphMirrorConformanceTest` + `StateProjectionBridgeTest` stay green.
+  - **VSCode / lazily-js:** the earlier framing (`@lazily/js` ships no reactive core) is now stale —
+    lazily-js **does** export the reactive primitives. It shipped no `StateGraphMirror` *class*,
+    though, so S5 **ported one into lazily-js** (`src/state-graph-mirror.js`, a real reactive graph on
+    `Context`: per-node payload cells + a memoized derived `summary()` slot; export
+    `@lazily-hub/lazily-js/state-graph-mirror`; conformance test against the shared lazily-spec
+    fixtures). The extension's `StateGraphMirror` now delegates to it, loaded via esbuild bundling so
+    the packaged `.vsix` is self-contained (the ESM lazily-js is inlined into the CJS extension
+    bundle). `MirrorTurnProjection` (no lazily equivalent) is still computed plugin-side from the
+    delegated closeout.cycle cell. `stateMirror.test.ts` / `stateMirrorConformance.test.ts` stay
+    green. The conformance pins are kept as cross-language drift catches.
 - **S6 — lazily `Bridge` for the plugin transport. DECISION: reject for now, keep the bespoke wire.**
   agent-doc keeps its own lazily-spec-shaped `snapshot`/`delta` wire over the existing Unix-socket
   IPC + FFI rather than lazily's `BridgeHub`/`IpcSink`/`IpcSource` (webrtc feature). Rationale: the

@@ -3383,7 +3383,18 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // Activation / Deactivation
 // ---------------------------------------------------------------------------
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    // S5: preload the lazily-js reactive StateGraphMirror ESM module (CJS→ESM
+    // escape hatch) and cache its constructor BEFORE anything that could
+    // construct a per-doc mirror or handle an FFI state_subscribe. The FFI /
+    // registry construction sites run after activation, so once this resolves
+    // they can `new StateGraphMirror()` synchronously.
+    try {
+        await stateMirror.initStateMirror();
+    } catch (err: any) {
+        console.warn(`[agent-doc] initStateMirror failed: ${err?.message ?? err}`);
+    }
+
     // Coordinate Project Controller turn state into the status bar. Refresh on
     // active editor changes and editor/plugin events; state itself comes from
     // the Project Controller lazily projection, never from sidecar files.

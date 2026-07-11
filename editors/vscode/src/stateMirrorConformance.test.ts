@@ -1,8 +1,13 @@
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as path from 'path';
 import * as fs from 'fs';
-import { AgentDocNodeType, StateGraphMirror } from './stateMirror';
+import { AgentDocNodeType, StateGraphMirror, initStateMirror } from './stateMirror';
+
+// S5: load the lazily-js StateGraphMirror ctor before any `new StateGraphMirror()`.
+before(async () => {
+    await initStateMirror();
+});
 
 /**
  * `#lazilystatesync5` / `#6n5j` — cross-editor convergence parity (JS half).

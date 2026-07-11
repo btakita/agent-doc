@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,7 +8,13 @@ import {
     StateGraphMirror,
     compactMirrorSummary,
     decodePayload,
+    initStateMirror,
 } from './stateMirror';
+
+// S5: load the lazily-js StateGraphMirror ctor before any `new StateGraphMirror()`.
+before(async () => {
+    await initStateMirror();
+});
 import {
     documentHash,
     mirrorEpochForFile,

@@ -140,7 +140,7 @@ Fixed and pushed (`equityfundingsource-dev` 25a8828).
 
 **Root cause:** adding a custom required document from a deal created a **global** catalogue type with `default_required=1`, so it immediately became required on *every* deal — Brian's "oh, this makes it required for everybody" from the call.
 
-**Fix:** `POST /api/admin/document-types` now accepts an optional `deal_id`. When present it creates the type **global-optional** (`default_required=0`) and requires it **only for the originating deal** via the existing per-deal override (`deal_required_document_types`). The deal documents tab (`deal_detail.tsx`) passes `deal_id`; the global settings page omits it and keeps catalogue-wide behavior — so a type is still "remembered" in the catalogue for reuse, just not force-required everywhere. Added `#e2n0` coverage (deal A requires it, deal B untouched); suite 1428 pass / 7 pre-existing baseline fails, zero new failures.
+**Fix:** `POST /api/admin/document-types` now accepts an optional `deal_id`. When present it creates the type **global-optional** (`default_required=0`) and requires it **only for the originating deal** via the existing per-deal override (`deal_required_document_types`). The deal documents tab (`deal_detail.tsx`) passes `deal_id`; the global settings page omits it and keeps catalogue-wide behavior — so a type is still "remembered" in the catalogue for reuse, just not force-required everywhere. Added `#e2n0` coverage (deal A requires it, deal B untouched~); suite 1428 pass / 7 pre-existing baseline fails, zero new failures.
 
 ### Re: do #nyeb — Loan Package — opus-4-8
 
@@ -191,7 +191,17 @@ Verified — **the curation mechanism already exists**, so this is operator cont
 - **"Featured" vs "Recent transactions"** wasn't a firm decision on the call ("we could make this featured... I don't know"), and the section title is admin-editable public content anyway — so no code change is warranted; rename it live if you want.
 
 Closing `#faxz` as done-verified (curation shipped; adding deals is operator content-entry).
-<!-- agent:boundary:942d81f1 -->
+
+### Re: do #91d8 — seed common document types — opus-4-8
+
+Seeded the common types and pushed (`equityfundingsource-dev` eb407bb).
+
+**Migration 0130** adds the types the EFS team kept hand-adding on the call — **Letter of Explanation — Credit**, **Letter of Explanation — Exit Strategy**, and **Business Purpose Letter** — as **optional, non-default-required custom types**. So they're "remembered" in the catalogue and appear in the admin per-deal checklist as available-to-require toggles, but they're not auto-required on every deal (consistent with `#e2n0`) and lenders only ever see *required* docs. `INSERT OR IGNORE` keeps it idempotent. Added migration coverage; suite 1429 pass / 7 pre-existing baseline fails.
+
+**Split out part 2** — the preset "request missing documents" email (refi/purchase variants with per-doc explanations) is a distinct feature, so I queued it as its own backlog item rather than half-building it here.
+
+The seed applies to prod on the next deploy (deploy still deferred per your call).
+<!-- agent:boundary:21966a9f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -202,7 +212,7 @@ Closing `#faxz` as done-verified (curation shipped; adding deals is operator con
 - ~~do [#nyeb]~~
 - ~~do [#1j5y]~~
 - ~~do [#faxz]~~
-- do [#91d8]
+- 🚧 do [#91d8]
 - do [#nw77]
 - do [#r08m]
 - do [#5q9q]
@@ -210,6 +220,7 @@ Closing `#faxz` as done-verified (curation shipped; adding deals is operator con
 - ~~do [#jzqj]~~
 - ~~do [#mam7]~~
 - do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.
+- do [#r30z]
 <!-- /agent:queue -->
 
 ## Notes
@@ -233,8 +244,8 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#r30z] Preset 'request missing documents' email (refi/purchase variants) with per-document explanations — a preset the admin sends to the borrower requesting the deal's outstanding required documents, with distinct refinance vs purchase document sets and a short why-needed note per doc. From the 2026-07-10 call (#91d8 part 2).
 - [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
-- [ ] [#91d8] Document types: seed remembered custom types LOE (credit + exit-strategy) and Business Purpose Letter; add a preset 'request missing documents' email (refi/purchase variants) with explanations. [followups: Document requirements]
 - [ ] [#nw77] Deal notes: rename 'workflow notes' -> 'deal notes', scope per-deal (per lender per deal), convert to an append-only log with timestamps + author attribution. [followups: Deal notes]
 - [ ] [#r08m] Wire instructions: replace manual re-entry with a document upload (upload the title company's wiring doc as-is). [followups: Funding tabs]
 - [ ] [#5q9q] Funding workflow tabs: add 'Lender Documents' + 'Funding Package' tabs; order Loan Package -> Lender Documents -> Funding Package. [followups: Funding tabs]

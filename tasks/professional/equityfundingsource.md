@@ -266,15 +266,28 @@ Two new tabs in the admin deal dialog, ordered **Loan Package → Lender Documen
 **Verified:** new lender-documents suite 10/10, full suite 1570/0 (updated the 3 existing `ActiveTab`-order contract assertions to the new tab list), browser + worker builds clean. Files go to `R2_DOCUMENTS`; a live-portal eyeball of the two tabs is worth a quick check once deployed.
 
 One note: **#sy71** is an empty queue item (no body text) — nothing to execute there; leaving it for you to fill or remove. Remaining queued: **#r30z** (request-missing-documents email preset).
-<!-- agent:boundary:7b831b9e -->
+
+### Re: #r30z — request-missing-documents borrower email preset — opus-4-8
+
+Done and pushed (`equityfundingsource-dev` 8adff23).
+
+- **Pure generator** (`shared/request_missing_documents.ts`) — normalizes the deal's transaction type to **refinance vs purchase**, resolves a short **why-needed note per document** (catalogue description → transaction-specific default → common default → generic fallback), and builds a `{ subject, body }` with distinct refi/purchase framing, a bullet per outstanding doc, portal-upload close, and EFS sign-off.
+- **Deal dialog** — a **"Request missing documents (N)"** action in the Documents tab drafts the email from the deal's outstanding **required** documents, in an editable modal with **Copy** and **Open borrower messages**. Disabled when nothing is outstanding.
+
+Refi defaults cover mortgage/payoff statement, note, deed; purchase defaults cover purchase contract, earnest money, gift letter; common defaults cover ID, income, insurance, appraisal, title, entity docs.
+
+**Verified:** new suite 8/8, full suite 1578/0, browser + worker builds clean.
+
+**Queue drained.** This turn shipped all three funding-workflow items: #r08m (wire doc upload), #5q9q (Lender Documents + Funding Package tabs), #r30z (missing-docs email preset). All committed + pushed; deploy stays deferred. Remaining backlog is gated/recommended items and the empty **#sy71** placeholder.
+<!-- agent:boundary:382fd470 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#r08m]~~
 - ~~do [#5q9q]~~
-- do [#r30z]
+- 🚧 :round_pushpin: [#sy71]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
-- 🚧 [#sy71]
+- ~~do [#r30z]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -298,7 +311,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#r30z] Preset 'request missing documents' email (refi/purchase variants) with per-document explanations — a preset the admin sends to the borrower requesting the deal's outstanding required documents, with distinct refinance vs purchase document sets and a short why-needed note per doc. From the 2026-07-10 call (#91d8 part 2).
 - [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 <!-- /agent:backlog -->
 

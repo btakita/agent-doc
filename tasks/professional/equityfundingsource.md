@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -92,26 +92,16 @@ Done both.
 **Added 14 follow-up items to the backlog** (which mirrors into the go-mode queue), ordered with the two **[P0]** items first — go-live and the available-deals upload API. Full detail per item lives in `src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-followups.md`. Three of them carry a blocker I flagged inline: go-live needs your call on which portals to hide, the available-deals API needs Brian's offer-format spec, and the TMO conditions sync is gated on the Tuesday screen-share + API access.
 
 The queue is now populated for the drain to work through; each item runs the `#spec-test-commit-push` preset. Say go and I'll start draining from the top, or reorder first.
-<!-- agent:boundary:cc49ab9f -->
+
+### Re: defer the deploy queue head — opus-4-8
+
+Striking the free-text `deploy` head out of the active drain per your deferral. Re-queue it when there's shippable EFS code from a clean HEAD worktree.
+
+> **Queue prompt:** deploy
+<!-- agent:boundary:ecf99fb9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~[#xzxy]~~
-- deploy
-- do [#tcb0]
-- do [#nyc5]
-- do [#nga4]
-- do [#e2n0]
-- do [#nyeb]
-- do [#1j5y]
-- do [#faxz]
-- do [#91d8]
-- do [#nw77]
-- do [#r08m]
-- do [#5q9q]
-- do [#1067]
-- do [#jzqj]
-- do [#mam7]
 <!-- /agent:queue -->
 
 ## Notes

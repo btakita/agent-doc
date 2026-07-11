@@ -39,6 +39,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
+use lazily::{CellHandle, SlotHandle, ThreadSafeCellFamily, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
@@ -58,10 +59,6 @@ pub const DISK_IS_RECOVERY_PROJECTION_ONLY: bool = true;
 struct Member {
     /// The supervisor's mirror of this editor's replica (synced via deltas).
     replica: ReplicaState,
-    /// Whether the editor is currently connected. A disconnected member is
-    /// skipped by broadcasts and the commit barrier (no deadlock on a slow /
-    /// offline editor) and catches up on [`RelayHub::reconnect`].
-    live: bool,
     generation: u64,
     last_ack_generation: u64,
     pending: VecDeque<PendingReplicaUpdate>,
@@ -154,12 +151,86 @@ pub struct RelayHub {
     /// `RebuiltFromDisk`; drained by the caller which delivers the replace and
     /// calls [`Self::clear_rebootstrap`].
     pending_rebootstrap: HashSet<u64>,
+    /// The thread-safe reactive graph that owns member liveness (#live-editor-reactive).
+    /// `RelayHub` lives in a `static Mutex<HashMap<String, RelayHub>>`, so every
+    /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
+    /// `Arc`-based [`ThreadSafeCellFamily`]/[`CellHandle`]/[`SlotHandle`] all qualify.
+    ctx: ThreadSafeContext,
+    /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
+    /// the **single** source of truth for whether a member is connected — the former
+    /// `Member.live` field is gone. The present set only grows (deferral, not
+    /// de-allocation): a deregistered `client_id`'s cell stays present-but-false, so it
+    /// is bounded per session and never counted as live.
+    liveness: ThreadSafeCellFamily<u64, bool>,
+    /// Bumped on [`Self::register`] so the derived count picks up a newly-present key
+    /// (a brand-new cell is not yet a dependency of `live_editor_count`; the epoch is,
+    /// so the register forces a recompute that then observes the new cell).
+    membership_epoch: CellHandle<u64>,
+    /// Reactive derived count of currently-live members: recomputes as
+    /// `count(present_keys whose cell is true)` whenever the epoch or any observed
+    /// liveness cell changes. [`Self::live_count`] is a reactive read of this slot.
+    live_editor_count: SlotHandle<usize>,
 }
 
 impl RelayHub {
+    /// Build the thread-safe reactive liveness core shared by every constructor:
+    /// a `ThreadSafeContext`, an on-demand `client_id -> live` cell family, a membership
+    /// epoch cell, and the derived live-member count slot.
+    fn build_liveness_core() -> (
+        ThreadSafeContext,
+        ThreadSafeCellFamily<u64, bool>,
+        CellHandle<u64>,
+        SlotHandle<usize>,
+    ) {
+        let ctx = ThreadSafeContext::new();
+        let membership_epoch = ctx.cell(0u64);
+        // Cells materialize on `register`; the factory value (`true` = live-on-register)
+        // only applies before the explicit `set_cell` in `set_live`.
+        let liveness: ThreadSafeCellFamily<u64, bool> =
+            ThreadSafeCellFamily::new(&ctx, std::iter::empty::<u64>(), |_| true);
+        let live_editor_count = {
+            let liveness = liveness.clone();
+            ctx.computed(move |ctx| {
+                // Depend on the membership epoch so a newly-registered (not-yet-observed)
+                // key forces a recompute that then picks it up in `present_keys`.
+                let _ = ctx.get_cell(&membership_epoch);
+                liveness
+                    .present_keys()
+                    .into_iter()
+                    .filter(|id| liveness.observe(ctx, *id))
+                    .count()
+            })
+        };
+        (ctx, liveness, membership_epoch, live_editor_count)
+    }
+
+    /// Materialize (if needed) and set member `client_id`'s liveness cell. Never holds
+    /// the family lock across the `ctx` write (the family releases its lock before
+    /// touching `ctx`), so there is no lock-order cycle with the registry mutex.
+    fn set_live(&self, client_id: u64, live: bool) {
+        let cell = self.liveness.get(&self.ctx, client_id);
+        self.ctx.set_cell(&cell, live);
+    }
+
+    /// Bump the membership epoch so `live_editor_count` recomputes and counts a
+    /// newly-present key. Called on [`Self::register`] only (value-only transitions
+    /// already dirty the derived count through the cell dependency).
+    fn bump_membership_epoch(&self) {
+        let epoch = self.ctx.get_cell(&self.membership_epoch);
+        self.ctx
+            .set_cell(&self.membership_epoch, epoch.wrapping_add(1));
+    }
+
+    /// Reactive read of member `client_id`'s liveness (the single source of truth that
+    /// replaced `Member.live`). Delta-routing / barrier sites read this instead of a
+    /// per-member `live` field.
+    fn is_live(&self, client_id: u64) -> bool {
+        self.liveness.observe(&self.ctx, client_id)
+    }
     /// Create a hub whose canonical replica uses `canonical_id` as its yrs client
     /// id. `canonical_id` is reserved — no member may register with it.
     pub fn new(canonical_id: u64) -> Self {
+        let (ctx, liveness, membership_epoch, live_editor_count) = Self::build_liveness_core();
         Self {
             canonical: ReplicaState::new(canonical_id),
             canonical_id,
@@ -167,6 +238,10 @@ impl RelayHub {
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
             pending_rebootstrap: HashSet::new(),
+            ctx,
+            liveness,
+            membership_epoch,
+            live_editor_count,
         }
     }
 
@@ -191,14 +266,10 @@ impl RelayHub {
         // correction / compaction (`#staleinmem`) instead of waiting for a finalize
         // to record one.
         let last_committed_text = Some(canonical.text());
-        Ok(Self {
-            canonical,
-            canonical_id,
-            members: HashMap::new(),
-            awareness: AwarenessChannel::new(),
-            last_committed_text,
-            pending_rebootstrap: HashSet::new(),
-        })
+        let mut hub = Self::new(canonical_id);
+        hub.canonical = canonical;
+        hub.last_committed_text = last_committed_text;
+        Ok(hub)
     }
 
     /// The canonical (authoritative) converged text.
@@ -211,9 +282,10 @@ impl RelayHub {
         self.members.get(&client_id).map(|m| m.replica.text())
     }
 
-    /// The number of currently-live (connected) members.
+    /// The number of currently-live (connected) members — a reactive read of the
+    /// derived `live_editor_count` slot, not a pull-scan over `members`.
     pub fn live_count(&self) -> usize {
-        self.members.values().filter(|m| m.live).count()
+        self.ctx.get(&self.live_editor_count)
     }
 
     /// Whether `client_id` is registered (live or offline).
@@ -251,12 +323,15 @@ impl RelayHub {
             client_id,
             Member {
                 replica,
-                live: true,
                 generation: 0,
                 last_ack_generation: 0,
                 pending: VecDeque::new(),
             },
         );
+        // Materialize this member's liveness cell (live-on-register) and bump the
+        // membership epoch so the derived count observes the newly-present key.
+        self.set_live(client_id, true);
+        self.bump_membership_epoch();
         Ok(())
     }
 
@@ -265,7 +340,13 @@ impl RelayHub {
     /// connection (it is not persisted and not committed).
     pub fn deregister(&mut self, client_id: u64) -> bool {
         self.awareness.remove(client_id);
-        self.members.remove(&client_id).is_some()
+        let removed = self.members.remove(&client_id).is_some();
+        if removed {
+            // The cell stays present-but-false (deferral, not de-allocation) so it is
+            // no longer counted; a later re-register flips the same cell back to true.
+            self.set_live(client_id, false);
+        }
+        removed
     }
 
     /// Mark a member offline (disconnected) without losing its replica state. A
@@ -274,14 +355,17 @@ impl RelayHub {
     /// disconnected cursor must not linger).
     pub fn disconnect(&mut self, client_id: u64) -> bool {
         self.awareness.remove(client_id);
-        match self.members.get_mut(&client_id) {
+        let existed = match self.members.get_mut(&client_id) {
             Some(m) => {
-                m.live = false;
                 m.pending.clear();
                 true
             }
             None => false,
+        };
+        if existed {
+            self.set_live(client_id, false);
         }
+        existed
     }
 
     /// Reconnect a member: a **bidirectional state-vector catch-up** that proves
@@ -293,7 +377,6 @@ impl RelayHub {
             .members
             .get_mut(&client_id)
             .ok_or_else(|| anyhow!("replica {client_id} is not registered"))?;
-        member.live = true;
         member.pending.clear();
         // Pull the member's offline ops into canonical, then push back everything
         // the member missed. Both directions are state-vector deltas.
@@ -301,6 +384,9 @@ impl RelayHub {
         let to_member = self.canonical.diff(&member.replica.state_vector())?;
         self.canonical.apply_update(&to_canonical)?;
         member.replica.apply_update(&to_member)?;
+        // Mark live only after a successful bidirectional catch-up (the `member`
+        // borrow above must end before touching the reactive `ctx`).
+        self.set_live(client_id, true);
         Ok(())
     }
 
@@ -343,9 +429,9 @@ impl RelayHub {
         let update = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
             .members
-            .iter()
-            .filter(|(id, m)| **id != client_id && m.live)
-            .map(|(id, _)| *id)
+            .keys()
+            .copied()
+            .filter(|id| *id != client_id && self.is_live(*id))
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
@@ -388,9 +474,9 @@ impl RelayHub {
         let delta = self.canonical.diff(&before)?;
         let targets: Vec<u64> = self
             .members
-            .iter()
-            .filter(|(id, m)| **id != client_id && m.live)
-            .map(|(id, _)| *id)
+            .keys()
+            .copied()
+            .filter(|id| *id != client_id && self.is_live(*id))
             .collect();
         let packet = BroadcastPacket {
             origin: client_id,
@@ -486,9 +572,9 @@ impl RelayHub {
         let update = self.canonical.diff(&before)?;
         let mut targets: Vec<u64> = self
             .members
-            .iter()
-            .filter(|(_, m)| m.live)
-            .map(|(id, _)| *id)
+            .keys()
+            .copied()
+            .filter(|id| self.is_live(*id))
             .collect();
         targets.sort_unstable();
         let packet = BroadcastPacket {
@@ -561,9 +647,9 @@ impl RelayHub {
     /// Disconnected editors are excluded from this live convergence cut.
     pub fn delivery_converged(&self) -> bool {
         self.members
-            .values()
-            .filter(|member| member.live)
-            .all(|member| member.pending.is_empty())
+            .iter()
+            .filter(|(id, _)| self.is_live(**id))
+            .all(|(_, member)| member.pending.is_empty())
     }
 
     pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
@@ -572,7 +658,7 @@ impl RelayHub {
             .iter()
             .map(|(client_id, member)| ReplicaDeliverySnapshot {
                 client_id: *client_id,
-                live: member.live,
+                live: self.is_live(*client_id),
                 pending_updates: member.pending.len(),
                 current_generation: member.generation,
                 last_ack_generation: member.last_ack_generation,
@@ -586,9 +672,9 @@ impl RelayHub {
     /// barrier — offline members are excluded so a slow editor cannot deadlock).
     fn live_editors(&self) -> Vec<&ReplicaState> {
         self.members
-            .values()
-            .filter(|m| m.live)
-            .map(|m| &m.replica)
+            .iter()
+            .filter(|(id, _)| self.is_live(**id))
+            .map(|(_, m)| &m.replica)
             .collect()
     }
 
@@ -764,9 +850,9 @@ impl RelayHub {
             // every live editor for a replace-capable re-bootstrap of its buffer.
             let live: Vec<u64> = self
                 .members
-                .iter()
-                .filter(|(_, m)| m.live)
-                .map(|(id, _)| *id)
+                .keys()
+                .copied()
+                .filter(|id| self.is_live(*id))
                 .collect();
             self.pending_rebootstrap.extend(live);
             Ok(DiskChangeOutcome::RebuiltFromDisk {
@@ -1568,5 +1654,126 @@ mod tests {
             Some("brand new disk text\n"),
             "the disk text becomes the baseline so a later correction is detectable"
         );
+    }
+
+    // ---- #live-editor-reactive S1: reactive liveness core -------------------
+
+    /// One liveness transition in the deterministic SimWorld model. Both the hub and
+    /// a plain reference `BTreeMap<client_id, live>` consume the same op via a shared
+    /// pure decision function (`apply_to_model`), so the reactive derived count can be
+    /// compared against the model at every step.
+    #[derive(Clone, Copy, Debug)]
+    enum LivenessOp {
+        Register(u64),
+        Disconnect(u64),
+        Reconnect(u64),
+        Deregister(u64),
+    }
+
+    /// The shared pure decision function: fold one op into the reference model. A
+    /// deregister removes the key (present-but-false in the hub, absent here — both
+    /// are uncounted, so the counts stay in lockstep).
+    fn apply_to_model(model: &mut std::collections::BTreeMap<u64, bool>, op: LivenessOp) {
+        match op {
+            LivenessOp::Register(id) => {
+                model.insert(id, true);
+            }
+            LivenessOp::Disconnect(id) => {
+                if let Some(live) = model.get_mut(&id) {
+                    *live = false;
+                }
+            }
+            LivenessOp::Reconnect(id) => {
+                model.insert(id, true);
+            }
+            LivenessOp::Deregister(id) => {
+                model.remove(&id);
+            }
+        }
+    }
+
+    fn apply_to_hub(hub: &mut RelayHub, op: LivenessOp) {
+        match op {
+            LivenessOp::Register(id) => hub.register(id).unwrap(),
+            LivenessOp::Disconnect(id) => {
+                hub.disconnect(id);
+            }
+            LivenessOp::Reconnect(id) => hub.reconnect(id).unwrap(),
+            LivenessOp::Deregister(id) => {
+                hub.deregister(id);
+            }
+        }
+    }
+
+    fn model_live_count(model: &std::collections::BTreeMap<u64, bool>) -> usize {
+        model.values().filter(|live| **live).count()
+    }
+
+    #[test]
+    fn reactive_live_count_matches_reference_model_across_transitions() {
+        use LivenessOp::*;
+        // Scripted SimWorld: register/disconnect/reconnect/deregister, including a
+        // re-register of a previously deregistered id (exercises the present-but-false
+        // cell being flipped back to true).
+        let script = [
+            Register(2),
+            Register(3),
+            Register(4),
+            Disconnect(3),
+            Reconnect(3),
+            Disconnect(2),
+            Disconnect(4),
+            Deregister(3),
+            Register(3),
+            Reconnect(2),
+            Reconnect(4),
+        ];
+
+        let mut hub = RelayHub::new(1);
+        let mut model: std::collections::BTreeMap<u64, bool> = Default::default();
+        assert_eq!(hub.live_count(), 0, "empty hub starts at 0 live editors");
+
+        for (step, op) in script.into_iter().enumerate() {
+            apply_to_hub(&mut hub, op);
+            apply_to_model(&mut model, op);
+            assert_eq!(
+                hub.live_count(),
+                model_live_count(&model),
+                "reactive live_count diverged from model at step {step} after {op:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn deregistered_present_key_is_not_counted_live() {
+        // The family is deferral-not-dealloc: a deregistered client_id's cell stays
+        // present-but-false. It must never inflate the reactive live count.
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert_eq!(hub.live_count(), 2);
+
+        hub.deregister(2);
+        assert_eq!(hub.live_count(), 1, "deregistered member drops out of the count");
+
+        // Re-registering the same id flips the retained cell back to true.
+        hub.register(2).unwrap();
+        assert_eq!(hub.live_count(), 2, "re-register flips the retained cell live");
+    }
+
+    #[test]
+    fn reactive_live_count_recomputes_on_each_transition() {
+        // The count is a live reactive read, not a one-shot snapshot: reading it
+        // before and after a transition must reflect the change.
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        assert_eq!(hub.live_count(), 2);
+
+        hub.disconnect(3);
+        assert_eq!(hub.live_count(), 1, "disconnect recomputes the derived count");
+
+        hub.reconnect(3).unwrap();
+        assert_eq!(hub.live_count(), 2, "reconnect recomputes the derived count");
     }
 }

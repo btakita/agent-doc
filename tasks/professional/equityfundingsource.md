@@ -248,14 +248,33 @@ Done and pushed (`equityfundingsource-dev` 9e9f4ea). The admin no longer has to 
 **Verified:** wire test suite 31/31, full suite 1560/0, browser + worker builds clean. The document is stored in `R2_DOCUMENTS`; a live prod eyeball of the upload → issue-link → recipient-download round-trip is worth a quick check once deployed, but it's wired correctly in code.
 
 Next queued: **#5q9q** (Funding workflow tabs — the sibling "Funding tabs" item).
-<!-- agent:boundary:4239321b -->
+
+### Re: #5q9q — funding workflow tabs (Lender Documents + Funding Package) — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#5q9q]
+
+
+Thanks for the clarification — with "the admin should be able to upload a lender-returned doc on the lender's behalf," #5q9q was fully specified. Built, tested, and pushed (`equityfundingsource-dev` ebda036).
+
+Two new tabs in the admin deal dialog, ordered **Loan Package → Lender Documents → Funding Package** (the separate "funding commitment" stage stays removed):
+
+- **Lender Documents** (new) — a per-deal collection of the documents the selected lender returns for the deal (term sheet / commitment letter, deal-specific proof of funds, underwriting conditions, counter-signed items, funding authorization). The admin can **upload a lender-returned doc on the lender's behalf** (`source = admin_on_behalf`) or record one the lender sent (`source = lender`); each row shows the source, size, and date, and is downloadable/removable. New `deal_lender_documents` table (migration 0133) + admin list/upload/download/delete routes.
+- **Funding Package** (new) — the ready-to-fund bundle: signed loan documents + evidence of insurance + funding wire instructions, assembled in one place so the deal reads as "ready to fund." Composes the loan-documents manager (titled for funding docs) + the wire-instructions section (which now also takes the #r08m uploaded wiring doc). Distinct from Loan Package and Closing.
+
+**Verified:** new lender-documents suite 10/10, full suite 1570/0 (updated the 3 existing `ActiveTab`-order contract assertions to the new tab list), browser + worker builds clean. Files go to `R2_DOCUMENTS`; a live-portal eyeball of the two tabs is worth a quick check once deployed.
+
+One note: **#sy71** is an empty queue item (no body text) — nothing to execute there; leaving it for you to fill or remove. Remaining queued: **#r30z** (request-missing-documents email preset).
+<!-- agent:boundary:7b831b9e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#r08m]~~
-- do [#5q9q]
+- ~~do [#5q9q]~~
 - do [#r30z]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
+- 🚧 [#sy71]
 <!-- /agent:queue -->
 
 ## Notes
@@ -281,7 +300,6 @@ After 20:30
 <!-- agent:backlog priority queue -->
 - [ ] [#r30z] Preset 'request missing documents' email (refi/purchase variants) with per-document explanations — a preset the admin sends to the borrower requesting the deal's outstanding required documents, with distinct refinance vs purchase document sets and a short why-needed note per doc. From the 2026-07-10 call (#91d8 part 2).
 - [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
-- [ ] [#5q9q] Funding workflow tabs: add 'Lender Documents' + 'Funding Package' tabs; order Loan Package -> Lender Documents -> Funding Package. [followups: Funding tabs]
 <!-- /agent:backlog -->
 
 ## Review

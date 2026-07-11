@@ -80,12 +80,38 @@ There's no new instruction in the exchange this cycle. Two queue heads remain, b
 
 - **`🚧 [#xzxy]` — triage the follow-ups.** This is the placeholder I filed; the prioritized list already lives in `docs/calls/2026-07-10 14-31-13-followups.md`. Picking *which* items to build (and in what order) is your call. My recommended first two are the **[P0]** items: go-live this week (hide non-functional portals, keep apply + inquiries) and the available-deals upload API to replace the manual YAMM flow. Tell me which to queue and I'll take them.
 - **`deploy`** — left ungated on purpose. Nothing from this doc's work is EFS-deployable (transcript + todos are docs, not shipped to prod), so running `deploy` now would just push whatever is in the EFS worktree — a concurrent-session clobber risk. Confirm the intent (and target) before I deploy.
-<!-- agent:boundary:3332b9e7 -->
+
+### Re: Defer deploy + add the follow-ups to backlog/queue — opus-4-8
+
+Done both.
+
+**Deploy — deferred** per your call. Nothing from this doc's work is EFS-deployable (docs only), so I'm not touching the EFS worktree; deploy when there's shippable code from a clean HEAD worktree.
+
+> **Queue prompt:** deploy — deferred by operator; no shippable EFS code this cycle.
+
+**Added 14 follow-up items to the backlog** (which mirrors into the go-mode queue), ordered with the two **[P0]** items first — go-live and the available-deals upload API. Full detail per item lives in `src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-followups.md`. Three of them carry a blocker I flagged inline: go-live needs your call on which portals to hide, the available-deals API needs Brian's offer-format spec, and the TMO conditions sync is gated on the Tuesday screen-share + API access.
+
+The queue is now populated for the drain to work through; each item runs the `#spec-test-commit-push` preset. Say go and I'll start draining from the top, or reorder first.
+<!-- agent:boundary:cc49ab9f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~[#xzxy]~~
 - deploy
+- do [#tcb0]
+- do [#nyc5]
+- do [#nga4]
+- do [#e2n0]
+- do [#nyeb]
+- do [#1j5y]
+- do [#faxz]
+- do [#91d8]
+- do [#nw77]
+- do [#r08m]
+- do [#5q9q]
+- do [#1067]
+- do [#jzqj]
+- do [#mam7]
 <!-- /agent:queue -->
 
 ## Notes
@@ -109,6 +135,20 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tcb0] [P0] Go-live: publish the EFS site this week — disable/hide not-yet-functional portals, keep apply-for-loan + contact inquiries working; verify apply->TMO end-to-end. (needs operator go on which portals to hide) [followups: Go-live]
+- [ ] [#nyc5] [P0] Available-deals upload: API endpoint + API key to upload investor offers to the marketplace (replaces manual YAMM) + a manual add-deal form (same template, admin-created). Needs Brian's offer-format spec. [followups: Available-deals]
+- [ ] [#nga4] Bug: admin->investor loan message no longer sends the email notification — investigate + fix. [followups: Messaging]
+- [ ] [#e2n0] Bug: adding a custom required document makes it required for everybody — scope required documents per-deal, not global. [followups: Document requirements]
+- [ ] [#nyeb] Loan Package: drop the loan number (reference by property address), add the front property photo, replace the blue placeholder image, surface all loan info in the Loan Package view. [followups: Loan Package]
+- [ ] [#1j5y] Homepage copy: step-3 'fund and close'; funded-deals CTA 'View more funded deals'; contact CTA 'Send us your details for a quick approval'; rate range 8.99-14%; fix theme/colors. [followups: Homepage copy]
+- [ ] [#faxz] Funded-deals page: add more funded deals + admin curate / 'featured transactions'. [followups: Homepage copy]
+- [ ] [#91d8] Document types: seed remembered custom types LOE (credit + exit-strategy) and Business Purpose Letter; add a preset 'request missing documents' email (refi/purchase variants) with explanations. [followups: Document requirements]
+- [ ] [#nw77] Deal notes: rename 'workflow notes' -> 'deal notes', scope per-deal (per lender per deal), convert to an append-only log with timestamps + author attribution. [followups: Deal notes]
+- [ ] [#r08m] Wire instructions: replace manual re-entry with a document upload (upload the title company's wiring doc as-is). [followups: Funding tabs]
+- [ ] [#5q9q] Funding workflow tabs: add 'Lender Documents' + 'Funding Package' tabs; order Loan Package -> Lender Documents -> Funding Package. [followups: Funding tabs]
+- [ ] [#1067] Accreditation/suitability questionnaire: full form in the lender portal, income/net-worth options only, not a hard funding gate, admin-fillable, editable PDF + investigate DocuSign. Needs the DRE form + a DocuSign account. [followups: Accreditation]
+- [ ] [#jzqj] Bidirectional TMO conditions sync (TMO as source of truth for conditions) + LOS lender-ID / deep-link into TMO pages. (gated on the Tue TMO screen-share + API access) [followups: TMO]
+- [ ] [#mam7] Fractionalized loans (future): support up to ~10 lenders/loan with siloed per-lender info in the shared loan view. [followups: Fractionalized loans]
 <!-- /agent:backlog -->
 
 ## Review

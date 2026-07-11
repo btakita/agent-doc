@@ -1,14 +1,18 @@
 # Plan — live_editor pipeline onto the lazily reactive backbone (#live-editor-reactive)
 
-## Status (2026-07-11) — core COMPLETE
+## Status (2026-07-11) — core COMPLETE, lazily state is the liveness authority
 S1 (reactive RelayHub liveness core, 824a2632), S2 (reactive editor open-docs registry),
-S2b + S3 (resolver/visible-write repair-not-demote through the reactive open-docs projection,
-55d91244) are **DONE** — the observed phantom-`live_editors=0` wedge is fixed: an open editor
-with zero live replicas keeps editor authority instead of demoting to disk. S4 core is delivered
-by S2b/S3 (the only wrongly-demoting consumer was the resolver); its residual poll→subscribe
-refactor is deferred (no behavioral bug, fail-closed-guard risk). S5/S6 are blocked upstream on
-lazily (`#lzpkgwire`) / decided against for now; S7 is decided (keep the content-CRDT vs
-state-projection split). See the staged section for per-stage detail. `make check`: 7415 passed.
+S2b + S3 (resolver/visible-write route through the reactive open-docs authority, 55d91244) and
+**S4 (lazily `editor_open_docs` is the authority; the durable lease is crash-recovery backup
+consulted only on a cold miss; sidecars/leases are off the steady-state hot path, d5d346e6)** are
+**DONE**. The observed phantom-`live_editors=0` wedge is fixed: after a controller recycle the doc
+is *untracked* in the reactive authority, so the resolver recovers once from the durable lease and
+keeps editor authority instead of demoting to disk. An explicit editor deregister (close) drives
+the reactive authority closed and resolves to disk directly — no lease read. The reactive registry
+is driven by explicit in-process editor events (replica register/update → open, deregister → close)
+in `agent-doc-crdt-relay-io`, so steady-state decisions touch no filesystem. S5/S6 remain blocked
+upstream on lazily (`#lzpkgwire`) / decided against for now; S7 decided (keep the content-CRDT vs
+state-projection split). See the staged section for per-stage detail. `make check`: 7418 passed.
 
 ## Problem
 
@@ -153,14 +157,14 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   editor authority when the editor is open + `live_count()==0` instead of demoting. The dropped
   replica re-registers on the editor's next edit (existing phantom-heal in
   `relay_replica_update_for_file`), so an explicit re-register in the resolver is unneeded.
-  - **PREREQUISITE (verified 2026-07-11) — CLOSED by S2b.** `EditorOpenDocs` was fed only in the
-    *plugin* process via FFI (`ffi.rs:597`/`1019`), so `is_open` was always false in the
-    *controller*/resolver process. `reconcile_and_observe_editor_open` now marks the registry from
-    the durable **plugin-owner lease** ground truth (`live_editor_endpoint_attached`, pid-live)
-    before each zero-live decision, making `is_open`/`open_count` truthful controller-side. (Note:
-    the lease is distinct from the `.agent-doc/live-buffer/` sidecars used by `#lbreap` reaping;
-    both are durable, cross-process filesystem records of editor liveness — see the sidecar-vs-
-    lazily-state note below.)
+  - **PREREQUISITE (verified 2026-07-11) — CLOSED, then superseded by S4.** `EditorOpenDocs` was
+    fed only in the *plugin* process via FFI (`ffi.rs:597`/`1019`), so `is_open` was always false in
+    the *controller*/resolver process. The first S2b pass reconciled it from the durable lease
+    before *every* zero-live decision — correct, but that put the lease on the hot path. **S4
+    (d5d346e6) replaced that**: the controller now drives `editor_open_docs` from explicit in-process
+    editor events (replica register/update → `mark_open`, deregister → `mark_closed`, in
+    `agent-doc-crdt-relay-io`), so the reactive authority is truthful controller-side with no
+    per-decision filesystem read; the lease is read only on a cold miss (see S4 + the sidecar note).
   - **CPC-write demote (`crdt-relay-io` `crdt_cpc_write_disk_authority_stale_lease`, `lib.rs:1219`)
     deliberately unchanged.** With zero live replicas there is no replica to write through; forcing
     editor authority there reintroduces the documented CAS `retry_crdt_merge` strand wedge, and disk
@@ -174,15 +178,26 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   fields are preserved; the repair path adds `crdt_relay_stale_lease_editor_open` /
   `recovery=keep_editor_authority_no_live_replica`. SimWorld: reactive-registry-driven transition
   test + two integration tests updated to keep-editor-authority semantics.
-- **S4 — remaining consumers. Core delivered by S2b/S3; residual poll→subscribe refactor deferred.**
-  The phantom-0 wedge is fully killed: the *only* consumer that wrongly demoted on `live_count()==0`
-  was the resolver (S2b/S3). Audited the other two named consumers — neither has the demote bug:
-  `live_buffer_guard`'s `commit_barrier_ready` routes through
-  `commit_barrier_via_controller_model_for_doc` and **fails closed** (blocks the disk commit,
-  protecting the editor buffer), and `plugin-owner` *is* the ground-truth lease source. Converting
-  them from the current (already-correct) model/ground-truth reads to reactive signal subscription is
-  a pure architectural refinement with **no behavioral bug to fix** and real fail-closed-guard
-  regression risk, so it is deferred, not implemented, until a concrete need justifies it.
+- **S4 — lazily state is the liveness authority; sidecars off the hot path. DONE (d5d346e6).**
+  Per operator directive: *replace the sidecar with lazily state as the authority, with the sidecar
+  as durable crash backup only if needed; sidecars must never be on the hot path.*
+  - **Authority = reactive `editor_open_docs`**, driven by explicit in-process editor events in
+    `agent-doc-crdt-relay-io`: `register_replica_for_file`/reconnect + `relay_replica_update_for_file`
+    → `mark_open`; `deregister_replica_for_file` → `mark_closed`. These are explicit plugin-sent
+    signals (editor attach / active / close), so the authority stays truthful with no filesystem read.
+  - **Hot path reads reactive state only.** `observe_editor_open_in` (pure core in
+    `agent-doc-document-realtime-io`) reads `is_open`; it consults the durable plugin-owner lease via
+    the injected `lease_attached` probe **only on a cold miss** (`!is_tracked` — a doc the authority
+    has never recorded, i.e. right after a controller recycle before any editor event re-seeded it),
+    then caches the recovered state so later reads stay purely reactive. `is_tracked`
+    (non-materializing) is the cold-miss signal.
+  - **Precision gain over the first pass:** an explicit editor deregister (close) now resolves to
+    disk immediately via the reactive state, instead of being overridden by a lagging live lease; the
+    real symptom (recycle with the editor still open → untracked cold miss → lease recovery) keeps
+    editor authority.
+  - **Other consumers unchanged (no demote bug):** `live_buffer_guard`'s `commit_barrier_ready`
+    routes through the controller model and **fails closed**; `plugin-owner` is the lease writer.
+    Converting them to reactive subscription is a no-behavioral-change refinement, deferred.
 
 ## Missing reactive components in the lazily plugins (#plugin-reactive-core)
 
@@ -243,9 +258,16 @@ source of truth. Replacing the sidecars with lazily state needs three things tha
    handshake on restart).
 3. **Origin ownership in the plugin's reactive graph** — S5's real plugin reactive core so the
    open-set cell is authored reactively rather than written as a lease file.
-   So: replacing the sidecars with pure lazily state is the **north-star end-state**, gated on
-   S5 + S6 + a durability story. Until then the durable lease/sidecar remains the correct
-   cross-process ground truth and `editor_open_docs` its reactive projection.
+
+**What S4 delivered against this (2026-07-11, d5d346e6):** within the *controller* process, lazily
+`editor_open_docs` is now the **authority** for the liveness decision and the durable lease is
+**off the hot path** — consulted only on a cold miss (post-recycle recovery), exactly the operator
+directive. This did *not* need S5/S6 because the controller is fed by explicit in-process editor
+events (the replica lifecycle over the existing socket), not by a cross-process reactive bridge.
+What still needs S5 + S6 + a durability story is the *fuller* north star — **eliminating the durable
+filesystem lease/sidecar entirely** (a pure lazily open-set cell authored in the plugin's reactive
+graph and bridged to the controller, with lazily-owned durability across a recycle). Until then the
+lease stays as the crash-recovery backup only; it is no longer a per-decision authority read.
 
 - **S7 — content CRDT vs reactive projection. DECISION: keep split (two substrates, one socket).**
   The yrs content replica (`CrdtReplicaForwarder`/`CrdtReplicaManager` + `.agent-doc/patches`) and

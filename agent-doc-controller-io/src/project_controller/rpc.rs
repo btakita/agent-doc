@@ -5755,6 +5755,13 @@ pub(crate) fn serve_with_options(
         write_bootstrap(project_root, launch_mode)?
     };
     let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+    // #s4b: install the OS process-exit watcher on the process-global editor-attachment
+    // registry so the editor-attached authority (`authority_for_file`) can read pure
+    // reactive state on the hot path and learn about editor **crashes** (which send no
+    // `deregister`) from a bounded-latency liveness poller instead of a per-decision
+    // filesystem lease read. Controller-only: a short-lived CLI installs no watcher, so it
+    // keeps cold-missing to the durable lease (unchanged, crash-safe).
+    crate::process_exit_watcher::install_process_exit_watcher();
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)

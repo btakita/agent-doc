@@ -1,18 +1,22 @@
 # Plan — live_editor pipeline onto the lazily reactive backbone (#live-editor-reactive)
 
-## Status (2026-07-11) — core COMPLETE, lazily state is the liveness authority
+## Status (2026-07-11) — COMPLETE (S1–S4 + S4b); S5/S6 blocked upstream, S7 decided
 S1 (reactive RelayHub liveness core, 824a2632), S2 (reactive editor open-docs registry),
-S2b + S3 (resolver/visible-write route through the reactive open-docs authority, 55d91244) and
+S2b + S3 (resolver/visible-write route through the reactive open-docs authority, 55d91244),
 **S4 (lazily `editor_open_docs` is the authority; the durable lease is crash-recovery backup
-consulted only on a cold miss; sidecars/leases are off the steady-state hot path, d5d346e6)** are
-**DONE**. The observed phantom-`live_editors=0` wedge is fixed: after a controller recycle the doc
-is *untracked* in the reactive authority, so the resolver recovers once from the durable lease and
-keeps editor authority instead of demoting to disk. An explicit editor deregister (close) drives
-the reactive authority closed and resolves to disk directly — no lease read. The reactive registry
-is driven by explicit in-process editor events (replica register/update → open, deregister → close)
-in `agent-doc-crdt-relay-io`, so steady-state decisions touch no filesystem. S5/S6 remain blocked
-upstream on lazily (`#lzpkgwire`) / decided against for now; S7 decided (keep the content-CRDT vs
-state-projection split). See the staged section for per-stage detail. `make check`: 7418 passed.
+consulted only on a cold miss; sidecars/leases are off the steady-state hot path, d5d346e6)** and
+now **S4b (the editor-attached gate `authority_for_file` reads pure reactive state on the hot path;
+editor **crash** is observed by a cross-platform OS process-exit watcher that flips a lazily `alive`
+cell; the lease is consulted only on a cold miss)** are **DONE**. The observed phantom-`live_editors=0`
+wedge is fixed: after a controller recycle the doc is *untracked* in the reactive authority, so the
+resolver recovers once from the durable lease and keeps editor authority instead of demoting to disk.
+An explicit editor deregister (close) drives the reactive authority closed and resolves to disk
+directly — no lease read. The reactive registries are driven by explicit in-process editor events
+(replica register/update → open+attach, deregister → close+detach) in `agent-doc-crdt-relay-io`, so
+steady-state decisions touch no filesystem. With S4b the **last** per-decision lease poll on the CRDT
+op hot path is gone: `authority_for_file` no longer reads the plugin-owner lease on every op.
+S5/S6 remain blocked upstream on lazily (`#lzpkgwire`) / decided against for now; S7 decided (keep the
+content-CRDT vs state-projection split). See the staged section for per-stage detail.
 
 ## Problem
 
@@ -198,19 +202,47 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
   - **Other consumers unchanged (no demote bug):** `live_buffer_guard`'s `commit_barrier_ready`
     routes through the controller model and **fails closed**; `plugin-owner` is the lease writer.
     Converting them to reactive subscription is a no-behavioral-change refinement, deferred.
-- **S4b — the editor-attached GATE (`authority_for_file`) still reads the lease on the hot path.
-  Left in place ON PURPOSE: it is the crash-detection backstop. (verified 2026-07-11)**
+- **S4b — the editor-attached GATE (`authority_for_file`) is now reactive on the hot path. DONE
+  (2026-07-11).** The gate reads pure reactive state (`editor_attach().is_tracked/is_attached`);
+  the plugin-owner lease is consulted **only on a cold miss** (a document this process never
+  recorded — a CLI with no watcher, or the controller right after a recycle before any editor event
+  re-seeded it). The missing crash signal is supplied by a **cross-platform OS process-exit watcher**
+  (operator requirement: Linux, macOS, Windows). Shipped shape (`#s4b-liveness-cell`):
+  - **Reactive topology** — `agent-doc-document-realtime/src/editor_attach.rs`: `alive:
+    ThreadSafeCellFamily<pid,bool>` (the crash input), `registered: ThreadSafeCellFamily<(doc,pid),
+    bool>` (driven by the replica lifecycle), and `is_attached(doc)` = *any registered (doc,pid) whose
+    `alive[pid]` is true* — a pure in-memory reactive read, zero filesystem. One `process_exited(pid)`
+    cascades to every doc that pid owned (whole-editor death). `is_tracked` is the cold-miss signal.
+  - **OS watcher** — `agent-doc-controller-io/src/process_exit_watcher.rs`, installed once in
+    `serve_with_options`. It is a **portable liveness poller** behind the injectable
+    `ProcessExitWatcher` seam: `kill(pid,0)` on Unix (Linux + macOS), an `OpenProcess`/
+    `WaitForSingleObject` handle wait on Windows (`windows-sys`, `cfg(windows)` target dep), a
+    conservative alive fallback elsewhere. It runs on a dedicated background thread off the hot path
+    and has **no per-pid OS resource** to leak (`unwatch` just drops the pid). The per-OS *event*
+    primitives (`pidfd`/`kqueue`/`RegisterWaitForSingleObject`) remain a latency optimization that can
+    drop in behind the same seam later without touching any consumer.
+  - **CLI-safety rule** — the reactive cache is trusted only in a process that will observe a crash.
+    The long-lived controller installs the watcher; a short-lived CLI does not, so `attach` is a no-op
+    there, the doc is never `is_tracked`, and `authority_for_file` keeps cold-missing to the lease —
+    byte-for-byte the pre-S4b behavior, and crash-safe because the lease pid-liveness is read fresh.
+  - **Seeding** — `agent-doc-crdt-relay-io` drives `editor_attach().attach(doc, lease.pid)` on
+    register/update (pid learned once from the lease) and `.detach(doc)` on deregister, alongside the
+    existing `editor_open_docs` marks.
+  - **SimWorld** — the exit-event source is injectable, so the derived authority is deterministically
+    testable without real process death (fake watcher + scripted `process_exited`), including the
+    whole-editor-death cascade and the reused-pid reattach. `make check` green.
+
+  Historical rationale (why this was deferred and why it is now safe) — the gate
   `agent_doc_plugin_owner::crdt_authority::authority_for_file` → `ownership_liveness_for_file` →
-  `read_plugin_owner_lease` is a filesystem lease read at the top of *every* CRDT op
-  (register/deregister/update/resolve, ~30 sites). It decides `MultiReplica` (editor attached) vs
-  `GitAuthoritative` (detached). It is **not** safe to make this reactive-cached the way S4 did the
+  `read_plugin_owner_lease` was a filesystem lease read at the top of *every* CRDT op
+  (register/deregister/update/resolve, ~30 sites), deciding `MultiReplica` (editor attached) vs
+  `GitAuthoritative` (detached). It could **not** be naively reactive-cached the way S4 did the
   open-docs decision, because the reactive event stream cannot observe an editor **crash**: a
   crashed editor sends no `deregister`, so a cached `MultiReplica` would go stale and wrongly hold
-  editor authority (blocking disk commits / stranding closeout). The lease's **pid-liveness** check
-  is the only prompt crash signal. In fact S4 is *safe precisely because* this gate still polls:
-  a crashed editor becomes `Detached` here, so the resolver never reaches S4's (reactive) zero-live
-  branch. `plugin-owner` already depends on `document-realtime`, so the dependency allows a reactive
-  read — the blocker is crash detection, not layering.
+  editor authority (blocking disk commits / stranding closeout). S4b closes that exact gap by making
+  the crash an OS-observed reactive input (the `alive` cell) instead of relying on a per-decision
+  lease poll; `plugin-owner` already depends on `document-realtime`, so the reactive read is a clean
+  layering. All ~30 op sites benefit from the single `authority_for_file` change.
   - **Preferred fix — an OS process-exit EVENT, not a poll (`#s4b-pidfd`).** The missing signal is
     "editor crashed" (pid death sends no `deregister`). Get it as an event:
     - **`pidfd` (fits the current connect-per-request transport):** `pidfd_open(2)` (Linux 5.3+)

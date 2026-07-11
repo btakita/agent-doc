@@ -13,6 +13,7 @@ pub mod convergence_gate;
 pub mod crdt_authority;
 pub mod crdt_merge_base;
 pub mod crdt_relay;
+pub mod editor_attach;
 pub mod editor_identity;
 pub mod editor_open_docs;
 pub mod ipc_corruption;

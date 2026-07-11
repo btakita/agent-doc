@@ -55,6 +55,11 @@ serde_json = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }
 tracing = "0.1"
 
+# S4b cross-platform process-exit watcher: Windows liveness via a process handle.
+# Unix (Linux + macOS) uses `libc::kill(pid, 0)` above; this covers the Windows leg.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [dev-dependencies]
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.84" }
 rusqlite = { version = "0.40", features = ["bundled"] }

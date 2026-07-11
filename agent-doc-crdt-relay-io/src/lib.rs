@@ -1015,6 +1015,41 @@ fn mark_editor_open_docs_closed(file: &Path) {
         .mark_closed(&file.display().to_string());
 }
 
+/// #s4b: seed the reactive **editor-attach** authority for this document from the durable
+/// plugin-owner lease (which records the editor process pid, `#8bfz`). This is the
+/// register/attach event where the pid is learned once. A no-op when no OS process-exit
+/// watcher is installed (a short-lived CLI): only the long-lived controller installs the
+/// watcher, so only it trusts the reactive `alive` cell; a watcher-less process keeps
+/// cold-missing `authority_for_file` to the lease. `attach` re-asserts liveness for the
+/// pid, so this also re-seeds after a controller recycle wiped the in-memory state.
+fn mark_editor_attach_open(file: &Path) {
+    let doc = file.display().to_string();
+    if let Some(lease) = agent_doc_plugin_owner::read_plugin_owner_lease(&doc) {
+        agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, lease.pid);
+    }
+}
+
+/// #s4b: re-seed the reactive editor-attach authority from the lease **only if** the
+/// document is not already reactively attached. Called on the high-frequency editor
+/// `replica_update` path so the once-per-attach lease read is not repeated per keystroke;
+/// it fires only to recover after a controller recycle (in-memory state lost) or a stale
+/// exit mark, matching the phantom-heal reattach next to it. A genuine update proves the
+/// editor is alive, so re-asserting `alive` is correct.
+fn reseed_editor_attach_if_needed(file: &Path) {
+    let doc = file.display().to_string();
+    if !agent_doc_document_realtime::editor_attach::editor_attach().is_attached(&doc) {
+        mark_editor_attach_open(file);
+    }
+}
+
+/// #s4b: mark this document detached in the reactive editor-attach authority on an
+/// explicit editor `replica_deregister` (mirrors [`mark_editor_open_docs_closed`]). A
+/// controller recycle sends no deregister, so it leaves the authority untracked → cold-miss
+/// recovery from the durable lease, not a stale detached state.
+fn mark_editor_attach_closed(file: &Path) {
+    agent_doc_document_realtime::editor_attach::editor_attach().detach(&file.display().to_string());
+}
+
 pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -1035,6 +1070,9 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
     })??;
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
+    // #s4b: seed the reactive editor-attach authority (pid learned from the lease) so the
+    // hot-path `authority_for_file` gate reads pure reactive state under the controller.
+    mark_editor_attach_open(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1062,6 +1100,9 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     // (A controller recycle sends no deregister, so it stays untracked → cold-miss
     // recovery from the durable lease, not a stale closed state.)
     mark_editor_open_docs_closed(file);
+    // #s4b: explicit close drives the reactive editor-attach authority detached, so the
+    // hot-path gate resolves to disk immediately (no lagging live lease override).
+    mark_editor_attach_closed(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1122,6 +1163,9 @@ pub fn relay_replica_update_for_file(
     // An editor update proves the doc is open → keep the reactive open-docs authority
     // truthful (also re-seeds it after a recycle-driven phantom-heal reattach).
     mark_editor_open_docs_open(file);
+    // #s4b: re-seed the reactive editor-attach authority only if not already attached
+    // (recovers after a recycle/stale-exit; avoids a per-update lease read otherwise).
+    reseed_editor_attach_if_needed(file);
     if reattached {
         agent_doc_ops_log_io::log_op(
             file,

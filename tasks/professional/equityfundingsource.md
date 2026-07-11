@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -33,85 +33,45 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260705-154854.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260711-044000.md`*
 
 Compacted content:
-- Archived 10 response topic(s): Advance-lender dialog; deploy; Realtime pipeline events + notifications; 7 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): #ccpz; IPC proof diagnostic (interrupted-cycle recovery); lend...
+- Archived 4 response topic(s): stop-hook closeout; CRDT relay compact-exchange hotpath; stop-hook commit-boundary repair; 1 more
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): Advance-lender dialog; deploy; Realtime pipeline events + not...
 
-### Re: stop-hook closeout — gpt-5
+### Re: Transcribe + diarize the 2026-07-10 call — opus-4-8
 
-No repo work was performed for `#sy71` in this cycle. The prior turn found no new document prompt body to answer, repaired the stale snapshot/CRDT sidecars from the current visible document, and verified the session cycle after recovery.
+Done. `corky transcribe --diarize` produced a diarized transcript of the 73-minute walkthrough (Brian, Robert, Judith, April) at `src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-compressed.transcript.md`, matching the existing `docs/calls/*.transcript.md` convention. Corrected the frontmatter date to the recording date (2026-07-10).
 
-This write is the required hook closeout: it moves the captured assistant response through the binary-owned `agent-doc write --commit` boundary so the turn is represented in the session document and git history.
+### Re: Analyze the transcript + add todo items — opus-4-8
 
-Verification already completed in this turn path:
-- `agent-doc reset --from-current /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md`
-- `agent-doc preflight /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reported `no_changes: true`
-- `agent-doc session-check /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` reached committed state after recovery
+Captured ~30 action items in `docs/calls/2026-07-10 14-31-13-followups.md` (companion to the transcript, same pattern as prior `-tasks.md`/`-feedback-plan.md` files), organized by theme:
 
-Remaining operator-visible notes: the queue is still paused by dangling `/goal #zhfn`, and the installed `agent-doc` binary is stale relative to local source edits.
+- **[P0] Go-live this week** — publish the site, hide non-functional portals, keep apply-for-loan + inquiries working; verify apply→TMO end-to-end.
+- **Homepage copy** — "fund and close", "View more funded deals", contact CTA "Send us your details for a quick approval", rate range 8.99–14%, theme/color fix.
+- **Loan Package** — drop loan number (reference by address), add front photo, replace blue placeholder, surface all loan info.
+- **Document requirements** — bug: custom required doc applies to everybody (should be per-deal); seed LOE / Business Purpose Letter types; preset "request missing docs" email.
+- **Deal notes** — rename workflow→deal notes, per-deal, append-only log with timestamps + author attribution.
+- **Funding tabs** — wire instructions as upload; add Lender Documents + Funding Package tabs; order Loan Package → Lender Docs → Funding Package.
+- **Accreditation questionnaire** — full form in lender portal, income/net-worth only, not a hard funding gate, admin-fillable, editable PDF + DocuSign.
+- **TMO** — bidirectional conditions sync (TMO source of truth); Tue ~11:30 screen-share with April to see the LOS portal; LOS lender-ID / deep-link.
+- **[P0] Available-deals upload** — API endpoint + key to upload investor offers (replaces manual YAMM), plus a manual add-deal form; add Robert to the YAMM list.
+- **Bug: messaging email** — admin→investor loan message no longer sends the email notification.
+- **Fractionalized loans** — up to ~10 lenders/loan with siloed info (future).
 
-### Re: CRDT relay compact-exchange hotpath — gpt-5
+Committed both files to the `equityfundingsource-dev` submodule (ce05c4c).
 
-Correction to the captured closeout above: the installed `agent-doc` binary is no longer stale. I rebuilt and installed `agent-doc` 0.34.67, restarted the project controller, and confirmed controller freshness reports the running inode matches the installed binary.
+**Cycle note:** the session document was wedged on a stale-editor lease — the JetBrains IDE plugin (pid 432595) stopped heartbeating ~12 min ago while holding a divergent pre-compaction buffer, so the supervisor kept treating it as authority over the clean post-compaction disk. Disk + CRDT sidecars are clean and hold all your prompts; I rebuilt them (`reset --from-current --force-disk`), restarted the relay controller, and persisted this response via `--force-disk`. If your IDE still shows the old version, reload the file from disk.
 
-Implemented the requested fixes in the binary: removed the legacy stale snapshot reset-drift guard, added compact-exchange CRDT relay projection recovery, covered stale editor publish rejection and transport-failure recovery, and kept force-disk/direct-run closeout disk-authoritative while preserving the exchange boundary and pending queue tail.
+I did **not** auto-enqueue the ~30 items into the go-mode queue — a walkthrough shouldn't trigger unsupervised feature builds. They live in the followups doc for you to triage; say the word to queue specific ones.
+<!-- agent:boundary:0d2da0a6:equityfundingsource -->
+Please transcribe + diarize [2026-07-10 14-31-13-compressed.mp4](../../../../../Videos/2026-07-10%2014-31-13-compressed.mp4) and place the transcript into equityfundingsource-dev.
 
-Verification completed:
-- `make check` passed: 7269 tests run, 7269 passed, 239 skipped.
-- Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
-- Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
-- `gh run list --workflow CI --limit 1` found no workflow named `CI`; fallback `gh run list --limit 1` shows an existing `Agent Doc` workflow failure from 2026-07-06T07:17:09Z, not a run from these local changes.
-- Queue/direct-run regression tests passed, including `run_auto_queue_continues_until_drained` and `run_auto_queue_starts_fresh_backend_session_after_accretion_threshold`.
-- Compact-exchange relay recovery test passed: `cargo test -p agent-doc-crdt-relay-io ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout -- --nocapture`.
-- `make check` passed: 7267 tests run, 7267 passed, 239 skipped.
-- `agent_doc_session_check` reported the admitted cycle open before this finalization; this finalize call is the required closeout boundary.
-- `agent_doc_plan` completed with `execution_scope=normal` and no blockers.
-- `agent-doc --version` reported `agent-doc 0.34.67`, matching the installed skill version.
-- `tsift status` reported a fresh index.
-- Confidence: high.
-- Escalation: none.
-- The EFS worktree already had unrelated uncommitted changes before this cycle; I left them intact and only edited the files above for this request.
-- `gh run list --workflow CI --limit 1` returned `could not find any workflows named CI`; fallback `gh run list --limit 1` produced no workflow rows.
-- `make check` passed: 1380 Bun tests, app build, and worker build completed.
-- `bun test tests/admin-investor-documents.test.ts tests/admin-investor-pipeline.test.ts tests/advance-lender-documents.test.ts` passed: 124 tests, 0 failures.
-- `prds/investor-pipeline-admin.md`: documented that admin-filled annual Requirements questionnaires are approved in one action.
-- `tests/admin-investor-documents.test.ts` and `tests/admin-investor-pipeline.test.ts`: updated coverage for auto-approval behavior and UI contract text.
-- `lib/ui--browser--efs/portal/admin/investor_pipeline.tsx`: the lender-pipeline Requirements button now says `Save and approve`, and the success toast says the requirements were approved.
-- `app/equityfundingsource/lib/admin/investor_management/index.ts`: the admin `PUT /api/admin/users/:id/investor-accreditation` path now saves the questionnaire row and immediately marks that row `verified` via `investor_accreditation_decision_`, using `ACCREDITATION_ANNUAL_TTL_SECONDS` and the admin reviewer id.
-
-### Re: stop-hook commit-boundary repair — gpt-5
-
-The Stop hook found the previous response on the wrong side of the commit boundary. I am not doing additional EFS repo work in this repair cycle; I am committing the already-visible session response through the binary-owned closeout path with a strict template heading.
-
-Verification:
-- `agent-doc session-check` reported the active cycle still at `response_captured` before this repair.
-- The session document already contains the annual Requirements closeout and struck queue prompt.
-- Normal `agent-doc write --commit --stream --template` retried socket IPC and file IPC, then failed at the unproven editor-authority guard.
-- This repair response exists only to satisfy the required write/commit boundary.
-- Confidence: high.
-- Escalation: force-disk closeout used because the Stop hook explicitly required commit-boundary completion after editor IPC proof failed.
-
-### Re: annual Requirements questionnaire queue prompt — gpt-5
-
-> **Queue prompt:** In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, if the admin fills the lender's annual requirements questionaire, the lender's requirements should automatically be approved.
-
-That queue prompt is answered by the already-visible implementation closeout: the admin annual Requirements save path now records the questionnaire and immediately approves the lender requirements row, and the lender-pipeline UI copy reflects the one-action `Save and approve` behavior.
-
-No additional EFS repo work was performed in this repair cycle. This response exists to provide the committed free-text queue prompt echo required by `agent-doc session-check` after the Stop-hook recovery.
-
-Verification:
-- The queue prompt is struck in `agent:queue` as answered this cycle.
-- The implementation closeout already records the changed EFS paths and test/build verification.
-- The previous repair response crossed the force-disk closeout path but `session-check` still required this explicit queue-prompt echo.
-- Confidence: high.
-- Escalation: force-disk closeout used because the Stop hook required commit-boundary completion after normal editor IPC proof failed.
-<!-- agent:boundary:de3fa2de -->
+Analyze the transcript. Please add todo items.
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~In https://equityfundingsource.brian-takita.workers.dev/admin/lender-pipeline?tab=pipeline&dialog_user_id=96176122-b287-4c47-823e-88a71a831f7c&dialog=lender, if the admin fills the lender's annual requirements questionaire, the lender's requirements should automatically be approved.~~ — auto-struck: answered this cycle (#ftstrike) 
+- ~~deploy~~
 - 🚧 [#sy71]
 <!-- /agent:queue -->
 
@@ -136,6 +96,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#xzxy] [recommended] Triage EFS 2026-07-10 walkthrough follow-ups (src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-followups.md) — pick which of ~30 items to queue: [P0] go-live this week, homepage copy, Loan Package (drop loan#, front photo), doc-requirements (2 bugs: per-deal required docs + LOE/BPL types), deal notes (per-deal append-only log), funding tabs (Lender Docs + Funding Package), accreditation questionnaire, bidirectional TMO conditions sync, [P0] available-deals upload API (replace YAMM), messaging-email regression, fractionalized loans.
 <!-- /agent:backlog -->
 
 ## Review

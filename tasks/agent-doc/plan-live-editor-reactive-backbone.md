@@ -112,11 +112,37 @@ So the earlier "hand-rolled epoch cell" workaround is UNNEEDED — use the real 
   bounded per session, acceptable. Deadlock guard: family releases its lock before touching `ctx`
   (already true in the shipped family), so no lock-order cycle with the registry mutex.
   SimWorld: liveness transitions recompute the derived count deterministically.
-- **S2 — bridge to backbone Transport projection.** Emit a Transport receipt on each
-  liveness transition; assert `authority_for_projection` and `live_count` agree.
+### Redirection (2026-07-11, operator) — editor open-files is the ground-truth reactive input
+The observed wedge was "document open in the editor but `live_count=0`". Root insight from
+the operator: the CRDT relay's per-replica liveness is a *derived, repairable* signal, not the
+ground truth. The **ground truth is the editor's open/visible file set**, and the authority
+rule is: *if there is any chance the editor buffer differs from disk, the editor buffer is
+authority.* A file open in an editor can diverge from disk → editor-authoritative; a file not
+open in any editor cannot diverge → disk-authoritative. So a stale CRDT lease (liveness 0 while
+the file is open) must **repair liveness toward the open-doc signal**, never demote to disk.
+
+**FFI-first (Shared Foundation).** The reactive open-doc model lives in the shared Rust library;
+editor plugins stay thin event reporters (report open/close, no native reactive authority). The
+reactive graph is process-local, so the plugin process is fed by FFI events and the controller
+process reconciles the same open set from the durable live-buffer sidecars. Native plugin
+reactive models, if any, are UI *views* of the Rust-owned truth — never a second authority.
+
+- **S2 [revised] — reactive editor open-docs registry.** `agent-doc-document-realtime::editor_open_docs`:
+  `ThreadSafeContext` + `ThreadSafeCellFamily<String, DocOpenState{open,is_agent_doc}>` +
+  `membership_epoch` + derived `open_count` / `open_agent_doc_count` slots. Source-agnostic driving:
+  `mark_open`/`mark_open_with`/`mark_closed` (in-process FFI events) and `reconcile(open_set)`
+  (controller sidecar scan). FFI `agent_doc_report_editor_state` → `mark_open_with` (lazy
+  frontmatter classify, first-open only); `agent_doc_document_closed_for_editor` → `mark_closed`
+  once no live-buffer sidecar remains. SimWorld: open/close sequence vs reference model; open
+  agent-doc subset; reconcile close-dropped/open-new. **DONE (this commit).**
+- **S2b — authority from open-docs + liveness repair.** Derive per-doc authority from
+  `is_open(doc)` (editor-authoritative when open, disk when not) and reconcile it with the
+  backbone Transport projection so `authority_for_projection` agrees. When `is_open(doc)` but the
+  relay `live_count()==0`, **repair** (re-register/reconnect the replica) instead of demoting —
+  this is the detach/attach mapping the earlier S2 question was really about.
 - **S3 — resolver observes backbone.** `agent-doc-crdt-relay-io` resolver derives
-  authority from the reactive projection, not a raw `live_count()` poll. Preserve the
-  `crdt_relay_no_live_editors` / `live_editors=` log fields (regression-visible).
+  authority from the reactive projection (open-docs + backbone), not a raw `live_count()` poll.
+  Preserve the `crdt_relay_no_live_editors` / `live_editors=` log fields (regression-visible).
 - **S4 — push to remaining consumers.** `live_buffer_guard`, `plugin-owner` observe
   the signal. Reconcile stale-lease heal so a live-but-lease-expired plugin re-lives
   reactively (kills the phantom-0 wedge that caused the symptom).

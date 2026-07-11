@@ -589,6 +589,13 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     if let Err(e) = agent_doc_debounce::clear_live_buffer_for_editor(path, Some(editor)) {
         eprintln!("[ffi] clear live buffer for editor failed for {path}: {e}");
     }
+    // Mirror the close into the reactive editor open-document registry
+    // (`#live-editor-reactive`). Close is per-editor, so only mark the document fully
+    // closed once no live buffer sidecar remains — another editor may still hold it
+    // open (and it stays editor-authoritative until the last one closes).
+    if agent_doc_debounce::live_buffer_snapshots(path).is_empty() {
+        agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
+    }
 }
 
 /// `#cancel-orphans-preflight-cycle`: explicit run-cancel reclaim seam.
@@ -1005,6 +1012,20 @@ pub unsafe extern "C" fn agent_doc_report_editor_state(
         session_id: sid,
     };
     agent_doc_debounce::record_editor_buffer_state(&state);
+    // Feed the reactive editor open-document registry (`#live-editor-reactive`): an
+    // editor buffer report proves the document is open. Classification is computed
+    // lazily and only the first time this path is seen, so the per-keystroke hot path
+    // never re-reads frontmatter for an already-known document.
+    agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open_with(path, || {
+        std::fs::read_to_string(path)
+            .map(|content| {
+                agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(
+                    &content,
+                    std::path::Path::new(path),
+                )
+            })
+            .unwrap_or(false)
+    });
 }
 
 /// Get the current editor buffer state for a document as JSON.

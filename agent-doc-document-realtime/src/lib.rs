@@ -14,6 +14,7 @@ pub mod crdt_authority;
 pub mod crdt_merge_base;
 pub mod crdt_relay;
 pub mod editor_identity;
+pub mod editor_open_docs;
 pub mod ipc_corruption;
 pub mod read_authority;
 pub mod replica_sync;

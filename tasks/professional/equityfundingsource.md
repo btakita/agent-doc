@@ -141,15 +141,33 @@ Fixed and pushed (`equityfundingsource-dev` 25a8828).
 **Root cause:** adding a custom required document from a deal created a **global** catalogue type with `default_required=1`, so it immediately became required on *every* deal — Brian's "oh, this makes it required for everybody" from the call.
 
 **Fix:** `POST /api/admin/document-types` now accepts an optional `deal_id`. When present it creates the type **global-optional** (`default_required=0`) and requires it **only for the originating deal** via the existing per-deal override (`deal_required_document_types`). The deal documents tab (`deal_detail.tsx`) passes `deal_id`; the global settings page omits it and keeps catalogue-wide behavior — so a type is still "remembered" in the catalogue for reuse, just not force-required everywhere. Added `#e2n0` coverage (deal A requires it, deal B untouched); suite 1428 pass / 7 pre-existing baseline fails, zero new failures.
-<!-- agent:boundary:2bcdfe38 -->
+
+### Re: do #nyeb — Loan Package — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#nyeb]
+
+
+Done and pushed (`equityfundingsource-dev` 2f725ed).
+
+Investigated all four call items; **most had already shipped** since the 2026-07-10 call — only the loan-number reference was still outstanding:
+
+- **Drop the loan number → reference by property address** — **fixed.** The package link label read `Loan package — loan <number>`; now `Loan package — <property address>` (the loan number isn't assigned until docs). Added a source-guard test.
+- **Front property photo in the email** — already shipped (`#dpkt-email-photos`): the email embeds up to 3 of the deal's real property photos via the token-gated `/dp/<token>/photos/<id>` route.
+- **Replace the blue placeholder** — already done: the lender view renders real photos through `DealPhotoCarousel`, with a neutral gray house-SVG empty state (the old blue default is gone).
+- **Surface all loan info** — already done: `PreferredLoanTerms` shows property value, loan amount, LTV, lien position, and borrower/property info in the lender's Loan Package view.
+
+Suite 1428 pass / 7 pre-existing baseline fails, zero new failures. The photo/placeholder/loan-info surfaces would benefit from a quick live-portal eyeball, but they're wired correctly in code.
+<!-- agent:boundary:7222555b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tcb0]~~
 - ~~do [#nyc5]~~
-- 🚧 do [#nga4]
+- ~~do [#nga4]~~
 - ~~do [#e2n0]~~
-- do [#nyeb]
+- ~~do [#nyeb]~~
 - do [#1j5y]
 - do [#faxz]
 - do [#91d8]
@@ -159,7 +177,7 @@ Fixed and pushed (`equityfundingsource-dev` 25a8828).
 - ~~do [#1067]~~
 - ~~do [#jzqj]~~
 - ~~do [#mam7]~~
-- do [#hmw9]
+- do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.
 <!-- /agent:queue -->
 
 ## Notes
@@ -184,7 +202,6 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
-- [ ] [#nyeb] Loan Package: drop the loan number (reference by property address), add the front property photo, replace the blue placeholder image, surface all loan info in the Loan Package view. [followups: Loan Package]
 - [ ] [#1j5y] Homepage copy: step-3 'fund and close'; funded-deals CTA 'View more funded deals'; contact CTA 'Send us your details for a quick approval'; rate range 8.99-14%; fix theme/colors. [followups: Homepage copy]
 - [ ] [#faxz] Funded-deals page: add more funded deals + admin curate / 'featured transactions'. [followups: Homepage copy]
 - [ ] [#91d8] Document types: seed remembered custom types LOE (credit + exit-strategy) and Business Purpose Letter; add a preset 'request missing documents' email (refi/purchase variants) with explanations. [followups: Document requirements]

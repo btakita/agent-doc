@@ -43,6 +43,9 @@ Compacted content:
 
 Done. `corky transcribe --diarize` produced a diarized transcript of the 73-minute walkthrough (Brian, Robert, Judith, April) at `src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-compressed.transcript.md`, matching the existing `docs/calls/*.transcript.md` convention. Corrected the frontmatter date to the recording date (2026-07-10).
 
+Please transcribe + diarize [2026-07-10 14-31-13-compressed.mp4](../../../../../Videos/2026-07-10%2014-31-13-compressed.mp4) and place the transcript into equityfundingsource-dev.
+
+❯ Analyze the transcript. Please add todo items.
 ### Re: Analyze the transcript + add todo items — opus-4-8
 
 Captured ~30 action items in `docs/calls/2026-07-10 14-31-13-followups.md` (companion to the transcript, same pattern as prior `-tasks.md`/`-feedback-plan.md` files), organized by theme:
@@ -64,15 +67,12 @@ Committed both files to the `equityfundingsource-dev` submodule (ce05c4c).
 **Cycle note:** the session document was wedged on a stale-editor lease — the JetBrains IDE plugin (pid 432595) stopped heartbeating ~12 min ago while holding a divergent pre-compaction buffer, so the supervisor kept treating it as authority over the clean post-compaction disk. Disk + CRDT sidecars are clean and hold all your prompts; I rebuilt them (`reset --from-current --force-disk`), restarted the relay controller, and persisted this response via `--force-disk`. If your IDE still shows the old version, reload the file from disk.
 
 I did **not** auto-enqueue the ~30 items into the go-mode queue — a walkthrough shouldn't trigger unsupervised feature builds. They live in the followups doc for you to triage; say the word to queue specific ones.
-<!-- agent:boundary:0d2da0a6:equityfundingsource -->
-Please transcribe + diarize [2026-07-10 14-31-13-compressed.mp4](../../../../../Videos/2026-07-10%2014-31-13-compressed.mp4) and place the transcript into equityfundingsource-dev.
-
-Analyze the transcript. Please add todo items.
+<!-- agent:boundary:cd32e992 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~deploy~~
-- 🚧 [#sy71]
+- [#xzxy]
+- deploy
 <!-- /agent:queue -->
 
 ## Notes

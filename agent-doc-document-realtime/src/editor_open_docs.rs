@@ -220,6 +220,16 @@ impl EditorOpenDocs {
         self.docs.is_present(&key) && self.docs.observe(&self.ctx, key).open
     }
 
+    /// Whether `path` has ever been recorded (open OR closed) in this registry. Lets a
+    /// consumer distinguish a **known-closed** document from a **never-seen** one so it
+    /// can fall back to a durable backup source *only on the never-seen (cold-miss) case*
+    /// — e.g. right after a process recycle, before any open/close event has re-seeded the
+    /// in-memory reactive authority — instead of consulting the backup on every read. Does
+    /// not materialize an entry for a never-seen path.
+    pub fn is_tracked(&self, path: &str) -> bool {
+        self.docs.is_present(&path.to_string())
+    }
+
     /// The number of documents currently open in an editor — a reactive read of the
     /// derived `open_count` slot.
     pub fn open_count(&self) -> usize {
@@ -372,6 +382,25 @@ mod tests {
         assert!(reg.is_open("plan.md"));
         reg.mark_closed("plan.md");
         assert!(!reg.is_open("plan.md"));
+    }
+
+    #[test]
+    fn is_tracked_distinguishes_never_seen_from_known_closed() {
+        let reg = EditorOpenDocs::new();
+        // Never seen → not tracked (cold miss). A pure query must not materialize it.
+        assert!(!reg.is_tracked("never-seen.md"));
+        assert_eq!(reg.open_count(), 0);
+
+        // A close records a present-but-closed entry: known-closed IS tracked, so a
+        // consumer will read the reactive authority (closed) and NOT re-consult a backup.
+        reg.mark_closed("closed.md");
+        assert!(reg.is_tracked("closed.md"));
+        assert!(!reg.is_open("closed.md"));
+
+        // An open is likewise tracked.
+        reg.mark_open("open.md", true);
+        assert!(reg.is_tracked("open.md"));
+        assert!(reg.is_open("open.md"));
     }
 
     #[test]

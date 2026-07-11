@@ -996,6 +996,25 @@ pub struct ReplicaPull {
 ///
 /// A client-id collision (already registered, or canonical-id collision) is a
 /// hard error per the plan's unique-stable-client-id rule.
+/// #live-editor-reactive: mark this document open in the process-local reactive
+/// `editor_open_docs` authority. Called from the editor replica lifecycle (register /
+/// reconnect / update) — an explicit, in-process event, so the reactive authority stays
+/// truthful **without any filesystem read**. Every document that reaches the CRDT relay is
+/// an agent-doc session document, so `is_agent_doc` is true.
+fn mark_editor_open_docs_open(file: &Path) {
+    agent_doc_document_realtime::editor_open_docs::editor_open_docs()
+        .mark_open(&file.display().to_string(), true);
+}
+
+/// #live-editor-reactive: mark this document closed in the reactive authority. Called on
+/// an explicit editor `replica_deregister` (the editor detached / closed the buffer). A
+/// controller recycle sends no deregister, so it leaves the authority untracked instead —
+/// the resolver then recovers that cold miss from the durable lease backup.
+fn mark_editor_open_docs_closed(file: &Path) {
+    agent_doc_document_realtime::editor_open_docs::editor_open_docs()
+        .mark_closed(&file.display().to_string());
+}
+
 pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -1014,6 +1033,8 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
                 .map(|()| hub.canonical_encoded_state())
         }
     })??;
+    // Editor attach is an explicit event → drive the reactive open-docs authority.
+    mark_editor_open_docs_open(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1037,6 +1058,10 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     }
     let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
+    // Editor detach is an explicit event → mark the reactive open-docs authority closed.
+    // (A controller recycle sends no deregister, so it stays untracked → cold-miss
+    // recovery from the durable lease, not a stale closed state.)
+    mark_editor_open_docs_closed(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1094,6 +1119,9 @@ pub fn relay_replica_update_for_file(
         }
         hub.relay_update(client_id, update)
     })??;
+    // An editor update proves the doc is open → keep the reactive open-docs authority
+    // truthful (also re-seeds it after a recycle-driven phantom-heal reattach).
+    mark_editor_open_docs_open(file);
     if reattached {
         agent_doc_ops_log_io::log_op(
             file,

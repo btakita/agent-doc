@@ -949,7 +949,7 @@ pub fn guard_visible_write_reconcile_with_target(
                 // response against it and NEVER read disk (which would clobber the open
                 // editor buffer). Only a genuinely closed editor falls through to the disk
                 // replica below.
-                if resolve_zero_live_editors(reconcile_and_observe_editor_open(file))
+                if resolve_zero_live_editors(observe_editor_open(file))
                     == ZeroLiveResolution::KeepEditorAuthority
                 {
                     if visible_write_content_matches(&relay_text, expected_current) {
@@ -1346,29 +1346,43 @@ pub fn resolve_zero_live_editors(editor_open: bool) -> ZeroLiveResolution {
     }
 }
 
-/// #live-editor-reactive (S2b/S3): reconcile the reactive `EditorOpenDocs` registry from
-/// the durable live-buffer sidecar ground truth for THIS document, then return the
-/// reactive `is_open` observation that drives [`resolve_zero_live_editors`].
-///
-/// The registry is fed FFI-side in the *plugin* process, but the controller/resolver
-/// process never sees those events, so its `is_open` would be permanently false without
-/// this reconcile (the reactive graph is process-local). The ground truth is the editor's
-/// open-file set, proved by the durable plugin-owner lease whose owning pid is still alive
-/// (`live_editor_endpoint_attached` — the `#6b5h` live-editor-endpoint predicate). Marking
-/// the registry keeps `is_open` and the derived `open_count` truthful for backbone
-/// observers and routes the authority decision through the reactive projection instead of
-/// a raw poll.
-fn reconcile_and_observe_editor_open(file: &std::path::Path) -> bool {
-    let path = file.display().to_string();
-    let registry = agent_doc_document_realtime::editor_open_docs::editor_open_docs();
-    if agent_doc_plugin_owner::live_editor_endpoint_attached(&path) {
-        // The relay resolve path only ever handles agent-doc session documents, so an
-        // open document here is an agent-doc by construction.
-        registry.mark_open_with(&path, || true);
-    } else {
-        registry.mark_closed(&path);
+/// #live-editor-reactive (S2b/S3/S4): pure core of [`observe_editor_open`]. The reactive
+/// `EditorOpenDocs` authority is the source of truth for "does the editor hold this doc
+/// open"; it is driven by explicit in-process editor events (replica register / update /
+/// deregister — see `agent-doc-crdt-relay-io`), so the steady-state read touches **no
+/// filesystem**. The durable plugin-owner lease backup is consulted through
+/// `lease_attached` **only on a cold miss** — a doc the reactive authority has never
+/// recorded, i.e. right after a controller recycle before any editor event re-seeded it —
+/// and the recovered state is written back so subsequent reads stay purely reactive.
+/// Leases/sidecars are therefore never on the steady-state hot path.
+fn observe_editor_open_in(
+    registry: &agent_doc_document_realtime::editor_open_docs::EditorOpenDocs,
+    path: &str,
+    lease_attached: impl FnOnce() -> bool,
+) -> bool {
+    if !registry.is_tracked(path) {
+        // Cold miss (never-seen doc): recover the truth from the durable backup ONCE and
+        // seed the reactive authority. The relay resolve path only handles agent-doc
+        // session documents, so an open document here is an agent-doc by construction.
+        if lease_attached() {
+            registry.mark_open_with(path, || true);
+        } else {
+            registry.mark_closed(path);
+        }
     }
-    registry.is_open(&path)
+    registry.is_open(path)
+}
+
+/// #live-editor-reactive (S2b/S3/S4): observe whether the editor holds `file` open from
+/// the reactive `editor_open_docs` authority, recovering from the durable plugin-owner
+/// lease backup only on a cold miss (see [`observe_editor_open_in`]).
+fn observe_editor_open(file: &std::path::Path) -> bool {
+    let path = file.display().to_string();
+    observe_editor_open_in(
+        agent_doc_document_realtime::editor_open_docs::editor_open_docs(),
+        &path,
+        || agent_doc_plugin_owner::live_editor_endpoint_attached(&path),
+    )
 }
 
 fn try_resolve_current_doc_with_disk(
@@ -1464,7 +1478,7 @@ fn try_resolve_current_doc_with_disk_inner(
                 // `live_editors=0` wedge that stranded pane sync and logged `authority=disk`
                 // every second while the plugin was alive. Only a genuinely closed editor
                 // falls through to disk.
-                if resolve_zero_live_editors(reconcile_and_observe_editor_open(file))
+                if resolve_zero_live_editors(observe_editor_open(file))
                     == ZeroLiveResolution::KeepEditorAuthority
                 {
                     let reconciliation = Reconciliation {
@@ -1915,16 +1929,15 @@ mod tests {
         );
     }
 
-    // #live-editor-reactive (S2b/S3): a LIVE plugin-owner lease (editor still has the doc
-    // open, pid alive) with a relay hub that has zero live replicas is the phantom-
-    // `live_editors=0` wedge — the in-process replica dropped (e.g. after a controller
-    // recycle) but the editor is genuinely open. The resolver must KEEP editor authority
-    // (the relay canonical, which the editor re-syncs on its next edit via the phantom-
-    // heal), NOT demote to disk. Demoting here was the bug that stranded pane sync and
-    // logged `authority=disk` every second while the plugin was alive. Out-of-band disk
-    // changes reconcile through the disk-change watcher, not by overriding the live editor.
+    // #live-editor-reactive (S2b/S3/S4): the editor explicitly DEREGISTERED its replica
+    // (an editor-close event), which drives the reactive `editor_open_docs` authority to
+    // closed. Even though a plugin-owner lease still lingers live, the resolver reads the
+    // reactive authority (closed) DIRECTLY on the hot path and demotes to disk — it does
+    // NOT re-consult the lease (leases are off the steady-state hot path; the reactive
+    // state is the authority). Contrast with the recycle case (no deregister → untracked →
+    // cold-miss lease recovery keeps editor authority), covered by the pure-core tests.
     #[test]
-    fn current_resolve_keeps_editor_authority_when_editor_open_despite_zero_live_replicas() {
+    fn current_resolve_reads_reactive_closed_authority_after_deregister_without_lease() {
         let relay_text = "\
 ## Exchange
 
@@ -1947,53 +1960,47 @@ mod tests {
         let owner = "test-zero-live-current-resolve";
         assert!(
             agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
-            "test setup should acquire a live plugin-owner lease (editor open)"
+            "test setup should acquire a live plugin-owner lease"
         );
         test_support_register_replica_for_file(&file, owner)
             .unwrap()
-            .expect("editor-attached replica registers");
+            .expect("editor-attached replica registers (marks reactive authority open)");
         assert!(
             test_support_deregister_replica_for_file(&file, owner).unwrap(),
-            "test setup should leave a relay hub with zero live editors"
+            "editor deregister (close event) marks the reactive authority closed"
         );
         std::fs::write(&file, disk_prompt).unwrap();
 
         let resolved = try_resolve_current_doc_from_file(&file)
-            .expect("open editor with zero live replicas keeps editor authority");
+            .expect("deregistered editor resolves to disk via the reactive authority");
         assert_eq!(
             resolved.authority,
-            agent_doc_document_realtime::DocAuthority::EditorBuffer,
-            "live editor open → relay canonical stays authority, no disk demote"
+            agent_doc_document_realtime::DocAuthority::Disk,
+            "reactive authority is closed (editor deregistered) → disk, lingering lease ignored"
         );
-        assert_eq!(resolved.reason, "crdt_relay_stale_lease_editor_open");
+        assert_eq!(resolved.reason, "crdt_relay_no_live_editors");
+        assert_eq!(resolved.content, disk_prompt);
         assert!(
-            !resolved
+            resolved
                 .content
-                .contains("/goal keep the saved disk prompt visible"),
-            "resolved content is the relay canonical, not the disk replica"
+                .contains("/goal keep the saved disk prompt visible")
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains(
-                "reason=crdt_relay_stale_lease_editor_open"
-            ) && log.contains("recovery=keep_editor_authority_no_live_replica"),
-            "keep-editor-authority repair should be auditable and preserve live_editors= field:\n{log}"
-        );
-        assert!(
-            log.contains("live_editors=0"),
-            "regression-visible live_editors= field preserved:\n{log}"
+            log.contains("realtime_doc_resolve_crdt_no_live_editors_disk_authority"),
+            "closed-editor disk demotion should be auditable:\n{log}"
         );
         agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
     }
 
     // #live-editor-reactive (S2b/S3): the visible-write reconcile must NOT read disk when
-    // the editor still has the doc open (live lease) but the relay has zero live replicas.
-    // The relay canonical is authoritative; since it matches `expected_current`, the write
-    // is Clean and the drifted disk replica is correctly ignored (reading it would clobber
-    // the open editor buffer).
+    // #live-editor-reactive (S2b/S3/S4): the editor deregistered (close event), so the
+    // reactive `editor_open_docs` authority is closed. The visible-write reconcile reads
+    // that reactive state directly and uses the disk replica — without re-consulting the
+    // lingering lease. (The recycle case, where the editor is genuinely still open, is a
+    // cold miss recovered from the lease and is covered by the pure-core tests.)
     #[test]
-    fn visible_write_reconcile_keeps_editor_authority_when_editor_open_despite_zero_live_replicas()
-    {
+    fn visible_write_reconcile_reads_reactive_closed_authority_after_deregister() {
         let relay_text = "\
 <!-- agent:exchange patch=append -->
 ### Session Summary
@@ -2012,14 +2019,14 @@ mod tests {
         let owner = "test-zero-live-visible-write";
         assert!(
             agent_doc_plugin_owner::try_acquire_plugin_owner(&canonical, owner, std::process::id()),
-            "test setup should acquire a live plugin-owner lease (editor open)"
+            "test setup should acquire a live plugin-owner lease"
         );
         test_support_register_replica_for_file(&file, owner)
             .unwrap()
-            .expect("editor-attached replica registers");
+            .expect("editor-attached replica registers (marks reactive authority open)");
         assert!(
             test_support_deregister_replica_for_file(&file, owner).unwrap(),
-            "test setup should leave a relay hub with zero live editors"
+            "editor deregister (close event) marks the reactive authority closed"
         );
         std::fs::write(&file, disk_prompt).unwrap();
 
@@ -2029,22 +2036,20 @@ mod tests {
             relay_text,
             None,
         )
-        .expect("open editor with zero live replicas keeps editor authority");
+        .expect("deregistered editor visible-write reconciles against disk");
         match outcome {
-            VisibleWriteReconcile::Clean => {}
-            VisibleWriteReconcile::DiskDrifted { fresh_current } => panic!(
-                "expected Clean against the editor-authoritative relay canonical, got disk drift: {fresh_current}"
-            ),
+            VisibleWriteReconcile::DiskDrifted { fresh_current } => {
+                assert_eq!(fresh_current, disk_prompt);
+            }
+            VisibleWriteReconcile::Clean => {
+                panic!("expected disk drift from the saved prompt after editor deregister")
+            }
         }
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_crdt_stale_lease_editor_open_clean")
-                && log.contains("recovery=keep_editor_authority_no_live_replica"),
-            "keep-editor-authority repair should be auditable and NOT read disk:\n{log}"
-        );
-        assert!(
-            !log.contains("visible_write_crdt_no_live_editors_disk_authority"),
-            "open editor must not demote the visible write to disk:\n{log}"
+            log.contains("visible_write_crdt_no_live_editors_disk_authority")
+                && log.contains("visible_write_disk_drift_reconcilable"),
+            "closed-editor visible-write disk reconcile should be auditable:\n{log}"
         );
         agent_doc_plugin_owner::release_plugin_owner(&canonical, owner);
     }
@@ -2780,5 +2785,57 @@ scratch
             ZeroLiveResolution::KeepEditorAuthority,
             "reopening flips back to editor authority (repair, not permanent demote)"
         );
+    }
+
+    // #live-editor-reactive (S4): the directive — leases/sidecars are NEVER on the
+    // steady-state hot path. Once the reactive authority has recorded the doc (via an
+    // in-process editor event), `observe_editor_open_in` reads it WITHOUT consulting the
+    // durable lease backup. The probe panics to prove it is not called.
+    #[test]
+    fn observe_editor_open_steady_state_reads_reactive_without_lease() {
+        use agent_doc_document_realtime::editor_open_docs::EditorOpenDocs;
+        let reg = EditorOpenDocs::new();
+
+        // Reactive authority says OPEN (e.g. from a replica register/update event).
+        reg.mark_open("plan.md", true);
+        assert!(
+            observe_editor_open_in(&reg, "plan.md", || panic!("lease must not be read when tracked")),
+            "tracked-open doc reads reactive authority (open) with no lease read"
+        );
+
+        // Reactive authority says CLOSED (e.g. from an editor deregister event).
+        reg.mark_closed("plan.md");
+        assert!(
+            !observe_editor_open_in(&reg, "plan.md", || panic!("lease must not be read when tracked")),
+            "tracked-closed doc reads reactive authority (closed) with no lease read"
+        );
+    }
+
+    // #live-editor-reactive (S4): cold miss (never-seen doc, e.g. right after a controller
+    // recycle before any editor event re-seeded the authority) recovers ONCE from the
+    // durable lease backup and writes the result back, so later reads are purely reactive.
+    #[test]
+    fn observe_editor_open_cold_miss_recovers_from_lease_then_caches() {
+        use agent_doc_document_realtime::editor_open_docs::EditorOpenDocs;
+        use std::cell::Cell;
+
+        // Cold miss + lease attached (editor genuinely still open across a recycle) →
+        // keep editor authority, and the lease is consulted exactly once.
+        let reg = EditorOpenDocs::new();
+        let calls = Cell::new(0);
+        assert!(observe_editor_open_in(&reg, "recycled.md", || {
+            calls.set(calls.get() + 1);
+            true
+        }));
+        assert_eq!(calls.get(), 1, "lease consulted once on the cold miss");
+        // Now tracked → second read is purely reactive (probe would panic if called).
+        assert!(observe_editor_open_in(&reg, "recycled.md", || panic!(
+            "lease must not be read after cold-miss recovery seeds the authority"
+        )));
+
+        // Cold miss + lease detached (editor truly gone) → disk authority.
+        let reg2 = EditorOpenDocs::new();
+        assert!(!observe_editor_open_in(&reg2, "gone.md", || false));
+        assert!(reg2.is_tracked("gone.md"), "cold miss records the recovered state");
     }
 }

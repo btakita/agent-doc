@@ -123,13 +123,23 @@ The drain auto-targeted `#tcb0` (go-live). Go-live *is* publishing/deploying the
 - **`#mam7` fractionalized loans** — gated: future/design.
 
 **9 cleanly-actionable items remain queued** and ready to build (messaging-email bug, per-deal required-docs bug, Loan Package, homepage copy, funded-deals curation, custom doc types, deal notes, wire-instructions upload, funding-workflow tabs). I'm holding the drain rather than auto-building 9 features unprompted — say **go** and I'll drain them top-down under `#spec-test-commit-push`, or reorder first. Provide any of the gated inputs and I'll un-gate those too.
-<!-- agent:boundary:1332fc0f -->
+
+### Re: do #nga4 — messaging-email regression — opus-4-8
+
+Fixed the diagnosable defect and pushed (`equityfundingsource-dev` e8b8fdd).
+
+**Root cause:** the message-notification email path (`app/equityfundingsource/lib/borrower/messages/notify.ts`) discarded `email_send_`'s `{ ok:false, reason }` result and swallowed rejections with `.catch(() => {})`. So a disabled feature flag, unconfigured Cloudflare sender, unverified sender, or missing recipient **all looked identical to a delivered message** — exactly Brian's "I'm not getting it and don't know why" from the call. `email_send_` returns a status object (it doesn't throw), so nothing ever surfaced the failure.
+
+**Fix:** every notify site now logs why an email didn't go out — `log_email_result_(context, ...)` for skipped/failed results across all four paths (party, admins-of-party, admin-of-borrower, borrower-of-admin), plus an explicit "disabled" log on the investor→admin path (the bug path). Added `#nga4` coverage to `tests/borrower-message-notify.test.ts`; full suite 1427 pass / 7 pre-existing baseline fails (my change adds one passing test, zero new failures).
+
+**Likely real cause is prod config, not code:** the recent Resend removal churn (`c5af4aa` revert, `d6f8fd8` remove stale config) probably left `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` off or the Cloudflare sender unconfigured in prod. I can't verify prod env vars from here, so I filed a follow-up — the new logs will now name the exact reason in `wrangler tail`.
+<!-- agent:boundary:dcb1ebd2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tcb0]~~
 - ~~do [#nyc5]~~
-- do [#nga4]
+- 🚧 do [#nga4]
 - do [#e2n0]
 - do [#nyeb]
 - do [#1j5y]
@@ -141,6 +151,7 @@ The drain auto-targeted `#tcb0` (go-live). Go-live *is* publishing/deploying the
 - ~~do [#1067]~~
 - ~~do [#jzqj]~~
 - ~~do [#mam7]~~
+- do [#hmw9]
 <!-- /agent:queue -->
 
 ## Notes
@@ -163,8 +174,8 @@ After 20:30
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
-- [ ] [#nga4] Bug: admin->investor loan message no longer sends the email notification — investigate + fix. [followups: Messaging]
+<!-- agent:backlog preset="#spec-test-commit-push-deploy" priority queue go -->
+- [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
 - [ ] [#e2n0] Bug: adding a custom required document makes it required for everybody — scope required documents per-deal, not global. [followups: Document requirements]
 - [ ] [#nyeb] Loan Package: drop the loan number (reference by property address), add the front property photo, replace the blue placeholder image, surface all loan info in the Loan Package view. [followups: Loan Package]
 - [ ] [#1j5y] Homepage copy: step-3 'fund and close'; funded-deals CTA 'View more funded deals'; contact CTA 'Send us your details for a quick approval'; rate range 8.99-14%; fix theme/colors. [followups: Homepage copy]

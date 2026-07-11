@@ -67,11 +67,19 @@ Committed both files to the `equityfundingsource-dev` submodule (ce05c4c).
 **Cycle note:** the session document was wedged on a stale-editor lease — the JetBrains IDE plugin (pid 432595) stopped heartbeating ~12 min ago while holding a divergent pre-compaction buffer, so the supervisor kept treating it as authority over the clean post-compaction disk. Disk + CRDT sidecars are clean and hold all your prompts; I rebuilt them (`reset --from-current --force-disk`), restarted the relay controller, and persisted this response via `--force-disk`. If your IDE still shows the old version, reload the file from disk.
 
 I did **not** auto-enqueue the ~30 items into the go-mode queue — a walkthrough shouldn't trigger unsupervised feature builds. They live in the followups doc for you to triage; say the word to queue specific ones.
-<!-- agent:boundary:cd32e992 -->
+### Re: session re-run — no new prompt; two queue heads need your call — opus-4-8
+
+The document wedge is cleared (preflight parses clean again). Last cycle's work stands and the follow-up todos were already captured: the diarized transcript and the ~30-item follow-up list are committed to `equityfundingsource-dev` (ce05c4c), and the response is committed here (9359c3807). No new actionable items this cycle.
+
+There's no new instruction in the exchange this cycle. Two queue heads remain, both needing **your** decision — I did not auto-run either:
+
+- **`🚧 [#xzxy]` — triage the follow-ups.** This is the placeholder I filed; the prioritized list already lives in `docs/calls/2026-07-10 14-31-13-followups.md`. Picking *which* items to build (and in what order) is your call. My recommended first two are the **[P0]** items: go-live this week (hide non-functional portals, keep apply + inquiries) and the available-deals upload API to replace the manual YAMM flow. Tell me which to queue and I'll take them.
+- **`deploy`** — left ungated on purpose. Nothing from this doc's work is EFS-deployable (transcript + todos are docs, not shipped to prod), so running `deploy` now would just push whatever is in the EFS worktree — a concurrent-session clobber risk. Confirm the intent (and target) before I deploy.
+<!-- agent:boundary:84264d9d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- [#xzxy]
+- 🚧 [#xzxy]
 - deploy
 <!-- /agent:queue -->
 

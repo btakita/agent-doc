@@ -2293,7 +2293,7 @@ fn resolve_direct_submit_pane(
         .actor_record
         .as_ref()
         .map(|record| record.pane_id.as_str())
-        .filter(|pane| tmux.pane_alive(pane))
+        .filter(|pane| recorded_owner_pane_is_safe_target(ctx, tmux, pane, "authoritative_actor"))
     {
         return Some((pane.to_string(), DirectSubmitPaneSource::AuthoritativeActor));
     }
@@ -2309,7 +2309,7 @@ fn resolve_direct_submit_pane(
     ctx.registry_entry
         .as_ref()
         .map(|entry| entry.pane.as_str())
-        .filter(|pane| tmux.pane_alive(pane))
+        .filter(|pane| recorded_owner_pane_is_safe_target(ctx, tmux, pane, "registry"))
         .map(|pane| (pane.to_string(), DirectSubmitPaneSource::Registry))
 }
 
@@ -3114,6 +3114,40 @@ fn evidence_pane_is_foreign_reuse(
     evidence_pane_reuse_cheap_gate(source, health)
         && recorded_owner_pid.is_some()
         && !pane_owned_by_recorded_pid
+}
+
+/// `#stale-actor-pane-collision`: whether a recorded-owner pane (authoritative actor
+/// or registry) is a SAFE target for direct input submission (clear / interrupt /
+/// resubmit). It must be alive AND not a foreign reuse — sending keystrokes into a
+/// pane another session reused after ours exited would interrupt someone else's work.
+/// Shares the provenance rule with the live-pane evidence path so status and dispatch
+/// agree on which panes are really ours.
+fn recorded_owner_pane_is_safe_target(
+    ctx: &SessionContext,
+    tmux: &Tmux,
+    pane: &str,
+    source: &'static str,
+) -> bool {
+    if !tmux.pane_alive(pane) {
+        return false;
+    }
+    let recorded_owner_pid = ctx
+        .supervisor_runtime
+        .child_pid
+        .or_else(|| ctx.registry_entry.as_ref().map(|entry| entry.pid));
+    let pane_owned_by_recorded_pid = match (
+        evidence_pane_reuse_cheap_gate(source, &ctx.supervisor_runtime.health),
+        recorded_owner_pid,
+    ) {
+        (true, Some(recorded_pid)) => pane_process_tree_contains_pid(tmux, pane, recorded_pid),
+        _ => true,
+    };
+    !evidence_pane_is_foreign_reuse(
+        source,
+        &ctx.supervisor_runtime.health,
+        recorded_owner_pid,
+        pane_owned_by_recorded_pid,
+    )
 }
 
 fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) {

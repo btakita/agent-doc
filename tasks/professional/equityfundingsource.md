@@ -69,17 +69,22 @@ Committed both files to the `equityfundingsource-dev` submodule (ce05c4c).
 I did **not** auto-enqueue the ~30 items into the go-mode queue — a walkthrough shouldn't trigger unsupervised feature builds. They live in the followups doc for you to triage; say the word to queue specific ones.
 ### Re: session re-run — no new prompt; two queue heads need your call — opus-4-8
 
+> **Queue prompt:**
+>
+> [#xzxy]
+
+
 The document wedge is cleared (preflight parses clean again). Last cycle's work stands and the follow-up todos were already captured: the diarized transcript and the ~30-item follow-up list are committed to `equityfundingsource-dev` (ce05c4c), and the response is committed here (9359c3807). No new actionable items this cycle.
 
 There's no new instruction in the exchange this cycle. Two queue heads remain, both needing **your** decision — I did not auto-run either:
 
 - **`🚧 [#xzxy]` — triage the follow-ups.** This is the placeholder I filed; the prioritized list already lives in `docs/calls/2026-07-10 14-31-13-followups.md`. Picking *which* items to build (and in what order) is your call. My recommended first two are the **[P0]** items: go-live this week (hide non-functional portals, keep apply + inquiries) and the available-deals upload API to replace the manual YAMM flow. Tell me which to queue and I'll take them.
 - **`deploy`** — left ungated on purpose. Nothing from this doc's work is EFS-deployable (transcript + todos are docs, not shipped to prod), so running `deploy` now would just push whatever is in the EFS worktree — a concurrent-session clobber risk. Confirm the intent (and target) before I deploy.
-<!-- agent:boundary:84264d9d -->
+<!-- agent:boundary:3332b9e7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- 🚧 [#xzxy]
+- ~~[#xzxy]~~
 - deploy
 <!-- /agent:queue -->
 
@@ -104,7 +109,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#xzxy] [recommended] Triage EFS 2026-07-10 walkthrough follow-ups (src/equityfundingsource-dev/docs/calls/2026-07-10 14-31-13-followups.md) — pick which of ~30 items to queue: [P0] go-live this week, homepage copy, Loan Package (drop loan#, front photo), doc-requirements (2 bugs: per-deal required docs + LOE/BPL types), deal notes (per-deal append-only log), funding tabs (Lender Docs + Funding Package), accreditation questionnaire, bidirectional TMO conditions sync, [P0] available-deals upload API (replace YAMM), messaging-email regression, fractionalized loans.
 <!-- /agent:backlog -->
 
 ## Review

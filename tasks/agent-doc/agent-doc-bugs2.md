@@ -26,6 +26,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -267,7 +268,7 @@ Fix (`#stale-lease-cpc-authority`, `agent-doc-crdt-relay-io`): when a hub exists
 - **Switching editor documents doesn't sync the focused tmux pane:** new feature `#tmuxfocusfollow` (JB `selectionChanged` / VS Code `onDidChangeActiveTextEditor` → refocus the doc's route-owned pane, no-op when it owns none). Plan `tasks/agent-doc/plan-tmux-focus-follow-active-editor.md`.
 
 Per the `#spec-test-build-install-commit-push` preset: shipped spec+test+build+install+commit+push for the authority fix; **not** tagged/published (standing "no releases until per-cell CRDT" hold). Live JB re-proof of the fix is left as `[operator-verify]`.
-<!-- agent:boundary:ed3226aa -->
+<!-- agent:boundary:b2a12863 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -358,7 +359,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#statedbgc] #agent-doc-bug preflight actor-gc hard-errors on a corrupt/oversized state.db (SQLITE_NOTADB code 26) instead of quarantining it the way the closeout-projection read already does (cycle-state WARNING: ignoring unreadable closeout projection ... using sidecar state only). Live 2026-07-10: .agent-doc/state.db grew to 4.3GB with no valid SQLite header and blocked every preflight until manually quarantined aside. Fix: wrap the actor-gc state.db open in read_valid_or_quarantine (move aside + rebuild from sidecar) so a corrupt state-backbone DB self-heals instead of wedging preflight. Relates to the crash_recovery_markers growth cap (69eabac2).
 - [ ] [#jblocalhistverify] [operator-verify] #jblocalhistcrash live proof: install editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.232.zip (uninstall -> restart -> install -> restart), then with a corrupt Local History store trigger Run Agent Doc and confirm dispatch proceeds (no aborting AssertionError) and idea/ops log shows active_document_save_failed then normal sendToTerminal.
 - [ ] [#compactcrdtretry] [focused-cycle] #agent-doc-bug JB Compact Exchange refused (CPC relay, retry_crdt_merge). The ZERO-live-editor variant is now fixed by #stale-lease-cpc-authority (0.34.75, compact converge shares apply_cpc_write). REMAINING: the live-editor concurrent-edit case (operator typing while a real editor is attached) still needs a bounded CAS retry around compact converge with retry-idempotent archive creation; fail closed with an actionable document-changed-during-compaction message when the compacted component drifted. Distinct from #jbcompactcommit. Plan: tasks/agent-doc/plan-compact-crdt-merge-retry.md
 - [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md

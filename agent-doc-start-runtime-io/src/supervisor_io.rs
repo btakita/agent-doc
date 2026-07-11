@@ -31,8 +31,8 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
         self.inject_pane.clone()
     }
 
-    fn harness_binary(&self) -> &str {
-        &self.harness_binary
+    fn harness_binary(&self) -> String {
+        self.current_harness()
     }
 
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String> {

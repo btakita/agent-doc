@@ -669,20 +669,21 @@ fn auto_trigger_inject_command(
     let submitted_text =
         agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
             .to_string();
+    let current_harness = shared.current_harness();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
-            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger",
             &format!("pane:{pane_id}"),
             &submitted_text,
-            Some(&shared.harness_binary),
+            Some(&current_harness),
             profile.transform(),
             profile.submit_key(),
         );
         let outcome =
-            match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary) {
+            match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness) {
                 Ok(()) => AutoTriggerOutcome::Sent,
                 Err(_) => AutoTriggerOutcome::SendFailed,
             };
@@ -713,7 +714,7 @@ fn auto_trigger_inject_command(
         "supervisor.auto_trigger",
         "child_pty",
         &submitted_text,
-        Some(&shared.harness_binary),
+        Some(&current_harness),
         "raw_pty_submit_enter_byte",
         "Enter",
     );
@@ -761,19 +762,20 @@ fn auto_trigger_clear_command(
     let submitted_text =
         agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(clear_cmd)
             .to_string();
+    let current_harness = shared.current_harness();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
         let profile =
-            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&shared.harness_binary);
+            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger_clear",
             &format!("pane:{pane_id}"),
             &submitted_text,
-            Some(&shared.harness_binary),
+            Some(&current_harness),
             profile.transform(),
             profile.submit_key(),
         );
-        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &shared.harness_binary)
+        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
         {
             Ok(()) => AutoTriggerOutcome::Sent,
             Err(_) => AutoTriggerOutcome::SendFailed,
@@ -793,7 +795,7 @@ fn auto_trigger_clear_command(
         "supervisor.auto_trigger_clear",
         "child_pty",
         &submitted_text,
-        Some(&shared.harness_binary),
+        Some(&current_harness),
         "raw_pty_clear_enter_byte",
         "Enter",
     );
@@ -1531,8 +1533,13 @@ pub(crate) struct SupervisorShared {
     running: AtomicBool,
     /// CWD source tag for IPC `state` responses.
     cwd_source: &'static str,
-    /// Harness binary for harness-specific tmux submit behavior.
-    harness_binary: String,
+    /// Harness binary for harness-specific tmux submit behavior AND the harness
+    /// identity reported to the state backbone (authoritative actor record) via
+    /// IPC `state`. Mutable so an in-loop harness switch (`agent:` change →
+    /// `agent_restart_performed` fresh spawn) updates the lazily state immediately
+    /// instead of leaving the persisted actor record reading the old harness until
+    /// an unrelated reconcile catches up (`#actor-harness-switch-writeback`).
+    harness_binary: Mutex<String>,
     /// Writer handle for IPC `inject`. Replaced on each spawn, cleared between restarts.
     inject_writer: SharedWriter,
     /// In-memory advisory projection of the prompt currently admitted for this
@@ -1620,7 +1627,7 @@ impl SupervisorShared {
             restart_count: AtomicU32::new(0),
             running: AtomicBool::new(false),
             cwd_source,
-            harness_binary: harness_binary.to_string(),
+            harness_binary: Mutex::new(harness_binary.to_string()),
             inject_writer: Mutex::new(None),
             prompt_dispatch_projection: Mutex::new(None),
             inject_pane,
@@ -1642,6 +1649,20 @@ impl SupervisorShared {
             capability_proof_epoch: AtomicU64::new(0),
             capability_proof_error: Mutex::new(None),
         }
+    }
+
+    /// Current harness identity (snapshot clone). Reflects the latest in-loop
+    /// harness switch so IPC `state` reports the switched harness to the state
+    /// backbone (`#actor-harness-switch-writeback`).
+    fn current_harness(&self) -> String {
+        self.harness_binary.lock().unwrap().clone()
+    }
+
+    /// Update the harness identity after an in-loop `agent:` switch spawned a fresh
+    /// harness, so the persisted authoritative actor record stops reading the old
+    /// harness (`#actor-harness-switch-writeback`).
+    fn set_current_harness(&self, harness_binary: &str) {
+        *self.harness_binary.lock().unwrap() = harness_binary.to_string();
     }
 
     fn capability_proof_gate(&self) -> CapabilityProofGate {
@@ -2849,6 +2870,31 @@ mod tests {
         assert_eq!(
             auto_trigger_no_prompt_action(&mut monitor, start + AUTO_TRIGGER_TIMEOUT),
             AutoTriggerNoPromptAction::FailClosed
+        );
+    }
+    #[test]
+    fn set_current_harness_updates_state_backbone_harness_identity() {
+        // `#actor-harness-switch-writeback`: an in-loop `agent:` switch (codex→claude)
+        // spawns a fresh harness and must update the harness identity reported to the
+        // authoritative actor record via IPC `state` IMMEDIATELY, so route stops
+        // emitting a stale harness-mismatch defer keyed off the old harness.
+        use agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState;
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        // `new` defaults to the claude harness; pretend the live child launched codex.
+        shared.set_current_harness("codex");
+        assert_eq!(shared.current_harness(), "codex");
+        assert_eq!(
+            SupervisorInjectDeliveryState::harness_binary(&shared),
+            "codex"
+        );
+        // Operator switches `agent:` back to claude → fresh spawn writes it back.
+        shared.set_current_harness("claude");
+        assert_eq!(shared.current_harness(), "claude");
+        // IPC `state` (which feeds the persisted actor record) reports the switch now,
+        // not after an unrelated later reconcile.
+        assert_eq!(
+            SupervisorInjectDeliveryState::harness_binary(&shared),
+            "claude"
         );
     }
     #[test]

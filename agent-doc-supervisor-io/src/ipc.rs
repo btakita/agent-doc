@@ -202,7 +202,9 @@ pub trait SupervisorIpcHandlerState: SupervisorIpcSnapshotState {
 
 pub trait SupervisorInjectDeliveryState {
     fn inject_pane_id(&self) -> Option<String>;
-    fn harness_binary(&self) -> &str;
+    /// Current harness identity (owned snapshot). Owned so the backing store can be
+    /// updated on an in-loop harness switch (`#actor-harness-switch-writeback`).
+    fn harness_binary(&self) -> String;
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String>;
     fn begin_prompt_dispatch(&self, source: &str, bytes: &str) -> PromptDispatchAdmission;
     fn clear_prompt_dispatch_on_failure(&self, key: &str);
@@ -299,6 +301,7 @@ where
         PromptDispatchAdmission::Untracked => None,
     };
     let harness = state.harness_binary();
+    let harness = harness.as_str();
     let source = format!("supervisor.{diag_op}");
     let result = if let Some(pane_id) = state.inject_pane_id() {
         let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness);

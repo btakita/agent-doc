@@ -142,7 +142,7 @@ members = [
 
 [package]
 name = "agent-doc"
-version = "0.34.80"
+version = "0.34.81"
 edition = "2024"
 description = "Interactive document sessions with AI agents"
 license = "MIT"

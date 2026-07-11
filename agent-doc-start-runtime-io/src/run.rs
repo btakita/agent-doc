@@ -511,6 +511,13 @@ pub fn run_with_reap_policy(
                             let old_harness = harness.binary.clone();
                             let new_harness = restart_spec.harness.binary.clone();
                             harness = restart_spec.harness.clone();
+                            // `#actor-harness-switch-writeback`: update the harness
+                            // identity in shared state NOW so IPC `state` reports the
+                            // switched harness to the authoritative actor record
+                            // immediately, instead of leaving it reading the old
+                            // harness (and route emitting a stale harness-mismatch
+                            // defer) until an unrelated reconcile catches up.
+                            shared.set_current_harness(&new_harness);
                             base_args = restart_spec.base_args.clone();
                             resolved_env = restart_spec.resolved_env.clone();
                             capability_proof_frontmatter = restart_fm.clone();

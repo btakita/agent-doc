@@ -201,7 +201,15 @@ Seeded the common types and pushed (`equityfundingsource-dev` eb407bb).
 **Split out part 2** — the preset "request missing documents" email (refi/purchase variants with per-doc explanations) is a distinct feature, so I queued it as its own backlog item rather than half-building it here.
 
 The seed applies to prod on the next deploy (deploy still deferred per your call).
-<!-- agent:boundary:21966a9f -->
+
+### Re: MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true — opus-4-8
+
+Done — pushed (`equityfundingsource-dev` a7b2d34).
+
+`message_email_enabled_` now reads the flag as **default-ON**: an unset/blank `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED` is treated as enabled, and only an explicit `false`/`0`/`no`/`off` disables it (new `flag_on_by_default_` helper). Since a delivery path always exists — a Cloudflare sender, or local capture which falls back on when Cloudflare is unconfigured — an unset flag now means emails send. This removes the most likely `#nga4` root cause (the flag left off in prod after the Resend removal). Tests updated for the default-on matrix; notify suite 19/19, full suite 1429 pass / 7 pre-existing baseline fails.
+
+Narrowed `#hmw9` to the one thing I can't check from here: that a **Cloudflare email sender** + `MESSAGE_ADMIN_NOTIFICATION_TO` are actually set in the prod worker (needs prod access). With the flag now default-on and the new skip-reason logs, `wrangler tail` will name the exact cause if anything is still off. Applies to prod on the next deploy (deploy still deferred).
+<!-- agent:boundary:ac4522ee -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -212,15 +220,14 @@ The seed applies to prod on the next deploy (deploy still deferred per your call
 - ~~do [#nyeb]~~
 - ~~do [#1j5y]~~
 - ~~do [#faxz]~~
-- 🚧 do [#91d8]
+- ~~do [#91d8]~~
 - do [#nw77]
 - do [#r08m]
 - do [#5q9q]
 - ~~do [#1067]~~
 - ~~do [#jzqj]~~
 - ~~do [#mam7]~~
-- do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.
-- do [#r30z]
+- ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -245,7 +252,7 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#r30z] Preset 'request missing documents' email (refi/purchase variants) with per-document explanations — a preset the admin sends to the borrower requesting the deal's outstanding required documents, with distinct refinance vs purchase document sets and a short why-needed note per doc. From the 2026-07-10 call (#91d8 part 2).
-- [ ] [#hmw9] [recommended] Verify EFS prod message-email config (#nga4 follow-up, needs prod access): confirm MESSAGE_EMAIL_NOTIFICATIONS_ENABLED=true + a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in the prod worker. The new '[message-notify] ... email not sent (skipped): ...' warn now shows the exact reason in wrangler tail; likely disabled after the Resend removal (c5af4aa/d6f8fd8).
+- [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 - [ ] [#nw77] Deal notes: rename 'workflow notes' -> 'deal notes', scope per-deal (per lender per deal), convert to an append-only log with timestamps + author attribution. [followups: Deal notes]
 - [ ] [#r08m] Wire instructions: replace manual re-entry with a document upload (upload the title company's wiring doc as-is). [followups: Funding tabs]
 - [ ] [#5q9q] Funding workflow tabs: add 'Lender Documents' + 'Funding Package' tabs; order Loan Package -> Lender Documents -> Funding Package. [followups: Funding tabs]

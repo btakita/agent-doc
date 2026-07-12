@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -304,15 +304,27 @@ Legacy/untyped documents surface under an **Other** bucket (no upload control �
 - **routes.ts** — upload parses/validates the posted `category`.
 - **deal_lender_documents.tsx** — renders per-type sections via a reusable `LenderDocSection`; uploads tag `category`.
 - **Tests** — category persistence/validation, section-key↔server-category parity, the 0134 contract, and the 5 UI sections.
+- **Verified live:** the served bundle at `equityfundingsource.brian-takita.workers.dev` is now `RO454M73` (2.0 MB, not a stub) and contains all five section literals — Term sheet / commitment letter, Deal-specific proof of funds, Underwriting conditions, Counter-signed items, Funding authorization.
+- **Worker deployed** from the clean main checkout at HEAD (`5431480`) — tree was clean, no concurrent WIP, so no clobber risk. New browser bundle `index.browser-RO454M73.js`; Version ID `62bc5e10-c12c-4fcf-a3ef-45b215646d3a`.
+- **Migration 0134 applied** to prod D1 (`deal_lender_documents.category`) — `✅` in the migrate step; it was the only pending migration.
 
 **Verification:** `bun run build` + `build:worker` green; full suite **1583 pass / 0 fail** (5 new). The tab isn't live at your URL yet — applying migration 0134 to prod D1 and deploying the worker is the remaining, outward-facing step, so I queued it (`#lender-docs-sections` deploy) rather than pushing to the client's prod unprompted. Say the word and I'll run it through the isolated clean-worktree recipe.
-<!-- agent:boundary:e4e9eb2f -->
+### Re: deploy — opus-4-8
+
+Deployed to EFS prod and verified live.
+
+- **Migration 0134 applied** to prod D1 (`deal_lender_documents.category`) — `✅` in the migrate step; it was the only pending migration.
+- **Worker deployed** from the clean main checkout at HEAD (`5431480`) — tree was clean, no concurrent WIP, so no clobber risk. New browser bundle `index.browser-RO454M73.js`; Version ID `62bc5e10-c12c-4fcf-a3ef-45b215646d3a`.
+- **Verified live:** the served bundle at `equityfundingsource.brian-takita.workers.dev` is now `RO454M73` (2.0 MB, not a stub) and contains all five section literals — Term sheet / commitment letter, Deal-specific proof of funds, Underwriting conditions, Counter-signed items, Funding authorization.
+
+The Lender Documents tab now renders the five per-type upload sections live. Commit left local/unpushed (shared superproject). `#e44f` done.
+<!-- agent:boundary:e84a4199 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#r08m]~~
 - ~~do [#5q9q]~~
-- 🚧 :round_pushpin: [#sy71]
+- :round_pushpin: [#sy71]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
 - ~~do [#r30z]~~
 - do [#e44f]

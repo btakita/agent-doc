@@ -411,13 +411,25 @@ push-loop wiring + dual-run cutover remain.
     **`agent_doc_reliable_sync_liveness_flush(project_root, document_hash)`** (flushes via
     `RpcLivenessPushTransport`, returns the ack cursor). Global endpoint registry (`LazyLock<Mutex<HashMap>>`,
     stateless-FFI pattern). Workspace compiles; clippy/fmt green.
-  - **REMAINING (`[operator-verify]` slice, crosses the live editor↔controller boundary + agent-doc
-    release blocked by STOP-releases):** the editor-plugin JNA/JS calls that invoke the two FFI entry
-    points on open/close/attach events + the S4b OS exit watcher feeding `Alive{value:false}`; and
-    switching `editor_open_docs`/`editor_attach`/the `#6b5h` lease to read `LivenessProjection`. Then the
-    cutover (turn dual-run ON → confirm parity live → switch the hot path → delete the sidecar
-    writers/reapers). **3B** (adopt lazily `Delta`/`Snapshot` in the `state_subscribe` pull) also remains
-    and likewise changes the FFI wire the plugins parse.
+  - **Plugin liveness emission DONE (this pass) — design B (operator-chosen): each plugin hosts a real
+    lazily liveness graph → FFI push.** The controller-side S4b exit watcher now injects `Alive{false}`
+    (`record_reliable_sync_editor_exit`, wired in `process_exit_watcher.rs`). **JetBrains** (v0.2.235,
+    `buildPlugin` green): `ReliableSyncLivenessGraph.kt` holds this editor's open-set as lazily-kt `OrSet`s
+    (add-wins re-open, reactive `isOpen()`) and derives the externally-tagged `LivenessOp` batch;
+    `ReliableSyncLivenessListener.kt` (`FileEditorManagerListener`) resolves the canonical `document_hash`
+    (`agent_doc_document_id_for_path`), pushes via the two FFI entry points off the EDT; `NativeLib.kt`
+    JNA decls; `plugin.xml` registration. **VSCode** (v0.2.43, `check-types` + esbuild + vsix green):
+    `reliableSyncLiveness.ts` — symmetric lazily-js `OrSet` graph + `onDidOpen/CloseTextDocument` →
+    `native.ts` koffi wrappers → FFI; registered in `extension.ts activate`. The FFI enqueue is gated on
+    `dual_run_enabled()` (no-op by default), so both plugins are safe on every install — sidecars stay
+    authoritative until the operator opts in.
+  - **REMAINING (`[operator-verify]` slice + agent-doc release blocked by STOP-releases):** switch
+    `editor_open_docs`/`editor_attach`/the `#6b5h` lease to READ `LivenessProjection` (the hot-path
+    authority flip); the cutover (turn dual-run ON → confirm parity live in a real IDE/VSCodium →
+    switch the hot path → delete the sidecar writers/reapers); and **3B** (adopt lazily `Delta`/`Snapshot`
+    in the `state_subscribe` pull — changes the FFI wire the plugins parse). The live-editor eyeball
+    (both editors emit + the derived open-set matches the sidecar-derived one, and a real editor crash
+    cascades to not-live) is the `[operator-verify]` gate.
 - **Migration & cutover:** dual-run (sidecar write + sync push) → assert the synced open-set/lease
   matches the sidecar-derived one across a SimWorld of open/close/crash/recycle sequences →
   switch the hot path to read the synced cells → stop reading the sidecars → delete the sidecar

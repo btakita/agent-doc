@@ -15,6 +15,7 @@
 
 pub mod archive_index;
 pub mod op_log;
+pub mod reliable_sync_outbox;
 pub mod state_store;
 
 pub use state_store::{

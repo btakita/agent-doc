@@ -48,7 +48,7 @@ anyhow = "1"
 base64 = "0.22"
 fs2 = "0.4"
 interprocess = { version = "2", default-features = false }
-lazily = { version = "0.29.0", features = ["thread-safe", "ipc"] }
+lazily = { version = "0.31.0", features = ["thread-safe", "ipc"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

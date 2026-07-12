@@ -291,9 +291,29 @@ Original Phase 2 checklist:
   rows; `make coverage-check`. (Respect the STOP-releases-for-**agent-doc** directive — this is
   lazily; follow lazily's own release conventions, GH Packages/npm/crates as usual.)
 
-### Phase 3 — S6 agent-doc integration (#s6-integration) — LAST
+### Phase 3 — S6 agent-doc integration (#s6-integration) — LAST — IN PROGRESS
 Three workstreams, gated behind a dual-run flag so the sidecars stay authoritative until parity
-is proven:
+is proven.
+
+**Prerequisite DONE — lazily bump 0.29.0 → 0.31.0 across agent-doc (this pass).** agent-doc pinned
+lazily `0.29.0`, but the reliable-sync surface (`DurableOutbox`/`ResyncCoordinator`/`OrSet`/
+`WireLwwRegister`/`Delta`/`Snapshot` + the `ResyncRequest`/`OutboxAck` `IpcMessage` variants) ships
+in `0.31.0`. Bumped all 12 lazily-consuming crates 0.29.0 → 0.31.0; 0.29→0.30 (`#lzfamilysync`) and
+0.30→0.31 (reliable sync) are both additive feature releases, so the workspace `cargo check
+--workspace` stays green (non-breaking, mirrors the earlier 0.21→0.29 milestone). `SyncDriver` is a
+later lazily HEAD commit (unreleased), needed only for 3C's push-loop wiring — a lazily 0.32 release
++ re-bump lands with that slice.
+
+**3C store DONE (this pass) — `SqliteOutbox`.** `agent-doc-sqlite::reliable_sync_outbox::SqliteOutbox`
+implements lazily's `DurableOutbox` against SQLite (new `reliable_sync_outbox` +
+`reliable_sync_outbox_cursor` tables, self-owned `CREATE IF NOT EXISTS` schema — no edit to the
+shared `initialize_state_db`). Per-`document_hash` channel; frames stored as serde_json of
+`IpcMessage`; append-before-send / `ack_through` prune / `replay_from(cursor)` ascending suffix /
+persisted ack cursor. The infallible trait methods log SQLite/serde failures loudly to stderr (no
+silent swallow). **6 tests** incl. the recycle-survival invariant (drop + reopen → the un-acked
+suffix and durable ack cursor are exactly preserved — the on-disk durability the sidecars gave) and
+per-`document_hash` isolation. This is the durable store 3C plugs behind the `SyncDriver`; the
+push-loop wiring + dual-run cutover remain.
 - **3A — UDS carrier.** Implement `IpcSink`/`IpcSource` (or a `DataChannel`) over the existing
   `agent-doc-ipc-io`/`ipc_socket.rs` Unix socket the controller already hosts. No new socket.
 - **3B — controller→consumer stays pull, on lazily types.** Adopt lazily's `Delta`/`Snapshot`

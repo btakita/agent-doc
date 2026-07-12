@@ -469,14 +469,18 @@ push-loop wiring + dual-run cutover remain.
 > live parity confirmation the plan's ordering requires.
 
 The **entire mechanism** is built + pushed behind `dual_run_enabled()` (env
-`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default OFF** → sidecars authoritative, safe on every install):
+`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default ON as of 2026-07-12** → the plane runs in *shadow*;
+sidecars remain hot-path authority until step 3's flip, so default-ON is safe on every install.
+Disable with `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0`):
 carrier (3A), receiver plane + RPC (3C), sender endpoint + FFI + SqliteOutbox (3C), death signal
 (S4b→`Alive{false}`), both plugins emitting via a lazily `OrSet` graph (design B; JB v0.2.235 zip +
 VSCode v0.2.43 vsix built), the dual-run parity SimWorld, and the `WireDelta↔lazily::Delta` bridge (3B
 start). What is left needs a human watching a real editor and the operator lifting STOP-releases:
 
-1. **Turn dual-run ON** — `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=1` in the controller **and** plugin env;
-   install the built JB zip + VSCode vsix.
+1. **Install the fresh build** — dual-run is now **ON by default** (no env needed). Install the JB zip
+   + VSCode vsix and run `agent-doc lib-install` so the controller/plugins load a cdylib that exports
+   the 3C FFI (`agent_doc_document_id_for_path`, `agent_doc_reliable_sync_liveness_*`) — a stale cdylib
+   raises `UnsatisfiedLinkError` on `agent_doc_document_id_for_path` (fixed 2026-07-12 by rebuild+install).
 2. **Prove emission + parity live** — open/close agent-doc docs in a real IDE / VSCodium; confirm the
    controller `ControllerLivenessPlane.projection().open_docs()` matches the sidecar-derived open-set
    (surface it via a diagnostic RPC/log), and that a real editor crash drives `live_docs()` to drop the

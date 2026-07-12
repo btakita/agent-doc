@@ -2473,9 +2473,11 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
     ops_json: *const c_char,
 ) -> c_int {
     let result = (|| -> anyhow::Result<()> {
-        // Safe-by-default: when the dual-run shadow plane is off (the default),
-        // enqueuing is a no-op so the durable outbox never grows on a shipped
-        // plugin that reports events before the operator opts into the cutover.
+        // The dual-run shadow plane is ON by default (2026-07-12); enqueuing
+        // durably records the liveness frame so the controller can fold it and the
+        // outbox can prune on ack. Explicitly disabled
+        // (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0`) ⇒ no-op so the durable outbox never
+        // grows when an operator keeps the plane dark.
         if !agent_doc_reliable_sync_io::dual_run_enabled() {
             return Ok(());
         }

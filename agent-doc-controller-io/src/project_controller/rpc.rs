@@ -7030,7 +7030,8 @@ static CONTROLLER_LIVENESS_PLANE: std::sync::LazyLock<
 /// signal (`#s4b`, Phase 3C): a dead editor `pid` writes `Alive{value:false}` at a
 /// fresh stamp, so the derived live-doc aggregate cascades every doc that pid held
 /// to not-live — the reliable-sync equivalent of the sidecar path's crash demote.
-/// No-op unless the dual-run flag is on (sidecars stay authoritative by default).
+/// No-op only when dual-run is explicitly disabled; the shadow plane is ON by
+/// default (sidecars remain the hot-path authority until the separate flip).
 pub fn record_reliable_sync_editor_exit(pid: u64) {
     if !agent_doc_reliable_sync_io::dual_run_enabled() {
         return;
@@ -14363,19 +14364,18 @@ mod tests {
         assert_eq!(record.pane_id, "%162");
     }
 
-    #[test]
-    fn reliable_sync_handler_default_off_is_noop_ack_zero() {
+    fn reliable_sync_open_request(document_hash: &str) -> ControllerRequest {
         use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
         // A valid 3A reliable-sync envelope carrying one liveness Open op.
         let frame = encode_liveness_frame(&[LivenessOp::Open {
-            document_hash: "docwire".into(),
+            document_hash: document_hash.into(),
             pid: 100,
             tag: "t1".into(),
         }])
         .expect("encode liveness frame");
-        let envelope = agent_doc_reliable_sync_io::encode_envelope("docwire", &frame)
+        let envelope = agent_doc_reliable_sync_io::encode_envelope(document_hash, &frame)
             .expect("encode envelope");
-        let request = ControllerRequest {
+        ControllerRequest {
             command: "reliable_sync".to_string(),
             file: None,
             session_id: None,
@@ -14389,11 +14389,38 @@ mod tests {
             supervisor_socket: None,
             command_kind: None,
             diagnostic_payload: Some(envelope.to_string()),
-        };
-        let resp = handle_reliable_sync(request).expect("handler ok");
-        // Default (env unset) ⇒ dual-run OFF: sidecars authoritative, frame not consumed.
+        }
+    }
+
+    #[test]
+    fn reliable_sync_handler_explicit_off_is_noop_ack_zero() {
+        // Explicitly disabled ⇒ dual-run OFF: sidecars authoritative, frame not consumed.
+        unsafe {
+            std::env::set_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV, "0");
+        }
+        let resp = handle_reliable_sync(reliable_sync_open_request("docwire-off"))
+            .expect("handler ok");
         assert!(!resp.dual_run);
         assert_eq!(resp.ack_through, 0);
-        assert_eq!(resp.document_hash, "docwire");
+        assert_eq!(resp.document_hash, "docwire-off");
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
+        }
+    }
+
+    #[test]
+    fn reliable_sync_handler_default_on_folds_frame() {
+        // Env unset ⇒ dual-run ON by default: the plane runs in shadow and folds
+        // the inbound liveness frame (authority is still the sidecars until the
+        // separate flip). The handler reports dual_run and advances the ack cursor.
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
+        }
+        let resp = handle_reliable_sync(reliable_sync_open_request("docwire-on"))
+            .expect("handler ok");
+        assert!(resp.dual_run);
+        assert_eq!(resp.document_hash, "docwire-on");
+        // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
+        assert!(resp.ack_through >= 1);
     }
 }

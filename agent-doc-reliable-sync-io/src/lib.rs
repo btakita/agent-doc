@@ -54,15 +54,18 @@ pub const DUAL_RUN_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_DUAL_RUN";
 /// Whether the controller should run the reliable-sync liveness plane alongside
 /// the filesystem sidecars.
 ///
-/// **Default OFF.** During migration the sidecars stay the authority; the plane
-/// runs in shadow only when the operator opts in (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`
-/// set to a truthy value), so the derived open-set/lease can be compared against
-/// the sidecar-derived one before the hot path is ever switched. The final cutover
-/// (delete the sidecars, read the plane) is a separate, operator-verified step.
+/// **Default ON.** The plane runs in *shadow* by default (both the controller
+/// process and the plugin-loaded native lib call this same gate, so a single
+/// default covers "controller and plugin env"): inbound liveness frames are
+/// folded into the derived `LivenessProjection` so its open-set/lease can be
+/// compared against the sidecar-derived one live. This is shadow only — the
+/// sidecars remain the hot-path **authority** until the separate authority-flip
+/// step lands, so default-ON is safe. Explicitly disable with a falsey value
+/// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0|false|no|off`) to keep the plane dark.
 pub fn dual_run_enabled() -> bool {
-    matches!(
+    !matches!(
         std::env::var(DUAL_RUN_ENV).ok().as_deref(),
-        Some("1" | "true" | "TRUE" | "yes" | "on")
+        Some("0" | "false" | "FALSE" | "no" | "off" | "OFF")
     )
 }
 

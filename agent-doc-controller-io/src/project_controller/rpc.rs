@@ -6830,6 +6830,7 @@ pub(crate) fn handle_request_locked(
         }
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "reliable_sync" => controller_envelope(handle_reliable_sync(request)),
+        "reliable_sync_status" => controller_envelope(handle_reliable_sync_status()),
         "focus_document_pane" => {
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
@@ -7025,6 +7026,82 @@ static CONTROLLER_LIVENESS_PLANE: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| {
     std::sync::Mutex::new(agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new())
 });
+
+/// Status response for the `reliable_sync_status` diagnostic RPC (sidecar-retirement
+/// Phase 3C `[operator-verify]` parity oracle). Surfaces the shadow plane's derived
+/// open-/live-set next to the sidecar-derived open-set so an operator can eyeball
+/// dual-run parity on real editor events (handoff step 2) without a debugger.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerReliableSyncStatusResponse {
+    /// Whether the shadow plane is active (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN` not disabled).
+    pub dual_run: bool,
+    /// Document hashes the plane derives as open (from pushed liveness frames).
+    pub plane_open_docs: Vec<String>,
+    /// Document hashes the plane derives as live (open minus the whole-editor-death cascade).
+    pub plane_live_docs: Vec<String>,
+    /// Document hashes the sidecar path derives as open (`editor_open_docs`, converted
+    /// path→hash so it is comparable to the plane's hash-keyed open-set).
+    pub sidecar_open_docs: Vec<String>,
+    /// Per open document: the live editor pids the plane sees.
+    pub per_doc_pids: Vec<(String, Vec<u64>)>,
+    /// True when the plane's open-set equals the sidecar-derived open-set — the
+    /// dual-run parity assertion. Trivially true (both empty) before any editor event.
+    pub parity: bool,
+}
+
+/// Handle the `reliable_sync_status` diagnostic RPC: project the shadow liveness plane
+/// and the sidecar-derived open-set into a single parity view for `[operator-verify]`.
+fn handle_reliable_sync_status() -> Result<ControllerReliableSyncStatusResponse> {
+    let dual_run = agent_doc_reliable_sync_io::dual_run_enabled();
+    let plane = CONTROLLER_LIVENESS_PLANE
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+    let projection = plane.projection();
+    let plane_open = projection.open_docs();
+    let plane_live = projection.live_docs();
+    let per_doc_pids: Vec<(String, Vec<u64>)> = plane_open
+        .iter()
+        .map(|doc| (doc.clone(), projection.open_pids(doc).into_iter().collect()))
+        .collect();
+    // Sidecar-derived open-set, converted path → document hash so it is directly
+    // comparable to the plane's hash-keyed open-set.
+    let sidecar_open: std::collections::BTreeSet<String> =
+        agent_doc_document_realtime::editor_open_docs::editor_open_docs()
+            .open_agent_docs()
+            .into_iter()
+            .map(|path| agent_doc_hash::document_id_for_path(std::path::Path::new(&path)))
+            .collect();
+    let parity = plane_open == sidecar_open;
+    Ok(ControllerReliableSyncStatusResponse {
+        dual_run,
+        plane_open_docs: plane_open.into_iter().collect(),
+        plane_live_docs: plane_live.into_iter().collect(),
+        sidecar_open_docs: sidecar_open.into_iter().collect(),
+        per_doc_pids,
+        parity,
+    })
+}
+
+/// Client side of the `reliable_sync_status` diagnostic RPC — the `[operator-verify]`
+/// parity read (`agent-doc reliable-sync-status`).
+pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyncStatusResponse> {
+    let request = ControllerRequest {
+        command: "reliable_sync_status".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("reliable_sync_status".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: None,
+    };
+    request_controller::<ControllerReliableSyncStatusResponse>(project_root, request)
+}
 
 /// Feed the shadow liveness plane the controller's own OS-exit-watcher death
 /// signal (`#s4b`, Phase 3C): a dead editor `pid` writes `Alive{value:false}` at a
@@ -14422,5 +14499,30 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    #[test]
+    fn reliable_sync_status_projects_plane_open_set_and_parity() {
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
+        }
+        // Fold an Open frame so the shadow plane derives one open doc (pid 100).
+        handle_reliable_sync(reliable_sync_open_request("docwire-status")).expect("fold");
+        let status = handle_reliable_sync_status().expect("status ok");
+        assert!(status.dual_run);
+        assert!(status.plane_open_docs.contains(&"docwire-status".to_string()));
+        // Absent death signal ⇒ pid presumed alive ⇒ the doc is also live.
+        assert!(status.plane_live_docs.contains(&"docwire-status".to_string()));
+        let pids = status
+            .per_doc_pids
+            .iter()
+            .find(|(d, _)| d == "docwire-status")
+            .map(|(_, p)| p.clone())
+            .unwrap_or_default();
+        assert!(pids.contains(&100));
+        // The sidecar registry is empty in this isolated test process, so the plane
+        // holds a doc the sidecars do not ⇒ parity is computed and false.
+        assert!(status.sidecar_open_docs.is_empty());
+        assert!(!status.parity);
     }
 }

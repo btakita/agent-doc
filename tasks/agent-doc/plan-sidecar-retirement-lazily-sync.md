@@ -481,11 +481,13 @@ start). What is left needs a human watching a real editor and the operator lifti
    + VSCode vsix and run `agent-doc lib-install` so the controller/plugins load a cdylib that exports
    the 3C FFI (`agent_doc_document_id_for_path`, `agent_doc_reliable_sync_liveness_*`) — a stale cdylib
    raises `UnsatisfiedLinkError` on `agent_doc_document_id_for_path` (fixed 2026-07-12 by rebuild+install).
-2. **Prove emission + parity live** — open/close agent-doc docs in a real IDE / VSCodium; confirm the
-   controller `ControllerLivenessPlane.projection().open_docs()` matches the sidecar-derived open-set
-   (surface it via a diagnostic RPC/log), and that a real editor crash drives `live_docs()` to drop the
-   dead pid's docs (the S4b `record_reliable_sync_editor_exit` cascade). This is the `[operator-verify]`
-   gate; the parity SimWorld already proves it deterministically, this proves it on real events.
+2. **Prove emission + parity live** — open/close agent-doc docs in a real IDE / VSCodium, then run
+   **`agent-doc reliable-sync-status`** (added 2026-07-12; `--json` for machine output). It surfaces the
+   controller plane's `open_docs`/`live_docs` + per-doc pids next to the sidecar-derived open-set and a
+   `parity` MATCH/MISMATCH flag — the diagnostic this step called for. Confirm `parity` is MATCH while
+   docs are open, and that a real editor crash drives `live_docs` to drop the dead pid's docs (the S4b
+   `record_reliable_sync_editor_exit` cascade). This is the `[operator-verify]` gate; the parity SimWorld
+   already proves it deterministically, this proves it on real events.
 3. **Authority flip** (behind the flag) — switch `authority_for_file` / `editor_open_docs` /
    `editor_attach` / the `#6b5h` lease to READ `LivenessProjection` when dual-run is ON (OFF keeps the
    sidecar read). Re-run step 2's parity check against the live hot path.

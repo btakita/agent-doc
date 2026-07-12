@@ -2485,6 +2485,17 @@ enum Commands {
         #[arg(long)]
         target_dir: Option<String>,
     },
+    /// Show the reliable-sync shadow liveness plane vs the sidecar open-set (dual-run
+    /// `[operator-verify]` parity read — sidecar-retirement Phase 3C)
+    #[command(name = "reliable-sync-status")]
+    ReliableSyncStatus {
+        /// Emit the raw JSON response instead of the human parity table
+        #[arg(long)]
+        json: bool,
+        /// Project root (default: discovered from the current directory)
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+    },
     /// Install this committed checkout from an isolated sibling git worktree
     #[command(name = "self-install")]
     SelfInstall {
@@ -4479,6 +4490,47 @@ fn try_main() -> anyhow::Result<()> {
             profile,
             target_dir,
         } => lib_install::run(source.as_deref(), target_dir.as_deref(), &profile),
+        Commands::ReliableSyncStatus { json, project_root } => {
+            let root = match project_root {
+                Some(root) => root,
+                None => {
+                    let cwd = std::env::current_dir()?;
+                    agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
+                }
+            };
+            let status =
+                agent_doc_controller_io::project_controller::reliable_sync_status(&root)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                let dark = if status.dual_run { "" } else { " (plane dark — AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0)" };
+                println!("reliable-sync dual-run: {}{}", status.dual_run, dark);
+                println!(
+                    "parity (plane open-set == sidecar open-set): {}",
+                    if status.parity { "MATCH" } else { "MISMATCH" }
+                );
+                println!("plane open docs ({}):", status.plane_open_docs.len());
+                for doc in &status.plane_open_docs {
+                    let pids = status
+                        .per_doc_pids
+                        .iter()
+                        .find(|(d, _)| d == doc)
+                        .map(|(_, p)| p.clone())
+                        .unwrap_or_default();
+                    let live = if status.plane_live_docs.contains(doc) {
+                        "live"
+                    } else {
+                        "not-live"
+                    };
+                    println!("  {doc}  pids={pids:?}  {live}");
+                }
+                println!("sidecar open docs ({}):", status.sidecar_open_docs.len());
+                for doc in &status.sidecar_open_docs {
+                    println!("  {doc}");
+                }
+            }
+            Ok(())
+        }
         Commands::SelfInstall {
             source_root,
             target_dir,

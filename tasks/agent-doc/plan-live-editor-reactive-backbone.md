@@ -1,6 +1,6 @@
 # Plan — live_editor pipeline onto the lazily reactive backbone (#live-editor-reactive)
 
-## Status (2026-07-11) — COMPLETE (S1–S4 + S4b + S5); S6 rejected, S7 decided
+## Status (2026-07-11) — COMPLETE (S1–S4 + S4b + S5); S6 re-scoped as the sidecar-retirement follow-up, S7 decided
 S1 (reactive RelayHub liveness core, 824a2632), S2 (reactive editor open-docs registry),
 S2b + S3 (resolver/visible-write route through the reactive open-docs authority, 55d91244),
 **S4 (lazily `editor_open_docs` is the authority; the durable lease is crash-recovery backup
@@ -17,8 +17,8 @@ steady-state decisions touch no filesystem. With S4b the **last** per-decision l
 op hot path is gone: `authority_for_file` no longer reads the plugin-owner lease on every op.
 S5 is now DONE too (both plugins delegate to a real lazily reactive `StateGraphMirror` — JB toolchain
 bumped to K2/JVM21/2024.2 to consume lazily-kt; a StateGraphMirror was ported into lazily-js for the
-VS Code extension). S6 stays rejected (bespoke wire) — a Bridge buys nothing until the transport itself
-moves; S7 decided (keep the
+VS Code extension). S6 is now RE-SCOPED as the active sidecar-retirement follow-up (S5 invalidated its
+rejection premises) → `plan-sidecar-retirement-lazily-sync.md`; S7 decided (keep the
 content-CRDT vs state-projection split). See the staged section for per-stage detail.
 
 ## Problem
@@ -341,14 +341,21 @@ Each is a candidate stage; none is a regression, all are parity gaps.
     bundle). `MirrorTurnProjection` (no lazily equivalent) is still computed plugin-side from the
     delegated closeout.cycle cell. `stateMirror.test.ts` / `stateMirrorConformance.test.ts` stay
     green. The conformance pins are kept as cross-language drift catches.
-- **S6 — lazily `Bridge` for the plugin transport. DECISION: reject for now, keep the bespoke wire.**
-  agent-doc keeps its own lazily-spec-shaped `snapshot`/`delta` wire over the existing Unix-socket
-  IPC + FFI rather than lazily's `BridgeHub`/`IpcSink`/`IpcSource` (webrtc feature). Rationale: the
-  wire carries **per-doc epoch-batched** delta sets (an accepted-event count), unlike single-step
-  lazily-IPC deltas; the plugin transports already exist and are conformance-pinned; and the same
-  CommonJS/ESM + IntelliJ-toolchain constraints that block S5 block importing lazily's bridge crate
-  plugin-side. Revisit only if/when S5 lands a real reactive core in the plugins (a bridge without a
-  plugin-side reactive graph to bridge into buys nothing).
+- **S6 — retire the sidecars onto lazily reliable sync. RE-SCOPED (2026-07-11): now the active
+  north-star follow-up → [`plan-sidecar-retirement-lazily-sync.md`](plan-sidecar-retirement-lazily-sync.md).**
+  The earlier "reject, keep the bespoke wire" rested on premises S5 invalidated and one that was
+  simply wrong: (1) "single-step lazily-IPC deltas" — false, `lazily::Delta` is `{base_epoch, epoch,
+  ops: Vec<DeltaOp>}`, already an epoch-batched delta set; (2) the CommonJS/ESM + IntelliJ-toolchain
+  blockers — resolved by S5 (JB on K2/JVM21; a `StateGraphMirror` ported into lazily-js); (3) "a
+  bridge without a plugin-side reactive graph buys nothing" — S5 landed that graph. The remaining
+  substantive facts still shape the design, not a rejection: agent-doc's epoch is a cumulative
+  *accepted-event count* (a delta may span epochs), and lazily's Bridge is fire-and-forget (no
+  retry/outbox/ack, `ResyncRequired` unwired, no per-doc channel, `webrtc`-gated). So the plan is
+  **not** "adopt `BridgeHub`" — it is: push the *reliable-sync protocol* (resync coordinator, durable
+  outbox, sync-driver, OR-set liveness) into lazily (spec+formal→rs/kt/js), keep agent-doc's
+  pull+epoch+SQLite for controller→consumer, and move the plugin→controller open-set/lease push onto
+  the idempotent CrdtSync plane — retiring the live-buffer + plugin-owner-lease sidecars (the
+  stale/phantom/divergent-read race class). Full design + phasing in the linked plan.
 **Can the durable filesystem sidecars be replaced by lazily state? (analysis 2026-07-11)**
 The editor-liveness truth crosses **two OS processes** (plugin ⇄ controller). Today the durable
 carriers are filesystem sidecars: the **plugin-owner lease** (`live_editor_endpoint_attached`,

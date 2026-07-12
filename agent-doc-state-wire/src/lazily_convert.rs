@@ -18,9 +18,11 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use lazily::{Delta, DeltaOp, IpcValue, NodeId, NodeState};
+use lazily::{
+    Delta, DeltaOp, EdgeSnapshot, IpcMessage, IpcValue, NodeId, NodeSnapshot, NodeState, Snapshot,
+};
 
-use crate::{WireDelta, WireDeltaOp};
+use crate::{WireDelta, WireDeltaOp, WireSnapshot, WireSubscribe};
 
 #[inline]
 fn nid(id: u64) -> NodeId {
@@ -149,6 +151,53 @@ pub fn wire_delta_to_lazily(delta: &WireDelta) -> Result<Delta, base64::DecodeEr
     })
 }
 
+/// agent-doc [`WireSnapshot`] → lazily [`Snapshot`]. Drops `document_hash`/`"type"`
+/// (the transport envelope + `IpcMessage::Snapshot` tag supply them): `slot_id`→
+/// `NodeId`, base64 `payload`→`NodeState::Payload`, absent payload→`Opaque`.
+pub fn wire_snapshot_to_lazily(snapshot: &WireSnapshot) -> Result<Snapshot, base64::DecodeError> {
+    let nodes = snapshot
+        .nodes
+        .iter()
+        .map(|n| {
+            Ok(NodeSnapshot {
+                node: nid(n.slot_id),
+                type_tag: n.type_tag.clone(),
+                state: match &n.payload {
+                    Some(b64) => NodeState::Payload(BASE64.decode(b64.as_bytes())?),
+                    None => NodeState::Opaque,
+                },
+                key: None,
+            })
+        })
+        .collect::<Result<Vec<_>, base64::DecodeError>>()?;
+    let edges = snapshot
+        .edges
+        .iter()
+        .map(|e| EdgeSnapshot {
+            dependent: nid(e.dependent),
+            dependency: nid(e.dependency),
+        })
+        .collect();
+    Ok(Snapshot {
+        epoch: snapshot.epoch,
+        nodes,
+        edges,
+        roots: snapshot.roots.iter().map(|r| nid(*r)).collect(),
+    })
+}
+
+/// agent-doc [`WireSubscribe`] → lazily [`IpcMessage`] — the native wire the plugins'
+/// `GraphView` folds (`document_hash` rides the transport envelope). The `#lzsync` 3B
+/// wire cutover: `state_subscribe` emits this instead of the bespoke `WireSubscribe` JSON.
+pub fn wire_subscribe_to_ipc_message(
+    subscribe: &WireSubscribe,
+) -> Result<IpcMessage, base64::DecodeError> {
+    Ok(match subscribe {
+        WireSubscribe::Snapshot(s) => IpcMessage::Snapshot(wire_snapshot_to_lazily(s)?),
+        WireSubscribe::Delta(d) => IpcMessage::Delta(wire_delta_to_lazily(d)?),
+    })
+}
+
 /// lazily [`Delta`] + `document_hash` → agent-doc [`WireDelta`]. Returns `None` if
 /// any op carries a non-representable `SharedBlob` payload.
 pub fn lazily_delta_to_wire(delta: &Delta, document_hash: impl Into<String>) -> Option<WireDelta> {
@@ -211,6 +260,65 @@ mod tests {
             let back = lazily_op_to_wire(&lazily).expect("back to wire");
             assert_eq!(back, op, "round-trip mismatch for {op:?}");
         }
+    }
+
+    #[test]
+    fn wire_subscribe_converts_to_native_ipc_message() {
+        use crate::{WireEdgeSnapshot, WireNodeSnapshot};
+        use lazily::{IpcMessage, NodeId, NodeState};
+        let payload = BASE64.encode(br#"{"phase":"committed"}"#);
+
+        // Snapshot → IpcMessage::Snapshot: slot_id→NodeId, base64 payload→Payload bytes.
+        let snap = WireSubscribe::Snapshot(WireSnapshot {
+            message_type: WireSnapshot::TYPE,
+            epoch: 3,
+            document_hash: "doc".into(),
+            nodes: vec![WireNodeSnapshot {
+                slot_id: 42,
+                type_tag: "agent_doc.closeout.cycle".into(),
+                state: "resolved",
+                payload: Some(payload.clone()),
+            }],
+            edges: vec![WireEdgeSnapshot {
+                dependent: 1,
+                dependency: 2,
+            }],
+            roots: vec![42],
+        });
+        match wire_subscribe_to_ipc_message(&snap).expect("to native") {
+            IpcMessage::Snapshot(s) => {
+                assert_eq!(s.epoch, 3);
+                assert_eq!(s.nodes[0].node, NodeId(42));
+                assert_eq!(s.nodes[0].type_tag, "agent_doc.closeout.cycle");
+                assert!(
+                    matches!(&s.nodes[0].state, NodeState::Payload(b) if b == br#"{"phase":"committed"}"#)
+                );
+                assert_eq!(s.roots, vec![NodeId(42)]);
+            }
+            other => panic!("expected Snapshot, got {other:?}"),
+        }
+
+        // Delta → IpcMessage::Delta.
+        let delta = WireSubscribe::Delta(WireDelta {
+            message_type: WireDelta::TYPE,
+            base_epoch: 3,
+            epoch: 5,
+            document_hash: "doc".into(),
+            ops: vec![WireDeltaOp::CellSet {
+                slot_id: 42,
+                payload,
+            }],
+        });
+        match wire_subscribe_to_ipc_message(&delta).expect("to native") {
+            IpcMessage::Delta(d) => {
+                assert_eq!((d.base_epoch, d.epoch, d.ops.len()), (3, 5, 1));
+            }
+            other => panic!("expected Delta, got {other:?}"),
+        }
+
+        // Native serde is externally tagged (`{"Snapshot":{…}}`) — the wire GraphView folds.
+        let json = serde_json::to_value(wire_subscribe_to_ipc_message(&snap).unwrap()).unwrap();
+        assert!(json.get("Snapshot").is_some(), "externally-tagged: {json}");
     }
 
     #[test]

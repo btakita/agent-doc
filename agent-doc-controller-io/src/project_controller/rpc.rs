@@ -6948,6 +6948,11 @@ fn handle_state_subscribe(
     // state so the Project Controller projection remains the hot-path source and
     // editor integrations never need to inspect sidecar files.
     runtime.refresh_memory()?;
+    // NOTE (`#lzsync` 3B wire cutover, staged): the native-`IpcMessage` emission
+    // (`agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message`) is ready,
+    // but flipping it here breaks the current `WireDelta`-parsing plugins with no fallback,
+    // so it lands **atomically** with the plugin rewrites (StateGraphMirror→GraphView) and a
+    // live editor-sync eyeball. Until then, keep emitting the bespoke `WireSubscribe` wire.
     let message_json = runtime
         .state_subscribe(&document_hash, last_epoch)?
         .to_json();

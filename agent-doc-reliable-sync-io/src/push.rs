@@ -80,6 +80,17 @@ impl<O: DurableOutbox> LivenessPushEndpoint<O> {
         Self::with_next_epoch(document_hash, outbox, 1)
     }
 
+    /// Build an endpoint that resumes the epoch counter past every epoch the
+    /// channel has ever used — the highest still-retained frame *and* the caller's
+    /// `acked_through` cursor (acked frames are pruned, so `retained_epochs` alone
+    /// would forget them). Use after a plugin/controller recycle so a new event
+    /// never re-uses an epoch the controller cursor would ignore.
+    pub fn resuming(document_hash: impl Into<String>, outbox: O, acked_through: u64) -> Self {
+        let highest_retained = outbox.retained_epochs().into_iter().max().unwrap_or(0);
+        let next_epoch = acked_through.max(highest_retained) + 1;
+        Self::with_next_epoch(document_hash, outbox, next_epoch)
+    }
+
     pub fn document_hash(&self) -> &str {
         &self.document_hash
     }

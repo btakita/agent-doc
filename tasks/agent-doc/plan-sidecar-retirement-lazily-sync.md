@@ -400,13 +400,24 @@ push-loop wiring + dual-run cutover remain.
     `ControllerLivenessPlane` and returns its ack: deliver-fold-prune, retain-on-fail→replay-on-reconnect,
     recycle epoch-monotonicity (never re-use an acked epoch), idempotent redelivery. 26 crate tests;
     clippy/fmt green.
+  - **FFI + RPC transport + SqliteOutbox registry DONE (this pass).** `controller-io` exposes the
+    `reliable_sync` RPC **client**: `push_reliable_sync_liveness(project_root, epoch, envelope)` +
+    `RpcLivenessPushTransport` (impls reliable-sync-io's `LivenessPushTransport` over `request_controller`;
+    `ControllerReliableSyncResponse` made `pub`). `src/ffi.rs` exports the C-ABI entry points the editor
+    plugins call: **`agent_doc_reliable_sync_liveness_enqueue(project_root, document_hash, ops_json)`**
+    (parses a `LivenessOp` JSON batch, gets-or-creates a per-`(root,doc)` `LivenessPushEndpoint` backed by
+    a durable `SqliteOutbox` at `.agent-doc/reliable_sync_outbox.db`, resuming the epoch counter past the
+    acked cursor via `LivenessPushEndpoint::resuming` so a recycle never re-uses an epoch) and
+    **`agent_doc_reliable_sync_liveness_flush(project_root, document_hash)`** (flushes via
+    `RpcLivenessPushTransport`, returns the ack cursor). Global endpoint registry (`LazyLock<Mutex<HashMap>>`,
+    stateless-FFI pattern). Workspace compiles; clippy/fmt green.
   - **REMAINING (`[operator-verify]` slice, crosses the live editor↔controller boundary + agent-doc
-    release blocked by STOP-releases):** the FFI C-ABI enqueue/flush functions in `src/ffi.rs` + the
-    concrete RPC `LivenessPushTransport` (over `request_controller`) + a per-doc SqliteOutbox registry;
-    the editor-plugin JNA/JS calls that report open/close/attach events + the S4b OS exit watcher feeding
-    `Alive{value:false}`; and switching `editor_open_docs`/`editor_attach`/the `#6b5h` lease to read
-    `LivenessProjection`. Then the cutover (turn dual-run ON → confirm parity live → switch the hot path →
-    delete the sidecar writers/reapers).
+    release blocked by STOP-releases):** the editor-plugin JNA/JS calls that invoke the two FFI entry
+    points on open/close/attach events + the S4b OS exit watcher feeding `Alive{value:false}`; and
+    switching `editor_open_docs`/`editor_attach`/the `#6b5h` lease to read `LivenessProjection`. Then the
+    cutover (turn dual-run ON → confirm parity live → switch the hot path → delete the sidecar
+    writers/reapers). **3B** (adopt lazily `Delta`/`Snapshot` in the `state_subscribe` pull) also remains
+    and likewise changes the FFI wire the plugins parse.
 - **Migration & cutover:** dual-run (sidecar write + sync push) → assert the synced open-set/lease
   matches the sidecar-derived one across a SimWorld of open/close/crash/recycle sequences →
   switch the hot path to read the synced cells → stop reading the sidecars → delete the sidecar

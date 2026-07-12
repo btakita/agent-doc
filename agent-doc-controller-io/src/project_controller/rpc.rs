@@ -6955,14 +6955,65 @@ fn handle_state_subscribe(
     })
 }
 
-#[derive(Debug, Serialize)]
-struct ControllerReliableSyncResponse {
-    document_hash: String,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerReliableSyncResponse {
+    pub document_hash: String,
     /// Ack cursor the pushing plugin uses to prune / resume its outbox.
-    ack_through: u64,
+    pub ack_through: u64,
     /// Whether the shadow liveness plane actually consumed the frame
     /// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`); OFF ⇒ sidecars stay authoritative.
-    dual_run: bool,
+    pub dual_run: bool,
+}
+
+/// Client side of the `reliable_sync` RPC: push one liveness envelope to the
+/// controller and return its response (ack cursor + dual-run flag).
+///
+/// The plugin-push endpoint's [`agent_doc_reliable_sync_io::push::LivenessPushTransport`]
+/// wraps this. `envelope` is an [`agent_doc_reliable_sync_io::encode_envelope`] value;
+/// `epoch` is the outbox retention key.
+pub fn push_reliable_sync_liveness(
+    project_root: &Path,
+    epoch: u64,
+    envelope: &serde_json::Value,
+) -> Result<ControllerReliableSyncResponse> {
+    let request = ControllerRequest {
+        command: "reliable_sync".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: Some(epoch),
+        state: None,
+        caller: Some("reliable_sync_push".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(envelope.to_string()),
+    };
+    request_controller::<ControllerReliableSyncResponse>(project_root, request)
+}
+
+/// [`agent_doc_reliable_sync_io::push::LivenessPushTransport`] over the controller
+/// `reliable_sync` RPC — the production transport the plugin-push endpoint flushes
+/// through. One per project root.
+pub struct RpcLivenessPushTransport {
+    project_root: std::path::PathBuf,
+}
+
+impl RpcLivenessPushTransport {
+    pub fn new(project_root: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            project_root: project_root.into(),
+        }
+    }
+}
+
+impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcLivenessPushTransport {
+    fn push(&self, _document_hash: &str, epoch: u64, envelope: &serde_json::Value) -> Result<u64> {
+        let response = push_reliable_sync_liveness(&self.project_root, epoch, envelope)?;
+        Ok(response.ack_through)
+    }
 }
 
 /// The controller's shadow reliable-sync liveness plane (sidecar-retirement

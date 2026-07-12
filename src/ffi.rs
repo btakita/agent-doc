@@ -2411,6 +2411,128 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
         .into_raw()
 }
 
+/// Per-`(project_root, document_hash)` plugin-side liveness push endpoints
+/// (sidecar-retirement Phase 3C). Global because the JNA/JS FFI boundary is
+/// stateless; each holds a durable `SqliteOutbox` so a push survives a plugin or
+/// controller recycle.
+static RELIABLE_SYNC_LIVENESS_ENDPOINTS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            agent_doc_reliable_sync_io::push::LivenessPushEndpoint<
+                agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
+            >,
+        >,
+    >,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn reliable_sync_registry_key(project_root: &Path, document_hash: &str) -> String {
+    format!("{}\u{0}{document_hash}", project_root.display())
+}
+
+fn reliable_sync_outbox_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join("reliable_sync_outbox.db")
+}
+
+/// Enqueue a JSON batch of `LivenessOp`s into a document's durable push outbox
+/// (sidecar-retirement Phase 3C). The editor plugin calls this on open / close /
+/// attach / exit events; the frame is appended durably **before** any send, then
+/// delivered by [`agent_doc_reliable_sync_liveness_flush`]. Returns `0` on
+/// success, `-1` on error.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
+    project_root: *const c_char,
+    document_hash: *const c_char,
+    ops_json: *const c_char,
+) -> c_int {
+    let result = (|| -> anyhow::Result<()> {
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let document_hash = unsafe { required_ffi_string(document_hash, "document_hash") }?;
+        let ops_json = unsafe { required_ffi_string(ops_json, "ops_json") }?;
+        let ops: Vec<agent_doc_reliable_sync_io::liveness::LivenessOp> =
+            serde_json::from_str(&ops_json).context("parse liveness ops_json")?;
+        let root = PathBuf::from(&project_root);
+        let key = reliable_sync_registry_key(&root, &document_hash);
+        let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
+            .lock()
+            .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
+        let endpoint = match registry.entry(key) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+                    &reliable_sync_outbox_path(&root),
+                    document_hash.clone(),
+                )?;
+                // Resume the epoch counter past every epoch ever used (acked or
+                // still-retained) so a recycle never re-uses one the controller
+                // cursor would ignore.
+                let acked_through = outbox.acked_through();
+                entry.insert(
+                    agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
+                        document_hash.clone(),
+                        outbox,
+                        acked_through,
+                    ),
+                )
+            }
+        };
+        endpoint.enqueue(&ops)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => 0,
+        Err(err) => {
+            eprintln!("[ffi] agent_doc_reliable_sync_liveness_enqueue: {err:#}");
+            -1
+        }
+    }
+}
+
+/// Flush a document's durable push outbox to the controller `reliable_sync` RPC
+/// (sidecar-retirement Phase 3C). Replays every un-acked frame and prunes on the
+/// controller's ack cursor; a push that fails while the controller is down stays
+/// retained for the next flush. Returns the ack cursor (`>= 0`) on success, `-1`
+/// on error.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_flush(
+    project_root: *const c_char,
+    document_hash: *const c_char,
+) -> i64 {
+    let result = (|| -> anyhow::Result<u64> {
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let document_hash = unsafe { required_ffi_string(document_hash, "document_hash") }?;
+        let root = PathBuf::from(&project_root);
+        let key = reliable_sync_registry_key(&root, &document_hash);
+        let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
+            .lock()
+            .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
+        let Some(endpoint) = registry.get_mut(&key) else {
+            return Ok(0); // nothing enqueued for this document yet
+        };
+        let transport =
+            agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(&root);
+        let progress = endpoint.flush(&transport)?;
+        Ok(progress.acked_through)
+    })();
+    match result {
+        Ok(ack) => ack as i64,
+        Err(err) => {
+            eprintln!("[ffi] agent_doc_reliable_sync_liveness_flush: {err:#}");
+            -1
+        }
+    }
+}
+
 /// Inspect one actor through the project controller and return the same JSON
 /// shape as `agent-doc admin inspect --json`.
 ///

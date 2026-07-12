@@ -285,7 +285,28 @@ https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&
 - underwriting conditions
 - counter-signed items
 - funding authorization
-<!-- agent:boundary:37813d07 -->
+
+### Re: Break Lender Documents tab into per-type upload sections — opus-4-8
+
+Done in code (committed to the EFS submodule, `5431480`). The deal dialog's **Lender Documents** tab was one flat upload + list; it now breaks out a separate section — each with its own upload control and document list — for the five lender-returned types you named:
+
+- **Term sheet / commitment letter** (in deal)
+- **Deal-specific proof of funds**
+- **Underwriting conditions**
+- **Counter-signed items**
+- **Funding authorization**
+
+Legacy/untyped documents surface under an **Other** bucket (no upload control — new uploads always pick a section). Each section keeps the on-the-lender's-behalf vs. sent-by-lender source toggle.
+
+**What changed** (`src/equityfundingsource-dev`):
+- **Migration `0134_deal_lender_document_category.sql`** — adds a validated `category` column + `(loan_id, category)` index. Existing rows default to `''` → the Other bucket.
+- **repo.ts** — `DEAL_LENDER_DOCUMENT_CATEGORIES` catalogue + `deal_lender_document_category_()` validator (unknown → `''`); category threaded through insert/view.
+- **routes.ts** — upload parses/validates the posted `category`.
+- **deal_lender_documents.tsx** — renders per-type sections via a reusable `LenderDocSection`; uploads tag `category`.
+- **Tests** — category persistence/validation, section-key↔server-category parity, the 0134 contract, and the 5 UI sections.
+
+**Verification:** `bun run build` + `build:worker` green; full suite **1583 pass / 0 fail** (5 new). The tab isn't live at your URL yet — applying migration 0134 to prod D1 and deploying the worker is the remaining, outward-facing step, so I queued it (`#lender-docs-sections` deploy) rather than pushing to the client's prod unprompted. Say the word and I'll run it through the isolated clean-worktree recipe.
+<!-- agent:boundary:e4e9eb2f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -294,6 +315,7 @@ https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&
 - 🚧 :round_pushpin: [#sy71]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
 - ~~do [#r30z]~~
+- do [#e44f]
 <!-- /agent:queue -->
 
 ## Notes

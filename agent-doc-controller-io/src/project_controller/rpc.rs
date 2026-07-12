@@ -3225,7 +3225,7 @@ fn checkpoint_crdt_via_controller_document_model(
 fn checkpoint_route_owned_document_crdt(doc: &Path, source: &str) -> Result<Option<String>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -3304,7 +3304,7 @@ fn current_text_controller_initial_read_for_doc(
 ) -> Result<Option<ControllerCurrentTextRead>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -3392,7 +3392,7 @@ pub fn current_text_via_controller_model_read_for_doc(
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -3645,7 +3645,7 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
 ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -3738,7 +3738,7 @@ pub fn consume_disk_change_reconcile_via_controller_model_for_doc(
 pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -3800,7 +3800,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -4218,7 +4218,7 @@ fn handle_crdt_current_text_rpc(
     let file_arg = canonical.to_string_lossy().to_string();
     let payload = crdt_current_text_payload(&request)?;
     let source = crdt_current_text_source(&payload);
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         let current = agent_doc_crdt_relay_io::CurrentText::Detached;
         log_controller_current_text_result(&canonical, &source, &current);
@@ -4312,7 +4312,7 @@ fn handle_crdt_replica_rpc(
         .filter(|value| !value.is_empty())
         .context("CRDT replica payload missing identity")?;
     let method_name = payload.method.as_str();
-    let authority = agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_arg);
+    let authority = crdt_authority_for_file(&file_arg);
     if !authority.editor_attached() {
         agent_doc_ops_log_io::log_op(
             &canonical,
@@ -7019,15 +7019,46 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcLivenessPush
     }
 }
 
-/// The controller's shadow reliable-sync liveness plane (sidecar-retirement
-/// Phase 3C). Global, like `RelayHub`, because the socket handler captures no
-/// state. Fed only when the dual-run flag is on; the sidecars remain the hot-path
-/// authority until the operator-verified cutover.
-static CONTROLLER_LIVENESS_PLANE: std::sync::LazyLock<
-    std::sync::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane>,
-> = std::sync::LazyLock::new(|| {
-    std::sync::Mutex::new(agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new())
-});
+/// The reliable-sync liveness plane the controller feeds and reads (sidecar-retirement
+/// Phase 3C + step 3). The global lives in `agent-doc-reliable-sync-io`
+/// ([`agent_doc_reliable_sync_io::global_liveness_plane`]) so the same instance the
+/// controller feeds is the one [`crdt_authority_for_file`] reads — the plane is the
+/// hot-path authority, the sidecars are background durability.
+fn controller_liveness_plane()
+-> &'static std::sync::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane> {
+    agent_doc_reliable_sync_io::global_liveness_plane()
+}
+
+/// The hot-path CRDT authority for `file` (sidecar-retirement step 3 — the authority
+/// flip). The reliable-sync plane is **primary**: when the process-global plane is *warm*
+/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY` on, default, and the plane holds at least one open
+/// doc — true in the controller, fed by editor pushes), its `live_docs` decides
+/// `MultiReplica` / `GitAuthoritative` and the filesystem sidecars are **not** consulted.
+/// On a plane cold miss (authority disabled, a poisoned lock, or an empty plane — a
+/// short-lived CLI that never received a push) it falls back to the sidecar-backed
+/// [`agent_doc_plugin_owner::crdt_authority::authority_for_file`] so cross-process
+/// authority stays correct. This is the single hot-path authority entry the controller
+/// and `commit-io` share; the sidecars are demoted to background durability + cold-miss.
+pub fn crdt_authority_for_file(
+    file: &str,
+) -> agent_doc_document_realtime::crdt_authority::CrdtAuthority {
+    use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+    if agent_doc_reliable_sync_io::authority_enabled()
+        && let Ok(plane) = controller_liveness_plane().lock()
+    {
+        let projection = plane.projection();
+        if !projection.open_docs().is_empty() {
+            let document_hash =
+                agent_doc_hash::document_id_for_path(std::path::Path::new(file));
+            return if projection.live_docs().contains(&document_hash) {
+                CrdtAuthority::MultiReplica
+            } else {
+                CrdtAuthority::GitAuthoritative
+            };
+        }
+    }
+    agent_doc_plugin_owner::crdt_authority::authority_for_file(file)
+}
 
 /// Status response for the `reliable_sync_status` diagnostic RPC (sidecar-retirement
 /// Phase 3C `[operator-verify]` parity oracle). Surfaces the shadow plane's derived
@@ -7084,7 +7115,7 @@ fn handle_reliable_sync_status(
     bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
     let dual_run = agent_doc_reliable_sync_io::dual_run_enabled();
-    let plane = CONTROLLER_LIVENESS_PLANE
+    let plane = controller_liveness_plane()
         .lock()
         .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
     let projection = plane.projection();
@@ -7184,7 +7215,7 @@ pub fn record_reliable_sync_editor_exit(pid: u64) {
             peer: 0,
         },
     };
-    match CONTROLLER_LIVENESS_PLANE.lock() {
+    match controller_liveness_plane().lock() {
         Ok(mut plane) => plane.apply_local(&op),
         Err(_) => eprintln!(
             "[reliable-sync] record_reliable_sync_editor_exit: liveness plane mutex poisoned"
@@ -7222,7 +7253,7 @@ fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliable
     }
 
     let ack_through = {
-        let mut plane = CONTROLLER_LIVENESS_PLANE
+        let mut plane = controller_liveness_plane()
             .lock()
             .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
         plane.ingest(&document_hash, epoch, &message)?
@@ -14557,6 +14588,53 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    #[test]
+    fn crdt_authority_for_file_reads_warm_plane_over_sidecar() {
+        use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+        use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
+        }
+        // Warm the process-global plane with an Open for a specific path's hash.
+        let live_path = "/tmp/agent-doc-authority-test/open-doc.md";
+        let live_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(live_path));
+        let frame = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: live_hash.clone(),
+            pid: 4242,
+            tag: "t".into(),
+        }])
+        .expect("encode liveness frame");
+        {
+            let mut plane = controller_liveness_plane().lock().unwrap();
+            plane.ingest(&live_hash, 1, &frame).expect("ingest");
+        }
+        // The warm plane is authoritative: the open doc is MultiReplica...
+        assert_eq!(crdt_authority_for_file(live_path), CrdtAuthority::MultiReplica);
+        // ...and a different path the warm plane does not hold is GitAuthoritative
+        // (authoritatively detached — the sidecar is NOT consulted while the plane is warm).
+        assert_eq!(
+            crdt_authority_for_file("/tmp/agent-doc-authority-test/other-doc.md"),
+            CrdtAuthority::GitAuthoritative
+        );
+    }
+
+    #[test]
+    fn crdt_authority_for_file_disabled_falls_back_to_sidecar() {
+        use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+        // Explicitly disabled ⇒ the plane is never consulted; a never-tracked path
+        // resolves through the sidecar-backed path as GitAuthoritative.
+        unsafe {
+            std::env::set_var(agent_doc_reliable_sync_io::AUTHORITY_ENV, "0");
+        }
+        assert_eq!(
+            crdt_authority_for_file("/tmp/agent-doc-authority-test/untracked.md"),
+            CrdtAuthority::GitAuthoritative
+        );
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
+        }
     }
 
     #[test]

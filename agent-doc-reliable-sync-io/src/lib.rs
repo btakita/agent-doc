@@ -51,6 +51,39 @@ pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
 /// Env var gating the reliable-sync dual-run (sidecar-retirement Phase 3C cutover).
 pub const DUAL_RUN_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_DUAL_RUN";
 
+/// Env var promoting the reliable-sync plane to the hot-path CRDT authority
+/// (sidecar-retirement step 3, the "authority flip").
+pub const AUTHORITY_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_AUTHORITY";
+
+/// Whether the reliable-sync plane is the **hot-path CRDT authority**. **Default ON.**
+///
+/// When on, `authority_for_file` (and the editor-attached gate) derives from the
+/// plane's `LivenessProjection`; the filesystem sidecars (plugin-owner lease,
+/// `.agent-doc/live-buffer/`) are demoted to **background durability** + the cold-miss
+/// backstop only. The plane is durable via its outbox, so promoting it does not lose
+/// the on-disk durability the sidecars gave. Explicitly disable with a falsey value
+/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY=0|false|no|off`) to keep the sidecars authoritative.
+pub fn authority_enabled() -> bool {
+    !matches!(
+        std::env::var(AUTHORITY_ENV).ok().as_deref(),
+        Some("0" | "false" | "FALSE" | "no" | "off" | "OFF")
+    )
+}
+
+/// Process-global reliable-sync liveness plane — the hot-path authority source
+/// (sidecar-retirement step 3). The controller feeds it (`ingest`); authority reads
+/// (`agent-doc-plugin-owner::authority_for_file`) derive from its projection. It is
+/// in-memory **per process**: warm in the controller (fed by editor pushes over the
+/// reliable-sync RPC), empty in a short-lived CLI — which cold-misses to the durable
+/// sidecar backstop so cross-process authority stays correct. Lives here (not in
+/// `controller-io`) so the low-level `plugin-owner` authority read can reach it without
+/// a dependency cycle (`controller-io` already depends on `plugin-owner`).
+pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLivenessPlane> {
+    static PLANE: std::sync::LazyLock<std::sync::Mutex<plane::ControllerLivenessPlane>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(plane::ControllerLivenessPlane::new()));
+    &PLANE
+}
+
 /// Whether the controller should run the reliable-sync liveness plane alongside
 /// the filesystem sidecars.
 ///

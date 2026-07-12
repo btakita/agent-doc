@@ -472,6 +472,7 @@ dependencies = [
  "agent-doc-document-realtime",
  "agent-doc-flow",
  "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-harness",
  "agent-doc-hash",

@@ -379,8 +379,12 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
     }
 
     fn editor_attached(&self, file: &Path) -> bool {
-        agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
-            .editor_attached()
+        // Step 3: share the controller's plane-primary authority so the commit path and
+        // the controller never disagree; the sidecar is only the cold-miss backstop.
+        agent_doc_controller_io::project_controller::crdt_authority_for_file(
+            &file.display().to_string(),
+        )
+        .editor_attached()
     }
 
     fn log_op(&self, file: &Path, message: &str) {

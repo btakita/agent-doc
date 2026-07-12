@@ -506,9 +506,21 @@ start). What is left needs a human watching a real editor and the operator lifti
      (b) is not effectively reaped (`#lbreap` / `reap_stale_jetbrains_live_buffers`). Follow-ups (separate
      from the flip): scope live-buffer writes to session docs like the plane now is, and/or GC the dead-pid
      backlog. Tracked here so step 6's writer/reaper deletion also removes this failure mode.
-3. **Authority flip** (behind the flag) — switch `authority_for_file` / `editor_open_docs` /
-   `editor_attach` / the `#6b5h` lease to READ `LivenessProjection` when dual-run is ON (OFF keeps the
-   sidecar read). Re-run step 2's parity check against the live hot path.
+3. **Authority flip — DONE (2026-07-12), default ON per operator directive.** `authority_for_file` now
+   reads the plane as the **primary** hot-path CRDT authority; the sidecars are the **cold-miss backstop /
+   background durability only** (operator: "always want `AGENT_DOC_RELIABLE_SYNC_AUTHORITY` true; remove
+   the sidecar from the hotpath; sidecar only for background durability" — [[project_reliable_sync_plane_is_authority_sidecar_durability_only]]).
+   Mechanics: the plane global moved from `controller-io` into **`agent-doc-reliable-sync-io`**
+   (`global_liveness_plane()`) — required because `plugin-owner` cannot depend on `reliable-sync-io`
+   (cycle via `ipc-io`), so the flip lives in a shared `controller-io` helper
+   **`crdt_authority_for_file(file)`** (plane-primary when the plane is *warm* = holds ≥1 open doc; else
+   falls back to `plugin_owner::authority_for_file`). The 8 controller `authority_for_file` call sites +
+   `commit-io::editor_attached` route through it, so controller and commit never disagree.
+   `AGENT_DOC_RELIABLE_SYNC_AUTHORITY` defaults ON; `=0` reverts to the sidecar. Cold CLIs (empty plane)
+   still cold-miss to the sidecar so cross-process authority stays correct. **Remaining for full removal
+   (step 6):** the open-set/lease readers (`editor_open_docs`, the `#6b5h` lease) and deleting the sidecar
+   *writers*/reapers. **`[operator-verify]`:** flip works in a live IDE (open a doc → controller resolves
+   `MultiReplica` from the plane; crash → `GitAuthoritative`).
 4. **3B fold-swap** (behind the flag) — swap `build_delta`/`state_subscribe` to produce `lazily::Delta`
    via `agent_doc_state_wire::lazily_convert` + drive gap-detect with `ResyncCoordinator`; on-wire JSON
    unchanged, so plugins are unaffected until step 5.

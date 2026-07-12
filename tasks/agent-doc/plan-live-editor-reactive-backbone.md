@@ -347,8 +347,11 @@ Each is a candidate stage; none is a regression, all are parity gaps.
   (lazily-formal `ReliableSync.lean`, 1749fbd), and Phase 2 impl across all three bindings
   (lazily-rs 3200cb3, lazily-kt 67c980f, lazily-js 81116e5) are DONE — `ResyncCoordinator` /
   `DurableOutbox` / OR-set+LWW liveness, control frames as `IpcMessage` variants (msgpack
-  cross-lang codec). Remaining: coverage-row bookkeeping + Phase 3 agent-doc integration (3A UDS
-  carrier, 3B pull-on-lazily-types, 3C plugin push on the CrdtSync plane, dual-run cutover).**
+  cross-lang codec). The lazily-spec `coverage.json` "Reliable sync" row is already ✅ for rs/kt/js,
+  and the deferred rs `SyncDriver` loop skeleton is now DONE too (lazily-rs `reliable_sync.rs`,
+  behind `feature="ipc"`, 8 SimWorld tests); the `webrtc`-ungate proved unnecessary (the pull/driver
+  path rides `IpcSink`/`IpcSource`, not `BridgeHub`). Remaining: Phase 3 agent-doc integration (3A
+  UDS carrier, 3B pull-on-lazily-types, 3C plugin push on the CrdtSync plane, dual-run cutover).**
   The earlier "reject, keep the bespoke wire" rested on premises S5 invalidated and one that was
   simply wrong: (1) "single-step lazily-IPC deltas" — false, `lazily::Delta` is `{base_epoch, epoch,
   ops: Vec<DeltaOp>}`, already an epoch-batched delta set; (2) the CommonJS/ESM + IntelliJ-toolchain

@@ -237,11 +237,28 @@ pre-existing unrelated `benchmark-check` missing-p50/p95-rows baseline):**
 - `tests/reliable_sync_conformance.rs` replays all 5 `conformance/reliable-sync/` fixtures + a
   reference `FileOutbox` crash-replay helper + the `ResyncRequest`/`OutboxAck` json+msgpack codec
   round-trip; new `make test-reliable-sync-conformance` wired into `check`. Inline unit tests.
-- **Deferred within rs (not blocking kt/js):** the `SyncDriver` loop skeleton and the
-  `webrtc`-ungate of `BridgeHub`/`ipc` + generic caller-supplied byte-transport pairing are the
-  transport-wiring slice; land them alongside Phase 3A (the pull consumer path may not need
-  `BridgeHub` at all). The pure-protocol coordinator/outbox/liveness — what kt/js must mirror — is
-  complete.
+- **`SyncDriver` loop skeleton — DONE (lazily-rs, behind `feature="ipc"`).** `reliable_sync.rs`
+  adds the full-duplex `SyncDriver<S: IpcSink, R: IpcSource, O: DurableOutbox, C: Clock, P:
+  SnapshotProvider>` implementing the spec loop shape in one `tick()`:
+  drain (append-before-send, retain-and-stall on sink failure) → resync-on-reconnect
+  (`on_reconnect()` replays the unacked outbox suffix from the peer ack cursor + re-advertises our
+  receiver cursor) → receive (route `OutboxAck` → `ack_through`; `ResyncRequest` → answer with a
+  `SnapshotProvider` snapshot; feed `Snapshot`/`Delta` through `ResyncCoordinator` → `Apply`/emit
+  `ResyncRequest`/`Ignore`; `CrdtSync` handed straight to the host). Injected `Clock` + transport +
+  outbox; no threads/runtime in core (cadence/backoff are host policy). `Progress`/`DriverError`
+  exported. **8 SimWorld-style deterministic tests** (scripted sink/source doubles, no real socket):
+  drain+ack-prune, retain-on-fail+reconnect-replay, apply+advertise-cursor, idempotent redelivery,
+  inbound-gap→request, answer-request→provider-snapshot, source-read-error, gap→snapshot converge.
+  `cargo clippy --all-targets --all-features -D warnings` + the `ipc,ipc-msgpack` reliable_sync lib
+  and conformance targets green. **It needs only the `ipc` feature — no `webrtc`** (it composes
+  `IpcSink`/`IpcSource`, not `BridgeHub`), which confirms the plan insight that the pull/driver path
+  does not need `BridgeHub` fan-out.
+- **`webrtc`-ungate of `BridgeHub`/`ipc` — deliberately NOT done (not needed by the pull path).**
+  The reliable-sync driver + coordinator + outbox all live behind `feature="ipc"` and never touch
+  `BridgeHub` (the `webrtc`-gated fan-out hub). Since Phase 3A's UDS carrier and 3B's pull consumer
+  ride `IpcSink`/`IpcSource` directly through the `SyncDriver`, the `webrtc`-ungate is unnecessary
+  scope; revisit only if a genuine multi-peer fan-out requirement for `BridgeHub` appears.
+- **Pure-protocol coordinator/outbox/liveness** — what kt/js mirror — remains complete.
 
 **lazily-kt port (DONE, 67c980f; `./gradlew test` green):** `ReliableSync.kt`
 (`ResyncCoordinator`/`DurableOutbox`+`InMemoryOutbox`/`OrSet`/`WireLwwRegister`), `Ipc.kt`

@@ -56,6 +56,81 @@ impl RealtimeSteering {
     }
 }
 
+/// All realtime operator steering directives added since the baseline, in document
+/// order (oldest-first).
+///
+/// `#realtime-steering-aggregate` (plan Phase 6): steering is **not** a FIFO
+/// `QueueCell` drained one head at a time. The operator may add several prompts
+/// while a turn is active, and every one must reach the agent **at once**, verbatim,
+/// so the agent can process the concurrent directives together and find patterns
+/// across them instead of answering them serially. This set is that aggregate view;
+/// [`RealtimeSteering`] (single) remains the "is there any steering / what is the
+/// primary one" summary used by the interrupt/label paths.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RealtimeSteeringSet {
+    directives: Vec<RealtimeSteering>,
+}
+
+impl RealtimeSteeringSet {
+    pub fn new(directives: Vec<RealtimeSteering>) -> Self {
+        Self {
+            directives: directives.into_iter().filter(|d| d.is_present()).collect(),
+        }
+    }
+
+    pub fn is_present(&self) -> bool {
+        !self.directives.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.directives.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.directives.is_empty()
+    }
+
+    pub fn directives(&self) -> &[RealtimeSteering] {
+        &self.directives
+    }
+
+    /// The primary (first / oldest) directive, for callers that still need a single
+    /// [`RealtimeSteering`] (labels, short markers). Falls back to `None` when empty.
+    pub fn primary(&self) -> RealtimeSteering {
+        self.directives
+            .first()
+            .cloned()
+            .unwrap_or(RealtimeSteering::None)
+    }
+
+    /// Every directive's full verbatim text, concatenated oldest-first so the agent
+    /// receives all concurrent steering at once. Directives are separated by a blank
+    /// line; a leading count header is included when there is more than one so the
+    /// agent knows to look for patterns across them. Returns `None` when empty.
+    pub fn verbatim_aggregate(&self) -> Option<String> {
+        let bodies: Vec<&str> = self
+            .directives
+            .iter()
+            .filter_map(RealtimeSteering::verbatim)
+            .filter(|v| !v.trim().is_empty())
+            .collect();
+        if bodies.is_empty() {
+            return None;
+        }
+        if bodies.len() == 1 {
+            return Some(bodies[0].to_string());
+        }
+        let mut out = format!(
+            "{} concurrent operator steering directives (address ALL of them this turn; look for patterns across them):",
+            bodies.len()
+        );
+        for (idx, body) in bodies.iter().enumerate() {
+            out.push_str(&format!("\n\n[steering {}/{}] {}", idx + 1, bodies.len(), body));
+        }
+        Some(out)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct BaselineComparison<'a> {
     pub baseline: &'a str,
@@ -110,6 +185,56 @@ impl<'a> BaselineComparison<'a> {
     pub fn realtime_steering(&self) -> RealtimeSteering {
         realtime_steering_between(self.baseline, self.current)
     }
+
+    /// All concurrent operator steering directives since the baseline
+    /// (`#realtime-steering-aggregate`). See [`RealtimeSteeringSet`].
+    pub fn realtime_steering_all(&self) -> RealtimeSteeringSet {
+        realtime_steering_all_between(self.baseline, self.current)
+    }
+}
+
+/// Aggregate form of [`realtime_steering_between`]: every unstarted prompt-bearing
+/// directive the operator added since the baseline, oldest-first
+/// (`#realtime-steering-aggregate`, plan Phase 6). A deleted/reduced prompt is a
+/// single-directive state, so those short-circuit to a one-element set to match the
+/// single-directive path exactly; the common "operator added N prompts mid-turn"
+/// case yields all N so the agent addresses them together.
+pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
+    match unresolved_prompt_delta(baseline, current) {
+        UnresolvedPromptDelta::Deleted { .. } | UnresolvedPromptDelta::Reduced { .. } => {
+            return RealtimeSteeringSet::new(vec![realtime_steering_between(baseline, current)]);
+        }
+        UnresolvedPromptDelta::None | UnresolvedPromptDelta::AddedOrExpanded => {}
+    }
+
+    let norm = |s: &str| {
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(s)
+    };
+    let base_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(baseline));
+    let cur_norm = norm(&agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(current));
+    let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &cur_norm) else {
+        return RealtimeSteeringSet::default();
+    };
+    let directives = agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff(
+        &diff_text, current,
+    )
+    .into_iter()
+    .map(|change| {
+        let preview = prompt_bearing_preview(&change.text);
+        let verbatim = change.text.trim().to_string();
+        match change.kind {
+            agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
+                RealtimeSteering::PromptTarget { preview, verbatim }
+            }
+            agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
+                RealtimeSteering::ContentEdit { preview, verbatim }
+            }
+            agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+            | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => RealtimeSteering::None,
+        }
+    })
+    .collect();
+    RealtimeSteeringSet::new(directives)
 }
 
 pub fn realtime_steering_between(baseline: &str, current: &str) -> RealtimeSteering {
@@ -389,5 +514,52 @@ mod tests {
         let verbatim = steering.verbatim().unwrap();
         assert!(verbatim.contains("Fix the JB error:"));
         assert!(verbatim.contains("Read access is allowed from inside read-action only"));
+    }
+
+    #[test]
+    fn realtime_steering_all_aggregates_multiple_concurrent_prompt_targets() {
+        // `#realtime-steering-aggregate` (plan Phase 6): the operator added TWO
+        // prompts while the turn was active. Both must reach the agent at once so it
+        // can address them together and find patterns — not just the first, and not
+        // drained one head at a time.
+        let baseline = doc("");
+        let current = doc("❯ First steering directive\n\n❯ Second steering directive\n");
+
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert!(set.is_present());
+        assert_eq!(set.len(), 2, "both concurrent directives must be surfaced");
+
+        let aggregate = set.verbatim_aggregate().unwrap();
+        assert!(aggregate.contains("First steering directive"));
+        assert!(aggregate.contains("Second steering directive"));
+        // A count header tells the agent to look for patterns across them.
+        assert!(aggregate.contains("2 concurrent operator steering directives"));
+
+        // The single-directive summary still reports the primary (oldest) one, so
+        // label/interrupt paths keep working.
+        assert_eq!(set.primary().label(), Some("prompt_target"));
+    }
+
+    #[test]
+    fn realtime_steering_all_single_directive_matches_single_path() {
+        // One added prompt: the aggregate is exactly the single verbatim (no count
+        // header), so the two paths agree when there is only one directive.
+        let baseline = doc("");
+        let current = doc("❯ Only one directive\n");
+
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert_eq!(set.len(), 1);
+        let single = BaselineComparison::new(&baseline, &current).realtime_steering();
+        assert_eq!(set.verbatim_aggregate().as_deref(), single.verbatim());
+        assert!(!set.verbatim_aggregate().unwrap().contains("concurrent operator"));
+    }
+
+    #[test]
+    fn realtime_steering_all_empty_when_unchanged() {
+        let baseline = doc("❯ Already here\n");
+        let current = doc("❯ Already here\n");
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert!(!set.is_present());
+        assert!(set.verbatim_aggregate().is_none());
     }
 }

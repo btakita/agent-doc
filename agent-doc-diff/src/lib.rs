@@ -847,7 +847,26 @@ pub fn first_unstarted_prompt_bearing_change_from_diff(
     diff_text: &str,
     current_doc: &str,
 ) -> Option<PromptBearingChange> {
+    all_unstarted_prompt_bearing_changes_from_diff(diff_text, current_doc)
+        .into_iter()
+        .next()
+}
+
+/// Every still-unanswered prompt-bearing change from an already-built diff, in
+/// document order (oldest-first). This is the multi-directive form of
+/// [`first_unstarted_prompt_bearing_change_from_diff`]: realtime operator steering
+/// is not a FIFO queue drained one head at a time — the operator can add several
+/// prompts while a turn is active, and all of them must reach the agent at once so
+/// it can address them together and find patterns across them
+/// (`#realtime-steering-aggregate`, plan Phase 6). The answered-prompt suppression
+/// (`skip_answered_response_run`, immediately-before-existing-response) is identical
+/// to the single-change path so the two never disagree on what counts as unstarted.
+pub fn all_unstarted_prompt_bearing_changes_from_diff(
+    diff_text: &str,
+    current_doc: &str,
+) -> Vec<PromptBearingChange> {
     let changes = classify_prompt_bearing_changes(diff_text);
+    let mut unstarted = Vec::new();
     let mut skip_answered_response_run = false;
     for (idx, change) in changes.iter().enumerate() {
         match change.kind {
@@ -877,14 +896,14 @@ pub fn first_unstarted_prompt_bearing_change_from_diff(
                     skip_answered_response_run = true;
                     continue;
                 }
-                return Some(change.clone());
+                unstarted.push(change.clone());
             }
             PromptBearingChangeKind::ContentEdit => {
                 continue;
             }
         }
     }
-    None
+    unstarted
 }
 
 fn suppress_answered_prompt_runs(changes: Vec<PromptBearingChange>) -> Vec<PromptBearingChange> {
@@ -3885,6 +3904,41 @@ Done.\n\
         assert!(!body.contains("do #queued"));
         assert!(body.contains("Visible."));
         assert!(body.contains("<!-- agent:queue auto -->"));
+    }
+
+    #[test]
+    fn all_unstarted_prompt_bearing_changes_returns_every_added_prompt() {
+        // `#realtime-steering-aggregate`: two prompts appended to the exchange tail
+        // while a turn was active must BOTH be returned (oldest-first), not just the
+        // first, so the agent can address all concurrent steering at once. The
+        // single-change form stays the first of the same set.
+        let snapshot = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older — gpt-5\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "Fix the markdown parser.\n\n",
+            "Also strengthen the SimWorld tests.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let diff = unified_diff_from_contents(snapshot, current).expect("diff");
+
+        let all = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
+        assert_eq!(all.len(), 2, "both appended prompts must be returned");
+        assert!(all.iter().all(|c| c.kind == PromptBearingChangeKind::PromptTarget));
+        assert!(all[0].text.contains("Fix the markdown parser"));
+        assert!(all[1].text.contains("strengthen the SimWorld tests"));
+
+        // The single-change accessor is the first of the aggregate.
+        let first = first_unstarted_prompt_bearing_change_from_diff(&diff, current).expect("first");
+        assert_eq!(first.text, all[0].text);
     }
 
     #[test]

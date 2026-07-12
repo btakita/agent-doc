@@ -163,32 +163,48 @@ would have inherited. When the merge moves onto `lazily::SeqCrdt`, map each
 converge while distinct turns stay distinct — no bespoke append-filter/dedup pass
 needed.
 
-## Phase 6 — Realtime steering via `lazily::QueueCell` (`#realtime-steering-verbatim`)
+## Phase 6 — Realtime steering as a concurrent aggregate (`#realtime-steering-verbatim` / `#realtime-steering-aggregate`)
 
 **Motivation (2026-07-12 operator directive):** the binary must gracefully handle
 the operator editing while a turn is active and hand the agent every added prompt
 **verbatim**, without thrash. The current stopgap surfaces the verbatim prompt +
 anti-thrash guidance through `session-check`
 (`realtime_steering_closeout_guidance` + `RealtimeSteering::verbatim`), and the
-graceful merge relies on the body-aware identity above. The durable version backs
-operator steering with a `lazily::QueueCell<SteeringPrompt>`:
+graceful merge relies on the body-aware identity above.
 
-- Operator prompt additions detected by `baseline_comparison::realtime_steering`
-  enqueue a `SteeringPrompt` (verbatim text + source epoch) into a per-document
-  `QueueCell` in the lazily graph instead of only being re-derived from a diff each
-  closeout.
-- The reactive queue delivers the prompt to the running agent turn (the "add the
-  user prompt verbatim to the agent" path) so a mid-turn add is addressed in-turn,
-  not deferred to the operator to re-invoke.
-- Closeout drains the `QueueCell` head as the prompt is answered; `session-check`
-  reads queue emptiness instead of re-diffing HEAD↔buffer, removing the
-  false-"unresolved" thrash class entirely.
-- Composes with the `SeqCrdt` exchange (Phase 3): the answer node is appended to the
-  exchange CRDT, its steering `QueueCell` entry drained, both reconciled through the
-  lazily reliable-sync plane — concurrent operator edits merge as CRDT ops, not a
-  bespoke 3-way merge.
+**Design correction (2026-07-12 operator directive — supersedes the `QueueCell`
+sketch below):** steering is **not** a FIFO `QueueCell` drained one head at a time.
+The operator may add several prompts while a turn is active, and **all** realtime
+steering must reach the agent **ASAP and in aggregate** so the agent can process the
+concurrent directives together and *find patterns across them* — a queue that
+delivers/drains one head at a time defeats that. The delivery model is therefore an
+**observable set of all pending steering directives**, surfaced in full every
+closeout/steering check, not a single head:
 
-Sequence Phase 6 after Phase 3 (exchange on `SeqCrdt`) so steering and exchange share
-one graph substrate. `QueueCell` and `SeqCrdt` already exist in `lazily-rs`
-(`src/queue.rs`, `src/seq_crdt.rs`); this migration is additive graph adoption, not a
-lazily change.
+- **Landed 2026-07-12 (aggregate delivery):**
+  `agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff` returns *every*
+  still-unstarted prompt-bearing change (oldest-first), with the single-change
+  `first_*` form now defined as its head (identical answered-prompt suppression, so
+  the two never disagree). `baseline_comparison::RealtimeSteeringSet` +
+  `realtime_steering_all[_between]` aggregate those into all concurrent directives;
+  `RealtimeSteeringSet::verbatim_aggregate()` concatenates them verbatim with a
+  count header ("N concurrent operator steering directives … look for patterns
+  across them") so the agent addresses them together.
+  `session-check`'s `detect_unstarted_prompt_bearing_diff` now surfaces the
+  aggregate verbatim (`realtime_steering_set_since_turn_baseline`), falling back to
+  the single verbatim when only one directive is present.
+
+- **Remaining (durable graph adoption):** back the aggregate with a lazily reactive
+  **observable collection** (a `ReactiveSet`/append-only observable log, **not** a
+  drain-one-head `QueueCell`) keyed off the same body-aware identity (Phase 3.1), so
+  concurrent operator edits reconcile as CRDT ops on the lazily reliable-sync plane
+  instead of a re-derived diff each closeout, and the agent observes the full live
+  set (add/settle) reactively. Compose with the `SeqCrdt` exchange (Phase 3): the
+  answer node is appended to the exchange CRDT and each addressed directive is marked
+  settled in the steering set, both reconciled through the same graph substrate.
+  `session-check` reads set-emptiness (all directives settled) instead of re-diffing
+  HEAD↔buffer, removing the false-"unresolved" thrash class entirely.
+
+Sequence the graph-adoption remainder after Phase 3 (exchange on `SeqCrdt`) so
+steering and exchange share one substrate. The reactive collection primitives exist
+in `lazily-rs`; this is additive graph adoption, not a lazily change.

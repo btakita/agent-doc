@@ -2,6 +2,8 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.github.lazily.GraphView
+import io.github.lazily.IpcMessage
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -10,19 +12,22 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Thin editor-side bridge for the Rust-owned state backbone.
  *
- * The plugin only reports observed facts and renders the projection JSON. The
- * durable state machines and stale-generation checks remain in the binary.
+ * The plugin only reports observed facts and renders the projection. The durable
+ * state machines and stale-generation checks remain in the binary.
  *
- * #lzpkgwire: JetBrains keeps this plugin-local bridge canonical for runtime
- * packaging because the plugin is built with the IntelliJ/Kotlin 1.9/JBR17
- * toolchain while lazily-kt is a standalone Kotlin 2/JVM21 package. Keep the
- * pure helper behavior pinned to lazily-kt's StateProjectionBridgeSupport tests.
+ * `#lzsync` 3B clean split: the reactive read path folds the canonical lazily wire
+ * (native `IpcMessage` Snapshot/Delta, `NodeId`/`IpcValue`) through a **generic**
+ * lazily [GraphView] and layers agent-doc's own [AgentDocProjection] /
+ * [AgentDocTurnProjection] domain projections on top. The old base64-`WireDelta`
+ * `StateGraphMirror` is retired — agent-doc is a peer product surface over lazily's
+ * view, sibling to signal-space's patchboard surface, reading only its own
+ * `agent_doc.*` node vocabulary.
  */
 object StateProjectionBridge {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(StateProjectionBridge::class.java)
     private val generations = ConcurrentHashMap<String, AtomicLong>()
-    /** Per-document reactive mirror (`#lazilystatesync3`), advanced by [subscribeMirrorForFile]. */
-    private val mirrors = ConcurrentHashMap<String, StateGraphMirror>()
+    /** Per-document generic materialized view (`#lzsync` 3B), advanced by [subscribeMirrorForFile]. */
+    private val mirrors = ConcurrentHashMap<String, GraphView>()
 
     data class ProjectionSummary(
         val routeReadiness: String?,
@@ -90,20 +95,20 @@ object StateProjectionBridge {
     }
 
     /**
-     * Subscribe the per-document [StateGraphMirror] to lazily-spec snapshot/delta
-     * messages from `agent_doc_state_subscribe` (`#lazilystatesync3`).
+     * Subscribe the per-document [GraphView] to native lazily snapshot/delta
+     * messages from `agent_doc_state_subscribe` (`#lzsync` 3B).
      *
-     * First call requests a cold snapshot (the mirror is uninitialized);
-     * subsequent calls request a delta since the mirror's current epoch. The
-     * mirror converges identically to a full re-render because the projection is
-     * a pure fold of deduped events. Returns the applied message type
-     * (`"snapshot"`/`"delta"`) or null when FFI is unavailable / no state yet.
+     * First call requests a cold snapshot (the view is uninitialized); subsequent
+     * calls request a delta since the view's current epoch. The view converges
+     * identically to a full re-render because the fold is a pure, idempotent replay
+     * of deduped events. Returns the applied message kind (`"snapshot"`/`"delta"`)
+     * or null when FFI is unavailable / no state yet.
      */
     fun subscribeMirrorForFile(filePath: String): String? {
         val lib = AgentDocLib.get() ?: return null
         val docHash = documentHash(filePath)
-        val mirror = mirrors.computeIfAbsent(docHash) { StateGraphMirror() }
-        val lastEpoch = if (mirror.isInitialized) mirror.epoch else 0L
+        val view = mirrors.computeIfAbsent(docHash) { GraphView() }
+        val lastEpoch = if (view.isInitialized) view.epoch else 0L
         val ptr = try {
             lib.agent_doc_state_subscribe(docHash, lastEpoch)
         } catch (e: Throwable) {
@@ -116,7 +121,7 @@ object StateProjectionBridge {
             lib.agent_doc_free_string(ptr)
         }
         if (raw == null || raw == "null" || raw.isEmpty()) return null
-        return if (mirror.applyMessage(raw)) {
+        return if (applyNativeMessage(view, raw)) {
             messageKind(raw)
         } else {
             null
@@ -125,8 +130,8 @@ object StateProjectionBridge {
 
     fun subscribeMirrorForFileViaProjectController(filePath: String, projectRoot: File): String? {
         val docHash = documentHash(filePath)
-        val mirror = mirrors.computeIfAbsent(docHash) { StateGraphMirror() }
-        val lastEpoch = if (mirror.isInitialized) mirror.epoch else 0L
+        val view = mirrors.computeIfAbsent(docHash) { GraphView() }
+        val lastEpoch = if (view.isInitialized) view.epoch else 0L
         val response = CpcRouteClient.stateSubscribe(
             projectRoot = projectRoot.path,
             filePath = filePath,
@@ -137,7 +142,7 @@ object StateProjectionBridge {
             LOG.debug("[state-projection] Project Controller returned state for ${response.documentHash}, expected $docHash")
             return null
         }
-        return if (mirror.applyMessage(response.messageJson)) {
+        return if (applyNativeMessage(view, response.messageJson)) {
             messageKind(response.messageJson)
         } else {
             null
@@ -145,88 +150,66 @@ object StateProjectionBridge {
     }
 
     /**
-     * Reactive summary derived from the per-document [StateGraphMirror]'s
-     * tracked cells (`#lazilystatesync3`). Call after [subscribeMirrorForFile].
-     * Returns null when the mirror has not been initialized yet.
+     * Reactive summary derived from the per-document [GraphView]'s folded nodes
+     * (`#lzsync` 3B). Call after [subscribeMirrorForFile]. Returns null when the
+     * view has not been initialized yet.
      */
-    fun mirrorSummaryForFile(filePath: String): MirrorProjectionSummary? {
-        val mirror = mirrors[documentHash(filePath)] ?: return null
-        if (!mirror.isInitialized) return null
-        return MirrorProjectionSummary.fromMirror(mirror)
+    fun mirrorSummaryForFile(filePath: String): AgentDocProjection? {
+        val view = mirrors[documentHash(filePath)] ?: return null
+        if (!view.isInitialized) return null
+        return AgentDocProjection.fromView(view)
     }
 
     fun mirrorTurnProjectionJsonForFile(filePath: String): String? {
-        val mirror = mirrors[documentHash(filePath)] ?: return null
-        if (!mirror.isInitialized) return null
-        return MirrorTurnProjection.fromMirror(mirror).toJsonString()
+        val view = mirrors[documentHash(filePath)] ?: return null
+        if (!view.isInitialized) return null
+        return AgentDocTurnProjection.fromView(view).toJsonString()
     }
 
-    /** The current mirror epoch for [filePath], or null if never initialized. */
+    /** The current view epoch for [filePath], or null if never initialized. */
     fun mirrorEpochForFile(filePath: String): Long? =
         mirrors[documentHash(filePath)]?.takeIf { it.isInitialized }?.epoch
 
     /**
-     * Reactive read for consumers (`#n529b` / `#lazilystatesync3b`): advance the
-     * per-document mirror by absorbing any FFI deltas since its current epoch, then
-     * derive the summary from the mirror's tracked cells.
+     * Reactive read for consumers (`#lzsync` 3B): advance the per-document view by
+     * absorbing any FFI deltas since its current epoch, then derive the domain
+     * projection from the folded nodes.
      *
      * This is the drop-in replacement for the cold [projectionSummaryForFile] pull
      * on the read path. Recording a fact (e.g. [recordRouteDispatchStarted] /
      * [recordRouteDispatchProven]) appends to the binary's ledger; this call pulls
      * those accepted events forward as a `delta` (or a cold `snapshot` on the first
-     * read) so the summary reflects the just-recorded state without a full re-render.
+     * read) so the projection reflects the just-recorded state without a full
+     * re-render.
      *
-     * Cold-pull fallback is intentional and narrow:
-     *  - The reactive [MirrorProjectionSummary] cannot carry `latestTransportPatchId`
-     *    (the patch id is the node's `slot_id`, not a wire payload field — see
-     *    [MirrorProjectionSummary]). When [includeTransportPatchId] and the mirror
-     *    summary leaves it null, backfill that one field from the cold projection.
-     *  - When the mirror never initializes (FFI unavailable, or no recorded state
-     *    yet), fall back to the cold [projectionSummaryForFile] so a cold-start read
-     *    still surfaces a summary.
-     *
-     * Returns null only when both the reactive mirror and the cold pull are empty.
+     * Cold-pull fallback is intentional and narrow: when the view never initializes
+     * (FFI unavailable, or no recorded state yet), fall back to the cold
+     * [projectionSummaryForFile] so a cold-start read still surfaces a projection.
      */
-    fun reactiveSummaryForFile(
-        filePath: String,
-        includeTransportPatchId: Boolean = true,
-    ): MirrorProjectionSummary? {
-        // Drive the mirror forward (snapshot on first read, delta thereafter).
+    fun reactiveSummaryForFile(filePath: String): AgentDocProjection? {
+        // Drive the view forward (snapshot on first read, delta thereafter).
         subscribeMirrorForFile(filePath)
-        val mirror = mirrorSummaryForFile(filePath)
-        if (mirror == null) {
-            // Cold-start fallback: mirror never initialized (no FFI / no state yet).
-            return projectionSummaryForFile(filePath)?.let {
-                MirrorProjectionSummary(
-                    routeReadiness = it.routeReadiness,
-                    routePaneId = it.routePaneId,
-                    latestTransportPatchId = it.latestTransportPatchId,
-                    latestTransportPhase = it.latestTransportPhase,
-                    proofMarkers = it.proofMarkers,
-                )
-            }
+        mirrorSummaryForFile(filePath)?.let { return it }
+        // Cold-start fallback: the view never initialized (no FFI / no state yet).
+        return projectionSummaryForFile(filePath)?.let {
+            AgentDocProjection(
+                routeReadiness = it.routeReadiness,
+                routePaneId = it.routePaneId,
+                latestTransportPhase = it.latestTransportPhase,
+                proofMarkers = it.proofMarkers,
+            )
         }
-        if (includeTransportPatchId && mirror.latestTransportPatchId == null) {
-            // Narrow backfill: the wire delta does not carry the patch id, so pull
-            // just that field from the cold projection while keeping every other
-            // field reactive (from the mirror's tracked cells).
-            val coldPatchId = projectionSummaryForFile(filePath)?.latestTransportPatchId
-            if (coldPatchId != null) {
-                return mirror.copy(latestTransportPatchId = coldPatchId)
-            }
-        }
-        return mirror
     }
 
     /**
-     * Evict the per-document mirror and owner-generation counters for [filePath]
+     * Evict the per-document view and owner-generation counters for [filePath]
      * (`#jbmirrorevict` / `#nsq2`). Called when the editor tab/document closes so a
      * reused path (move/symlink/reopen) does not surface the prior document's stale
      * projection state — the leak behind the "sessions working on other open
      * documents" symptom. The [mirrors] and [generations] maps are keyed by
      * `documentHash` (SHA-256 of the canonical path) and otherwise grow
      * monotonically over the IDE lifetime. Re-subscription lazily re-creates the
-     * mirror from a fresh cold snapshot, so aggressive eviction is safe.
+     * view from a fresh cold snapshot, so aggressive eviction is safe.
      */
     fun evictForFile(filePath: String) {
         val docHash = documentHash(filePath)
@@ -235,24 +218,56 @@ object StateProjectionBridge {
         generations.keys.filter { it.startsWith(genPrefix) }.forEach { generations.remove(it) }
     }
 
-    /** Test-only: live mirror + generation entry counts (for eviction coverage). */
+    /** Test-only: live view + generation entry counts (for eviction coverage). */
     internal fun debugEntryCounts(): Pair<Int, Int> = mirrors.size to generations.size
 
     /**
-     * Test-only seam (`#n529b`): seed the per-document mirror by applying a
-     * lazily-spec snapshot/delta message directly, bypassing the FFI subscribe
-     * call. Lets consumer-observation tests assert that the read path derives the
-     * summary from the reactive mirror's tracked cells rather than the cold pull
-     * (FFI is unavailable in plugin unit tests). Returns whether the message
-     * applied.
+     * Test-only seam (`#lzsync` 3B): seed the per-document view by applying a native
+     * lazily snapshot/delta message directly, bypassing the FFI subscribe call. Lets
+     * consumer-observation tests assert that the read path derives the projection
+     * from the folded view rather than the cold pull (FFI is unavailable in plugin
+     * unit tests). Returns whether the message applied.
      */
     internal fun seedMirrorMessageForTest(filePath: String, message: String): Boolean {
-        val mirror = mirrors.computeIfAbsent(documentHash(filePath)) { StateGraphMirror() }
-        return mirror.applyMessage(message)
+        val view = mirrors.computeIfAbsent(documentHash(filePath)) { GraphView() }
+        return applyNativeMessage(view, message)
     }
 
+    /**
+     * Fold one native `agent_doc_state_subscribe` message into [view], dispatching
+     * on the externally-tagged `IpcMessage` variant (`Snapshot`/`Delta`). Control
+     * frames and malformed JSON are ignored. Returns whether a graph message
+     * applied.
+     */
+    private fun applyNativeMessage(view: GraphView, raw: String): Boolean {
+        val message = try {
+            IpcMessage.decodeJson(raw)
+        } catch (e: Exception) {
+            LOG.debug("[state-projection] native IpcMessage decode failed: ${e.message}")
+            return false
+        }
+        return when (message) {
+            is IpcMessage.SnapshotMessage -> {
+                view.applySnapshot(message.snapshot)
+                true
+            }
+            is IpcMessage.DeltaMessage -> {
+                view.applyDelta(message.delta)
+                true
+            }
+            else -> false
+        }
+    }
+
+    /** Detect the native `IpcMessage` variant key (`Snapshot`/`Delta`) → `snapshot`/`delta`. */
     private fun messageKind(raw: String): String? = try {
-        JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject?.get("type")?.asString
+        val obj = JsonParser.parseString(raw).takeIf { it.isJsonObject }?.asJsonObject
+        when {
+            obj == null -> null
+            obj.has("Snapshot") -> "snapshot"
+            obj.has("Delta") -> "delta"
+            else -> null
+        }
     } catch (_: Exception) {
         null
     }

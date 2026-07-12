@@ -381,7 +381,7 @@ let turnStatusWatcherRoot: string | undefined;
 let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let turnStatusLastRefreshMs = 0;
 let turnStatusRefreshSeq = 0;
-const turnStatusMirrors = new Map<string, stateMirror.StateGraphMirror>();
+const turnStatusMirrors = new Map<string, InstanceType<typeof stateMirror.GraphView>>();
 
 function activeAgentDocProjectRoot(): string | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -434,7 +434,7 @@ async function turnProjectionFromProjectController(
     const docHash = native.documentHash(filePath);
     let mirror = turnStatusMirrors.get(docHash);
     if (!mirror) {
-        mirror = new stateMirror.StateGraphMirror();
+        mirror = new stateMirror.GraphView();
         turnStatusMirrors.set(docHash, mirror);
     }
     const controller = new AbortController();
@@ -457,10 +457,10 @@ async function turnProjectionFromProjectController(
         if (data?.document_hash && data.document_hash !== docHash) {
             throw new Error('Project Controller returned state for a different document');
         }
-        if (!mirror.applyMessage(JSON.stringify(message))) {
+        if (!stateMirror.applyIpcMessageToView(mirror, JSON.stringify(message))) {
             throw new Error('Project Controller state_subscribe message did not apply');
         }
-        return mirror.turnProjection();
+        return stateMirror.agentDocTurnProjectionFromView(mirror);
     } finally {
         clearTimeout(timer);
     }
@@ -1132,7 +1132,7 @@ async function executeRunForDocument(
         const summary = native.reactiveSummaryForFile(filePath, cwd);
         if (summary) {
             console.log(
-                `[agent-doc/state-projection] ${stateMirror.compactMirrorSummary(summary)} `
+                `[agent-doc/state-projection] ${stateMirror.compactAgentDocProjection(summary)} `
                 + `epoch=${native.mirrorEpochForFile(filePath) ?? '-'} file=${rel}`,
             );
         }
@@ -3385,16 +3385,9 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // ---------------------------------------------------------------------------
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    // S5: preload the lazily-js reactive StateGraphMirror ESM module (CJS→ESM
-    // escape hatch) and cache its constructor BEFORE anything that could
-    // construct a per-doc mirror or handle an FFI state_subscribe. The FFI /
-    // registry construction sites run after activation, so once this resolves
-    // they can `new StateGraphMirror()` synchronously.
-    try {
-        await stateMirror.initStateMirror();
-    } catch (err: any) {
-        console.warn(`[agent-doc] initStateMirror failed: ${err?.message ?? err}`);
-    }
+    // #lzsync 3B clean split: the generic lazily GraphView is a plain statically
+    // imported class (esbuild inlines it; tsc require()s it), so per-document views
+    // construct synchronously — no async constructor preload is needed.
 
     // Sidecar-retirement Phase 3C (design B): report this editor's open-set to the
     // reliable-sync liveness plane via a lazily-js OrSet graph → FFI push. No-op

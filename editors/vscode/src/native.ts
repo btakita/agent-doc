@@ -16,8 +16,10 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import {
-    StateGraphMirror,
-    type MirrorProjectionSummary,
+    GraphView,
+    agentDocProjectionFromView,
+    applyIpcMessageToView,
+    type AgentDocProjection,
 } from './stateMirror';
 
 // Result struct returned by FFI functions that produce text
@@ -931,11 +933,11 @@ export function turnProjectionForFile(filePath: string, projectRoot?: string): a
     }
 }
 
-// #r5at lazily-js reactive mirror — the VS Code counterpart of the JB plugin's
-// StateProjectionBridge per-document StateGraphMirror (#n529 / #lazilystatesync3).
-// Keyed by documentHash (canonical-path SHA-256); re-subscription lazily re-creates
-// the mirror from a fresh cold snapshot, so aggressive eviction is safe.
-const stateMirrors = new Map<string, StateGraphMirror>();
+// #lzsync 3B generic materialized view — the VS Code counterpart of the JB plugin's
+// StateProjectionBridge per-document GraphView. Keyed by documentHash (canonical-path
+// SHA-256); re-subscription lazily re-creates the view from a fresh cold snapshot, so
+// aggressive eviction is safe.
+const stateMirrors = new Map<string, GraphView>();
 
 /**
  * Pull a raw `agent_doc_state_subscribe(documentHash, lastEpoch)` message
@@ -983,21 +985,15 @@ export function hasStateSubscribe(projectRoot?: string): boolean {
  */
 export function subscribeMirrorForFile(filePath: string, projectRoot?: string): string | null {
     const docHash = documentHash(filePath);
-    let mirror = stateMirrors.get(docHash);
-    if (!mirror) {
-        mirror = new StateGraphMirror();
-        stateMirrors.set(docHash, mirror);
+    let view = stateMirrors.get(docHash);
+    if (!view) {
+        view = new GraphView();
+        stateMirrors.set(docHash, view);
     }
-    const lastEpoch = mirror.isInitialized ? mirror.epoch : 0;
+    const lastEpoch = view.isInitialized ? view.epoch : 0;
     const raw = stateSubscribe(docHash, lastEpoch, projectRoot);
     if (!raw) return null;
-    if (!mirror.applyMessage(raw)) return null;
-    try {
-        const parsed = JSON.parse(raw);
-        return typeof parsed?.type === 'string' ? parsed.type : null;
-    } catch {
-        return null;
-    }
+    return applyIpcMessageToView(view, raw);
 }
 
 /**
@@ -1005,16 +1001,16 @@ export function subscribeMirrorForFile(filePath: string, projectRoot?: string): 
  * (`#r5at`). Call after {@link subscribeMirrorForFile}. Returns null when the
  * mirror has not been initialized yet.
  */
-export function mirrorSummaryForFile(filePath: string): MirrorProjectionSummary | null {
-    const mirror = stateMirrors.get(documentHash(filePath));
-    if (!mirror || !mirror.isInitialized) return null;
-    return mirror.summary();
+export function mirrorSummaryForFile(filePath: string): AgentDocProjection | null {
+    const view = stateMirrors.get(documentHash(filePath));
+    if (!view || !view.isInitialized) return null;
+    return agentDocProjectionFromView(view);
 }
 
-/** The current mirror epoch for [filePath], or null if never initialized (#r5at). */
+/** The current view epoch for [filePath], or null if never initialized (#lzsync 3B). */
 export function mirrorEpochForFile(filePath: string): number | null {
-    const mirror = stateMirrors.get(documentHash(filePath));
-    return mirror && mirror.isInitialized ? mirror.epoch : null;
+    const view = stateMirrors.get(documentHash(filePath));
+    return view && view.isInitialized ? view.epoch : null;
 }
 
 /**
@@ -1024,50 +1020,32 @@ export function mirrorEpochForFile(filePath: string): number | null {
  *
  * Drop-in replacement for the cold {@link stateProjectionForFile} +
  * {@link projectionSummary} pull on the read path:
- *  - The reactive {@link MirrorProjectionSummary} cannot carry
- *    `latestTransportPatchId` (the patch id is the node's `slot_id`, not a wire
- *    payload field). When `includeTransportPatchId` and the mirror summary leaves
- *    it undefined, backfill that one field from the cold projection.
- *  - When the mirror never initializes (FFI unavailable / no recorded state yet),
- *    fall back to the cold pull so a cold-start read still surfaces a summary.
+ *  - When the view never initializes (FFI unavailable / no recorded state yet),
+ *    fall back to the cold pull so a cold-start read still surfaces a projection.
  *
- * Returns null only when both the reactive mirror and the cold pull are empty.
+ * Returns null only when both the reactive view and the cold pull are empty.
  */
 export function reactiveSummaryForFile(
     filePath: string,
     projectRoot?: string,
-    includeTransportPatchId: boolean = true,
-): MirrorProjectionSummary | null {
+): AgentDocProjection | null {
     subscribeMirrorForFile(filePath, projectRoot);
-    const mirror = mirrorSummaryForFile(filePath);
-    if (!mirror) {
-        // Cold-start fallback: mirror never initialized (no FFI / no state yet).
-        const cold = stateProjectionForFile(filePath, projectRoot);
-        const summary = cold ? projectionSummary(cold) : null;
-        if (!summary) return null;
-        return {
-            routeReadiness: summary.routeReadiness,
-            routePaneId: summary.routePaneId,
-            latestTransportPatchId: summary.latestTransportPatchId,
-            latestTransportPhase: summary.latestTransportPhase,
-            proofMarkers: summary.proofMarkers,
-        };
-    }
-    if (includeTransportPatchId && mirror.latestTransportPatchId == null) {
-        // Narrow backfill: the wire delta does not carry the patch id, so pull
-        // just that field from the cold projection while keeping every other
-        // field reactive (from the mirror's tracked cells).
-        const cold = stateProjectionForFile(filePath, projectRoot);
-        const coldPatchId = cold ? projectionSummary(cold)?.latestTransportPatchId : undefined;
-        if (coldPatchId != null) {
-            return { ...mirror, latestTransportPatchId: coldPatchId };
-        }
-    }
-    return mirror;
+    const view = mirrorSummaryForFile(filePath);
+    if (view) return view;
+    // Cold-start fallback: the view never initialized (no FFI / no state yet).
+    const cold = stateProjectionForFile(filePath, projectRoot);
+    const summary = cold ? projectionSummary(cold) : null;
+    if (!summary) return null;
+    return {
+        routeReadiness: summary.routeReadiness ?? null,
+        routePaneId: summary.routePaneId ?? null,
+        latestTransportPhase: summary.latestTransportPhase ?? null,
+        proofMarkers: summary.proofMarkers,
+    };
 }
 
 /**
- * Evict the per-document mirror for [filePath] (`#r5at`, the VS Code analog of
+ * Evict the per-document view for [filePath] (`#lzsync` 3B, the VS Code analog of
  * the JB `evictForFile`). Called when the editor tab/document closes so a reused
  * path (move/symlink/reopen) does not surface the prior document's stale state.
  */
@@ -1075,26 +1053,26 @@ export function evictStateMirrorForFile(filePath: string): void {
     stateMirrors.delete(documentHash(filePath));
 }
 
-/** Test-only: number of live per-document mirrors (eviction coverage). */
+/** Test-only: number of live per-document views (eviction coverage). */
 export function debugStateMirrorCount(): number {
     return stateMirrors.size;
 }
 
 /**
- * Test-only seam (`#r5at`): seed the per-document mirror by applying a
- * lazily-spec snapshot/delta message directly, bypassing the FFI subscribe call.
- * Lets consumer-observation tests assert the read path derives the summary from
- * the reactive mirror's tracked cells rather than the cold pull (FFI is
- * unavailable in plugin unit tests). Returns whether the message applied.
+ * Test-only seam (`#lzsync` 3B): seed the per-document view by applying a native
+ * lazily snapshot/delta message directly, bypassing the FFI subscribe call. Lets
+ * consumer-observation tests assert the read path derives the projection from the
+ * folded view rather than the cold pull (FFI is unavailable in plugin unit tests).
+ * Returns whether the message applied.
  */
 export function seedStateMirrorMessageForTest(filePath: string, message: string): boolean {
     const docHash = documentHash(filePath);
-    let mirror = stateMirrors.get(docHash);
-    if (!mirror) {
-        mirror = new StateGraphMirror();
-        stateMirrors.set(docHash, mirror);
+    let view = stateMirrors.get(docHash);
+    if (!view) {
+        view = new GraphView();
+        stateMirrors.set(docHash, view);
     }
-    return mirror.applyMessage(message);
+    return applyIpcMessageToView(view, message) !== null;
 }
 
 export function recordStateEvent(

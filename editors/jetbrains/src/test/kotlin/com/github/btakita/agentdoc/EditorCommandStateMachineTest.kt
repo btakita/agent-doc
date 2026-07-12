@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
-import java.util.Base64
 
 class EditorCommandStateMachineTest {
     @Test
@@ -105,19 +104,18 @@ class EditorCommandStateMachineTest {
     // the same command request resolves against a route readiness that the mirror
     // advances reactively (not a stale cold read).
 
-    private fun b64(json: String): String =
-        Base64.getEncoder().encodeToString(json.toByteArray())
+    private fun bytesOf(json: String): String =
+        json.toByteArray(Charsets.UTF_8).joinToString(",", "[", "]")
 
     private fun routeSnapshot(epoch: Long, readiness: String, pane: String): String =
-        """{"type":"snapshot","epoch":$epoch,"document_hash":"doc-a",""" +
-            """"nodes":[{"slot_id":11,"type_tag":"${AgentDocNodeType.ROUTE}",""" +
-            """"state":"resolved","payload":"${b64("""{"readiness":"$readiness","pane_id":"$pane"}""")}"}],""" +
-            """"edges":[],"roots":[]}"""
+        """{"Snapshot":{"epoch":$epoch,"nodes":[""" +
+            """{"node":11,"type_tag":"${AgentDocNodeType.ROUTE}",""" +
+            """"state":{"Payload":${bytesOf("""{"readiness":"$readiness","pane_id":"$pane"}""")}}}],""" +
+            """"edges":[],"roots":[]}}"""
 
     private fun routeDelta(baseEpoch: Long, epoch: Long, readiness: String, pane: String): String =
-        """{"type":"delta","base_epoch":$baseEpoch,"epoch":$epoch,"document_hash":"doc-a",""" +
-            """"ops":[{"op":"cell_set","slot_id":11,""" +
-            """"payload":"${b64("""{"readiness":"$readiness","pane_id":"$pane"}""")}"}]}"""
+        """{"Delta":{"base_epoch":$baseEpoch,"epoch":$epoch,"ops":[""" +
+            """{"CellSet":{"node":11,"payload":{"Inline":${bytesOf("""{"readiness":"$readiness","pane_id":"$pane"}""")}}}}]}}"""
 
     @Test
     fun `run dispatch reads route readiness reactively from an applied delta`() {
@@ -165,9 +163,9 @@ class EditorCommandStateMachineTest {
             // regardless of the reactive state churn.
             StateProjectionBridge.seedMirrorMessageForTest(
                 path,
-                """{"type":"delta","base_epoch":1,"epoch":2,"document_hash":"doc-a",""" +
-                    """"ops":[{"op":"node_add","slot_id":40,"type_tag":"${AgentDocNodeType.TRANSPORT_PATCH}",""" +
-                    """"payload":"${b64("""{"phase":"applied","actor_generation":1}""")}"}]}""",
+                """{"Delta":{"base_epoch":1,"epoch":2,"ops":[""" +
+                    """{"NodeAdd":{"node":40,"type_tag":"${AgentDocNodeType.TRANSPORT_PATCH}",""" +
+                    """"state":{"Payload":${bytesOf("""{"phase":"applied","actor_generation":1}""")}}}}]}}""",
             )
             assertEquals("applied", StateProjectionBridge.reactiveSummaryForFile(path)?.latestTransportPhase)
 

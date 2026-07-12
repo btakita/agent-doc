@@ -2360,25 +2360,26 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
 
 /// Subscribe to the agent-doc state projection for a document (`#lazilystatesync2`).
 ///
-/// `last_epoch` is the caller's last-seen lazily-spec epoch for this document.
-/// The return value is a NUL-terminated JSON message in the lazily-spec wire
-/// envelope:
-/// - `{ "type": "snapshot", ... }` when `last_epoch == 0` (cold read) or the
-///   document has no state yet — a full graph image the mirror applies once.
-/// - `{ "type": "delta", "base_epoch": <last_epoch>, "epoch": <current>, "ops": [...] }`
-///   when `0 < last_epoch < current_epoch` — the ordered ops the mirror applies
+/// `last_epoch` is the caller's last-seen lazily epoch for this document. The
+/// return value is a NUL-terminated JSON message in the canonical native lazily
+/// wire (externally-tagged `IpcMessage`, `#lzsync` 3B clean split):
+/// - `{ "Snapshot": { "epoch": .., "nodes": [..], "edges": [..], "roots": [..] } }`
+///   when `last_epoch == 0` (cold read) or the document has no state yet — a full
+///   graph image the consumer's `GraphView` folds once.
+/// - `{ "Delta": { "base_epoch": <last_epoch>, "epoch": <current>, "ops": [..] } }`
+///   when `0 < last_epoch < current_epoch` — the ordered ops the view folds
 ///   verbatim to converge from `last_epoch` to current.
-/// - `{ "type": "delta", "ops": [], ... }` when the caller is already current.
+/// - `{ "Delta": { "ops": [], .. } }` when the caller is already current.
 ///
-/// The projection is a pure fold of deduped events, so delta application is
+/// The fold is a pure replay of deduped events, so delta application is
 /// deterministic and idempotent: a re-emit/replay yields an empty (no-op) delta.
 /// Because the ledger is append-only within a process lifetime, any
 /// `last_epoch <= current_epoch` is satisfiable without a resync.
 ///
 /// This complements [`agent_doc_state_projection`], which stays as the full
 /// `DocumentStateProjection` JSON for round-trip/human reads (the cold path).
-/// Plugins that want reactive updates should subscribe here and apply deltas to a
-/// lazily-kt / lazily-js mirror graph instead of re-rendering the snapshot.
+/// Plugins that want reactive updates subscribe here and fold the native message
+/// into a generic lazily `GraphView` instead of re-rendering the snapshot.
 ///
 /// Caller must free the returned pointer with `agent_doc_free_string`.
 ///
@@ -2400,7 +2401,28 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
         }
     };
     let json = match state_ledger().lock() {
-        Ok(ledger) => agent_doc_state_wire::subscribe(&ledger, doc_hash, last_epoch).to_json(),
+        Ok(ledger) => {
+            // `#lzsync` 3B wire cutover (flipped): emit the canonical native lazily
+            // wire (`IpcMessage` Snapshot/Delta) instead of the bespoke base64
+            // `WireSubscribe` JSON. Plugins fold this through a generic lazily
+            // `GraphView`. `build_delta` still produces the internal `WireDelta`
+            // producer form; the state-wire bridge converts it here.
+            let wire = agent_doc_state_wire::subscribe(&ledger, doc_hash, last_epoch);
+            match agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message(&wire) {
+                Ok(message) => serde_json::to_string(&message).unwrap_or_else(|err| {
+                    eprintln!(
+                        "[state-projection] agent_doc_state_subscribe: serialize native IpcMessage failed: {err}"
+                    );
+                    "null".to_string()
+                }),
+                Err(err) => {
+                    eprintln!(
+                        "[state-projection] agent_doc_state_subscribe: wire→native conversion failed: {err}"
+                    );
+                    "null".to_string()
+                }
+            }
+        }
         Err(err) => {
             eprintln!("[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}");
             "null".to_string()
@@ -3437,8 +3459,8 @@ mod tests {
             .to_string();
         drop(unsafe { CString::from_raw(cold_ptr) });
         assert!(
-            cold.contains("\"type\":\"snapshot\""),
-            "cold subscribe with no state must yield a snapshot: {cold}"
+            cold.contains("\"Snapshot\""),
+            "cold subscribe with no state must yield a native Snapshot: {cold}"
         );
         assert!(
             cold.contains("\"epoch\":0"),
@@ -3484,8 +3506,8 @@ mod tests {
             .to_string();
         drop(unsafe { CString::from_raw(delta_ptr) });
         assert!(
-            delta.contains("\"type\":\"delta\""),
-            "warm read must yield a delta: {delta}"
+            delta.contains("\"Delta\""),
+            "warm read must yield a native Delta: {delta}"
         );
         assert!(
             delta.contains("\"base_epoch\":1") && delta.contains("\"epoch\":1"),

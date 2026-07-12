@@ -1,20 +1,16 @@
-import { before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
     AgentDocNodeType,
-    StateGraphMirror,
-    compactMirrorSummary,
-    decodePayload,
-    initStateMirror,
+    GraphView,
+    agentDocProjectionFromView,
+    agentDocTurnProjectionFromView,
+    applyIpcMessageToView,
+    compactAgentDocProjection,
 } from './stateMirror';
-
-// S5: load the lazily-js StateGraphMirror ctor before any `new StateGraphMirror()`.
-before(async () => {
-    await initStateMirror();
-});
 import {
     documentHash,
     mirrorEpochForFile,
@@ -24,265 +20,201 @@ import {
     seedStateMirrorMessageForTest,
 } from './native';
 
-/** base64(serde_json(struct)) — the FFI node payload encoding. */
-function payload(obj: unknown): string {
-    return Buffer.from(JSON.stringify(obj), 'utf-8').toString('base64');
+// --- native wire builders (externally-tagged IpcMessage JSON) -----------------
+
+/** Component JSON object → native `Payload`/`Inline` byte array. */
+function inlineBytes(obj: unknown): number[] {
+    return [...Buffer.from(JSON.stringify(obj), 'utf-8')];
 }
 
-function routeSlot(): number {
-    return 1001;
-}
-function patchSlot(): number {
-    return 2002;
-}
-function closeoutSlot(): number {
-    return 2502;
-}
-function proofSlot(): number {
-    return 3003;
+interface SnapshotNode {
+    node: number;
+    typeTag: string;
+    payload?: unknown;
 }
 
-function snapshotMessage(epoch: number, docHash: string): string {
+function snapshotMsg(epoch: number, nodes: SnapshotNode[]): string {
     return JSON.stringify({
-        type: 'snapshot',
-        epoch,
-        document_hash: docHash,
-        nodes: [
-            {
-                slot_id: routeSlot(),
-                type_tag: AgentDocNodeType.ROUTE,
-                payload: payload({ readiness: 'dispatch_authorized', pane_id: '%2' }),
-            },
-        ],
-        edges: [],
-        roots: [routeSlot()],
+        Snapshot: {
+            epoch,
+            nodes: nodes.map((n) => ({
+                node: n.node,
+                type_tag: n.typeTag,
+                state: n.payload !== undefined ? { Payload: inlineBytes(n.payload) } : 'Opaque',
+            })),
+            edges: [],
+            roots: [],
+        },
     });
 }
 
-describe('StateGraphMirror (#r5at lazily-js reactive mirror)', () => {
-    it('applies a snapshot and derives the summary from tracked cells', () => {
-        const mirror = new StateGraphMirror();
-        assert.strictEqual(mirror.isInitialized, false);
+function deltaMsg(baseEpoch: number, epoch: number, ops: unknown[]): string {
+    return JSON.stringify({ Delta: { base_epoch: baseEpoch, epoch, ops } });
+}
 
-        assert.strictEqual(mirror.applyMessage(snapshotMessage(3, 'doc-a')), true);
+const cellSet = (node: number, payload: unknown) => ({ CellSet: { node, payload: { Inline: inlineBytes(payload) } } });
+const nodeAdd = (node: number, typeTag: string, payload: unknown) => ({
+    NodeAdd: { node, type_tag: typeTag, state: { Payload: inlineBytes(payload) } },
+});
+const nodeRemove = (node: number) => ({ NodeRemove: { node } });
+const edgeAdd = (dependent: number, dependency: number) => ({ EdgeAdd: { dependent, dependency } });
+const edgeRemove = (dependent: number, dependency: number) => ({ EdgeRemove: { dependent, dependency } });
 
-        assert.strictEqual(mirror.isInitialized, true);
-        assert.strictEqual(mirror.documentHash, 'doc-a');
-        assert.strictEqual(mirror.epoch, 3);
-        assert.strictEqual(mirror.nodeCount, 1);
+const ROUTE = 11;
+const PATCH = 40;
+const CLOSEOUT = 21;
+const PROOF = 70;
 
-        const summary = mirror.summary();
-        assert.strictEqual(summary.routeReadiness, 'dispatch_authorized');
-        assert.strictEqual(summary.routePaneId, '%2');
-        assert.strictEqual(summary.proofMarkers, 0);
-        assert.strictEqual(summary.latestTransportPhase, undefined);
+function routeSnapshot(epoch: number): string {
+    return snapshotMsg(epoch, [
+        { node: ROUTE, typeTag: AgentDocNodeType.ROUTE, payload: { readiness: 'dispatch_authorized', pane_id: '%2' } },
+    ]);
+}
+
+describe('GraphView fold + AgentDocProjection (#lzsync 3B clean split)', () => {
+    it('applies a native snapshot and derives the projection from folded nodes', () => {
+        const view = new GraphView();
+        assert.strictEqual(view.isInitialized, false);
+
+        assert.strictEqual(applyIpcMessageToView(view, routeSnapshot(3)), 'snapshot');
+
+        assert.strictEqual(view.isInitialized, true);
+        assert.strictEqual(view.epoch, 3);
+        assert.strictEqual(view.nodeCount, 1);
+
+        const projection = agentDocProjectionFromView(view);
+        assert.strictEqual(projection.routeReadiness, 'dispatch_authorized');
+        assert.strictEqual(projection.routePaneId, '%2');
+        assert.strictEqual(projection.proofMarkers, 0);
+        assert.strictEqual(projection.latestTransportPhase, null);
     });
 
-    it('applies a delta reactively: node_add + cell_set update the derived summary', () => {
-        const mirror = new StateGraphMirror();
-        mirror.applyMessage(snapshotMessage(1, 'doc-b'));
+    it('applies a delta reactively: node_add + cell_set update the derived projection', () => {
+        const view = new GraphView();
+        applyIpcMessageToView(view, routeSnapshot(1));
 
-        // Before the delta: no transport patch, route still authorized.
-        assert.strictEqual(mirror.summary().latestTransportPhase, undefined);
-        assert.strictEqual(mirror.summary().routeReadiness, 'dispatch_authorized');
+        assert.strictEqual(agentDocProjectionFromView(view).latestTransportPhase, null);
+        assert.strictEqual(agentDocProjectionFromView(view).routeReadiness, 'dispatch_authorized');
 
-        const delta = JSON.stringify({
-            type: 'delta',
-            base_epoch: 1,
-            epoch: 4,
-            document_hash: 'doc-b',
-            ops: [
-                {
-                    op: 'node_add',
-                    slot_id: patchSlot(),
-                    type_tag: AgentDocNodeType.TRANSPORT_PATCH,
-                    payload: payload({ phase: 'queued' }),
-                },
-                {
-                    op: 'node_add',
-                    slot_id: proofSlot(),
-                    type_tag: AgentDocNodeType.PROOF_MARKER,
-                    payload: payload({ phase: 'observed', sources: ['route'] }),
-                },
-                // Reactively flip the route readiness.
-                {
-                    op: 'cell_set',
-                    slot_id: routeSlot(),
-                    payload: payload({ readiness: 'dispatch_proven', pane_id: '%2' }),
-                },
-                // Reactively advance the transport phase.
-                {
-                    op: 'cell_set',
-                    slot_id: patchSlot(),
-                    payload: payload({ phase: 'applied' }),
-                },
-            ],
-        });
+        const delta = deltaMsg(1, 4, [
+            nodeAdd(PATCH, AgentDocNodeType.TRANSPORT_PATCH, { phase: 'queued' }),
+            nodeAdd(PROOF, AgentDocNodeType.PROOF_MARKER, { phase: 'observed', sources: ['route'] }),
+            cellSet(ROUTE, { readiness: 'dispatch_proven', pane_id: '%2' }),
+            cellSet(PATCH, { phase: 'applied' }),
+        ]);
 
-        assert.strictEqual(mirror.applyMessage(delta), true);
-        assert.strictEqual(mirror.epoch, 4);
+        assert.strictEqual(applyIpcMessageToView(view, delta), 'delta');
+        assert.strictEqual(view.epoch, 4);
 
-        const summary = mirror.summary();
-        assert.strictEqual(summary.routeReadiness, 'dispatch_proven', 'cell_set flips route reactively');
-        assert.strictEqual(summary.latestTransportPhase, 'applied', 'cell_set advances transport phase reactively');
-        assert.strictEqual(summary.proofMarkers, 1, 'node_add proof marker counted reactively');
+        const projection = agentDocProjectionFromView(view);
+        assert.strictEqual(projection.routeReadiness, 'dispatch_proven', 'cell_set flips route reactively');
+        assert.strictEqual(projection.latestTransportPhase, 'applied', 'cell_set advances transport phase reactively');
+        assert.strictEqual(projection.proofMarkers, 1, 'node_add proof marker counted reactively');
     });
 
     it('node_remove + edge ops are applied verbatim', () => {
-        const mirror = new StateGraphMirror();
-        mirror.applyMessage(snapshotMessage(1, 'doc-c'));
-        mirror.applyMessage(JSON.stringify({
-            type: 'delta',
-            base_epoch: 1,
-            epoch: 2,
-            document_hash: 'doc-c',
-            ops: [
-                { op: 'node_add', slot_id: patchSlot(), type_tag: AgentDocNodeType.TRANSPORT_PATCH, payload: payload({ phase: 'queued' }) },
-                { op: 'edge_add', dependent: patchSlot(), dependency: routeSlot() },
-            ],
-        }));
-        assert.strictEqual(mirror.nodeCount, 2);
+        const view = new GraphView();
+        applyIpcMessageToView(view, routeSnapshot(1));
+        applyIpcMessageToView(view, deltaMsg(1, 2, [
+            nodeAdd(PATCH, AgentDocNodeType.TRANSPORT_PATCH, { phase: 'queued' }),
+            edgeAdd(PATCH, ROUTE),
+        ]));
+        assert.strictEqual(view.nodeCount, 2);
 
-        mirror.applyMessage(JSON.stringify({
-            type: 'delta',
-            base_epoch: 2,
-            epoch: 3,
-            document_hash: 'doc-c',
-            ops: [
-                { op: 'edge_remove', dependent: patchSlot(), dependency: routeSlot() },
-                { op: 'node_remove', slot_id: patchSlot() },
-            ],
-        }));
-        assert.strictEqual(mirror.nodeCount, 1);
-        assert.strictEqual(mirror.summary().latestTransportPhase, undefined);
+        applyIpcMessageToView(view, deltaMsg(2, 3, [
+            edgeRemove(PATCH, ROUTE),
+            nodeRemove(PATCH),
+        ]));
+        assert.strictEqual(view.nodeCount, 1);
+        assert.strictEqual(agentDocProjectionFromView(view).latestTransportPhase, null);
     });
 
     it('idempotent no-op delta only advances the epoch (#qdedupsync property)', () => {
-        const mirror = new StateGraphMirror();
-        mirror.applyMessage(snapshotMessage(2, 'doc-d'));
-        const before = mirror.summary();
+        const view = new GraphView();
+        applyIpcMessageToView(view, routeSnapshot(2));
+        const before = agentDocProjectionFromView(view);
 
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({
-            type: 'delta',
-            base_epoch: 2,
-            epoch: 5,
-            document_hash: 'doc-d',
-            ops: [],
-        })), true);
+        assert.strictEqual(applyIpcMessageToView(view, deltaMsg(2, 5, [])), 'delta');
 
-        assert.strictEqual(mirror.epoch, 5);
-        assert.deepStrictEqual(mirror.summary(), before, 'no-op delta leaves derived state unchanged');
+        assert.strictEqual(view.epoch, 5);
+        assert.deepStrictEqual(agentDocProjectionFromView(view), before, 'no-op delta leaves derived state unchanged');
     });
 
     it('epoch never regresses on an out-of-order delta', () => {
-        const mirror = new StateGraphMirror();
-        mirror.applyMessage(snapshotMessage(10, 'doc-e'));
-        mirror.applyMessage(JSON.stringify({ type: 'delta', base_epoch: 10, epoch: 4, document_hash: 'doc-e', ops: [] }));
-        assert.strictEqual(mirror.epoch, 10, 'epoch is max(current, delta.epoch)');
+        const view = new GraphView();
+        applyIpcMessageToView(view, routeSnapshot(10));
+        applyIpcMessageToView(view, deltaMsg(10, 4, []));
+        assert.strictEqual(view.epoch, 10, 'epoch is max(current, delta.epoch)');
     });
 
-    it('rejects malformed / unknown-type messages (fail safe)', () => {
-        const mirror = new StateGraphMirror();
-        assert.strictEqual(mirror.applyMessage('{not json'), false);
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({ type: 'bogus' })), false);
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({ epoch: 1 })), false);
-        assert.strictEqual(mirror.isInitialized, false);
+    it('rejects malformed / unknown-variant messages (fail safe)', () => {
+        const view = new GraphView();
+        assert.strictEqual(applyIpcMessageToView(view, '{not json'), null);
+        assert.strictEqual(applyIpcMessageToView(view, JSON.stringify({ Bogus: {} })), null);
+        assert.strictEqual(applyIpcMessageToView(view, JSON.stringify({ epoch: 1 })), null);
+        assert.strictEqual(view.isInitialized, false);
     });
 
-    it('compactMirrorSummary renders the editor-visible status string (kt .compact() parity)', () => {
+    it('compactAgentDocProjection renders the editor-visible status string (kt .compact() parity)', () => {
         assert.strictEqual(
-            compactMirrorSummary({
+            compactAgentDocProjection({
                 routeReadiness: 'dispatch_proven',
                 routePaneId: '%2',
-                latestTransportPatchId: 'patch-2',
                 latestTransportPhase: 'applied',
                 proofMarkers: 1,
             }),
-            'route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1',
+            'route=dispatch_proven pane=%2 transport=applied proof_markers=1',
         );
         assert.strictEqual(
-            compactMirrorSummary({ proofMarkers: 0 }),
-            'route=unknown pane=- transport=-:- proof_markers=0',
+            compactAgentDocProjection({
+                routeReadiness: null,
+                routePaneId: null,
+                latestTransportPhase: null,
+                proofMarkers: 0,
+            }),
+            'route=unknown pane=- transport=- proof_markers=0',
         );
     });
 
-    it('turnProjection derives from the closeout cycle phase', () => {
-        const mirror = new StateGraphMirror();
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({
-            type: 'snapshot',
-            epoch: 1,
-            document_hash: 'doc-turn',
-            nodes: [
-                {
-                    slot_id: closeoutSlot(),
-                    type_tag: AgentDocNodeType.CLOSEOUT_CYCLE,
-                    payload: payload({ phase: 'preflight_started' }),
-                },
-            ],
-            edges: [],
-            roots: [closeoutSlot()],
-        })), true);
-        assert.deepStrictEqual(mirror.turnProjection(), {
+    it('agentDocTurnProjectionFromView derives from the closeout cycle phase', () => {
+        const view = new GraphView();
+        assert.strictEqual(applyIpcMessageToView(view, snapshotMsg(1, [
+            { node: CLOSEOUT, typeTag: AgentDocNodeType.CLOSEOUT_CYCLE, payload: { phase: 'preflight_started' } },
+        ])), 'snapshot');
+        assert.deepStrictEqual(agentDocTurnProjectionFromView(view), {
             state: 'awaiting_response',
             turn_in_flight: true,
             transition_authority: 'project_controller',
         });
 
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({
-            type: 'delta',
-            base_epoch: 1,
-            epoch: 2,
-            document_hash: 'doc-turn',
-            ops: [
-                { op: 'cell_set', slot_id: closeoutSlot(), payload: payload({ phase: 'write_applied' }) },
-            ],
-        })), true);
-        assert.deepStrictEqual(mirror.turnProjection(), {
+        applyIpcMessageToView(view, deltaMsg(1, 2, [cellSet(CLOSEOUT, { phase: 'write_applied' })]));
+        assert.deepStrictEqual(agentDocTurnProjectionFromView(view), {
             state: 'persisting',
             turn_in_flight: true,
             transition_authority: 'project_controller',
         });
 
-        assert.strictEqual(mirror.applyMessage(JSON.stringify({
-            type: 'delta',
-            base_epoch: 2,
-            epoch: 3,
-            document_hash: 'doc-turn',
-            ops: [
-                { op: 'cell_set', slot_id: closeoutSlot(), payload: payload({ phase: 'committed' }) },
-            ],
-        })), true);
-        assert.deepStrictEqual(mirror.turnProjection(), {
+        applyIpcMessageToView(view, deltaMsg(2, 3, [cellSet(CLOSEOUT, { phase: 'committed' })]));
+        assert.deepStrictEqual(agentDocTurnProjectionFromView(view), {
             state: 'idle',
             turn_in_flight: false,
             transition_authority: 'project_controller',
         });
     });
-
-    it('decodePayload decodes base64(serde_json(struct)) and fails safe', () => {
-        assert.deepStrictEqual(decodePayload(payload({ phase: 'queued' })), { phase: 'queued' });
-        assert.strictEqual(decodePayload(null), null);
-        assert.strictEqual(decodePayload(''), null);
-        assert.strictEqual(decodePayload('!!!not-base64-json'), null);
-    });
 });
 
-describe('native per-document mirror registry (#r5at)', () => {
-    it('seedStateMirrorMessageForTest drives the read-path summary from tracked cells', () => {
-        const tmp = path.join(os.tmpdir(), `agent_doc_mirror_${Date.now()}.md`);
+describe('native per-document view registry (#lzsync 3B)', () => {
+    it('seedStateMirrorMessageForTest drives the read-path projection from folded nodes', () => {
+        const tmp = path.join(os.tmpdir(), `agent_doc_view_${Date.now()}.md`);
         fs.writeFileSync(tmp, 'state');
         try {
-            const docHash = documentHash(tmp);
-            // No mirror yet → cold read path (null without FFI).
+            // No view yet → cold read path (null without FFI).
             assert.strictEqual(mirrorSummaryForFile(tmp), null);
 
-            assert.strictEqual(
-                seedStateMirrorMessageForTest(tmp, snapshotMessage(7, docHash)),
-                true,
-            );
+            assert.strictEqual(seedStateMirrorMessageForTest(tmp, routeSnapshot(7)), true);
 
             const summary = mirrorSummaryForFile(tmp);
-            assert.ok(summary, 'mirror summary derived from seeded snapshot');
+            assert.ok(summary, 'projection derived from seeded snapshot');
             assert.strictEqual(summary!.routeReadiness, 'dispatch_authorized');
             assert.strictEqual(summary!.routePaneId, '%2');
             assert.strictEqual(mirrorEpochForFile(tmp), 7);
@@ -297,21 +229,21 @@ describe('native per-document mirror registry (#r5at)', () => {
         }
     });
 
-    it('evictStateMirrorForFile removes only the targeted document mirror', () => {
-        const a = path.join(os.tmpdir(), `agent_doc_mirror_a_${Date.now()}.md`);
-        const b = path.join(os.tmpdir(), `agent_doc_mirror_b_${Date.now()}.md`);
+    it('evictStateMirrorForFile removes only the targeted document view', () => {
+        const a = path.join(os.tmpdir(), `agent_doc_view_a_${Date.now()}.md`);
+        const b = path.join(os.tmpdir(), `agent_doc_view_b_${Date.now()}.md`);
         fs.writeFileSync(a, 'a');
         fs.writeFileSync(b, 'b');
         try {
             const baseline = debugStateMirrorCount();
-            seedStateMirrorMessageForTest(a, snapshotMessage(1, documentHash(a)));
-            seedStateMirrorMessageForTest(b, snapshotMessage(1, documentHash(b)));
+            seedStateMirrorMessageForTest(a, routeSnapshot(1));
+            seedStateMirrorMessageForTest(b, routeSnapshot(1));
             assert.strictEqual(debugStateMirrorCount(), baseline + 2);
 
             evictStateMirrorForFile(a);
             assert.strictEqual(debugStateMirrorCount(), baseline + 1);
             assert.strictEqual(mirrorSummaryForFile(a), null);
-            assert.ok(mirrorSummaryForFile(b), 'untargeted mirror survives');
+            assert.ok(mirrorSummaryForFile(b), 'untargeted view survives');
         } finally {
             evictStateMirrorForFile(a);
             evictStateMirrorForFile(b);

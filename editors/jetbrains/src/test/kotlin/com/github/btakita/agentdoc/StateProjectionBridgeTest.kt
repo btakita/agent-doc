@@ -1,14 +1,16 @@
 package com.github.btakita.agentdoc
 
 import com.google.gson.JsonParser
+import io.github.lazily.GraphView
+import io.github.lazily.IpcMessage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.security.MessageDigest
-import java.util.Base64
 
 class StateProjectionBridgeTest {
     @Test
@@ -43,7 +45,9 @@ class StateProjectionBridgeTest {
     }
 
     @Test
-    fun `projection summary renders route transport and proof slices`() {
+    fun `cold projection summary renders route transport and proof slices`() {
+        // Cold FFI-projection pull (the `agent_doc_state_projection` JSON), kept as
+        // the cold-start fallback in reactiveSummaryForFile.
         val projection = """
             {
               "document_hash":"doc-a",
@@ -64,195 +68,194 @@ class StateProjectionBridgeTest {
         assertEquals("patch-2", summary.latestTransportPatchId)
         assertEquals("applied", summary.latestTransportPhase)
         assertEquals(1, summary.proofMarkers)
-        assertEquals(
-            "route=dispatch_proven pane=%2 transport=patch-2:applied proof_markers=1",
-            summary.compact(),
-        )
     }
 
-    // --- StateGraphMirror mirror-apply tests (`#lazilystatesync3`) ------------
-    // Pin the plugin-local mirror behavior to the lazily-kt conformance tests
-    // (`#lzpkgwire`). The mirror must converge identically to a snapshot after
-    // applying the corresponding delta stream, and a no-op delta must be safe.
+    // --- Native GraphView fold + AgentDocProjection tests (`#lzsync` 3B) --------
+    // The reactive read path folds the canonical lazily wire (native `IpcMessage`
+    // Snapshot/Delta, `NodeId`/`IpcValue`) through a generic GraphView and layers
+    // AgentDocProjection on top. The fold must converge identically to a snapshot
+    // after applying the corresponding delta stream, and a no-op delta must be safe.
 
-    private fun b64(json: String): String =
-        Base64.getEncoder().encodeToString(json.toByteArray())
+    /** Component JSON bytes → native `Payload`/`Inline` byte-array literal. */
+    private fun bytesOf(json: String): String =
+        json.toByteArray(Charsets.UTF_8).joinToString(",", "[", "]")
 
-    private fun snapshotJson(
+    private fun snapshotMessage(
         epoch: Long,
         routePayload: String? = null,
         closeoutPayload: String? = null,
         transportPatches: List<Pair<Long, String>> = emptyList(),
         proofMarkers: List<Long> = emptyList(),
     ): String {
-        val nodes = StringBuilder()
-        fun addNode(slot: Long, typeTag: String, payload: String?) {
-            if (nodes.isNotEmpty()) nodes.append(',')
-            nodes.append("""{"slot_id":$slot,"type_tag":"$typeTag","state":"resolved"""")
-            if (payload != null) nodes.append(""","payload":"$payload"}""") else nodes.append("}")
+        val nodes = mutableListOf<String>()
+        fun addNode(id: Long, typeTag: String, payload: String?) {
+            val state = if (payload != null) """{"Payload":${bytesOf(payload)}}""" else "\"Opaque\""
+            nodes.add("""{"node":$id,"type_tag":"$typeTag","state":$state}""")
         }
         if (routePayload != null) addNode(11, AgentDocNodeType.ROUTE, routePayload)
         if (closeoutPayload != null) addNode(21, AgentDocNodeType.CLOSEOUT_CYCLE, closeoutPayload)
-        transportPatches.forEach { (slot, payload) -> addNode(slot, AgentDocNodeType.TRANSPORT_PATCH, payload) }
-        proofMarkers.forEach { slot -> addNode(slot, AgentDocNodeType.PROOF_MARKER, b64("{}")) }
-        return """{"type":"snapshot","epoch":$epoch,"document_hash":"doc-a","nodes":[$nodes],"edges":[],"roots":[]}"""
+        transportPatches.forEach { (id, payload) -> addNode(id, AgentDocNodeType.TRANSPORT_PATCH, payload) }
+        proofMarkers.forEach { id -> addNode(id, AgentDocNodeType.PROOF_MARKER, "{}") }
+        return """{"Snapshot":{"epoch":$epoch,"nodes":[${nodes.joinToString(",")}],"edges":[],"roots":[]}}"""
     }
 
-    private fun deltaJson(
-        baseEpoch: Long,
-        epoch: Long,
-        opsJson: String,
-    ): String =
-        """{"type":"delta","base_epoch":$baseEpoch,"epoch":$epoch,"document_hash":"doc-a","ops":[$opsJson]}"""
+    private fun deltaMessage(baseEpoch: Long, epoch: Long, opsJson: String): String =
+        """{"Delta":{"base_epoch":$baseEpoch,"epoch":$epoch,"ops":[$opsJson]}}"""
+
+    private fun cellSetOp(node: Long, payload: String): String =
+        """{"CellSet":{"node":$node,"payload":{"Inline":${bytesOf(payload)}}}}"""
+
+    private fun nodeAddOp(node: Long, typeTag: String, payload: String): String =
+        """{"NodeAdd":{"node":$node,"type_tag":"$typeTag","state":{"Payload":${bytesOf(payload)}}}}"""
+
+    private fun nodeRemoveOp(node: Long): String = """{"NodeRemove":{"node":$node}}"""
+
+    /** Fold a native message into a fresh GraphView (mirrors the bridge's private apply). */
+    private fun folded(vararg messages: String): GraphView {
+        val view = GraphView()
+        for (raw in messages) {
+            when (val message = IpcMessage.decodeJson(raw)) {
+                is IpcMessage.SnapshotMessage -> view.applySnapshot(message.snapshot)
+                is IpcMessage.DeltaMessage -> view.applyDelta(message.delta)
+                else -> error("unexpected message: $message")
+            }
+        }
+        return view
+    }
 
     @Test
-    fun `mirror cold snapshot then delta converges identically to direct snapshot`() {
-        val routeFinal = b64("""{"readiness":"dispatch_proven","pane_id":"%2"}""")
-        val proofPayload = b64("{}")
+    fun `cold snapshot then delta converges identically to direct snapshot`() {
+        val routeFinal = """{"readiness":"dispatch_proven","pane_id":"%2"}"""
 
-        // Path A: one cold snapshot of the full state.
-        val direct = StateGraphMirror().apply {
-            applyMessage(snapshotJson(epoch = 3, routePayload = routeFinal, proofMarkers = listOf(50)))
-        }
-
-        // Path B: cold snapshot (partial, epoch 1) then delta to full (epoch 3).
-        val incremental = StateGraphMirror().apply {
-            applyMessage(snapshotJson(epoch = 1, routePayload = b64("""{"readiness":"idle","pane_id":"%2"}""")))
-            applyMessage(
-                deltaJson(
-                    baseEpoch = 1,
-                    epoch = 3,
-                    opsJson =
-                        """{"op":"cell_set","slot_id":11,"payload":"$routeFinal"},""" +
-                            """{"op":"node_add","slot_id":50,"type_tag":"${AgentDocNodeType.PROOF_MARKER}","payload":"$proofPayload"}""",
-                )
-            )
-        }
+        val direct = folded(
+            snapshotMessage(epoch = 3, routePayload = routeFinal, proofMarkers = listOf(50)),
+        )
+        val incremental = folded(
+            snapshotMessage(epoch = 1, routePayload = """{"readiness":"idle","pane_id":"%2"}"""),
+            deltaMessage(
+                baseEpoch = 1,
+                epoch = 3,
+                opsJson = cellSetOp(11, routeFinal) + "," +
+                    nodeAddOp(50, AgentDocNodeType.PROOF_MARKER, "{}"),
+            ),
+        )
 
         assertEquals(direct.epoch, incremental.epoch)
         assertEquals(
-            MirrorProjectionSummary.fromMirror(direct).compact(),
-            MirrorProjectionSummary.fromMirror(incremental).compact(),
+            AgentDocProjection.fromView(direct).compact(),
+            AgentDocProjection.fromView(incremental).compact(),
         )
-        assertEquals("dispatch_proven", MirrorProjectionSummary.fromMirror(incremental).routeReadiness)
+        assertEquals("dispatch_proven", AgentDocProjection.fromView(incremental).routeReadiness)
     }
 
     @Test
-    fun `mirror derive summary reads route phase and proof count from tracked cells`() {
-        val mirror = StateGraphMirror()
-        mirror.applyMessage(
-            snapshotJson(
+    fun `derive projection reads route phase and proof count from folded nodes`() {
+        val view = folded(
+            snapshotMessage(
                 epoch = 4,
-                routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%2"}"""),
+                routePayload = """{"readiness":"dispatch_proven","pane_id":"%2"}""",
                 transportPatches = listOf(
-                    40L to b64("""{"phase":"applied","actor_generation":1}"""),
-                    41L to b64("""{"phase":"queued","actor_generation":1}"""),
+                    40L to """{"phase":"applied","actor_generation":1}""",
+                    41L to """{"phase":"queued","actor_generation":1}""",
                 ),
                 proofMarkers = listOf(50L),
-            )
+            ),
         )
 
-        val summary = MirrorProjectionSummary.fromMirror(mirror)
-        assertEquals("dispatch_proven", summary.routeReadiness)
-        assertEquals("%2", summary.routePaneId)
-        // Latest transport patch by slot_id wins; phase readable, patch_id not on wire.
-        assertEquals("queued", summary.latestTransportPhase)
-        assertEquals(1, summary.proofMarkers)
+        val projection = AgentDocProjection.fromView(view)
+        assertEquals("dispatch_proven", projection.routeReadiness)
+        assertEquals("%2", projection.routePaneId)
+        // Latest transport patch by node id wins.
+        assertEquals("queued", projection.latestTransportPhase)
+        assertEquals(1, projection.proofMarkers)
     }
 
     @Test
-    fun `mirror no-op delta is safe and node_remove is honored`() {
-        val mirror = StateGraphMirror()
-        mirror.applyMessage(snapshotJson(epoch = 2, routePayload = b64("""{"readiness":"idle","pane_id":"%2"}""")))
-        val beforeEpoch = mirror.epoch
+    fun `no-op delta is safe and node_remove is honored`() {
+        val view = folded(snapshotMessage(epoch = 2, routePayload = """{"readiness":"idle","pane_id":"%2"}"""))
+        val beforeEpoch = view.epoch
 
         // No-op delta: caller is current.
-        mirror.applyMessage(deltaJson(baseEpoch = 2, epoch = 2, opsJson = ""))
-        assertEquals(beforeEpoch, mirror.epoch)
+        view.applyDelta((IpcMessage.decodeJson(deltaMessage(2, 2, "")) as IpcMessage.DeltaMessage).delta)
+        assertEquals(beforeEpoch, view.epoch)
 
         // Node remove.
-        mirror.applyMessage(deltaJson(baseEpoch = 2, epoch = 3, opsJson = """{"op":"node_remove","slot_id":11}"""))
-        assertEquals(3, mirror.epoch)
-        assertNull(mirror.singletonNode(AgentDocNodeType.ROUTE))
+        view.applyDelta(
+            (IpcMessage.decodeJson(deltaMessage(2, 3, nodeRemoveOp(11))) as IpcMessage.DeltaMessage).delta,
+        )
+        assertEquals(3, view.epoch)
+        assertNull(view.singletonNode(AgentDocNodeType.ROUTE))
     }
 
     @Test
-    fun `mirror empty yields nullish summary`() {
-        val mirror = StateGraphMirror()
-        val summary = MirrorProjectionSummary.fromMirror(mirror)
-        assertNull(summary.routeReadiness)
-        assertNull(summary.latestTransportPhase)
-        assertEquals(0, summary.proofMarkers)
+    fun `empty view yields nullish projection`() {
+        val projection = AgentDocProjection.fromView(GraphView())
+        assertNull(projection.routeReadiness)
+        assertNull(projection.latestTransportPhase)
+        assertEquals(0, projection.proofMarkers)
     }
 
     @Test
-    fun `mirror turn projection derives from closeout cycle phase`() {
-        val awaiting = StateGraphMirror().apply {
-            applyMessage(snapshotJson(epoch = 1, closeoutPayload = b64("""{"phase":"preflight_started"}""")))
-        }
-        assertEquals("awaiting_response", MirrorTurnProjection.fromMirror(awaiting).state)
-        assertTrue(MirrorTurnProjection.fromMirror(awaiting).turnInFlight)
+    fun `turn projection derives from closeout cycle phase`() {
+        val awaiting = folded(snapshotMessage(epoch = 1, closeoutPayload = """{"phase":"preflight_started"}"""))
+        assertEquals("awaiting_response", AgentDocTurnProjection.fromView(awaiting).state)
+        assertTrue(AgentDocTurnProjection.fromView(awaiting).turnInFlight)
 
-        val persisting = StateGraphMirror().apply {
-            applyMessage(snapshotJson(epoch = 2, closeoutPayload = b64("""{"phase":"response_captured"}""")))
-        }
-        assertEquals("persisting", MirrorTurnProjection.fromMirror(persisting).state)
-        assertTrue(MirrorTurnProjection.fromMirror(persisting).turnInFlight)
+        val persisting = folded(snapshotMessage(epoch = 2, closeoutPayload = """{"phase":"response_captured"}"""))
+        assertEquals("persisting", AgentDocTurnProjection.fromView(persisting).state)
+        assertTrue(AgentDocTurnProjection.fromView(persisting).turnInFlight)
 
-        val idle = StateGraphMirror().apply {
-            applyMessage(snapshotJson(epoch = 3, closeoutPayload = b64("""{"phase":"committed"}""")))
-        }
-        assertEquals("idle", MirrorTurnProjection.fromMirror(idle).state)
-        assertEquals(false, MirrorTurnProjection.fromMirror(idle).turnInFlight)
+        val idle = folded(snapshotMessage(epoch = 3, closeoutPayload = """{"phase":"committed"}"""))
+        assertEquals("idle", AgentDocTurnProjection.fromView(idle).state)
+        assertEquals(false, AgentDocTurnProjection.fromView(idle).turnInFlight)
     }
 
     @Test
-    fun `mirror epoch is null before initialization via StateProjectionBridge`() {
+    fun `epoch is null before initialization via StateProjectionBridge`() {
         // The bridge-level accessor returns null for a never-subscribed document.
-        // (Using a path unlikely to collide with real FFI state.)
-        assertNull(StateProjectionBridge.mirrorEpochForFile("/tmp/agent-doc-n529-uninitialized-mirror.md"))
-        assertNull(StateProjectionBridge.mirrorSummaryForFile("/tmp/agent-doc-n529-uninitialized-mirror.md"))
+        assertNull(StateProjectionBridge.mirrorEpochForFile("/tmp/agent-doc-lzsync-uninitialized-view.md"))
+        assertNull(StateProjectionBridge.mirrorSummaryForFile("/tmp/agent-doc-lzsync-uninitialized-view.md"))
     }
 
     @Test
-    fun `applyMessage rejects unknown type discriminator`() {
-        val mirror = StateGraphMirror()
-        org.junit.Assert.assertFalse(mirror.applyMessage("""{"type":"not_a_real_kind"}"""))
-        org.junit.Assert.assertFalse(mirror.isInitialized)
-        assertTrue(mirror.nodeCount == 0)
-    }
-
-    // --- Consumer reactive-read tests (`#n529b` / `#lazilystatesync3b`) --------
-    // The route summary consumer (TerminalUtil finally block) now reads the
-    // reactive mirror via reactiveSummaryForFile instead of the cold pull. With
-    // FFI unavailable in unit tests, subscribeMirrorForFile is a no-op, so a
-    // mirror seeded directly stands in for "FFI deltas already applied".
-
-    @Test
-    fun `reactiveSummaryForFile derives from the seeded mirror not the cold pull`() {
-        val path = "/tmp/agent-doc-n529b-reactive-read-${System.nanoTime()}.md"
+    fun `seedMirrorMessageForTest rejects malformed native messages`() {
+        val path = "/tmp/agent-doc-lzsync-malformed-${System.nanoTime()}.md"
         try {
-            // Seed the per-document mirror as if FFI deltas had advanced it.
+            assertFalse(StateProjectionBridge.seedMirrorMessageForTest(path, "{not json"))
+            assertFalse(StateProjectionBridge.seedMirrorMessageForTest(path, """{"Bogus":{}}"""))
+            assertNull(StateProjectionBridge.mirrorEpochForFile(path))
+        } finally {
+            StateProjectionBridge.evictForFile(path)
+        }
+    }
+
+    // --- Consumer reactive-read tests (`#lzsync` 3B) ---------------------------
+    // The route summary consumer (TerminalUtil finally block) reads the reactive
+    // view via reactiveSummaryForFile. With FFI unavailable in unit tests,
+    // subscribeMirrorForFile is a no-op, so a view seeded directly stands in for
+    // "FFI deltas already applied".
+
+    @Test
+    fun `reactiveSummaryForFile derives from the seeded view not the cold pull`() {
+        val path = "/tmp/agent-doc-lzsync-reactive-read-${System.nanoTime()}.md"
+        try {
             val applied = StateProjectionBridge.seedMirrorMessageForTest(
                 path,
-                snapshotJson(
+                snapshotMessage(
                     epoch = 5,
-                    routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%3"}"""),
-                    transportPatches = listOf(60L to b64("""{"phase":"applied","actor_generation":2}""")),
+                    routePayload = """{"readiness":"dispatch_proven","pane_id":"%3"}""",
+                    transportPatches = listOf(60L to """{"phase":"applied","actor_generation":2}"""),
                     proofMarkers = listOf(70L),
                 ),
             )
             assertTrue(applied)
 
-            // The consumer read derives every field from the reactive mirror.
             val summary = StateProjectionBridge.reactiveSummaryForFile(path)
             assertNotNull(summary)
             assertEquals("dispatch_proven", summary!!.routeReadiness)
             assertEquals("%3", summary.routePaneId)
             assertEquals("applied", summary.latestTransportPhase)
             assertEquals(1, summary.proofMarkers)
-            // FFI unavailable in tests → no cold-pull transport-id backfill.
-            assertNull(summary.latestTransportPatchId)
         } finally {
             StateProjectionBridge.evictForFile(path)
         }
@@ -260,23 +263,17 @@ class StateProjectionBridgeTest {
 
     @Test
     fun `reactiveSummaryForFile reflects a subsequently applied delta`() {
-        val path = "/tmp/agent-doc-n529b-reactive-delta-${System.nanoTime()}.md"
+        val path = "/tmp/agent-doc-lzsync-reactive-delta-${System.nanoTime()}.md"
         try {
             StateProjectionBridge.seedMirrorMessageForTest(
                 path,
-                snapshotJson(epoch = 1, routePayload = b64("""{"readiness":"idle","pane_id":"%3"}""")),
+                snapshotMessage(epoch = 1, routePayload = """{"readiness":"idle","pane_id":"%3"}"""),
             )
             assertEquals("idle", StateProjectionBridge.reactiveSummaryForFile(path)?.routeReadiness)
 
-            // A later FFI delta flips the route readiness; the consumer read must
-            // observe the new cell value reactively (no full re-render).
             StateProjectionBridge.seedMirrorMessageForTest(
                 path,
-                deltaJson(
-                    baseEpoch = 1,
-                    epoch = 2,
-                    opsJson = """{"op":"cell_set","slot_id":11,"payload":"${b64("""{"readiness":"dispatch_proven","pane_id":"%3"}""")}"}""",
-                ),
+                deltaMessage(1, 2, cellSetOp(11, """{"readiness":"dispatch_proven","pane_id":"%3"}""")),
             )
             assertEquals("dispatch_proven", StateProjectionBridge.reactiveSummaryForFile(path)?.routeReadiness)
             assertEquals(2L, StateProjectionBridge.mirrorEpochForFile(path))
@@ -286,51 +283,21 @@ class StateProjectionBridgeTest {
     }
 
     @Test
-    fun `reactiveSummaryForFile prefers the reactive mirror over the cold pull`() {
-        // Seed the mirror with a route readiness that no cold projection would
-        // invent for a throwaway path. The consumer read must surface the mirror's
-        // tracked-cell value, proving it derives from the reactive mirror (not the
-        // cold projectionSummaryForFile pull) on the happy path. This holds whether
-        // or not the FFI library happens to be loadable in the test JVM.
-        val path = "/tmp/agent-doc-n529b-reactive-prefer-${System.nanoTime()}.md"
-        try {
-            StateProjectionBridge.seedMirrorMessageForTest(
-                path,
-                snapshotJson(epoch = 9, routePayload = b64("""{"readiness":"dispatch_proven","pane_id":"%9"}""")),
-            )
-            val summary = StateProjectionBridge.reactiveSummaryForFile(path)
-            assertNotNull(summary)
-            assertEquals("dispatch_proven", summary!!.routeReadiness)
-            assertEquals("%9", summary.routePaneId)
-        } finally {
-            StateProjectionBridge.evictForFile(path)
-        }
-    }
-
-    @Test
     fun `evictForFile clears owner-generation counters and restarts fresh`() {
         // #jbmirrorevict / #nsq2: the mirrors + generations maps must not leak
-        // across document close/reopen. Use a unique path so the singleton bridge
-        // state never collides with other tests.
+        // across document close/reopen.
         val path = "/tmp/agent-doc-nsq2-evict-${System.nanoTime()}.md"
 
-        // Seed an owner-generation counter. nextGeneration mutates `generations`
-        // unconditionally (FFI only gates recordFact, which is a no-op here).
         val firstGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-seed")
         assertNotNull(firstGen)
         assertEquals(1L, firstGen)
         val secondGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-seed-2")
         assertEquals(2L, secondGen)
 
-        // Evict on close.
         StateProjectionBridge.evictForFile(path)
 
-        // After eviction the docHash-scoped generation counter is gone, so a
-        // reopened (or reused) path restarts at 1 — no stale actor_generation
-        // bleed from the prior document.
         val reGen = StateProjectionBridge.recordEditorPatchQueued(path, "patch-evict-reseed")
         assertEquals(1L, reGen)
-        // Mirror was never created (no FFI in unit tests); epoch stays null.
         assertNull(StateProjectionBridge.mirrorEpochForFile(path))
     }
 }

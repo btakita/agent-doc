@@ -521,8 +521,9 @@ start). What is left needs a human watching a real editor and the operator lifti
    (step 6):** the open-set/lease readers (`editor_open_docs`, the `#6b5h` lease) and deleting the sidecar
    *writers*/reapers. **`[operator-verify]`:** flip works in a live IDE (open a doc → controller resolves
    `MultiReplica` from the plane; crash → `GitAuthoritative`).
-4-5. **3B "clean split" — IN PROGRESS (operator-directed 2026-07-12). Foundation DONE; the atomic wire
-   flip is the NEXT-SESSION handoff below.** (An earlier spike wrongly called native-`Delta` a regression;
+4-5. **3B "clean split" — ATOMIC WIRE FLIP DONE (2026-07-12).** Both subscribe emitters and both plugins
+   now speak the canonical native lazily wire; verified green (see the FLIP checklist below). Foundation was
+   DONE previously. (An earlier spike wrongly called native-`Delta` a regression;
    the operator corrected it — the lazily-*spec* op form **is** `NodeId`/`IpcValue`, so `WireDelta`
    (`slot_id`+base64) is the *divergent* one and native is the canonical target. The clean split also
    untangles the agent-doc-welded `StateGraphMirror`: lazily gets a **generic** view; agent-doc keeps its
@@ -541,22 +542,39 @@ start). What is left needs a human watching a real editor and the operator lifti
    - **state-wire bridge** `agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message`
      (`WireSubscribe` → native `IpcMessage` Snapshot/Delta; `wire_snapshot_to_lazily` added). Round-trip test.
 
-   **`[NEXT-SESSION FLIP]` — the atomic no-fallback cutover (do all together, one build, then live eyeball):**
-   1. **Controller:** in `agent-doc-controller-io/.../rpc.rs::handle_state_subscribe`, replace the
-      `WireSubscribe.to_json()` emit with `serde_json::to_value(lazily_convert::wire_subscribe_to_ipc_message(&wire)?)`
-      (the exact code is in the `NOTE (#lzsync 3B wire cutover, staged)` comment there). `document_hash` already
-      rides `ControllerStateSubscribeResponse`.
-   2. **JB plugin:** `StateProjectionBridge.kt` — `mirrors: Map<String, GraphView>`; replace `mirror.applyMessage(raw)`
-      with `IpcMessage.fromJson(parse(raw))` → `when { SnapshotMessage -> gv.applySnapshot(m.snapshot); DeltaMessage
-      -> gv.applyDelta(m.delta) }`; `messageKind(raw)` detects native top-level key (`"Snapshot"`/`"Delta"`);
-      `mirrorSummaryForFile` → `AgentDocProjection.fromView(gv)`. Repoint `EditorTabSyncListener.kt`,
-      `TurnStateBridge.kt`, `TerminalUtil.kt` from `MirrorProjectionSummary` → `AgentDocProjection`.
-   3. **VSCode plugin:** `stateMirror.ts` → `GraphView` + `agentDocProjectionFromView` + native parse
-      (`IpcMessage.fromWire` from lazily-js); repoint `extension.ts` consumers.
-   4. **Retire the old mirror** once unreferenced: lazily-kt/js `StateGraphMirror` + `WireDelta`/`WireSnapshot`
-      types (keep the state-wire `WireDelta` internal producer form that `build_delta` emits → the bridge
-      converts it; fully porting `build_delta` to native is a follow-up).
-   5. **Rebuild both plugins** (JB `make bump-plugin`; VSCode version bump + `vsce package`), `make check`, `install-full`.
+   **`[FLIP DONE 2026-07-12]` — the atomic no-fallback cutover (landed together, one build, verified):**
+   1. **Controller — DONE.** `agent-doc-controller-io/.../rpc.rs::handle_state_subscribe` now emits
+      `serde_json::to_value(lazily_convert::wire_subscribe_to_ipc_message(&wire)?)` (native `IpcMessage`,
+      externally-tagged `{"Snapshot":..}`/`{"Delta":..}`). `document_hash` still rides the response.
+   1b. **FFI subscribe — DONE (the handoff omitted this; both emitters must flip together).** `src/ffi.rs::
+      agent_doc_state_subscribe` also flipped from `subscribe(..).to_json()` to the native converter — the
+      plugins' *direct FFI* subscribe path (`subscribeMirrorForFile` → `reactiveSummaryForFile`) is the other
+      producer; leaving it on the old wire would have broken the FFI path under native-parsing plugins. Doc
+      comment + `state_subscribe_ffi_emits_snapshot_then_delta` test updated to the native shape.
+   2. **JB plugin — DONE.** `StateProjectionBridge.kt` — `mirrors: Map<String, GraphView>`; `applyNativeMessage`
+      folds `IpcMessage.decodeJson(raw)` → `applySnapshot`/`applyDelta`; `messageKind` detects the native key;
+      `mirrorSummaryForFile` → `AgentDocProjection.fromView`; `mirrorTurnProjectionJsonForFile` →
+      `AgentDocTurnProjection.fromView`. The turn projection + node vocabulary (`AgentDocNodeType`) moved into
+      `AgentDocProjection.kt`; the plugin-local base64 `StateGraphMirror.kt` (+ `MirrorProjectionSummary` /
+      `MirrorTurnProjection`) was **deleted**. `TerminalUtil.reactiveSummaryForFile` (only `.compact()`) and
+      `TurnStateBridge` need no consumer edits (same method names). Tests rewritten to native wire
+      (`StateProjectionBridgeTest`, `StateGraphMirrorConformanceTest` folds the native fixtures directly,
+      `EditorCommandStateMachineTest` builders). `./gradlew test` green.
+   3. **VSCode plugin — DONE.** `stateMirror.ts` → re-exports `GraphView` + `agentDocProjectionFromView`, adds
+      `applyIpcMessageToView` (native `IpcMessage.fromWire`), `agentDocTurnProjectionFromView`,
+      `compactAgentDocProjection`; the base64 delegating `StateGraphMirror` class was removed. `native.ts`
+      (`stateMirrors: Map<string, GraphView>`, summary/reactive/seed) and `extension.ts` (turn-status views,
+      `agentDocTurnProjectionFromView`, dropped the now-unneeded `initStateMirror` preload) repointed. Tests
+      rewritten to native wire; all 13 pass; `tsc --noEmit` clean; `vsce package` inlines the native fold.
+   4. **Retire the old mirror — PARTIAL / gated follow-up.** JB plugin-local `StateGraphMirror.kt` deleted.
+      The **lazily-kt/js library** `StateGraphMirror` + `WireDelta`/`WireSnapshot` types are NOT yet removed:
+      "once unreferenced" is not satisfied — lazily's own `StateGraphMirrorTest` / `AgentDocStateConformanceTest`
+      and `StateProjectionClient.kt` (kt) plus `state-graph-mirror.js`/`.d.ts` (js) still reference them. That
+      lazily-internal cleanup (delete the types + their tests, port `StateProjectionClient`) is a separate
+      low-risk follow-up, decoupled from this wire flip. Keep the state-wire `WireDelta` internal producer form
+      that `build_delta` emits → the bridge converts it (porting `build_delta` to native is also a follow-up).
+   5. **Rebuild both plugins — DONE.** JB `make bump-plugin` → v0.2.237 (signed+unsigned zips). VSCode
+      → v0.2.45 vsix. Rust `make check` green (7468 tests). `install-full` run.
    6. **`[operator-verify]`:** open a doc → editor sync + inspector (route/transport/proof) still render;
       a controller state update reflects in the plugin; a real edit round-trips. This is the no-fallback eyeball.
 6. **Reader cutover — DONE (2026-07-12), non-destructive per operator directive** ("sidecar should

@@ -5,6 +5,25 @@ import com.google.gson.JsonParser
 import io.github.lazily.GraphView
 
 /**
+ * agent-doc state node `type_tag`s for the reactive projection (`#lzsync` 3B).
+ *
+ * These mirror `agent-doc-orchestration/src/state_wire.rs` 1:1 and are the single
+ * source of the agent-doc node vocabulary the domain projections fold from a
+ * generic lazily [GraphView].
+ */
+internal object AgentDocNodeType {
+    const val ROUTE = "agent_doc.route"
+    const val QUEUE = "agent_doc.queue"
+    const val QUEUE_HEAD = "agent_doc.queue.head"
+    const val CLOSEOUT_CYCLE = "agent_doc.closeout.cycle"
+    const val TRANSPORT_PATCH = "agent_doc.transport.patch"
+    const val SUPERVISOR_OWNER = "agent_doc.supervisor.owner"
+    const val DOCUMENT_BASELINE = "agent_doc.document.baseline"
+    const val DOCUMENT_AUTHORITY = "agent_doc.document.authority"
+    const val PROOF_MARKER = "agent_doc.proof.marker"
+}
+
+/**
  * agent-doc's document-lifecycle inspector projection, derived from a generic lazily
  * [GraphView] (`#lzsync` 3B clean split).
  *
@@ -28,33 +47,61 @@ data class AgentDocProjection(
             "transport=${latestTransportPhase ?: "-"} proof_markers=$proofMarkers"
 
     companion object {
-        const val ROUTE = "agent_doc.route"
-        const val TRANSPORT_PATCH = "agent_doc.transport.patch"
-        const val PROOF_MARKER = "agent_doc.proof.marker"
-
         /** Derive the agent-doc inspector projection from a folded [GraphView]. */
         fun fromView(view: GraphView): AgentDocProjection {
-            val route = payloadJson(view.singletonNode(ROUTE)?.payload)
-            val latestPatch = view.nodesOfType(TRANSPORT_PATCH).maxByOrNull { it.id }
+            val route = payloadJson(view.singletonNode(AgentDocNodeType.ROUTE)?.payload)
+            val latestPatch = view.nodesOfType(AgentDocNodeType.TRANSPORT_PATCH).maxByOrNull { it.id }
             return AgentDocProjection(
-                routeReadiness = route?.stringField("readiness"),
-                routePaneId = route?.stringField("pane_id"),
-                latestTransportPhase = payloadJson(latestPatch?.payload)?.stringField("phase"),
-                proofMarkers = view.nodesOfType(PROOF_MARKER).size,
+                routeReadiness = route.stringField("readiness"),
+                routePaneId = route.stringField("pane_id"),
+                latestTransportPhase = payloadJson(latestPatch?.payload).stringField("phase"),
+                proofMarkers = view.nodesOfType(AgentDocNodeType.PROOF_MARKER).size,
             )
         }
-
-        /** Raw component payload bytes (the native `Inline` JSON) → a JSON object, or null. */
-        private fun payloadJson(bytes: ByteArray?): JsonObject? {
-            if (bytes == null || bytes.isEmpty()) return null
-            return try {
-                JsonParser.parseString(String(bytes, Charsets.UTF_8)).asJsonObject
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        private fun JsonObject.stringField(key: String): String? =
-            this.get(key)?.takeIf { it.isJsonPrimitive }?.asString
     }
 }
+
+/**
+ * agent-doc's turn-state projection (idle / awaiting_response / persisting),
+ * derived from the `agent_doc.closeout.cycle` node's `phase` on a folded
+ * [GraphView] (`#lzsync` 3B clean split). The Project Controller owns the phase;
+ * this is the plugin's read-only view of it, symmetric with the VS Code
+ * `agentDocTurnProjectionFromView`.
+ */
+data class AgentDocTurnProjection(
+    val state: String,
+    val turnInFlight: Boolean,
+) {
+    fun toJsonString(): String {
+        val root = JsonObject()
+        root.addProperty("state", state)
+        root.addProperty("turn_in_flight", turnInFlight)
+        root.addProperty("transition_authority", "project_controller")
+        return root.toString()
+    }
+
+    companion object {
+        /** Derive the turn projection from a folded [GraphView]. */
+        fun fromView(view: GraphView): AgentDocTurnProjection =
+            fromPhase(payloadJson(view.singletonNode(AgentDocNodeType.CLOSEOUT_CYCLE)?.payload).stringField("phase"))
+
+        fun fromPhase(phase: String?): AgentDocTurnProjection = when (phase) {
+            "preflight_started" -> AgentDocTurnProjection("awaiting_response", true)
+            "response_captured", "write_applied" -> AgentDocTurnProjection("persisting", true)
+            else -> AgentDocTurnProjection("idle", false)
+        }
+    }
+}
+
+/** Raw component payload bytes (the native `Inline` JSON) → a JSON object, or null. */
+private fun payloadJson(bytes: ByteArray?): JsonObject? {
+    if (bytes == null || bytes.isEmpty()) return null
+    return try {
+        JsonParser.parseString(String(bytes, Charsets.UTF_8)).asJsonObject
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun JsonObject?.stringField(key: String): String? =
+    this?.get(key)?.takeIf { it.isJsonPrimitive }?.asString

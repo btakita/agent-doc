@@ -314,8 +314,24 @@ silent swallow). **6 tests** incl. the recycle-survival invariant (drop + reopen
 suffix and durable ack cursor are exactly preserved — the on-disk durability the sidecars gave) and
 per-`document_hash` isolation. This is the durable store 3C plugs behind the `SyncDriver`; the
 push-loop wiring + dual-run cutover remain.
-- **3A — UDS carrier.** Implement `IpcSink`/`IpcSource` (or a `DataChannel`) over the existing
-  `agent-doc-ipc-io`/`ipc_socket.rs` Unix socket the controller already hosts. No new socket.
+- **3A — UDS carrier — DONE (this pass) — `agent-doc-reliable-sync-io`.** A new crate implements
+  lazily's `IpcSink`/`IpcSource` over the **existing** `agent-doc-ipc-io` controller socket — no new
+  socket. Each reliable-sync frame rides in one NDJSON control message
+  `{"type":"reliable_sync","document_hash":"<hash>","codec":"msgpack","frame":"<base64>"}`: the frame
+  body is the `IpcMessage` msgpack-encoded (the decided cross-language wire codec), base64'd into a
+  JSON envelope so a mixed-codec listener still routes by `type`/`document_hash` without decoding the
+  opaque frame. `encode_envelope`/`decode_envelope` (the latter returns `None` for non-reliable-sync
+  messages, `Some(Err)` for a malformed frame — never a silent drop). `ReliableSyncSink<T:
+  EnvelopeTransport>` is the plugin→controller push sink (a transport error surfaces as the sink error
+  → the `SyncDriver` retains the frame in the outbox = at-least-once); `SocketEnvelopeTransport` is the
+  real socket impl, and the sink is generic over `EnvelopeTransport` so the send path is unit-testable
+  without a live socket. `reliable_sync_channel(document_hash)` returns a `ReliableSyncInbox`
+  (listener pushes decoded frames) + `QueueIpcSource` (`recv` is non-blocking: `Ok(None)` when empty
+  or the inbox is dropped — the `SyncDriver` polls, never blocks). **8 tests**: per-variant envelope
+  round-trip (Snapshot/Delta/ResyncRequest/OutboxAck), non-reliable-sync rejection, malformed-frame
+  errors, sink→decode loopback via a fake transport, sink-surfaces-failure, channel FIFO drain,
+  dropped-inbox-reads-closed, deliver-after-source-dropped. `cargo test`/`clippy`/`fmt` green. The
+  listener→inbox routing wiring lands with 3C (the consumer of these building blocks).
 - **3B — controller→consumer stays pull, on lazily types.** Adopt lazily's `Delta`/`Snapshot`
   types + `ResyncCoordinator` in place of the bespoke `WireDelta` fold, keeping the
   `state_subscribe(last_epoch)` pull + SQLite resume (already retry-safe). Mostly a type

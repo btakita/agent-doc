@@ -98,6 +98,7 @@ members = [
     "agent-doc-element-unknown",
     "agent-doc-queue",
     "agent-doc-queue-io",
+    "agent-doc-reliable-sync-io",
     "agent-doc-route-io",
     "agent-doc-sqlite",
     "agent-doc-start-io",
@@ -250,6 +251,7 @@ agent-doc-session-actor-io = { path = "agent-doc-session-actor-io", version = "0
 agent-doc-session-check-io = { path = "agent-doc-session-check-io", version = "0.34.84" }
 agent-doc-session-registry = { path = "agent-doc-session-registry", version = "0.34.84" }
 agent-doc-session-registry-io = { path = "agent-doc-session-registry-io", version = "0.34.84" }
+agent-doc-reliable-sync-io = { path = "agent-doc-reliable-sync-io", version = "0.34.84" }
 agent-doc-snapshot-io = { path = "agent-doc-snapshot-io", version = "0.34.84" }
 agent-doc-sqlite = { path = "agent-doc-sqlite", version = "0.34.84" }
 agent-doc-start-io = { path = "agent-doc-start-io", version = "0.34.84" }

@@ -1,0 +1,440 @@
+//! Unix-domain-socket carrier for lazily's reliable-sync plane (`#lzsync`,
+//! sidecar-retirement Phase 3A).
+//!
+//! The plan (`tasks/agent-doc/plan-sidecar-retirement-lazily-sync.md` § Phase
+//! 3A) is explicit: carry lazily's reliable-sync `IpcMessage` frames over the
+//! **existing** `agent-doc-ipc-io` controller Unix socket — *no new socket*.
+//! This crate is the byte transport the design table assigns to the app:
+//!
+//! | Byte transport (which socket) | **app** (UDS `IpcSink`/`IpcSource`) | deployment choice |
+//!
+//! The correctness-critical protocol (`ResyncCoordinator`, `DurableOutbox`,
+//! `SyncDriver`, the OR-set/LWW liveness cells) lives in lazily; this crate only
+//! moves the already-encoded frames across the process boundary. It stays
+//! transport-agnostic in the sense that the `IpcSink` half is generic over an
+//! [`EnvelopeTransport`] so the driver's send path is unit-testable without a
+//! live socket.
+//!
+//! ## Wire shape
+//!
+//! Each reliable-sync frame rides inside one NDJSON control message on the
+//! existing socket:
+//!
+//! ```json
+//! {"type":"reliable_sync","document_hash":"<hash>","codec":"msgpack","frame":"<base64>"}
+//! ```
+//!
+//! The `frame` payload is the lazily `IpcMessage` encoded with the **msgpack**
+//! codec — the decided cross-language wire codec (plan § Frame codec grounding
+//! fact). msgpack is portable and evolution-safe, and the socket envelope stays
+//! JSON so a mixed-codec listener can still route by `type`/`document_hash`
+//! without decoding the opaque frame. The `document_hash` tag gives the per-doc
+//! isolation invariant (a stale overlay for doc B cannot flip doc A's authority)
+//! at the envelope layer, before the frame is ever decoded.
+
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+
+use anyhow::{Context, Result, anyhow};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use lazily::{IpcCodec, IpcMessage, IpcSink, IpcSource};
+use serde::{Deserialize, Serialize};
+
+/// NDJSON `type` tag for a reliable-sync control frame on the shared socket.
+pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
+
+/// Codec token carried in the envelope (`IpcCodec::MessagePack.name()`).
+const MSGPACK_CODEC: &str = "msgpack";
+
+/// The NDJSON envelope wrapping one lazily reliable-sync frame.
+///
+/// Serializes with an internally-tagged `type` field so it coexists with every
+/// other message on the `agent-doc-ipc-io` socket (`patch`, queue convergence,
+/// live-buffer signals, …). Non-reliable-sync messages never parse into this
+/// struct, so [`decode_envelope`] can cheaply reject them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReliableSyncEnvelope {
+    /// Constant `"reliable_sync"`.
+    #[serde(rename = "type")]
+    pub message_type: String,
+    /// Per-document channel tag — the isolation boundary (`#lzsync` invariant).
+    pub document_hash: String,
+    /// Frame codec token; currently always `"msgpack"`.
+    pub codec: String,
+    /// Base64 of the codec-encoded [`IpcMessage`].
+    pub frame: String,
+}
+
+/// Encode `message` for `document_hash` into the shared-socket JSON envelope.
+///
+/// The frame body is msgpack (the decided cross-language wire codec). The
+/// returned value is ready to hand to [`agent_doc_ipc_io::send_message`].
+pub fn encode_envelope(document_hash: &str, message: &IpcMessage) -> Result<serde_json::Value> {
+    let frame_bytes = IpcCodec::MessagePack
+        .encode(message)
+        .map_err(|e| anyhow!("reliable-sync msgpack encode failed: {e}"))?;
+    let envelope = ReliableSyncEnvelope {
+        message_type: RELIABLE_SYNC_MESSAGE_TYPE.to_string(),
+        document_hash: document_hash.to_string(),
+        codec: MSGPACK_CODEC.to_string(),
+        frame: BASE64.encode(frame_bytes),
+    };
+    serde_json::to_value(&envelope).context("reliable-sync envelope to_value failed")
+}
+
+/// Decode a shared-socket message back into `(document_hash, IpcMessage)`.
+///
+/// Returns:
+/// - `None` — the message is **not** a reliable-sync frame (wrong/absent
+///   `type`); the caller routes it through the normal socket handler.
+/// - `Some(Err)` — it *is* a reliable-sync frame but is malformed (bad codec,
+///   base64, or msgpack); the caller must surface the error, never silently drop.
+/// - `Some(Ok((hash, msg)))` — a well-formed frame ready to feed a
+///   `ResyncCoordinator` / `SyncDriver`.
+pub fn decode_envelope(message: &serde_json::Value) -> Option<Result<(String, IpcMessage)>> {
+    // Cheap `type` gate before attempting a full deserialize.
+    if message.get("type").and_then(|v| v.as_str()) != Some(RELIABLE_SYNC_MESSAGE_TYPE) {
+        return None;
+    }
+    Some(decode_envelope_inner(message))
+}
+
+fn decode_envelope_inner(message: &serde_json::Value) -> Result<(String, IpcMessage)> {
+    let envelope: ReliableSyncEnvelope = serde_json::from_value(message.clone())
+        .context("reliable-sync envelope deserialize failed")?;
+    if envelope.codec != MSGPACK_CODEC {
+        return Err(anyhow!(
+            "reliable-sync unsupported frame codec {:?} (expected {MSGPACK_CODEC})",
+            envelope.codec
+        ));
+    }
+    let frame_bytes = BASE64
+        .decode(envelope.frame.as_bytes())
+        .context("reliable-sync frame base64 decode failed")?;
+    let message = IpcCodec::MessagePack
+        .decode(&frame_bytes)
+        .map_err(|e| anyhow!("reliable-sync msgpack decode failed: {e}"))?;
+    Ok((envelope.document_hash, message))
+}
+
+/// The byte-level send half — abstracts *which* socket a frame goes out on so
+/// the sink is unit-testable without a live controller.
+pub trait EnvelopeTransport {
+    /// Deliver one already-built reliable-sync envelope. A returned `Err` means
+    /// the frame was **not** durably handed to the peer; the driver keeps it in
+    /// the outbox for replay-on-reconnect (at-least-once).
+    fn send_envelope(&self, envelope: &serde_json::Value) -> Result<()>;
+}
+
+/// [`EnvelopeTransport`] over the existing `agent-doc-ipc-io` controller socket.
+///
+/// One connect-send-receipt per frame, exactly like every other message on that
+/// socket. A missing/failed receipt propagates as an `Err`, which is the
+/// SyncDriver's "sink failure → retain and stall" signal.
+pub struct SocketEnvelopeTransport {
+    project_root: PathBuf,
+}
+
+impl SocketEnvelopeTransport {
+    pub fn new(project_root: impl Into<PathBuf>) -> Self {
+        Self {
+            project_root: project_root.into(),
+        }
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+}
+
+impl EnvelopeTransport for SocketEnvelopeTransport {
+    fn send_envelope(&self, envelope: &serde_json::Value) -> Result<()> {
+        agent_doc_ipc_io::send_message(&self.project_root, envelope)
+            .context("reliable-sync socket send failed")?;
+        Ok(())
+    }
+}
+
+/// lazily [`IpcSink`] over an [`EnvelopeTransport`] for one document channel.
+///
+/// This is the plugin→controller push side (Phase 3C wires a `SyncDriver` onto
+/// it). Every `send` msgpack-encodes the frame, tags it with `document_hash`,
+/// and hands it to the transport; a transport error surfaces as the sink error
+/// so the driver retains the frame.
+pub struct ReliableSyncSink<T: EnvelopeTransport> {
+    transport: T,
+    document_hash: String,
+}
+
+impl<T: EnvelopeTransport> ReliableSyncSink<T> {
+    pub fn new(transport: T, document_hash: impl Into<String>) -> Self {
+        Self {
+            transport,
+            document_hash: document_hash.into(),
+        }
+    }
+
+    pub fn document_hash(&self) -> &str {
+        &self.document_hash
+    }
+}
+
+impl<T: EnvelopeTransport> IpcSink for ReliableSyncSink<T> {
+    type Error = anyhow::Error;
+
+    fn send(&mut self, message: &IpcMessage) -> Result<(), Self::Error> {
+        let envelope = encode_envelope(&self.document_hash, message)?;
+        self.transport.send_envelope(&envelope)
+    }
+}
+
+/// The delivery half of a reliable-sync inbox: the controller listener pushes a
+/// decoded frame here; the paired [`QueueIpcSource`] drains it for the driver.
+///
+/// Cloneable so one document channel can be fed from any listener handler
+/// thread. Delivery after the source is dropped is a no-op (the peer went away),
+/// logged rather than panicking.
+#[derive(Clone)]
+pub struct ReliableSyncInbox {
+    document_hash: String,
+    tx: Sender<IpcMessage>,
+}
+
+impl ReliableSyncInbox {
+    /// Deliver a decoded frame to the paired source. Returns `false` if the
+    /// source was dropped (channel closed).
+    pub fn deliver(&self, message: IpcMessage) -> bool {
+        match self.tx.send(message) {
+            Ok(()) => true,
+            Err(_) => {
+                eprintln!(
+                    "[reliable-sync-io] {}: inbox delivery dropped — source closed",
+                    self.document_hash
+                );
+                false
+            }
+        }
+    }
+
+    pub fn document_hash(&self) -> &str {
+        &self.document_hash
+    }
+}
+
+/// lazily [`IpcSource`] backed by an in-memory queue fed by a [`ReliableSyncInbox`].
+///
+/// Non-blocking by contract: `recv` returns `Ok(None)` when the queue is
+/// currently empty (or the inbox has been dropped and drained), matching the
+/// `IpcSource` "currently exhausted or closed" semantics the `SyncDriver`
+/// expects — the driver polls, it does not block a thread on the source.
+pub struct QueueIpcSource {
+    document_hash: String,
+    rx: Receiver<IpcMessage>,
+}
+
+impl QueueIpcSource {
+    pub fn document_hash(&self) -> &str {
+        &self.document_hash
+    }
+}
+
+impl IpcSource for QueueIpcSource {
+    type Error = anyhow::Error;
+
+    fn recv(&mut self) -> Result<Option<IpcMessage>, Self::Error> {
+        match self.rx.try_recv() {
+            Ok(message) => Ok(Some(message)),
+            Err(TryRecvError::Empty) => Ok(None),
+            // A disconnected-but-drained inbox is "closed", not an error: the
+            // peer stopped pushing. The driver treats `None` as no-progress.
+            Err(TryRecvError::Disconnected) => Ok(None),
+        }
+    }
+}
+
+/// Build a connected inbox/source pair for one `document_hash` channel.
+///
+/// The controller registers the [`ReliableSyncInbox`] in its per-document
+/// routing map (keyed by the envelope `document_hash`) and hands the
+/// [`QueueIpcSource`] to that document's driver.
+pub fn reliable_sync_channel(
+    document_hash: impl Into<String>,
+) -> (ReliableSyncInbox, QueueIpcSource) {
+    let document_hash = document_hash.into();
+    let (tx, rx) = channel();
+    (
+        ReliableSyncInbox {
+            document_hash: document_hash.clone(),
+            tx,
+        },
+        QueueIpcSource { document_hash, rx },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lazily::{Delta, Snapshot};
+    use std::sync::Mutex;
+
+    fn sample_messages() -> Vec<IpcMessage> {
+        vec![
+            IpcMessage::Snapshot(Snapshot::new(0, Vec::new(), Vec::new(), Vec::new())),
+            IpcMessage::Delta(Delta {
+                base_epoch: 3,
+                epoch: 5,
+                ops: Vec::new(),
+            }),
+            IpcMessage::ResyncRequest(lazily::ResyncRequest { from_epoch: 7 }),
+            IpcMessage::OutboxAck(lazily::OutboxAck { through_epoch: 9 }),
+        ]
+    }
+
+    #[test]
+    fn envelope_roundtrips_every_variant() {
+        for msg in sample_messages() {
+            let value = encode_envelope("doc-abc", &msg).expect("encode");
+            assert_eq!(value["type"], RELIABLE_SYNC_MESSAGE_TYPE);
+            assert_eq!(value["document_hash"], "doc-abc");
+            assert_eq!(value["codec"], MSGPACK_CODEC);
+            let (hash, decoded) = decode_envelope(&value)
+                .expect("is reliable-sync")
+                .expect("ok");
+            assert_eq!(hash, "doc-abc");
+            assert_eq!(decoded, msg);
+        }
+    }
+
+    #[test]
+    fn decode_ignores_non_reliable_sync_messages() {
+        let patch = serde_json::json!({ "type": "patch", "id": "x" });
+        assert!(decode_envelope(&patch).is_none());
+        let untyped = serde_json::json!({ "document_hash": "d" });
+        assert!(decode_envelope(&untyped).is_none());
+    }
+
+    #[test]
+    fn decode_rejects_malformed_frame() {
+        let bad_codec = serde_json::json!({
+            "type": RELIABLE_SYNC_MESSAGE_TYPE,
+            "document_hash": "d",
+            "codec": "json",
+            "frame": "AAAA",
+        });
+        assert!(
+            decode_envelope(&bad_codec)
+                .expect("is reliable-sync")
+                .is_err()
+        );
+
+        let bad_b64 = serde_json::json!({
+            "type": RELIABLE_SYNC_MESSAGE_TYPE,
+            "document_hash": "d",
+            "codec": MSGPACK_CODEC,
+            "frame": "not base64!!!",
+        });
+        assert!(
+            decode_envelope(&bad_b64)
+                .expect("is reliable-sync")
+                .is_err()
+        );
+    }
+
+    /// Collecting fake transport: proves the sink builds a routable envelope
+    /// that decodes back to the exact frame, with no live socket.
+    #[derive(Default)]
+    struct CollectingTransport {
+        sent: Mutex<Vec<serde_json::Value>>,
+        fail: bool,
+    }
+
+    impl EnvelopeTransport for CollectingTransport {
+        fn send_envelope(&self, envelope: &serde_json::Value) -> Result<()> {
+            if self.fail {
+                return Err(anyhow!("transport down"));
+            }
+            self.sent.lock().unwrap().push(envelope.clone());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn sink_encodes_and_transport_carries_every_frame() {
+        let transport = CollectingTransport::default();
+        let mut sink = ReliableSyncSink::new(transport, "doc-xyz");
+        let msgs = sample_messages();
+        for msg in &msgs {
+            sink.send(msg).expect("send ok");
+        }
+        // Re-borrow the transport via the sink to inspect what it carried.
+        let sent = {
+            // SAFETY: sink owns the transport; expose it for the assertion.
+            let ReliableSyncSink { transport, .. } = &sink;
+            transport.sent.lock().unwrap().clone()
+        };
+        assert_eq!(sent.len(), msgs.len());
+        for (value, expected) in sent.iter().zip(&msgs) {
+            let (hash, decoded) = decode_envelope(value).unwrap().unwrap();
+            assert_eq!(hash, "doc-xyz");
+            assert_eq!(&decoded, expected);
+        }
+    }
+
+    #[test]
+    fn sink_surfaces_transport_failure_for_driver_retain() {
+        let transport = CollectingTransport {
+            fail: true,
+            ..Default::default()
+        };
+        let mut sink = ReliableSyncSink::new(transport, "doc-xyz");
+        let err = sink.send(&IpcMessage::Snapshot(Snapshot::new(
+            0,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )));
+        assert!(
+            err.is_err(),
+            "transport failure must surface for retain-on-fail"
+        );
+    }
+
+    #[test]
+    fn channel_source_drains_in_order_then_empty() {
+        let (inbox, mut source) = reliable_sync_channel("doc-1");
+        assert_eq!(source.document_hash(), "doc-1");
+        let msgs = sample_messages();
+        for msg in &msgs {
+            assert!(inbox.deliver(msg.clone()));
+        }
+        for expected in &msgs {
+            let got = source.recv().expect("recv ok").expect("some");
+            assert_eq!(&got, expected);
+        }
+        // Drained → None, not an error.
+        assert!(source.recv().expect("recv ok").is_none());
+    }
+
+    #[test]
+    fn source_reports_none_after_inbox_dropped() {
+        let (inbox, mut source) = reliable_sync_channel("doc-2");
+        inbox.deliver(IpcMessage::OutboxAck(lazily::OutboxAck {
+            through_epoch: 1,
+        }));
+        drop(inbox);
+        // Buffered frame still drains...
+        assert!(source.recv().expect("recv").is_some());
+        // ...then a dropped inbox reads as closed (None), never an error.
+        assert!(source.recv().expect("recv").is_none());
+    }
+
+    #[test]
+    fn deliver_after_source_dropped_is_false_not_panic() {
+        let (inbox, source) = reliable_sync_channel("doc-3");
+        drop(source);
+        assert!(!inbox.deliver(IpcMessage::OutboxAck(lazily::OutboxAck {
+            through_epoch: 1
+        })));
+    }
+}

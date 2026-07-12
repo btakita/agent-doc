@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-reliable-sync-io"
+version = "0.34.84"
+edition = "2024"
+description = "Unix-domain-socket carrier for lazily's reliable-sync plane (#lzsync) — implements IpcSink/IpcSource over agent-doc's existing controller socket (sidecar-retirement Phase 3A)"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+
+[lib]
+name = "agent_doc_reliable_sync_io"
+
+[dependencies]
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.84" }
+anyhow = "1"
+base64 = "0.22"
+lazily = { version = "0.31.0", features = ["ipc", "ipc-msgpack"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]

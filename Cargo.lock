@@ -92,6 +92,7 @@ dependencies = [
  "agent-doc-prompt-io",
  "agent-doc-queue",
  "agent-doc-queue-io",
+ "agent-doc-reliable-sync-io",
  "agent-doc-repair-command-io",
  "agent-doc-repair-io",
  "agent-doc-response-replay-io",
@@ -1553,6 +1554,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "agent-doc-reliable-sync-io"
+version = "0.34.84"
+dependencies = [
+ "agent-doc-ipc-io",
+ "anyhow",
+ "base64 0.22.1",
+ "lazily 0.31.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3969,6 +3982,7 @@ dependencies = [
  "arc-swap",
  "lazily-macros",
  "parking_lot",
+ "rmp-serde",
  "serde",
  "smallvec",
 ]
@@ -4660,6 +4674,25 @@ dependencies = [
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
 ]
 
 [[package]]

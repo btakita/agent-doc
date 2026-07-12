@@ -53,6 +53,7 @@ import {
     EditorCommandRegistry,
 } from './editorCommandState';
 import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
+import { registerReliableSyncLiveness } from './reliableSyncLiveness';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -3394,6 +3395,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } catch (err: any) {
         console.warn(`[agent-doc] initStateMirror failed: ${err?.message ?? err}`);
     }
+
+    // Sidecar-retirement Phase 3C (design B): report this editor's open-set to the
+    // reliable-sync liveness plane via a lazily-js OrSet graph → FFI push. No-op
+    // unless the controller dual-run flag is on.
+    registerReliableSyncLiveness(context);
 
     // Coordinate Project Controller turn state into the status bar. Refresh on
     // active editor changes and editor/plugin events; state itself comes from

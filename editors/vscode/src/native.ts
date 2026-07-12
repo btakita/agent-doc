@@ -355,6 +355,9 @@ let _document_closed_for_editor: any = null;
 let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
 let _resolve_project_path: any = null;
+let _document_id_for_path: any = null;
+let _reliable_sync_liveness_enqueue: any = null;
+let _reliable_sync_liveness_flush: any = null;
 let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
@@ -461,6 +464,24 @@ function bindFunctions(): void {
         _admin_repair_projection_json = null;
     }
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
+    try {
+        _document_id_for_path = lib.func('agent_doc_document_id_for_path', 'char*', ['str']);
+        _reliable_sync_liveness_enqueue = lib.func(
+            'agent_doc_reliable_sync_liveness_enqueue',
+            'int',
+            ['str', 'str', 'str'],
+        );
+        _reliable_sync_liveness_flush = lib.func(
+            'agent_doc_reliable_sync_liveness_flush',
+            'int64',
+            ['str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] reliable-sync liveness wrappers unavailable: ${e.message}`);
+        _document_id_for_path = null;
+        _reliable_sync_liveness_enqueue = null;
+        _reliable_sync_liveness_flush = null;
+    }
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
     _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
@@ -1634,6 +1655,65 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
         return [];
     } finally {
         if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * Canonical path-based document id (`document_id_for_path`) — the reliable-sync
+ * `document_hash` for a file (sidecar-retirement Phase 3C). Returns null when the
+ * FFI is unavailable.
+ */
+export function documentIdForPath(filePath: string, projectRoot?: string): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_document_id_for_path) return null;
+    const ptr = _document_id_for_path(filePath);
+    try {
+        if (!ptr) return null;
+        const raw = koffi.decode(ptr, 'char', -1);
+        return raw && raw.length > 0 ? raw : null;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] document_id_for_path error: ${err.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * Enqueue a JSON `LivenessOp` batch into a document's durable reliable-sync push
+ * outbox (`#lzsync` Phase 3C). No-op unless the controller dual-run flag is on.
+ * Returns 0 on success, -1 on error / FFI unavailable.
+ */
+export function reliableSyncLivenessEnqueue(
+    projectRoot: string,
+    documentHash: string,
+    opsJson: string,
+): number {
+    if (!ensureLoaded(projectRoot)) return -1;
+    bindFunctions();
+    if (!_reliable_sync_liveness_enqueue) return -1;
+    try {
+        return _reliable_sync_liveness_enqueue(projectRoot, documentHash, opsJson);
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] reliable_sync_liveness_enqueue error: ${err.message}`);
+        return -1;
+    }
+}
+
+/**
+ * Flush a document's durable reliable-sync push outbox to the controller.
+ * Returns the ack cursor (>= 0) on success, -1 on error / FFI unavailable.
+ */
+export function reliableSyncLivenessFlush(projectRoot: string, documentHash: string): number {
+    if (!ensureLoaded(projectRoot)) return -1;
+    bindFunctions();
+    if (!_reliable_sync_liveness_flush) return -1;
+    try {
+        return Number(_reliable_sync_liveness_flush(projectRoot, documentHash));
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] reliable_sync_liveness_flush error: ${err.message}`);
+        return -1;
     }
 }
 

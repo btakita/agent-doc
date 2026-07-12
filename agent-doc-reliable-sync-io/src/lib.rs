@@ -34,6 +34,7 @@
 
 pub mod liveness;
 pub mod plane;
+pub mod push;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};

@@ -390,12 +390,23 @@ push-loop wiring + dual-run cutover remain.
     plus a **recycle** test (controller loses the projection → replays the plugin's retained outbox suffix
     → rebuilds the exact derived authority) and a redelivery-idempotence test. 22 crate tests + 1 handler
     test (default-OFF path), clippy/fmt green.
+  - **Plugin-push Rust core DONE (this pass) — `push::LivenessPushEndpoint`.** The editor-plugin *send*
+    half, generic over `DurableOutbox` (SqliteOutbox in prod, InMemoryOutbox in tests) + an injected
+    `LivenessPushTransport` (the `reliable_sync` controller RPC in prod): `enqueue` assigns the next epoch
+    and durably `append`s the frame **before** any send; `flush` replays every un-acked frame through the
+    transport, prunes on the returned ack cursor, and **retains-and-stalls** on a transport failure so a
+    push lost while the controller is down re-sends on the next flush/reconnect. **Full plugin→controller
+    push loop proven end to end** in a SimWorld whose fake transport folds pushed frames into a real
+    `ControllerLivenessPlane` and returns its ack: deliver-fold-prune, retain-on-fail→replay-on-reconnect,
+    recycle epoch-monotonicity (never re-use an acked epoch), idempotent redelivery. 26 crate tests;
+    clippy/fmt green.
   - **REMAINING (`[operator-verify]` slice, crosses the live editor↔controller boundary + agent-doc
-    release blocked by STOP-releases):** the editor-plugin side that *emits* liveness ops (FFI enqueue +
-    JNA/JS calls, the S4b OS exit watcher feeding `Alive{value:false}`); per-doc plugin-side `SyncDriver`s
-    with `SqliteOutbox` for the durable push; and switching `editor_open_docs`/`editor_attach`/the `#6b5h`
-    lease to read `LivenessProjection`. Then the cutover (turn dual-run ON → confirm parity live → switch
-    the hot path → delete the sidecar writers/reapers).
+    release blocked by STOP-releases):** the FFI C-ABI enqueue/flush functions in `src/ffi.rs` + the
+    concrete RPC `LivenessPushTransport` (over `request_controller`) + a per-doc SqliteOutbox registry;
+    the editor-plugin JNA/JS calls that report open/close/attach events + the S4b OS exit watcher feeding
+    `Alive{value:false}`; and switching `editor_open_docs`/`editor_attach`/the `#6b5h` lease to read
+    `LivenessProjection`. Then the cutover (turn dual-run ON → confirm parity live → switch the hot path →
+    delete the sidecar writers/reapers).
 - **Migration & cutover:** dual-run (sidecar write + sync push) → assert the synced open-set/lease
   matches the sidecar-derived one across a SimWorld of open/close/crash/recycle sequences →
   switch the hot path to read the synced cells → stop reading the sidecars → delete the sidecar

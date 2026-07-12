@@ -6829,6 +6829,7 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_tmux_layout_sync_state(&bootstrap_snapshot, request))
         }
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
+        "reliable_sync" => controller_envelope(handle_reliable_sync(request)),
         "focus_document_pane" => {
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
@@ -6951,6 +6952,68 @@ fn handle_state_subscribe(
     Ok(ControllerStateSubscribeResponse {
         document_hash,
         message,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct ControllerReliableSyncResponse {
+    document_hash: String,
+    /// Ack cursor the pushing plugin uses to prune / resume its outbox.
+    ack_through: u64,
+    /// Whether the shadow liveness plane actually consumed the frame
+    /// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`); OFF ⇒ sidecars stay authoritative.
+    dual_run: bool,
+}
+
+/// The controller's shadow reliable-sync liveness plane (sidecar-retirement
+/// Phase 3C). Global, like `RelayHub`, because the socket handler captures no
+/// state. Fed only when the dual-run flag is on; the sidecars remain the hot-path
+/// authority until the operator-verified cutover.
+static CONTROLLER_LIVENESS_PLANE: std::sync::LazyLock<
+    std::sync::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane>,
+> = std::sync::LazyLock::new(|| {
+    std::sync::Mutex::new(agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new())
+});
+
+/// `plugin → controller` reliable-sync liveness push (`#lzsync`, Phase 3C).
+///
+/// The plugin sends the 3A `reliable_sync` envelope (from
+/// `agent_doc_reliable_sync_io::encode_envelope`) as the `diagnostic_payload` and
+/// the outbox epoch as `generation`. When dual-run is **off** (default) the frame
+/// is not consumed and the ack is `0` — sidecars stay authoritative. When on, the
+/// frame folds into the shadow `ControllerLivenessPlane` and the returned
+/// `ack_through` lets the plugin outbox prune / resume from the frontier.
+fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliableSyncResponse> {
+    let payload_str = request
+        .diagnostic_payload
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("reliable_sync request missing diagnostic_payload"))?;
+    let payload: serde_json::Value =
+        serde_json::from_str(payload_str).context("parse reliable_sync envelope")?;
+    let (document_hash, message) = agent_doc_reliable_sync_io::decode_envelope(&payload)
+        .ok_or_else(|| {
+            anyhow::anyhow!("reliable_sync payload is not a reliable-sync envelope")
+        })??;
+    let epoch = request.generation.unwrap_or(0);
+
+    if !agent_doc_reliable_sync_io::dual_run_enabled() {
+        return Ok(ControllerReliableSyncResponse {
+            document_hash,
+            ack_through: 0,
+            dual_run: false,
+        });
+    }
+
+    let ack_through = {
+        let mut plane = CONTROLLER_LIVENESS_PLANE
+            .lock()
+            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+        plane.ingest(&document_hash, epoch, &message)?
+    };
+    Ok(ControllerReliableSyncResponse {
+        document_hash,
+        ack_through,
+        dual_run: true,
     })
 }
 
@@ -14217,5 +14280,39 @@ mod tests {
             agent_doc_sqlite::state_store::ActorState::Starting
         );
         assert_eq!(record.pane_id, "%162");
+    }
+
+    #[test]
+    fn reliable_sync_handler_default_off_is_noop_ack_zero() {
+        use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
+        // A valid 3A reliable-sync envelope carrying one liveness Open op.
+        let frame = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: "docwire".into(),
+            pid: 100,
+            tag: "t1".into(),
+        }])
+        .expect("encode liveness frame");
+        let envelope = agent_doc_reliable_sync_io::encode_envelope("docwire", &frame)
+            .expect("encode envelope");
+        let request = ControllerRequest {
+            command: "reliable_sync".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: Some(5),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(envelope.to_string()),
+        };
+        let resp = handle_reliable_sync(request).expect("handler ok");
+        // Default (env unset) ⇒ dual-run OFF: sidecars authoritative, frame not consumed.
+        assert!(!resp.dual_run);
+        assert_eq!(resp.ack_through, 0);
+        assert_eq!(resp.document_hash, "docwire");
     }
 }

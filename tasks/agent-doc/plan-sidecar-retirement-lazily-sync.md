@@ -376,12 +376,26 @@ push-loop wiring + dual-run cutover remain.
     connected-flag transport, no real socket).
   - **`dual_run_enabled()`** (env `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default OFF**) — the flag the
     controller checks so the plane runs in shadow while the sidecars stay authoritative.
-  - **REMAINING:** wire the controller `start_listener` to route inbound `reliable_sync` envelopes to
-    per-doc `ReliableSyncInbox`es; host per-doc `SyncDriver`s in the controller with the `SqliteOutbox`
-    store; the editor-plugin side that *emits* liveness ops (FFI enqueue + JNA/JS calls) — the S4b OS
-    exit watcher feeds the `Alive{value:false}` op; and derive `editor_open_docs`/`editor_attach`/the
-    `#6b5h` lease from `LivenessProjection`. These cross the live editor↔controller boundary and are the
-    `[operator-verify]` slice.
+  - **Controller receive wiring + dual-run parity oracle DONE (this pass).** `plane::ControllerLivenessPlane`
+    (reliable-sync-io) folds inbound frames via `ingest(document_hash, epoch, &IpcMessage)` (idempotent;
+    returns the per-channel ack cursor for the receipt so the plugin outbox prunes/resumes) and owns the
+    derived-authority `LivenessProjection`. **Wired into the controller RPC** (`rpc.rs`): a new
+    `"reliable_sync"` dispatch arm → `handle_reliable_sync` decodes the 3A envelope from
+    `diagnostic_payload` (reusing `decode_envelope`, so msgpack stays inside reliable-sync-io — no new
+    controller-io feature), gates on `dual_run_enabled()` (**OFF ⇒ ack 0, sidecars authoritative**), and
+    on ON folds into a global `CONTROLLER_LIVENESS_PLANE` (a `LazyLock<Mutex<…>>`, mirroring the
+    stateless-handler `RelayHub` pattern). **Dual-run parity SimWorld** (`plane::parity`): a
+    `SidecarOpenSetModel` oracle + a `drive()` harness push every open/close/crash event through *both*
+    the synced plane and the sidecar model and assert `open_docs`/`live_docs` agree **after every event**;
+    plus a **recycle** test (controller loses the projection → replays the plugin's retained outbox suffix
+    → rebuilds the exact derived authority) and a redelivery-idempotence test. 22 crate tests + 1 handler
+    test (default-OFF path), clippy/fmt green.
+  - **REMAINING (`[operator-verify]` slice, crosses the live editor↔controller boundary + agent-doc
+    release blocked by STOP-releases):** the editor-plugin side that *emits* liveness ops (FFI enqueue +
+    JNA/JS calls, the S4b OS exit watcher feeding `Alive{value:false}`); per-doc plugin-side `SyncDriver`s
+    with `SqliteOutbox` for the durable push; and switching `editor_open_docs`/`editor_attach`/the `#6b5h`
+    lease to read `LivenessProjection`. Then the cutover (turn dual-run ON → confirm parity live → switch
+    the hot path → delete the sidecar writers/reapers).
 - **Migration & cutover:** dual-run (sidecar write + sync push) → assert the synced open-set/lease
   matches the sidecar-derived one across a SimWorld of open/close/crash/recycle sequences →
   switch the hot path to read the synced cells → stop reading the sidecars → delete the sidecar

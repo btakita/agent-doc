@@ -480,6 +480,7 @@ dependencies = [
  "agent-doc-project-config-io",
  "agent-doc-project-root-io",
  "agent-doc-queue",
+ "agent-doc-reliable-sync-io",
  "agent-doc-secret-redact",
  "agent-doc-session-actor-io",
  "agent-doc-session-registry-io",

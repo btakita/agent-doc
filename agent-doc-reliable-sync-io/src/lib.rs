@@ -33,6 +33,7 @@
 //! at the envelope layer, before the frame is ever decoded.
 
 pub mod liveness;
+pub mod plane;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};

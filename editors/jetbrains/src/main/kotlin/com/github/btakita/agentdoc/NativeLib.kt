@@ -557,6 +557,32 @@ interface AgentDocLib : Library {
     fun agent_doc_resolve_project_path(filePath: String): FfiProjectPath.ByValue
 
     /**
+     * Canonical path-based document id (`document_id_for_path`) — the reliable-sync
+     * `document_hash` for a file (sidecar-retirement Phase 3C). Returns a
+     * NUL-terminated string to free with [agent_doc_free_string], or null on a
+     * non-UTF-8 path.
+     */
+    fun agent_doc_document_id_for_path(filePath: String): Pointer?
+
+    /**
+     * Enqueue a JSON batch of externally-tagged `LivenessOp`s
+     * (`[{"Open":{"document_hash":..,"pid":..,"tag":..}}, ..]`) into a document's
+     * durable reliable-sync push outbox (`#lzsync` Phase 3C). No-op unless the
+     * controller dual-run flag is on. Returns 0 on success, -1 on error.
+     */
+    fun agent_doc_reliable_sync_liveness_enqueue(
+        projectRoot: String,
+        documentHash: String,
+        opsJson: String,
+    ): Int
+
+    /**
+     * Flush a document's durable reliable-sync push outbox to the controller.
+     * Returns the ack cursor (>= 0) on success, -1 on error.
+     */
+    fun agent_doc_reliable_sync_liveness_flush(projectRoot: String, documentHash: String): Long
+
+    /**
      * Commit the document at [filePath] to git.
      * Call after successfully applying a patch as a defense-in-depth guarantee
      * that the agent response is tracked even if the shell-side --commit was skipped.

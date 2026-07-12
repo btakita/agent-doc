@@ -136,6 +136,22 @@ fn continuation_guidance_for(file: &Path) -> String {
     agent_doc_queue::queue_continuation::continuation_guidance(pause_reason.as_deref())
 }
 
+/// `#realtime-steering-verbatim` / `#no-thrash-steering`: clear, deterministic
+/// closeout guidance for the case where a committed cycle's document already
+/// carries a fresh operator prompt (the operator edited/steered while the turn
+/// was active — the whole point of a realtime document). The prior response is
+/// already committed; the correct move is to ADDRESS the new prompt in the
+/// current turn, not to re-run finalize on the old response, force-disk over the
+/// live buffer, or re-answer prompts already committed in `HEAD`. Handing the
+/// agent this exact instruction is what prevents the thrash loop (repeated
+/// preflight/finalize, empty cycles, force-disk clobbers).
+fn realtime_steering_closeout_guidance(file: &Path) -> String {
+    format!(
+        "This is realtime operator steering, not a failed closeout — your prior response is already committed in HEAD. Address the operator prompt above in your CURRENT turn: run `agent-doc {}` to continue and finalize a response for it. Do NOT re-run finalize on the prior response, do NOT use `--force-disk` (that clobbers the operator's live edits), and do NOT re-answer any prompt already committed in HEAD (the realtime replica reconciles your committed response back into the live buffer).",
+        file.display()
+    )
+}
+
 fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
     agent_doc_ops_log_io::log_op(
         file,
@@ -912,12 +928,13 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
             if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                 return Ok(SessionCheckStatus::Interrupted(format!(
-                    "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                    "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
                     state.cycle_id,
                     state.phase.as_str(),
                     state.last_event,
                     reason,
-                    prompt_marker
+                    prompt_marker,
+                    realtime_steering_closeout_guidance(file)
                 )));
             }
             return Ok(SessionCheckStatus::Ok(format!(
@@ -932,12 +949,13 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
             if let Some(reason) = effects.repair_committed_historical_snapshot_drift(file)? {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
-                        "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                        "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), repaired committed historical {} snapshot drift, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
                         state.cycle_id,
                         state.phase.as_str(),
                         state.last_event,
                         reason,
-                        prompt_marker
+                        prompt_marker,
+                        realtime_steering_closeout_guidance(file)
                     )));
                 }
                 return Ok(SessionCheckStatus::Ok(format!(
@@ -1049,11 +1067,12 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         }
         if let Some(marker) = detect_unstarted_prompt_bearing_diff(file)? {
             return Ok(SessionCheckStatus::Interrupted(format!(
-                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
+                "[session-check] INTERRUPTED: cycle `{}` is `{}` ({}), but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}\n{}",
                 state.cycle_id,
                 state.phase.as_str(),
                 state.last_event,
-                marker
+                marker,
+                realtime_steering_closeout_guidance(file)
             )));
         }
         return Ok(SessionCheckStatus::Ok(format!(

@@ -147,3 +147,48 @@ struct IpcDeliveryOutcome { source, invariant: Option<IpcProofInvariant>, recove
 - Ship Phases 2→3→4 in order (tree model → migrate merge onto it → expose API);
   Phase 5 independently, last.
 ```
+
+## Phase 3.1 — Adopt the body-aware node identity as the `SeqCrdt` element id (`#qcellmerge-response-body-id`)
+
+**Landed 2026-07-12 (prep for the SeqCrdt swap):** `ExchangeNode::node_id` is now
+content-derived from the response heading **and** body via
+`exchange_tree::response_identity_digest` (transient `(HEAD)`/strike/boundary/
+trailing-ws normalized out). This is the identity a `SeqCrdt<Id, V>` should key its
+elements on when Phase 3 migrates the merge core: heading-only identity made two
+same-heading turns collide (a fresh response was dropped as a false duplicate — "a
+cell-merge chose the existing content"), which a CRDT keyed on the same collided id
+would have inherited. When the merge moves onto `lazily::SeqCrdt`, map each
+`ExchangeNode` to a `SeqCrdt` element whose `Id` is `response_identity_digest`
+(responses) / trimmed-body hash (prompts), so byte-identical mirror duplicates still
+converge while distinct turns stay distinct — no bespoke append-filter/dedup pass
+needed.
+
+## Phase 6 — Realtime steering via `lazily::QueueCell` (`#realtime-steering-verbatim`)
+
+**Motivation (2026-07-12 operator directive):** the binary must gracefully handle
+the operator editing while a turn is active and hand the agent every added prompt
+**verbatim**, without thrash. The current stopgap surfaces the verbatim prompt +
+anti-thrash guidance through `session-check`
+(`realtime_steering_closeout_guidance` + `RealtimeSteering::verbatim`), and the
+graceful merge relies on the body-aware identity above. The durable version backs
+operator steering with a `lazily::QueueCell<SteeringPrompt>`:
+
+- Operator prompt additions detected by `baseline_comparison::realtime_steering`
+  enqueue a `SteeringPrompt` (verbatim text + source epoch) into a per-document
+  `QueueCell` in the lazily graph instead of only being re-derived from a diff each
+  closeout.
+- The reactive queue delivers the prompt to the running agent turn (the "add the
+  user prompt verbatim to the agent" path) so a mid-turn add is addressed in-turn,
+  not deferred to the operator to re-invoke.
+- Closeout drains the `QueueCell` head as the prompt is answered; `session-check`
+  reads queue emptiness instead of re-diffing HEAD↔buffer, removing the
+  false-"unresolved" thrash class entirely.
+- Composes with the `SeqCrdt` exchange (Phase 3): the answer node is appended to the
+  exchange CRDT, its steering `QueueCell` entry drained, both reconciled through the
+  lazily reliable-sync plane — concurrent operator edits merge as CRDT ops, not a
+  bespoke 3-way merge.
+
+Sequence Phase 6 after Phase 3 (exchange on `SeqCrdt`) so steering and exchange share
+one graph substrate. `QueueCell` and `SeqCrdt` already exist in `lazily-rs`
+(`src/queue.rs`, `src/seq_crdt.rs`); this migration is additive graph adoption, not a
+lazily change.

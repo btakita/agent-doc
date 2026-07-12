@@ -963,7 +963,7 @@ Body\n\
         );
 
         let change = realtime_steering_since_turn_baseline(&doc).unwrap();
-        let RealtimeSteering::PromptTarget { preview } = change else {
+        let RealtimeSteering::PromptTarget { preview, .. } = change else {
             panic!("fresh exchange tail prompt must be detected via HEAD fallback: {change:?}");
         };
         assert!(
@@ -1219,7 +1219,7 @@ Body\n\
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
 
         let change = realtime_steering_since_turn_baseline(&doc).unwrap();
-        let RealtimeSteering::PromptTarget { preview } = change else {
+        let RealtimeSteering::PromptTarget { preview, .. } = change else {
             panic!("plain exchange-tail prompt should remain actionable: {change:?}");
         };
         assert_eq!(

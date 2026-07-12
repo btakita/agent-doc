@@ -124,24 +124,39 @@ class PatchWatcher(private val project: Project) : Disposable {
     }
 
     private fun currentContentForProjection(filePath: String): String? {
+        // VFS lookup + synchronous refresh must stay OUTSIDE a read action: a
+        // synchronous `refresh(false)` cannot run while holding the read lock.
         var targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
         if (targetFile == null) {
             LocalFileSystem.getInstance().refresh(false)
             targetFile = LocalFileSystem.getInstance().findFileByPath(filePath)
         }
-        if (targetFile == null) {
+        val file = targetFile
+        if (file == null) {
             LOG.warn("[content-projection] already_applied target file not found: $filePath")
             return null
         }
-        val document = FileDocumentManager.getInstance().getDocument(targetFile)
-        if (document != null) {
-            return document.text
-        }
-        return try {
-            String(targetFile.contentsToByteArray(), targetFile.charset)
-        } catch (e: Exception) {
-            LOG.warn("[content-projection] failed to read already_applied VFS content for $filePath", e)
-            null
+        // #patchwatcher-readaccess: `getDocument()` / `document.text` touch the
+        // IntelliJ document model, which requires a read action. This method runs
+        // on the background watcher thread (`agent-doc-patch-watcher-*`,
+        // processPatchFile -> writeAlreadyAppliedContentProjection), so read the
+        // model inside a read action instead of tripping `softAssertReadAccess`
+        // and aborting the whole watch loop with a RuntimeExceptionWithAttachments.
+        return ApplicationManager.getApplication().runReadAction<String?> {
+            val document = FileDocumentManager.getInstance().getDocument(file)
+            if (document != null) {
+                document.text
+            } else {
+                try {
+                    String(file.contentsToByteArray(), file.charset)
+                } catch (e: Exception) {
+                    LOG.warn(
+                        "[content-projection] failed to read already_applied VFS content for $filePath",
+                        e,
+                    )
+                    null
+                }
+            }
         }
     }
 

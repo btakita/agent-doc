@@ -9,10 +9,10 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealtimeSteering {
     None,
-    PromptTarget { preview: String },
-    ContentEdit { preview: String },
-    PromptDeleted { preview: String },
-    PromptReduced { preview: String },
+    PromptTarget { preview: String, verbatim: String },
+    ContentEdit { preview: String, verbatim: String },
+    PromptDeleted { preview: String, verbatim: String },
+    PromptReduced { preview: String, verbatim: String },
 }
 
 impl RealtimeSteering {
@@ -30,13 +30,28 @@ impl RealtimeSteering {
         }
     }
 
+    /// First non-empty line of the steering change — for logs / short markers.
     pub fn preview(&self) -> Option<&str> {
         match self {
             Self::None => None,
-            Self::PromptTarget { preview }
-            | Self::ContentEdit { preview }
-            | Self::PromptDeleted { preview }
-            | Self::PromptReduced { preview } => Some(preview),
+            Self::PromptTarget { preview, .. }
+            | Self::ContentEdit { preview, .. }
+            | Self::PromptDeleted { preview, .. }
+            | Self::PromptReduced { preview, .. } => Some(preview),
+        }
+    }
+
+    /// The full, verbatim operator steering text. `#realtime-steering-verbatim`:
+    /// the simplest robust way to make the agent address a prompt the operator
+    /// added mid-turn is to hand it the operator's prompt **verbatim**, not a
+    /// first-line preview, so no steering intent is silently truncated away.
+    pub fn verbatim(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::PromptTarget { verbatim, .. }
+            | Self::ContentEdit { verbatim, .. }
+            | Self::PromptDeleted { verbatim, .. }
+            | Self::PromptReduced { verbatim, .. } => Some(verbatim),
         }
     }
 }
@@ -102,11 +117,13 @@ pub fn realtime_steering_between(baseline: &str, current: &str) -> RealtimeSteer
         UnresolvedPromptDelta::Deleted { baseline_prompt } => {
             return RealtimeSteering::PromptDeleted {
                 preview: prompt_bearing_preview(&baseline_prompt),
+                verbatim: baseline_prompt.trim().to_string(),
             };
         }
         UnresolvedPromptDelta::Reduced { current_prompt } => {
             return RealtimeSteering::PromptReduced {
                 preview: prompt_bearing_preview(&current_prompt),
+                verbatim: current_prompt.trim().to_string(),
             };
         }
         UnresolvedPromptDelta::None | UnresolvedPromptDelta::AddedOrExpanded => {}
@@ -126,12 +143,13 @@ pub fn realtime_steering_between(baseline: &str, current: &str) -> RealtimeSteer
         return RealtimeSteering::None;
     };
     let preview = prompt_bearing_preview(&change.text);
+    let verbatim = change.text.trim().to_string();
     match change.kind {
         agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
-            RealtimeSteering::PromptTarget { preview }
+            RealtimeSteering::PromptTarget { preview, verbatim }
         }
         agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
-            RealtimeSteering::ContentEdit { preview }
+            RealtimeSteering::ContentEdit { preview, verbatim }
         }
         agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
         | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => RealtimeSteering::None,
@@ -329,12 +347,12 @@ mod tests {
         let baseline = doc("❯ Original prompt\nmore detail\n");
         let current = doc("");
 
-        assert_eq!(
-            BaselineComparison::new(&baseline, &current).realtime_steering(),
-            RealtimeSteering::PromptDeleted {
-                preview: "Original prompt".to_string()
-            }
-        );
+        let steering = BaselineComparison::new(&baseline, &current).realtime_steering();
+        assert_eq!(steering.label(), Some("prompt_deleted"));
+        assert_eq!(steering.preview(), Some("Original prompt"));
+        // `#realtime-steering-verbatim`: the full operator text is retained, not
+        // just the first-line preview.
+        assert!(steering.verbatim().unwrap().contains("more detail"));
     }
 
     #[test]
@@ -342,12 +360,10 @@ mod tests {
         let baseline = doc("❯ Original prompt\nmore detail\n");
         let current = doc("❯ Original prompt\n");
 
-        assert_eq!(
-            BaselineComparison::new(&baseline, &current).realtime_steering(),
-            RealtimeSteering::PromptReduced {
-                preview: "Original prompt".to_string()
-            }
-        );
+        let steering = BaselineComparison::new(&baseline, &current).realtime_steering();
+        assert_eq!(steering.label(), Some("prompt_reduced"));
+        assert_eq!(steering.preview(), Some("Original prompt"));
+        assert!(steering.verbatim().unwrap().contains("Original prompt"));
     }
 
     #[test]
@@ -355,11 +371,23 @@ mod tests {
         let baseline = doc("");
         let current = doc("❯ New prompt\n");
 
-        assert_eq!(
-            BaselineComparison::new(&baseline, &current).realtime_steering(),
-            RealtimeSteering::PromptTarget {
-                preview: "❯ New prompt".to_string()
-            }
-        );
+        let steering = BaselineComparison::new(&baseline, &current).realtime_steering();
+        assert_eq!(steering.label(), Some("prompt_target"));
+        assert_eq!(steering.preview(), Some("❯ New prompt"));
+        assert_eq!(steering.verbatim(), Some("❯ New prompt"));
+    }
+
+    #[test]
+    fn realtime_steering_verbatim_retains_multiline_operator_prompt() {
+        // `#realtime-steering-verbatim`: a multi-line operator prompt added
+        // mid-turn is surfaced in full so the agent can address the whole intent,
+        // not just the first line.
+        let baseline = doc("");
+        let current = doc("❯ Fix the JB error:\n```\nRead access is allowed from inside read-action only\n```\n");
+        let steering = BaselineComparison::new(&baseline, &current).realtime_steering();
+        assert_eq!(steering.label(), Some("prompt_target"));
+        let verbatim = steering.verbatim().unwrap();
+        assert!(verbatim.contains("Fix the JB error:"));
+        assert!(verbatim.contains("Read access is allowed from inside read-action only"));
     }
 }

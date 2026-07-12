@@ -6,8 +6,11 @@ pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String
     let Some(label) = steering.label() else {
         return Ok(None);
     };
-    let preview = steering.preview().unwrap_or_default();
-    Ok(Some(format!("{label}: {preview}")))
+    // `#realtime-steering-verbatim`: surface the operator's added prompt in FULL,
+    // not a first-line preview, so the closeout guidance hands the agent the whole
+    // steering intent to address in the current turn.
+    let verbatim = steering.verbatim().unwrap_or_default();
+    Ok(Some(format!("{label}: {verbatim}")))
 }
 
 pub fn realtime_steering_since_turn_baseline(

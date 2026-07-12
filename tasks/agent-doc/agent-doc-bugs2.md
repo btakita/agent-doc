@@ -83,7 +83,22 @@ Fix JB `Compact Exchange` error
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/equityfundingsource/pre-compact-21 [crdt] projection saved file=tasks/professional/equityfundingsource.md elapsed_ms=10 legacy_changed=true overlay_changed=true nodes_changed=true legacy_len=21664 overlay_len=21671 nodes_len=21856 [compact] CRDT state refreshed from post-compact content [compact] discarded 14 stale capture sidecar(s) for archived response(s) in tasks/professional/equityfundingsource.md [compact] Archived 287 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260712-181754.md [commit] repaired committed historical committed_capture drift into snapshot for tasks/professional/equityfundingsource.md [commit] detected post-commit local drift for tasks/professional/equityfundingsource.md - HEAD already contains the committed response; leaving later local working-tree edits uncommitted [commit] staged snapshot already matches HEAD for tasks/professional/equityfundingsource.md - closing cycle as already committed [perf] commit total: 8311ms [compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange` Error: compact --commit did not land the compacted content in HEAD for tasks/professional/equityfundingsource.md (a stale-supervisor CRDT replay or an unflushed editor buffer desynced the commit surface). The document is left with uncommitted compaction drift. Recover with `agent-doc reset --from-current tasks/professional/equityfundingsource.md` then `agent-doc compact tasks/professional/equityfundingsource.md --component exchange --commit` (#jb-compact-commit-left-uncommitted).
 ```
-<!-- agent:boundary:9f32de9e -->
+
+### Re: Implement plan-exchange-tree-seqcrdt-and-ipc-unify.md + steering shouldn't be a QueueCell — opus-4-8
+
+Shipped the next actionable slice of the plan — **Phase 6 realtime-steering delivery** — and folded in your mid-turn correction. agent-doc `da445378`, full suite green (7475 tests, +4), built + installed locally, committed + pushed.
+
+**Your correction is the design now (QueueCell was wrong):** steering is **not** a FIFO `QueueCell` drained one head at a time. When you add several prompts while a turn is active, all of them reach the agent **at once, verbatim**, so the agent processes the concurrent directives together and can find patterns across them.
+
+- `agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff` — returns *every* still-unstarted directive (oldest-first). `first_*` is now defined as its head, so the single/multi paths never disagree on answered-prompt suppression.
+- `baseline_comparison::RealtimeSteeringSet` + `realtime_steering_all[_between]` — aggregate all concurrent directives; `verbatim_aggregate()` concatenates them verbatim with a count header (`"N concurrent operator steering directives … look for patterns across them"`).
+- `session-check`'s `detect_unstarted_prompt_bearing_diff` now surfaces that aggregate (`realtime_steering_set_since_turn_baseline`), falling back to the single verbatim when only one directive is present.
+- Plan **Phase 6** + AGENTS.md `#realtime-steering-verbatim` rewritten: steering is a concurrent observable set; the durable graph target is a lazily **reactive observable set**, explicitly **not** a `QueueCell`.
+
+**Scope note:** Phases 1–4 + 3.1 were already landed (exchange tree, structural `agent-doc exchange` API, body-aware node identity; yrs already removed in Phase 3c). This turn advanced Phase 6 delivery. Remaining: Phase 5 (IPC-action unification, gated on the concurrent guard-extraction) and the Phase 6 durable graph adoption — queued as `#steeringobservableset`.
+
+`[operator-verify]`: with a live editor attached, add two prompts mid-turn and confirm the next `agent-doc` cycle surfaces both verbatim under one count header (not just the first, not one-at-a-time). Note: the running supervisor still serves the prior binary until its idle-boundary recycle (install ran with `AGENT_DOC_RECYCLE_ON_INSTALL=0` to protect your live JB session).
+<!-- agent:boundary:c7812756 -->
 <!-- /agent:exchange -->
 ## Queue
 

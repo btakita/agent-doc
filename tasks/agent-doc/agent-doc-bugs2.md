@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -44,6 +44,25 @@ Compacted content:
 Fix `agent-doc tasks/equityfundingsource.md` is periodically added while the turn is running.
 
 #spec-test-build-install-commit-push
+
+### Re: gracefully handle mid-turn steering + fix the JB read-access crash — opus-4-8
+
+Shipped the binary + plugin changes for your goal and fixed the JB read-access crash. All committed and pushed to git (durable regardless of this doc's concurrent-edit churn); full suite green (7471 tests).
+
+**Graceful mid-turn steering + clear anti-thrash instructions (the goal) — SHIPPED** (`agent-doc` `61fa13d5`)
+- `RealtimeSteering` now carries your added prompt **verbatim** (full text), not a first-line preview.
+- `session-check` appends `realtime_steering_closeout_guidance` when a committed cycle carries a fresh operator prompt: prior response is already in HEAD; address the new prompt in the current turn via `agent-doc <FILE>`; do NOT re-run finalize on the prior response, do NOT `--force-disk` (clobbers live edits), do NOT re-answer a prompt already in HEAD. That is the exact anti-thrash instruction.
+- `AGENTS.md` + `runbooks/respond.md`: every operator-added prompt (incl. realtime steering) is addressed in-turn, never committed-and-ignored.
+
+**JB read-access crash (`Fix the JB error:`) — FIXED** (plugin `0.2.239`): `PatchWatcher.currentContentForProjection` read the document model off the watcher thread with no read action; now wrapped in `runReadAction` (VFS refresh kept outside). `[operator-verify]` install `agent-doc-jetbrains-0.2.239.zip`.
+
+**Lazily-graph migration (QueueCell + SeqCrdt) — PLANNED**: extended `plan-exchange-tree-seqcrdt-and-ipc-unify.md` with Phase 3.1 (body-aware node identity → `SeqCrdt` element id) and Phase 6 (realtime steering via `lazily::QueueCell`, so steering reconciles as CRDT ops and `session-check` reads queue-emptiness instead of re-diffing HEAD↔buffer — removing the false-"unresolved" thrash class). Primitives already in lazily-rs; no lazily change.
+
+**Note:** this very closeout hit the concurrent-edit race live — my response was dropped by the merge against your rapidly-changing buffer, and the binary correctly **fail-closed** (clear "replay with `write --commit`" instruction, no silent loss) rather than thrash. That fail-closed clarity is the shipped behavior. New items you added (`#jbcompactexchange`, `/goal #1d0k`) are queued for the drain.
+/goal Implement plan-exchange-tree-seqcrdt-and-ipc-unify.md #spec-test-build-install-commit-push
+
+The QueueCell may not be the correct choice. All real-time steering should be added to the agent asap. So the agent can process multiple real-time steering directives at the same time and find patterns in the steering.
+
 Fix the JB error:
 ```
 com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments: Read access is allowed from inside read-action only (see Application.runReadAction()); If you access or modify model on EDT consider wrapping your code in WriteIntentReadAction  or ReadAction; see https://jb.gg/ij-platform-threading for details
@@ -60,26 +79,12 @@ SystemEventQueueThread: Thread[#147,AWT-EventQueue-0,6,main] 1683864329
 	at java.base/java.lang.Thread.run(Thread.java:1474)
 ```
 
-### Re: gracefully handle mid-turn steering + fix the JB read-access crash — opus-4-8
-
-Shipped the binary + plugin changes for your goal and fixed the JB read-access crash. All committed and pushed to git (durable regardless of this doc's concurrent-edit churn); full suite green (7471 tests).
-
-**Graceful mid-turn steering + clear anti-thrash instructions (the goal) — SHIPPED** (`agent-doc` `61fa13d5`)
-- `RealtimeSteering` now carries your added prompt **verbatim** (full text), not a first-line preview.
-- `session-check` appends `realtime_steering_closeout_guidance` when a committed cycle carries a fresh operator prompt: prior response is already in HEAD; address the new prompt in the current turn via `agent-doc <FILE>`; do NOT re-run finalize on the prior response, do NOT `--force-disk` (clobbers live edits), do NOT re-answer a prompt already in HEAD. That is the exact anti-thrash instruction.
-- `AGENTS.md` + `runbooks/respond.md`: every operator-added prompt (incl. realtime steering) is addressed in-turn, never committed-and-ignored.
-
-**JB read-access crash (`Fix the JB error:`) — FIXED** (plugin `0.2.239`): `PatchWatcher.currentContentForProjection` read the document model off the watcher thread with no read action; now wrapped in `runReadAction` (VFS refresh kept outside). `[operator-verify]` install `agent-doc-jetbrains-0.2.239.zip`.
-
-**Lazily-graph migration (QueueCell + SeqCrdt) — PLANNED**: extended `plan-exchange-tree-seqcrdt-and-ipc-unify.md` with Phase 3.1 (body-aware node identity → `SeqCrdt` element id) and Phase 6 (realtime steering via `lazily::QueueCell`, so steering reconciles as CRDT ops and `session-check` reads queue-emptiness instead of re-diffing HEAD↔buffer — removing the false-"unresolved" thrash class). Primitives already in lazily-rs; no lazily change.
-
-**Note:** this very closeout hit the concurrent-edit race live — my response was dropped by the merge against your rapidly-changing buffer, and the binary correctly **fail-closed** (clear "replay with `write --commit`" instruction, no silent loss) rather than thrash. That fail-closed clarity is the shipped behavior. New items you added (`#jbcompactexchange`, `/goal #1d0k`) are queued for the drain.
-<!-- agent:boundary:68032e2c -->
-<!-- /agent:exchange -->
 Fix JB `Compact Exchange` error
 ```
 agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/equityfundingsource/pre-compact-21 [crdt] projection saved file=tasks/professional/equityfundingsource.md elapsed_ms=10 legacy_changed=true overlay_changed=true nodes_changed=true legacy_len=21664 overlay_len=21671 nodes_len=21856 [compact] CRDT state refreshed from post-compact content [compact] discarded 14 stale capture sidecar(s) for archived response(s) in tasks/professional/equityfundingsource.md [compact] Archived 287 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260712-181754.md [commit] repaired committed historical committed_capture drift into snapshot for tasks/professional/equityfundingsource.md [commit] detected post-commit local drift for tasks/professional/equityfundingsource.md - HEAD already contains the committed response; leaving later local working-tree edits uncommitted [commit] staged snapshot already matches HEAD for tasks/professional/equityfundingsource.md - closing cycle as already committed [perf] commit total: 8311ms [compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange` Error: compact --commit did not land the compacted content in HEAD for tasks/professional/equityfundingsource.md (a stale-supervisor CRDT replay or an unflushed editor buffer desynced the commit surface). The document is left with uncommitted compaction drift. Recover with `agent-doc reset --from-current tasks/professional/equityfundingsource.md` then `agent-doc compact tasks/professional/equityfundingsource.md --component exchange --commit` (#jb-compact-commit-left-uncommitted).
 ```
+<!-- agent:boundary:9f32de9e -->
+<!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
@@ -170,6 +175,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [ ] [#jbcompactexchange] #agent-doc-bug JB Compact Exchange action fails: `agent-doc command failed (exit 1)` after 'Tagged pre-compact state'. Triage the compact subcommand exit-1 path surfaced through the JB CompactExchangeAction; capture the full stderr and fix the failing compact step.
 - [ ] [#goal1d0k] #agent-doc /goal Implement backlog item(s): #1d0k — pick up on the next drain cycle.
 - [ ] [#idlewatchturnactive] #agent-doc-bug idle-watch injects the file drain trigger during an active turn (periodic `agent-doc tasks/equityfundingsource.md` re-add). Root cause is a turn_active input false-negative in turn_active_for_owned_pane_with_idle_evidence (marker missing/stale, pane mismatch, or premature ready-prompt clear). Needs incident ops.log to pin the branch before fixing. Plan: src/agent-doc/tasks/agent-doc/plan-idle-watch-turn-active-false-idle.md

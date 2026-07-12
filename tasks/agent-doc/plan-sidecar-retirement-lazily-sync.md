@@ -452,6 +452,36 @@ push-loop wiring + dual-run cutover remain.
   `reap_stale_jetbrains_live_buffers`). Keep one durable projection (the outbox/ledger) as the
   recycle-recovery source that replaces the sidecar's on-disk durability.
 
+## Handoff — remaining is one operator-verify session (needs a live IDE + a STOP-releases exception)
+
+The **entire mechanism** is built + pushed behind `dual_run_enabled()` (env
+`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default OFF** → sidecars authoritative, safe on every install):
+carrier (3A), receiver plane + RPC (3C), sender endpoint + FFI + SqliteOutbox (3C), death signal
+(S4b→`Alive{false}`), both plugins emitting via a lazily `OrSet` graph (design B; JB v0.2.235 zip +
+VSCode v0.2.43 vsix built), the dual-run parity SimWorld, and the `WireDelta↔lazily::Delta` bridge (3B
+start). What is left needs a human watching a real editor and the operator lifting STOP-releases:
+
+1. **Turn dual-run ON** — `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=1` in the controller **and** plugin env;
+   install the built JB zip + VSCode vsix.
+2. **Prove emission + parity live** — open/close agent-doc docs in a real IDE / VSCodium; confirm the
+   controller `ControllerLivenessPlane.projection().open_docs()` matches the sidecar-derived open-set
+   (surface it via a diagnostic RPC/log), and that a real editor crash drives `live_docs()` to drop the
+   dead pid's docs (the S4b `record_reliable_sync_editor_exit` cascade). This is the `[operator-verify]`
+   gate; the parity SimWorld already proves it deterministically, this proves it on real events.
+3. **Authority flip** (behind the flag) — switch `authority_for_file` / `editor_open_docs` /
+   `editor_attach` / the `#6b5h` lease to READ `LivenessProjection` when dual-run is ON (OFF keeps the
+   sidecar read). Re-run step 2's parity check against the live hot path.
+4. **3B fold-swap** (behind the flag) — swap `build_delta`/`state_subscribe` to produce `lazily::Delta`
+   via `agent_doc_state_wire::lazily_convert` + drive gap-detect with `ResyncCoordinator`; on-wire JSON
+   unchanged, so plugins are unaffected until step 5.
+5. **3B wire cutover** — point the plugin `StateGraphMirror`s at lazily-native `Delta`/`Snapshot` (kt/js
+   already ship the types), retire `WireDelta`, rebuild both plugins, eyeball.
+6. **Final cutover** — flip the hot path to read `LivenessProjection`; delete the sidecar writers
+   (`record_live_buffer_*`, lease write) + reapers (`#lbreap`, `reap_stale_jetbrains_live_buffers`);
+   keep the outbox/ledger as the recycle-recovery source.
+7. **Release** — once STOP-releases is lifted, ship agent-doc (version bump + `VERSIONS.md` + publish +
+   `admin recycle`), and the plugins (JB GH-release, VSCode vsix).
+
 ## Risks / open questions
 - **Per-doc scoping on `BridgeHub`:** one hub/transport-pair per document vs a single hub with
   `document_hash`+fnv1a NodeId namespacing and per-node `PeerPermissions`. Decide in Phase 0;

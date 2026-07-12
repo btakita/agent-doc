@@ -149,8 +149,31 @@ CrdtSync plane for the open-set/lease push (idempotent, frontier-resumable — t
 
 ## Phased execution (each phase: functionality + tests together; conformance rs/js/kt)
 
-### Phase 0 — lazily-spec (#lzsync-spec) — FIRST
-Specify the reliable-sync protocol before any code:
+### Phase 0 — lazily-spec (#lzsync-spec) — FIRST — DONE (2026-07-11, lazily-spec f18d7e9)
+Specified the reliable-sync protocol before any code (`make check` green: 110 schema tests +
+lean build + coverage-check). Landed:
+- `protocol.md` § **Reliable Sync (`#lzsync`)**: the `ResyncCoordinator` decision table
+  (`Apply` / `RequestSnapshot{from}` / `Ignore`, with the resyncing single-request-per-gap
+  sub-state), the `DurableOutbox` contract (append-before-send, `ack_through`,
+  `replay_from(cursor)` ⇒ at-least-once + idempotent-apply = exactly-once effect), the
+  `SyncDriver.tick()` loop shape (drain→append-then-send→retain-on-fail→resync-on-reconnect, with
+  injected `Clock`/transport and the `webrtc`-ungate note), and the **OR-set/LWW liveness cells** on
+  the CrdtSync plane (open-set membership + per-pid `alive`/lease; whole-editor-death cascade;
+  derived live-doc aggregate).
+- **Multi-epoch-span `Delta`** chosen and specified as `epoch ≥ base_epoch + 1` (the accepted-event
+  fold; span-1 is the ordinary case, so every existing `Delta` fixture stays valid). `schemas/delta.json`
+  description updated.
+- Two new externally-tagged control frames **`ResyncRequest` / `OutboxAck`** (`schemas/reliable-sync.json`),
+  required to round-trip through **both `json` and `msgpack`** (semantic round-trip for the map codecs).
+- **Conformance fixtures** `conformance/reliable-sync/`: `multi_epoch_delta`, `resync_gap_converge`,
+  `idempotent_redelivery`, `outbox_replay_after_crash`, `liveness_orset_lww` — the rs/js/kt
+  cross-language pins; new `tests/test_schema_conformance.py` block validates well-formedness + the
+  control-frame serde. `README.md` (Reliable Sync Conformance + Versioning) and `cell-model.md`
+  (cross-process liveness as a CRDT cell) cross-refs.
+- **Additive, non-breaking**: no `protocol_major_version` bump; `ReliableSync.lean` (Phase 1) is the
+  named formal backstop the fixtures pin to.
+
+Original Phase 0 checklist (all satisfied):
 - The `ResyncCoordinator` state machine (inbound → Apply/RequestSnapshot/Ignore) with the
   multi-epoch-span `Delta` semantics reconciled (chosen: `epoch ≥ base_epoch+1`).
 - The `DurableOutbox` contract: append-before-send, ack-through, replay-from-cursor, and the
@@ -169,9 +192,25 @@ Specify the reliable-sync protocol before any code:
   (`tests/ipc.rs`); extend the same coverage to the new frames.
 - Version bump + `cell-model.md`/wire-schema updates.
 
-### Phase 1 — lazily-formal (#lzsync-lean) — SECOND
-Lean proofs of the protocol (mirroring the existing Materialization/AsyncMaterialization
-proofs):
+### Phase 1 — lazily-formal (#lzsync-lean) — SECOND — DONE (2026-07-11, lazily-formal 1749fbd)
+`LazilyFormal/ReliableSync.lean` (22 theorems, no `sorry`/`axiom`, `lake build` green) proves all
+four required results, named exactly as the spec cites them:
+- **`multi_epoch_apply_eq_fold`** — a coalesced multi-epoch-span `Delta` (N ops) produces the same
+  state as its expansion into N single-op unit deltas (batch = fold); `applyDelta_advances_epoch`
+  proves the atomic advance to `d.epoch`.
+- **`resync_convergence`** — dropping an arbitrary delta suffix then adopting the resync `Snapshot`
+  reaches the same graph as seeing every delta (gap recovery is state-equivalent, not lossy). Plus
+  the `ResyncCoordinator` decision table (`ingest_apply_on_contiguous` / `ingest_ignore_on_redelivery`
+  / `ingest_request_on_gap`) and `step_redelivery_noop`.
+- **`outbox_at_least_once_exactly_once_effect`** — replaying already-applied frames before the new
+  frames reaches the identical `(state, last)` as delivering only the new frames once (no op lost,
+  none doubled) — the at-least-once + idempotent-apply ⇒ exactly-once-effect guarantee.
+- **`crdt_liveness_convergence_under_retry`** — the OR-set/LWW liveness join is a semilattice
+  (`joinReg_{comm,assoc,idem}`, `joinOR_{comm,assoc,idem}`), so out-of-order and re-delivered
+  liveness ops converge and a retry is a no-op; `orset_add_wins_over_stale_remove`.
+README proof-group + compute-layer-table row added.
+
+Original Phase 1 checklist (all satisfied):
 - **Resync convergence:** a receiver that drops an arbitrary delta suffix then applies the
   resync Snapshot reaches the *same* graph as one that saw every delta (gap recovery is
   state-equivalent, not lossy).
@@ -183,8 +222,48 @@ proofs):
   single-op deltas in order (batch = fold).
 - `lake build` green; formal version bump.
 
-### Phase 2 — lazily-rs → lazily-kt → lazily-js (#lzsync-impl) — THIRD
-Implement to the spec, conformance-pinned across all three:
+### Phase 2 — lazily-rs → lazily-kt → lazily-js (#lzsync-impl) — THIRD — rs DONE (lazily-rs 3200cb3), kt/js REMAINING
+**lazily-rs reference (DONE, 3200cb3; `#lzsync` targets green, `make check` green except a
+pre-existing unrelated `benchmark-check` missing-p50/p95-rows baseline):**
+- `src/reliable_sync.rs`: `ResyncCoordinator` (Apply/RequestSnapshot/Ignore, multi-epoch-span aware,
+  single-request-per-gap `resyncing` state), `DurableOutbox` trait + `InMemoryOutbox`
+  (append-before-send, `ack_through` retention, `replay_from` cursor), `OrSet` (observed-remove,
+  add-wins) + `WireLwwRegister` (WireStamp-keyed LWW) liveness cells.
+- **Control frames as `IpcMessage` variants** (not a side channel): `ResyncRequest` / `OutboxAck`
+  added to the `IpcMessage` enum + FFI message kinds 4/5; updated the exhaustive matches (transport
+  spill, webrtc filter, bridge authorize) + all 3 FFI kind fns. `Delta::span()` + multi-epoch docs.
+  Decision + rationale mirrored back into **lazily-spec** (be91e0f: protocol.md IpcMessage
+  enumeration + FFI kind table; the C enum was also stale, now CrdtSync=3/ResyncRequest=4/OutboxAck=5).
+- `tests/reliable_sync_conformance.rs` replays all 5 `conformance/reliable-sync/` fixtures + a
+  reference `FileOutbox` crash-replay helper + the `ResyncRequest`/`OutboxAck` json+msgpack codec
+  round-trip; new `make test-reliable-sync-conformance` wired into `check`. Inline unit tests.
+- **Deferred within rs (not blocking kt/js):** the `SyncDriver` loop skeleton and the
+  `webrtc`-ungate of `BridgeHub`/`ipc` + generic caller-supplied byte-transport pairing are the
+  transport-wiring slice; land them alongside Phase 3A (the pull consumer path may not need
+  `BridgeHub` at all). The pure-protocol coordinator/outbox/liveness — what kt/js must mirror — is
+  complete.
+
+**lazily-kt port (DONE, 67c980f; `./gradlew test` green):** `ReliableSync.kt`
+(`ResyncCoordinator`/`DurableOutbox`+`InMemoryOutbox`/`OrSet`/`WireLwwRegister`), `Ipc.kt`
+`ResyncRequest`/`OutboxAck` data classes + `IpcMessage` variants + `Delta.span()`, FFI kinds 4/5,
+exhaustive `when`-matches updated (WebRtcTransport/Transport/IpcConformanceTest);
+`ReliableSyncConformanceTest.kt` (7 tests) replays all 5 fixtures + a reference `FileOutbox`.
+
+**lazily-js port (DONE, 81116e5; `npm run build` + `npm test` green, 336 tests):** `index.js`
+`ResyncAction`/`ResyncCoordinator`/`InMemoryOutbox`/`OrSet`/`WireLwwRegister`/`wireStampGreater` +
+`ResyncRequest`/`OutboxAck` classes + `IpcMessage` variants + `Delta.span()` + FFI kinds 4/5;
+`ffi.js`/`distributed.js` dispatch handle the control frames; `index.d.ts` declarations;
+`test/reliable-sync.test.js` (7 tests) replays all 5 fixtures + a reference `FileOutbox`. **This port
+surfaced two more spec drifts, both closed:** the `IpcMessage` enumeration + FFI kind table
+(be91e0f) and the `schemas/ffi.json` `LazilyFfiMessageKind` enum → `[0..5]` (680a1df).
+
+**REMAINING (Phase 2 tracking only):** the shared `lazily-spec/coverage.json` "Reliable sync" row
+(rs/kt/js ✅; py/dart/zig/go/cpp —) + `make coverage-sync`/`coverage-check`. Deferred to a dedicated
+careful pass because `coverage.json` is a hot multi-session file that fans out to every sibling
+binding README (one-commit-per-binding discipline; avoid clobbering concurrent flips). The rs
+`SyncDriver` loop skeleton + `webrtc`-ungate are the transport-wiring slice folded into Phase 3A.
+
+Original Phase 2 checklist:
 - `ResyncCoordinator`, `DurableOutbox` (trait + `InMemoryOutbox` + reference file impl),
   `SyncDriver` skeleton, OR-set/LWW liveness cell.
 - Multi-epoch-span `Delta` support; ungate `BridgeHub`/`ipc` from `webrtc`.

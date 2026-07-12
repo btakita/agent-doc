@@ -342,7 +342,13 @@ Each is a candidate stage; none is a regression, all are parity gaps.
     delegated closeout.cycle cell. `stateMirror.test.ts` / `stateMirrorConformance.test.ts` stay
     green. The conformance pins are kept as cross-language drift catches.
 - **S6 — retire the sidecars onto lazily reliable sync. RE-SCOPED (2026-07-11): now the active
-  north-star follow-up → [`plan-sidecar-retirement-lazily-sync.md`](plan-sidecar-retirement-lazily-sync.md).**
+  north-star follow-up → [`plan-sidecar-retirement-lazily-sync.md`](plan-sidecar-retirement-lazily-sync.md).
+  PROGRESS (2026-07-11): Phase 0 (lazily-spec reliable-sync protocol, f18d7e9), Phase 1
+  (lazily-formal `ReliableSync.lean`, 1749fbd), and Phase 2 impl across all three bindings
+  (lazily-rs 3200cb3, lazily-kt 67c980f, lazily-js 81116e5) are DONE — `ResyncCoordinator` /
+  `DurableOutbox` / OR-set+LWW liveness, control frames as `IpcMessage` variants (msgpack
+  cross-lang codec). Remaining: coverage-row bookkeeping + Phase 3 agent-doc integration (3A UDS
+  carrier, 3B pull-on-lazily-types, 3C plugin push on the CrdtSync plane, dual-run cutover).**
   The earlier "reject, keep the bespoke wire" rested on premises S5 invalidated and one that was
   simply wrong: (1) "single-step lazily-IPC deltas" — false, `lazily::Delta` is `{base_epoch, epoch,
   ops: Vec<DeltaOp>}`, already an epoch-batched delta set; (2) the CommonJS/ESM + IntelliJ-toolchain

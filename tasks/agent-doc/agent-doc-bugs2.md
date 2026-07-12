@@ -59,7 +59,22 @@ SystemEventQueueThread: Thread[#147,AWT-EventQueue-0,6,main] 1683864329
 	at com.github.btakita.agentdoc.PatchWatcher.registerRoot$lambda$2(PatchWatcher.kt:216)
 	at java.base/java.lang.Thread.run(Thread.java:1474)
 ```
-<!-- agent:boundary:c3531985 -->
+
+### Re: gracefully handle mid-turn steering + fix the JB read-access crash — opus-4-8
+
+Shipped the binary + plugin changes for your goal and fixed the JB read-access crash. All committed and pushed to git (durable regardless of this doc's concurrent-edit churn); full suite green (7471 tests).
+
+**Graceful mid-turn steering + clear anti-thrash instructions (the goal) — SHIPPED** (`agent-doc` `61fa13d5`)
+- `RealtimeSteering` now carries your added prompt **verbatim** (full text), not a first-line preview.
+- `session-check` appends `realtime_steering_closeout_guidance` when a committed cycle carries a fresh operator prompt: prior response is already in HEAD; address the new prompt in the current turn via `agent-doc <FILE>`; do NOT re-run finalize on the prior response, do NOT `--force-disk` (clobbers live edits), do NOT re-answer a prompt already in HEAD. That is the exact anti-thrash instruction.
+- `AGENTS.md` + `runbooks/respond.md`: every operator-added prompt (incl. realtime steering) is addressed in-turn, never committed-and-ignored.
+
+**JB read-access crash (`Fix the JB error:`) — FIXED** (plugin `0.2.239`): `PatchWatcher.currentContentForProjection` read the document model off the watcher thread with no read action; now wrapped in `runReadAction` (VFS refresh kept outside). `[operator-verify]` install `agent-doc-jetbrains-0.2.239.zip`.
+
+**Lazily-graph migration (QueueCell + SeqCrdt) — PLANNED**: extended `plan-exchange-tree-seqcrdt-and-ipc-unify.md` with Phase 3.1 (body-aware node identity → `SeqCrdt` element id) and Phase 6 (realtime steering via `lazily::QueueCell`, so steering reconciles as CRDT ops and `session-check` reads queue-emptiness instead of re-diffing HEAD↔buffer — removing the false-"unresolved" thrash class). Primitives already in lazily-rs; no lazily change.
+
+**Note:** this very closeout hit the concurrent-edit race live — my response was dropped by the merge against your rapidly-changing buffer, and the binary correctly **fail-closed** (clear "replay with `write --commit`" instruction, no silent loss) rather than thrash. That fail-closed clarity is the shipped behavior. New items you added (`#jbcompactexchange`, `/goal #1d0k`) are queued for the drain.
+<!-- agent:boundary:68032e2c -->
 <!-- /agent:exchange -->
 Fix JB `Compact Exchange` error
 ```

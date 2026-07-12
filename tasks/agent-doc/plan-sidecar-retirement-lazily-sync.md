@@ -521,11 +521,21 @@ start). What is left needs a human watching a real editor and the operator lifti
    (step 6):** the open-set/lease readers (`editor_open_docs`, the `#6b5h` lease) and deleting the sidecar
    *writers*/reapers. **`[operator-verify]`:** flip works in a live IDE (open a doc → controller resolves
    `MultiReplica` from the plane; crash → `GitAuthoritative`).
-4. **3B fold-swap** (behind the flag) — swap `build_delta`/`state_subscribe` to produce `lazily::Delta`
-   via `agent_doc_state_wire::lazily_convert` + drive gap-detect with `ResyncCoordinator`; on-wire JSON
-   unchanged, so plugins are unaffected until step 5.
-5. **3B wire cutover** — point the plugin `StateGraphMirror`s at lazily-native `Delta`/`Snapshot` (kt/js
-   already ship the types), retire `WireDelta`, rebuild both plugins, eyeball.
+4-5. **3B fold-swap + wire cutover — SATISFIED IN SUBSTANCE / native swap declined (spike 2026-07-12).**
+   Operator authorized "wire cutover 4+5"; the spike found the premise no longer holds and the literal
+   swap would **regress**, so it is not worth a no-fallback live-editor rewrite:
+   - **The wire is already lazily-conformance-unified.** The plugin `StateGraphMirror`s import
+     `io.github.lazily.WireDelta`/`WireSnapshot` (a **lazily** type) and feed lazily-kt/js's own
+     `StateGraphMirror.applyDelta/applySnapshot`; the Rust producer emits the same lazily-spec `delta.json`/
+     `snapshot.json` JSON (`"type"` discriminator + spec op vocabulary). So rs/kt/js already speak one
+     conformance-pinned wire — the "bespoke fold" 3B set out to retire is already gone.
+   - **Switching to lazily-*native* `IpcMessage::Delta` would regress:** native `Delta` has **no
+     `document_hash`** (and no `type` discriminator), but agent-doc needs `document_hash` for per-doc
+     isolation on the shared socket — I'd have to re-add it via an envelope, reintroducing what WireDelta
+     already carries; native encodes ops as `NodeId`/`IpcValue` vs the portable spec `slot_id`+base64.
+   - **Net:** high risk (no fallback; a field mismatch breaks live editor sync), marginal value. Recorded
+     as satisfied-in-substance. To force the literal native cutover anyway, it must carry a `document_hash`
+     envelope + a json/msgpack round-trip conformance fixture + a both-plugins rebuild + a live eyeball.
 6. **Reader cutover — DONE (2026-07-12), non-destructive per operator directive** ("sidecar should
    only be used for background durability" — so the sidecar *writers* are **kept** as the durability +
    cold-miss backstop; only the hot-path *reads* moved to the plane; the `#lbreap` reaper is **not**

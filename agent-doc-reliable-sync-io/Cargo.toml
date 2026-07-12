@@ -10,6 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_reliable_sync_io"
 
 [dependencies]
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.84" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.84" }
 anyhow = "1"
 base64 = "0.22"

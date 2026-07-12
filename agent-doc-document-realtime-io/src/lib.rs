@@ -1307,7 +1307,14 @@ pub fn try_resolve_current_document_content(
 /// (not heartbeat freshness) so an idle-but-open real editor still reads as
 /// attached.
 pub fn live_editor_endpoint_attached_for_file(file: &std::path::Path) -> bool {
-    agent_doc_plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy())
+    // Step 3 (`#6b5h` disk-write guard, plane-primary): the reliable-sync plane is the
+    // hot-path authority for "is a live editor attached?" when warm; on a cold miss it
+    // falls back to the sidecar-backed plugin-owner lease (background durability), so a
+    // watcher-less CLI still guards correctly.
+    match agent_doc_reliable_sync_io::plane_editor_live_for_path(&file.to_string_lossy()) {
+        Some(live) => live,
+        None => agent_doc_plugin_owner::live_editor_endpoint_attached(&file.to_string_lossy()),
+    }
 }
 
 /// Resolve the authoritative current document when the caller already has a

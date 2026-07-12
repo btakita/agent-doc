@@ -526,9 +526,18 @@ start). What is left needs a human watching a real editor and the operator lifti
    unchanged, so plugins are unaffected until step 5.
 5. **3B wire cutover** — point the plugin `StateGraphMirror`s at lazily-native `Delta`/`Snapshot` (kt/js
    already ship the types), retire `WireDelta`, rebuild both plugins, eyeball.
-6. **Final cutover** — flip the hot path to read `LivenessProjection`; delete the sidecar writers
-   (`record_live_buffer_*`, lease write) + reapers (`#lbreap`, `reap_stale_jetbrains_live_buffers`);
-   keep the outbox/ledger as the recycle-recovery source.
+6. **Reader cutover — DONE (2026-07-12), non-destructive per operator directive** ("sidecar should
+   only be used for background durability" — so the sidecar *writers* are **kept** as the durability +
+   cold-miss backstop; only the hot-path *reads* moved to the plane; the `#lbreap` reaper is **not**
+   deleted). All hot-path editor-attached reads now route through the shared
+   `agent_doc_reliable_sync_io::plane_editor_live_for_path(file)` (plane-primary when warm; `None` cold
+   miss → sidecar): `authority_for_file` (via `controller-io::crdt_authority_for_file`, step 3), the
+   `#6b5h` disk-write guard `document-realtime-io::live_editor_endpoint_attached_for_file` (so
+   `start-runtime-io` idle-watch auto-flips), and `write-converge-io::live_editor_attached`. **Remaining
+   sidecar read:** `ipc-io::editor_target` (patch-routing) is *inside* the `reliable-sync-io → ipc-io`
+   cycle and cannot reach the plane without dep surgery — left on the sidecar (routing, not authority).
+   The `[operator-verify]` above confirmed the plane tracks open→close accurately (more accurately than
+   the stale in-memory registry).
 7. **Release** — once STOP-releases is lifted, ship agent-doc (version bump + `VERSIONS.md` + publish +
    `admin recycle`), and the plugins (JB GH-release, VSCode vsix).
 

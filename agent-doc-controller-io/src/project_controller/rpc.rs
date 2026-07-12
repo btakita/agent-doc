@@ -7043,21 +7043,11 @@ pub fn crdt_authority_for_file(
     file: &str,
 ) -> agent_doc_document_realtime::crdt_authority::CrdtAuthority {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    if agent_doc_reliable_sync_io::authority_enabled()
-        && let Ok(plane) = controller_liveness_plane().lock()
-    {
-        let projection = plane.projection();
-        if !projection.open_docs().is_empty() {
-            let document_hash =
-                agent_doc_hash::document_id_for_path(std::path::Path::new(file));
-            return if projection.live_docs().contains(&document_hash) {
-                CrdtAuthority::MultiReplica
-            } else {
-                CrdtAuthority::GitAuthoritative
-            };
-        }
+    match agent_doc_reliable_sync_io::plane_editor_live_for_path(file) {
+        Some(true) => CrdtAuthority::MultiReplica,
+        Some(false) => CrdtAuthority::GitAuthoritative,
+        None => agent_doc_plugin_owner::crdt_authority::authority_for_file(file),
     }
-    agent_doc_plugin_owner::crdt_authority::authority_for_file(file)
 }
 
 /// Status response for the `reliable_sync_status` diagnostic RPC (sidecar-retirement

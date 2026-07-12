@@ -2695,7 +2695,12 @@ fn live_editor_attached(file: &Path) -> bool {
         .unwrap_or_else(|_| file.to_path_buf())
         .to_string_lossy()
         .to_string();
-    agent_doc_plugin_owner::live_plugin_owner_consumer_id(&indicator_path).is_some()
+    // Step 3 (plane-primary): the reliable-sync plane decides editor-attached on the hot
+    // path when warm; cold miss falls back to the sidecar lease (background durability).
+    match agent_doc_reliable_sync_io::plane_editor_live_for_path(&indicator_path) {
+        Some(live) => live,
+        None => agent_doc_plugin_owner::live_plugin_owner_consumer_id(&indicator_path).is_some(),
+    }
 }
 
 fn editor_ipc_listener_active(file: &Path) -> bool {

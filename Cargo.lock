@@ -660,6 +660,7 @@ dependencies = [
  "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
  "agent-doc-queue-io",
+ "agent-doc-reliable-sync-io",
  "agent-doc-session-actor-io",
  "agent-doc-state-backbone",
  "agent-doc-turn",
@@ -1562,6 +1563,7 @@ dependencies = [
 name = "agent-doc-reliable-sync-io"
 version = "0.34.84"
 dependencies = [
+ "agent-doc-hash",
  "agent-doc-ipc-io",
  "anyhow",
  "base64 0.22.1",
@@ -2622,6 +2624,7 @@ dependencies = [
  "agent-doc-plugin-owner",
  "agent-doc-project-root-io",
  "agent-doc-queue",
+ "agent-doc-reliable-sync-io",
  "agent-doc-session-accretion-io",
  "agent-doc-snapshot-io",
  "agent-doc-state-backbone",

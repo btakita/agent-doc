@@ -38,6 +38,7 @@ agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.84" }
 agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.84" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.84" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.84" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.84" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.84" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.84" }
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.34.84" }

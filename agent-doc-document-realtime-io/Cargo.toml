@@ -31,6 +31,7 @@ agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.84" }
 agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.34.84" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.84" }
 agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.84" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.84" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.84" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.84" }
 agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.34.84" }

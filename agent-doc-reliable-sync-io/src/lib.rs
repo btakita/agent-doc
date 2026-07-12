@@ -84,6 +84,27 @@ pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLiv
     &PLANE
 }
 
+/// Plane-primary "is a live editor attached to `file`?" — the shared hot-path authority
+/// read for the step-3 flip. Returns `Some(true/false)` when the plane is authoritative
+/// for this process (authority enabled **and** the plane is *warm* = holds ≥1 open doc,
+/// true in the controller fed by editor pushes); returns `None` on a **cold miss**
+/// (authority disabled, a poisoned lock, or an empty plane) so the caller falls back to
+/// the sidecar backstop. Both `controller-io::crdt_authority_for_file` and the
+/// `document-realtime-io` `#6b5h` disk-write guard route through this so every hot-path
+/// reader agrees; the filesystem sidecars are demoted to background durability + cold-miss.
+pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
+    if !authority_enabled() {
+        return None;
+    }
+    let plane = global_liveness_plane().lock().ok()?;
+    let projection = plane.projection();
+    if projection.open_docs().is_empty() {
+        return None;
+    }
+    let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
+    Some(projection.live_docs().contains(&document_hash))
+}
+
 /// Whether the controller should run the reliable-sync liveness plane alongside
 /// the filesystem sidecars.
 ///

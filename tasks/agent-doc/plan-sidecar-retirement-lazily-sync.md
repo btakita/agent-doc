@@ -495,8 +495,17 @@ start). What is left needs a human watching a real editor and the operator lifti
      (b) **oracle measured the wrong sidecar** — it compared against the *volatile* in-memory
      `editor_open_docs` registry (empty right after a controller recycle, while the plane survives via its
      durable outbox → false MISMATCH). Parity now compares against the **durable** `.agent-doc/live-buffer/`
-     scan (`agent_doc_debounce::live_buffer_open_document_paths`), apples-to-apples with the plane; the
-     in-memory registry is surfaced as a secondary `registry_open_docs` line only.
+     scan (`agent_doc_debounce::live_buffer_document_paths_with_liveness`, **strictly-live editors
+     only**), apples-to-apples with the plane; the in-memory registry is surfaced as a secondary
+     `registry_open_docs` line only. The oracle also resolves each plane hash → readable path
+     (`plane_open_paths`) via the live-buffer index so the operator eyeballs *which* docs the plane holds.
+   - **Finding — the sidecars accumulate massive un-reaped cruft** (extra motivation for retiring them):
+     the live run's `.agent-doc/live-buffer/` held **988 files** — hundreds from dead IDE pids (468 from a
+     single dead pid), 193 legacy `editor_id: null`, and many non-session paths (`node_modules/**/README.md`),
+     with only the current IDE pid actually live. So the sidecar path (a) tracks non-session files and
+     (b) is not effectively reaped (`#lbreap` / `reap_stale_jetbrains_live_buffers`). Follow-ups (separate
+     from the flip): scope live-buffer writes to session docs like the plane now is, and/or GC the dead-pid
+     backlog. Tracked here so step 6's writer/reaper deletion also removes this failure mode.
 3. **Authority flip** (behind the flag) — switch `authority_for_file` / `editor_open_docs` /
    `editor_attach` / the `#6b5h` lease to READ `LivenessProjection` when dual-run is ON (OFF keeps the
    sidecar read). Re-run step 2's parity check against the live hot path.

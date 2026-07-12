@@ -832,19 +832,26 @@ fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveB
     (snapshot.path == file).then_some(snapshot)
 }
 
-/// Enumerate every document with a **live** durable live-buffer sidecar under
-/// `<project_root>/.agent-doc/live-buffer/` — the durable open-set ground truth
-/// (`#lbreap`) that survives a controller recycle, unlike the volatile in-memory
-/// `editor_open_docs` registry. Returns distinct document file paths; a sidecar
-/// whose editor process is gone (`live_buffer_snapshot_editor_is_live` false) is
-/// excluded, mirroring the reaper's liveness rule. This is the apples-to-apples
-/// comparison for the reliable-sync plane's open-set, which is likewise durable.
-pub fn live_buffer_open_document_paths(project_root: &std::path::Path) -> Vec<String> {
+/// Every distinct document path that has a durable live-buffer sidecar under
+/// `<project_root>/.agent-doc/live-buffer/`, each tagged with whether **any** of its
+/// sidecars is from a **strictly live, identified** editor — `editor_id` present and
+/// (for JetBrains) its pid alive; a non-JetBrains id is assumed live because its pid
+/// cannot be probed. A legacy `editor_id: null` sidecar resolves the path (useful for
+/// hash→path lookup) but is **not** counted strictly-live: it cannot prove a current
+/// editor, and the dir accumulates stale files from dead IDE sessions that the
+/// `#lbreap` reaper has not collected (observed: hundreds of dead-pid/legacy files,
+/// including non-session `node_modules/**` READMEs the sidecar path also tracks).
+///
+/// Callers use the `strict` flag for the durable open-set (the apples-to-apples
+/// comparison for the reliable-sync plane, which likewise only reflects live editors)
+/// and the full list as a hash→path index to resolve the plane's hashes to readable
+/// paths.
+pub fn live_buffer_document_paths_with_liveness(project_root: &std::path::Path) -> Vec<(String, bool)> {
     let dir = project_root.join(LIVE_BUFFER_DIR);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
-    let mut paths = std::collections::BTreeSet::new();
+    let mut by_path: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
@@ -856,11 +863,14 @@ pub fn live_buffer_open_document_paths(project_root: &std::path::Path) -> Vec<St
         let Ok(snapshot) = serde_json::from_str::<LiveBufferSnapshot>(&content) else {
             continue;
         };
-        if live_buffer_snapshot_editor_is_live(&snapshot) {
-            paths.insert(snapshot.path);
-        }
+        let strict = snapshot
+            .editor_id
+            .as_deref()
+            .is_some_and(editor_id_is_live_for_delivery);
+        let slot = by_path.entry(snapshot.path).or_insert(false);
+        *slot = *slot || strict;
     }
-    paths.into_iter().collect()
+    by_path.into_iter().collect()
 }
 
 /// Return the per-editor sync status for every live-buffer sidecar of `file`.

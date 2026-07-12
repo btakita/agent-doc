@@ -7039,12 +7039,17 @@ pub struct ControllerReliableSyncStatusResponse {
     pub dual_run: bool,
     /// Document hashes the plane derives as open (from pushed liveness frames).
     pub plane_open_docs: Vec<String>,
+    /// Each plane-open hash resolved to a readable file path via the live-buffer
+    /// path index (`None` if no sidecar records that hash's path) — so an operator
+    /// can eyeball exactly which documents the plane believes are open.
+    pub plane_open_paths: Vec<(String, Option<String>)>,
     /// Document hashes the plane derives as live (open minus the whole-editor-death cascade).
     pub plane_live_docs: Vec<String>,
     /// Document hashes the **durable** sidecar ground truth derives as open — the
-    /// `.agent-doc/live-buffer/` scan (`#lbreap`), converted path→hash. Durable like
-    /// the plane (both survive a controller recycle), so this is the apples-to-apples
-    /// parity comparison.
+    /// `.agent-doc/live-buffer/` scan (`#lbreap`) restricted to **strictly-live,
+    /// identified** editors, converted path→hash. Durable like the plane and scoped to
+    /// live editors, so this is the apples-to-apples parity comparison; dead-pid and
+    /// legacy `editor_id: null` sidecars (which accumulate un-reaped) are excluded.
     pub sidecar_open_docs: Vec<String>,
     /// Document hashes the **volatile** in-memory `editor_open_docs` registry derives
     /// as open. Secondary diagnostic only: it is empty right after a controller recycle
@@ -7075,15 +7080,26 @@ fn handle_reliable_sync_status(
         .iter()
         .map(|doc| (doc.clone(), projection.open_pids(doc).into_iter().collect()))
         .collect();
-    // Durable sidecar ground truth: the `.agent-doc/live-buffer/` scan, converted
-    // path → document hash so it is directly comparable to the plane's hash-keyed
-    // open-set. Durable like the plane (both survive a controller recycle) ⇒ the
-    // apples-to-apples parity basis.
-    let sidecar_open: std::collections::BTreeSet<String> =
-        agent_doc_debounce::live_buffer_open_document_paths(&bootstrap.project_root)
-            .into_iter()
-            .map(|path| agent_doc_hash::document_id_for_path(std::path::Path::new(&path)))
-            .collect();
+    // Durable sidecar ground truth: the `.agent-doc/live-buffer/` scan. Every path
+    // yields a hash→path index (to resolve the plane's hashes to readable paths);
+    // only paths with a strictly-live editor form the durable open-set the plane is
+    // compared against (dead-pid / legacy sidecars accumulate and must not count).
+    let mut hash_to_path: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    let mut sidecar_open: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (path, strictly_live) in
+        agent_doc_debounce::live_buffer_document_paths_with_liveness(&bootstrap.project_root)
+    {
+        let hash = agent_doc_hash::document_id_for_path(std::path::Path::new(&path));
+        if strictly_live {
+            sidecar_open.insert(hash.clone());
+        }
+        hash_to_path.insert(hash, path);
+    }
+    let plane_open_paths: Vec<(String, Option<String>)> = plane_open
+        .iter()
+        .map(|hash| (hash.clone(), hash_to_path.get(hash).cloned()))
+        .collect();
     // Volatile in-memory registry — secondary diagnostic only (empty after a recycle
     // until editors re-report), not the parity basis.
     let registry_open: std::collections::BTreeSet<String> =
@@ -7096,6 +7112,7 @@ fn handle_reliable_sync_status(
     Ok(ControllerReliableSyncStatusResponse {
         dual_run,
         plane_open_docs: plane_open.into_iter().collect(),
+        plane_open_paths,
         plane_live_docs: plane_live.into_iter().collect(),
         sidecar_open_docs: sidecar_open.into_iter().collect(),
         registry_open_docs: registry_open.into_iter().collect(),

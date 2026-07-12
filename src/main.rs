@@ -4522,10 +4522,16 @@ fn try_main() -> anyhow::Result<()> {
                     } else {
                         "not-live"
                     };
-                    println!("  {doc}  pids={pids:?}  {live}");
+                    let path = status
+                        .plane_open_paths
+                        .iter()
+                        .find(|(h, _)| h == doc)
+                        .and_then(|(_, p)| p.clone())
+                        .unwrap_or_else(|| "<no sidecar to resolve path>".to_string());
+                    println!("  {live:8}  pids={pids:?}  {path}");
                 }
                 println!(
-                    "sidecar open docs — durable live-buffer scan ({}):",
+                    "sidecar open docs — durable live-buffer scan, strictly-live editors only ({}):",
                     status.sidecar_open_docs.len()
                 );
                 for doc in &status.sidecar_open_docs {

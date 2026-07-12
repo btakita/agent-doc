@@ -285,7 +285,7 @@ https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&
 - underwriting conditions
 - counter-signed items
 - funding authorization
-<!-- agent:boundary:1b431267 -->
+<!-- agent:boundary:37813d07 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -294,7 +294,6 @@ https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&
 - 🚧 :round_pushpin: [#sy71]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
 - ~~do [#r30z]~~
-- do [#e44f]
 <!-- /agent:queue -->
 
 ## Notes

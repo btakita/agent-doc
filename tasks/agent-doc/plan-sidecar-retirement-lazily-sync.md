@@ -521,21 +521,44 @@ start). What is left needs a human watching a real editor and the operator lifti
    (step 6):** the open-set/lease readers (`editor_open_docs`, the `#6b5h` lease) and deleting the sidecar
    *writers*/reapers. **`[operator-verify]`:** flip works in a live IDE (open a doc → controller resolves
    `MultiReplica` from the plane; crash → `GitAuthoritative`).
-4-5. **3B fold-swap + wire cutover — SATISFIED IN SUBSTANCE / native swap declined (spike 2026-07-12).**
-   Operator authorized "wire cutover 4+5"; the spike found the premise no longer holds and the literal
-   swap would **regress**, so it is not worth a no-fallback live-editor rewrite:
-   - **The wire is already lazily-conformance-unified.** The plugin `StateGraphMirror`s import
-     `io.github.lazily.WireDelta`/`WireSnapshot` (a **lazily** type) and feed lazily-kt/js's own
-     `StateGraphMirror.applyDelta/applySnapshot`; the Rust producer emits the same lazily-spec `delta.json`/
-     `snapshot.json` JSON (`"type"` discriminator + spec op vocabulary). So rs/kt/js already speak one
-     conformance-pinned wire — the "bespoke fold" 3B set out to retire is already gone.
-   - **Switching to lazily-*native* `IpcMessage::Delta` would regress:** native `Delta` has **no
-     `document_hash`** (and no `type` discriminator), but agent-doc needs `document_hash` for per-doc
-     isolation on the shared socket — I'd have to re-add it via an envelope, reintroducing what WireDelta
-     already carries; native encodes ops as `NodeId`/`IpcValue` vs the portable spec `slot_id`+base64.
-   - **Net:** high risk (no fallback; a field mismatch breaks live editor sync), marginal value. Recorded
-     as satisfied-in-substance. To force the literal native cutover anyway, it must carry a `document_hash`
-     envelope + a json/msgpack round-trip conformance fixture + a both-plugins rebuild + a live eyeball.
+4-5. **3B "clean split" — IN PROGRESS (operator-directed 2026-07-12). Foundation DONE; the atomic wire
+   flip is the NEXT-SESSION handoff below.** (An earlier spike wrongly called native-`Delta` a regression;
+   the operator corrected it — the lazily-*spec* op form **is** `NodeId`/`IpcValue`, so `WireDelta`
+   (`slot_id`+base64) is the *divergent* one and native is the canonical target. The clean split also
+   untangles the agent-doc-welded `StateGraphMirror`: lazily gets a **generic** view; agent-doc keeps its
+   **domain** projection as a peer surface, sibling to signal-space's patchboard surface — because a
+   cross-process consumer receives materialized *values*, not the reactive compute, so it is a read-only
+   **view**, never a writable replica. See [[project_reliable_sync_plane_is_authority_sidecar_durability_only]].)
+
+   **DONE + pushed (foundation):**
+   - **lazily-kt/js `GraphView`** — generic read-only materialized view folding native `Snapshot`/`Delta`
+     (`NodeId`/`IpcValue`) into a queryable node/edge map (no base64, no `agent_doc.*` knowledge).
+     Conformance-pinned to `lazily-spec/conformance/agent-doc/` native fixtures (folds to the same projection
+     as the hand-fold reference). **lazily-formal `GraphView.lean`**: `applyOps_idempotent` (re-delivered
+     delta is a no-op *independent of coordinator dedup*, `lake` green, no `sorry`).
+   - **agent-doc `AgentDocProjection`** (JB `AgentDocProjection.kt` / VSCode `agentDocProjection.ts`) — the
+     domain inspector (route/transport/proof) read from a `GraphView`, moved out of lazily.
+   - **state-wire bridge** `agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message`
+     (`WireSubscribe` → native `IpcMessage` Snapshot/Delta; `wire_snapshot_to_lazily` added). Round-trip test.
+
+   **`[NEXT-SESSION FLIP]` — the atomic no-fallback cutover (do all together, one build, then live eyeball):**
+   1. **Controller:** in `agent-doc-controller-io/.../rpc.rs::handle_state_subscribe`, replace the
+      `WireSubscribe.to_json()` emit with `serde_json::to_value(lazily_convert::wire_subscribe_to_ipc_message(&wire)?)`
+      (the exact code is in the `NOTE (#lzsync 3B wire cutover, staged)` comment there). `document_hash` already
+      rides `ControllerStateSubscribeResponse`.
+   2. **JB plugin:** `StateProjectionBridge.kt` — `mirrors: Map<String, GraphView>`; replace `mirror.applyMessage(raw)`
+      with `IpcMessage.fromJson(parse(raw))` → `when { SnapshotMessage -> gv.applySnapshot(m.snapshot); DeltaMessage
+      -> gv.applyDelta(m.delta) }`; `messageKind(raw)` detects native top-level key (`"Snapshot"`/`"Delta"`);
+      `mirrorSummaryForFile` → `AgentDocProjection.fromView(gv)`. Repoint `EditorTabSyncListener.kt`,
+      `TurnStateBridge.kt`, `TerminalUtil.kt` from `MirrorProjectionSummary` → `AgentDocProjection`.
+   3. **VSCode plugin:** `stateMirror.ts` → `GraphView` + `agentDocProjectionFromView` + native parse
+      (`IpcMessage.fromWire` from lazily-js); repoint `extension.ts` consumers.
+   4. **Retire the old mirror** once unreferenced: lazily-kt/js `StateGraphMirror` + `WireDelta`/`WireSnapshot`
+      types (keep the state-wire `WireDelta` internal producer form that `build_delta` emits → the bridge
+      converts it; fully porting `build_delta` to native is a follow-up).
+   5. **Rebuild both plugins** (JB `make bump-plugin`; VSCode version bump + `vsce package`), `make check`, `install-full`.
+   6. **`[operator-verify]`:** open a doc → editor sync + inspector (route/transport/proof) still render;
+      a controller state update reflects in the plugin; a real edit round-trips. This is the no-fallback eyeball.
 6. **Reader cutover — DONE (2026-07-12), non-destructive per operator directive** ("sidecar should
    only be used for background durability" — so the sidecar *writers* are **kept** as the durability +
    cold-miss backstop; only the hot-path *reads* moved to the plane; the `#lbreap` reaper is **not**

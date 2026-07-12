@@ -18,7 +18,7 @@ use anyhow::Result;
 use lazily::IpcMessage;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::liveness::{LivenessProjection, Pid, decode_liveness_frame};
+use crate::liveness::{LivenessOp, LivenessProjection, Pid, decode_liveness_frame};
 
 /// The controller's receive-side reliable-sync plane for editor liveness.
 ///
@@ -58,6 +58,14 @@ impl ControllerLivenessPlane {
             *cursor = epoch;
         }
         Ok(*cursor)
+    }
+
+    /// Fold a **locally-originated** liveness op (not received over the wire) —
+    /// e.g. the controller's own OS exit watcher writing `Alive{value:false}` for a
+    /// dead editor pid. No epoch/ack cursor is touched (there is no remote sender to
+    /// resume); the LWW/OR-set join keeps it convergent with the pushed frames.
+    pub fn apply_local(&mut self, op: &LivenessOp) {
+        self.projection.apply(op);
     }
 
     /// The derived-authority projection (open-set / live-docs / per-pid alive).

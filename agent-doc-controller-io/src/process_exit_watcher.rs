@@ -102,6 +102,10 @@ fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>) {
                 // OS-observed exit → drive the reactive `alive` cell closed. Every
                 // document that pid owned recomputes to detached.
                 editor_attach().process_exited(pid);
+                // Sidecar-retirement Phase 3C: also write the reliable-sync
+                // `Alive{false}` so the shadow liveness plane cascades the same
+                // crash demote (no-op unless dual-run is on).
+                crate::project_controller::record_reliable_sync_editor_exit(pid as u64);
                 watched
                     .lock()
                     .expect("process-exit watcher lock")

@@ -7026,6 +7026,36 @@ static CONTROLLER_LIVENESS_PLANE: std::sync::LazyLock<
     std::sync::Mutex::new(agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new())
 });
 
+/// Feed the shadow liveness plane the controller's own OS-exit-watcher death
+/// signal (`#s4b`, Phase 3C): a dead editor `pid` writes `Alive{value:false}` at a
+/// fresh stamp, so the derived live-doc aggregate cascades every doc that pid held
+/// to not-live — the reliable-sync equivalent of the sidecar path's crash demote.
+/// No-op unless the dual-run flag is on (sidecars stay authoritative by default).
+pub fn record_reliable_sync_editor_exit(pid: u64) {
+    if !agent_doc_reliable_sync_io::dual_run_enabled() {
+        return;
+    }
+    let wall_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0);
+    let op = agent_doc_reliable_sync_io::liveness::LivenessOp::Alive {
+        pid,
+        value: false,
+        stamp: lazily::WireStamp {
+            wall_time,
+            logical: 0,
+            peer: 0,
+        },
+    };
+    match CONTROLLER_LIVENESS_PLANE.lock() {
+        Ok(mut plane) => plane.apply_local(&op),
+        Err(_) => eprintln!(
+            "[reliable-sync] record_reliable_sync_editor_exit: liveness plane mutex poisoned"
+        ),
+    }
+}
+
 /// `plugin → controller` reliable-sync liveness push (`#lzsync`, Phase 3C).
 ///
 /// The plugin sends the 3A `reliable_sync` envelope (from

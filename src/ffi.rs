@@ -2411,6 +2411,27 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
         .into_raw()
 }
 
+/// Canonical path-based document id (`document_id_for_path`) — the same id the
+/// controller keys sessions/liveness by. The editor plugins use it as the
+/// reliable-sync `document_hash` so the pushed liveness lines up with the
+/// controller's projection (sidecar-retirement Phase 3C). Returns a heap string
+/// to free with [`agent_doc_free_string`], or null on a non-UTF-8 path.
+///
+/// # Safety
+///
+/// `file_path` must be a NUL-terminated UTF-8 pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_document_id_for_path(file_path: *const c_char) -> *mut c_char {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!("[reliable-sync] agent_doc_document_id_for_path: non-UTF-8 path; returning null");
+        return std::ptr::null_mut();
+    };
+    let id = agent_doc_hash::document_id_for_path(Path::new(path));
+    CString::new(id)
+        .map(|c| c.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
 /// Per-`(project_root, document_hash)` plugin-side liveness push endpoints
 /// (sidecar-retirement Phase 3C). Global because the JNA/JS FFI boundary is
 /// stateless; each holds a durable `SqliteOutbox` so a push survives a plugin or
@@ -2452,6 +2473,12 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
     ops_json: *const c_char,
 ) -> c_int {
     let result = (|| -> anyhow::Result<()> {
+        // Safe-by-default: when the dual-run shadow plane is off (the default),
+        // enqueuing is a no-op so the durable outbox never grows on a shipped
+        // plugin that reports events before the operator opts into the cutover.
+        if !agent_doc_reliable_sync_io::dual_run_enabled() {
+            return Ok(());
+        }
         let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
         let document_hash = unsafe { required_ffi_string(document_hash, "document_hash") }?;
         let ops_json = unsafe { required_ffi_string(ops_json, "ops_json") }?;

@@ -454,6 +454,20 @@ push-loop wiring + dual-run cutover remain.
 
 ## Handoff — remaining is one operator-verify session (needs a live IDE + a STOP-releases exception)
 
+> **Re-verified 2026-07-12** (handoff hygiene pass, no code change): `make check` green in
+> `src/agent-doc` — **7463 tests passed, 240 skipped, 0 failed** (the Acceptance §"`make check`
+> passes" criterion holds). Handoff confirmed accurate against HEAD: `authority_for_file`
+> (`agent-doc-plugin-owner/src/crdt_authority.rs`) still reads the **S4b editor-attach + lease**
+> path, *not* the reliable-sync `LivenessProjection` — step 3's authority flip is genuinely
+> unstarted. Dependency direction confirmed: `agent-doc-reliable-sync-io` is depended on **only by
+> `agent-doc-controller-io`** (not by `plugin-owner`/`document-realtime`), so the step-3 flip is
+> **controller-layer read-wiring** — the controller readers that call `authority_for_file` must
+> consult the plane's projection when dual-run is ON — not an in-place edit of the pure-authority
+> crate (avoids a dep cycle). Every remaining step (1-3, 5-6 = live-editor `[operator-verify]`;
+> 7 = STOP-releases) stays operator-gated as written below; step 4 (3B fold-swap) is the only
+> editor-free/on-wire-invariant slice and is deliberately deferred so it lands *after* the step-2
+> live parity confirmation the plan's ordering requires.
+
 The **entire mechanism** is built + pushed behind `dual_run_enabled()` (env
 `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default OFF** → sidecars authoritative, safe on every install):
 carrier (3A), receiver plane + RPC (3C), sender endpoint + FFI + SqliteOutbox (3C), death signal

@@ -344,10 +344,25 @@ push-loop wiring + dual-run cutover remain.
   errors, sink→decode loopback via a fake transport, sink-surfaces-failure, channel FIFO drain,
   dropped-inbox-reads-closed, deliver-after-source-dropped. `cargo test`/`clippy`/`fmt` green. The
   listener→inbox routing wiring lands with 3C (the consumer of these building blocks).
-- **3B — controller→consumer stays pull, on lazily types.** Adopt lazily's `Delta`/`Snapshot`
-  types + `ResyncCoordinator` in place of the bespoke `WireDelta` fold, keeping the
-  `state_subscribe(last_epoch)` pull + SQLite resume (already retry-safe). Mostly a type
-  unification; behavior-preserving.
+- **3B — controller→consumer stays pull, on lazily types — STARTED (this pass): type-unification
+  bridge.** Adopt lazily's `Delta`/`Snapshot` types + `ResyncCoordinator` in place of the bespoke
+  `WireDelta` fold, keeping the `state_subscribe(last_epoch)` pull + SQLite resume (already retry-safe).
+  Mostly a type unification; behavior-preserving.
+  - **DONE — `agent-doc-state-wire::lazily_convert`.** A bidirectional, lossless-for-representable-ops
+    bridge `WireDelta`/`WireDeltaOp` ↔ lazily `Delta`/`DeltaOp` (`wire_op_to_lazily`/`lazily_op_to_wire`,
+    `wire_delta_to_lazily`/`lazily_delta_to_wire`). Structural mapping: `slot_id: u64` ↔ `NodeId(u64)`;
+    base64 `payload` string ↔ `IpcValue::Inline` bytes; `NodeAdd.payload: Option<String>` ↔
+    `NodeState::Payload`/`Opaque`; a lazily `SharedBlob` value reports `None` (no string-payload wire
+    form). Multi-epoch span (`epoch > base_epoch+1`) is preserved. `state-wire` gains a `lazily` 0.32 dep.
+    **3 round-trip tests** (every-variant, whole-delta with epochs+hash, SharedBlob-not-representable);
+    clippy/fmt green; `cargo check --workspace` green. This lets the controller move to producing/
+    consuming `lazily::Delta` internally while the on-wire JSON stays exactly what the S5
+    `StateGraphMirror` plugins already parse.
+  - **REMAINING (`[operator-verify]`):** swap the controller's `build_delta`/`state_subscribe` fold to
+    produce `lazily::Delta` (via the bridge) and drive the gap-detect with lazily's `ResyncCoordinator`;
+    then the wire cutover — point the plugin `StateGraphMirror`s at lazily's native `Delta`/`Snapshot`
+    (kt/js already have the types) and retire `WireDelta` — which changes the FFI wire the plugins parse
+    (plugin rebuilds + live eyeball).
 - **3C — plugin→controller open-set/liveness push on the CrdtSync plane — RECEIVER CORE + PUSH LOOP
   DONE (this pass), FFI/listener/plugin-emission REMAINING.** Landed in `agent-doc-reliable-sync-io`:
   - **`liveness::LivenessProjection`** — the controller's derived-authority engine that *replaces the

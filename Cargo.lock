@@ -2149,6 +2149,7 @@ dependencies = [
  "agent-doc-state-backbone",
  "agent-doc-turn",
  "base64 0.22.1",
+ "lazily 0.32.0",
  "serde",
  "serde_json",
 ]

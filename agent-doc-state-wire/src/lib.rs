@@ -21,6 +21,8 @@
 //! schema-pin half of `#lazilyspecpin` lands in the sibling `lazily-spec`
 //! session; this module is the in-repo producer.
 
+pub mod lazily_convert;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, StateOwner};

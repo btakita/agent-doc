@@ -565,6 +565,15 @@ interface AgentDocLib : Library {
     fun agent_doc_document_id_for_path(filePath: String): Pointer?
 
     /**
+     * Whether `filePath` is an agent-doc **session document** (frontmatter/opt-in
+     * classified). Reliable-sync liveness must only report session documents so the
+     * plane's open-set matches the sidecar `open_agent_docs` scope — a plain source
+     * file opened as an editor tab must not enter the plane. Returns 1 for a session
+     * document, 0 otherwise (including unreadable paths).
+     */
+    fun agent_doc_is_session_document(filePath: String): Int
+
+    /**
      * Enqueue a JSON batch of externally-tagged `LivenessOp`s
      * (`[{"Open":{"document_hash":..,"pid":..,"tag":..}}, ..]`) into a document's
      * durable reliable-sync push outbox (`#lzsync` Phase 3C). No-op unless the

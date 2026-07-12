@@ -6830,7 +6830,9 @@ pub(crate) fn handle_request_locked(
         }
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "reliable_sync" => controller_envelope(handle_reliable_sync(request)),
-        "reliable_sync_status" => controller_envelope(handle_reliable_sync_status()),
+        "reliable_sync_status" => {
+            controller_envelope(handle_reliable_sync_status(&bootstrap_snapshot))
+        }
         "focus_document_pane" => {
             controller_envelope(handle_focus_document_pane(&bootstrap_snapshot, request))
         }
@@ -7039,19 +7041,29 @@ pub struct ControllerReliableSyncStatusResponse {
     pub plane_open_docs: Vec<String>,
     /// Document hashes the plane derives as live (open minus the whole-editor-death cascade).
     pub plane_live_docs: Vec<String>,
-    /// Document hashes the sidecar path derives as open (`editor_open_docs`, converted
-    /// path→hash so it is comparable to the plane's hash-keyed open-set).
+    /// Document hashes the **durable** sidecar ground truth derives as open — the
+    /// `.agent-doc/live-buffer/` scan (`#lbreap`), converted path→hash. Durable like
+    /// the plane (both survive a controller recycle), so this is the apples-to-apples
+    /// parity comparison.
     pub sidecar_open_docs: Vec<String>,
+    /// Document hashes the **volatile** in-memory `editor_open_docs` registry derives
+    /// as open. Secondary diagnostic only: it is empty right after a controller recycle
+    /// until editors re-report, so it is NOT the parity basis (the durable live-buffer
+    /// scan is). Surfaced to make a recycle-timing divergence legible.
+    pub registry_open_docs: Vec<String>,
     /// Per open document: the live editor pids the plane sees.
     pub per_doc_pids: Vec<(String, Vec<u64>)>,
-    /// True when the plane's open-set equals the sidecar-derived open-set — the
-    /// dual-run parity assertion. Trivially true (both empty) before any editor event.
+    /// True when the plane's open-set equals the durable sidecar open-set
+    /// (`sidecar_open_docs`) — the dual-run parity assertion. Trivially true (both
+    /// empty) before any editor event.
     pub parity: bool,
 }
 
 /// Handle the `reliable_sync_status` diagnostic RPC: project the shadow liveness plane
 /// and the sidecar-derived open-set into a single parity view for `[operator-verify]`.
-fn handle_reliable_sync_status() -> Result<ControllerReliableSyncStatusResponse> {
+fn handle_reliable_sync_status(
+    bootstrap: &ControllerBootstrap,
+) -> Result<ControllerReliableSyncStatusResponse> {
     let dual_run = agent_doc_reliable_sync_io::dual_run_enabled();
     let plane = CONTROLLER_LIVENESS_PLANE
         .lock()
@@ -7063,9 +7075,18 @@ fn handle_reliable_sync_status() -> Result<ControllerReliableSyncStatusResponse>
         .iter()
         .map(|doc| (doc.clone(), projection.open_pids(doc).into_iter().collect()))
         .collect();
-    // Sidecar-derived open-set, converted path → document hash so it is directly
-    // comparable to the plane's hash-keyed open-set.
+    // Durable sidecar ground truth: the `.agent-doc/live-buffer/` scan, converted
+    // path → document hash so it is directly comparable to the plane's hash-keyed
+    // open-set. Durable like the plane (both survive a controller recycle) ⇒ the
+    // apples-to-apples parity basis.
     let sidecar_open: std::collections::BTreeSet<String> =
+        agent_doc_debounce::live_buffer_open_document_paths(&bootstrap.project_root)
+            .into_iter()
+            .map(|path| agent_doc_hash::document_id_for_path(std::path::Path::new(&path)))
+            .collect();
+    // Volatile in-memory registry — secondary diagnostic only (empty after a recycle
+    // until editors re-report), not the parity basis.
+    let registry_open: std::collections::BTreeSet<String> =
         agent_doc_document_realtime::editor_open_docs::editor_open_docs()
             .open_agent_docs()
             .into_iter()
@@ -7077,6 +7098,7 @@ fn handle_reliable_sync_status() -> Result<ControllerReliableSyncStatusResponse>
         plane_open_docs: plane_open.into_iter().collect(),
         plane_live_docs: plane_live.into_iter().collect(),
         sidecar_open_docs: sidecar_open.into_iter().collect(),
+        registry_open_docs: registry_open.into_iter().collect(),
         per_doc_pids,
         parity,
     })
@@ -14506,9 +14528,23 @@ mod tests {
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
         }
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = ControllerBootstrap {
+            project_root: dir.path().to_path_buf(),
+            socket_path: socket_path(dir.path()),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: current_binary_identity().ok(),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
         // Fold an Open frame so the shadow plane derives one open doc (pid 100).
         handle_reliable_sync(reliable_sync_open_request("docwire-status")).expect("fold");
-        let status = handle_reliable_sync_status().expect("status ok");
+        let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
         assert!(status.dual_run);
         assert!(status.plane_open_docs.contains(&"docwire-status".to_string()));
         // Absent death signal ⇒ pid presumed alive ⇒ the doc is also live.
@@ -14520,8 +14556,8 @@ mod tests {
             .map(|(_, p)| p.clone())
             .unwrap_or_default();
         assert!(pids.contains(&100));
-        // The sidecar registry is empty in this isolated test process, so the plane
-        // holds a doc the sidecars do not ⇒ parity is computed and false.
+        // No live-buffer sidecars in this fresh project, so the durable sidecar
+        // open-set is empty while the plane holds a doc ⇒ parity computed and false.
         assert!(status.sidecar_open_docs.is_empty());
         assert!(!status.parity);
     }

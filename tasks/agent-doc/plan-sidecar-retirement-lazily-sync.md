@@ -488,6 +488,15 @@ start). What is left needs a human watching a real editor and the operator lifti
    docs are open, and that a real editor crash drives `live_docs` to drop the dead pid's docs (the S4b
    `record_reliable_sync_editor_exit` cascade). This is the `[operator-verify]` gate; the parity SimWorld
    already proves it deterministically, this proves it on real events.
+   - **First live run (2026-07-12) caught two real bugs, both fixed** (JB v0.2.236 / VSCode v0.2.44):
+     (a) **plane over-counted** — the plugin liveness listeners emitted for *every* open editor tab (28
+     docs for one pid), not just agent-doc session docs; both listeners now gate on
+     `agent_doc_is_session_document` so the plane's open-set matches the sidecar `open_agent_docs` scope.
+     (b) **oracle measured the wrong sidecar** — it compared against the *volatile* in-memory
+     `editor_open_docs` registry (empty right after a controller recycle, while the plane survives via its
+     durable outbox → false MISMATCH). Parity now compares against the **durable** `.agent-doc/live-buffer/`
+     scan (`agent_doc_debounce::live_buffer_open_document_paths`), apples-to-apples with the plane; the
+     in-memory registry is surfaced as a secondary `registry_open_docs` line only.
 3. **Authority flip** (behind the flag) — switch `authority_for_file` / `editor_open_docs` /
    `editor_attach` / the `#6b5h` lease to READ `LivenessProjection` when dual-run is ON (OFF keeps the
    sidecar read). Re-run step 2's parity check against the live hot path.

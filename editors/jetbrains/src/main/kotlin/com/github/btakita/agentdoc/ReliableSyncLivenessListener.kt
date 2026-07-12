@@ -45,6 +45,10 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     private fun reportOnPool(projectRoot: String, filePath: String, buildOps: (String) -> String?) {
         ApplicationManager.getApplication().executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
+            // Scope liveness to agent-doc session documents only: a plain source file
+            // opened as a tab must not enter the plane (it would over-count the
+            // open-set vs the sidecar `open_agent_docs` ground truth).
+            if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
             val opsJson = buildOps(documentHash) ?: return@executeOnPooledThread
             if (lib.agent_doc_reliable_sync_liveness_enqueue(projectRoot, documentHash, opsJson) == 0) {

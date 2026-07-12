@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto';
 import { OrSet } from '../../../../lazily-js/src/index.js';
 import {
     documentIdForPath,
+    isSessionDocument,
     reliableSyncLivenessEnqueue,
     reliableSyncLivenessFlush,
 } from './native';
@@ -76,6 +77,10 @@ export function registerReliableSyncLiveness(context: vscode.ExtensionContext): 
         const filePath = document.uri.fsPath;
         // Off the event loop's critical path — the flush may do a controller RPC.
         setImmediate(() => {
+            // Scope liveness to agent-doc session documents only: a plain source
+            // file opened as a tab must not enter the plane (it would over-count the
+            // open-set vs the sidecar `open_agent_docs` ground truth).
+            if (!isSessionDocument(filePath, root)) return;
             const documentHash = documentIdForPath(filePath, root);
             if (!documentHash) return;
             const opsJson = buildOps(documentHash);

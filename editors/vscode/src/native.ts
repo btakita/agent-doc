@@ -356,6 +356,7 @@ let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
 let _resolve_project_path: any = null;
 let _document_id_for_path: any = null;
+let _is_session_document: any = null;
 let _reliable_sync_liveness_enqueue: any = null;
 let _reliable_sync_liveness_flush: any = null;
 let _free_state: any = null;
@@ -466,6 +467,7 @@ function bindFunctions(): void {
     _visual_tokens_json = lib.func('agent_doc_visual_tokens_json', 'char*', ['str']);
     try {
         _document_id_for_path = lib.func('agent_doc_document_id_for_path', 'char*', ['str']);
+        _is_session_document = lib.func('agent_doc_is_session_document', 'int', ['str']);
         _reliable_sync_liveness_enqueue = lib.func(
             'agent_doc_reliable_sync_liveness_enqueue',
             'int',
@@ -479,6 +481,7 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] reliable-sync liveness wrappers unavailable: ${e.message}`);
         _document_id_for_path = null;
+        _is_session_document = null;
         _reliable_sync_liveness_enqueue = null;
         _reliable_sync_liveness_flush = null;
     }
@@ -1677,6 +1680,24 @@ export function documentIdForPath(filePath: string, projectRoot?: string): strin
         return null;
     } finally {
         if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * Whether `filePath` is an agent-doc session document (frontmatter/opt-in
+ * classified). Reliable-sync liveness must only report session documents so the
+ * plane open-set matches the sidecar `open_agent_docs` scope. Returns false for a
+ * non-session file, an unreadable path, or when the FFI is unavailable.
+ */
+export function isSessionDocument(filePath: string, projectRoot?: string): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_is_session_document) return false;
+    try {
+        return _is_session_document(filePath) === 1;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] is_session_document error: ${err.message}`);
+        return false;
     }
 }
 

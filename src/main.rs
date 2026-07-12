@@ -4524,8 +4524,18 @@ fn try_main() -> anyhow::Result<()> {
                     };
                     println!("  {doc}  pids={pids:?}  {live}");
                 }
-                println!("sidecar open docs ({}):", status.sidecar_open_docs.len());
+                println!(
+                    "sidecar open docs — durable live-buffer scan ({}):",
+                    status.sidecar_open_docs.len()
+                );
                 for doc in &status.sidecar_open_docs {
+                    println!("  {doc}");
+                }
+                println!(
+                    "in-memory registry open docs — secondary, empty right after a recycle ({}):",
+                    status.registry_open_docs.len()
+                );
+                for doc in &status.registry_open_docs {
                     println!("  {doc}");
                 }
             }

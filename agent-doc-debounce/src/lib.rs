@@ -832,6 +832,37 @@ fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveB
     (snapshot.path == file).then_some(snapshot)
 }
 
+/// Enumerate every document with a **live** durable live-buffer sidecar under
+/// `<project_root>/.agent-doc/live-buffer/` — the durable open-set ground truth
+/// (`#lbreap`) that survives a controller recycle, unlike the volatile in-memory
+/// `editor_open_docs` registry. Returns distinct document file paths; a sidecar
+/// whose editor process is gone (`live_buffer_snapshot_editor_is_live` false) is
+/// excluded, mirroring the reaper's liveness rule. This is the apples-to-apples
+/// comparison for the reliable-sync plane's open-set, which is likewise durable.
+pub fn live_buffer_open_document_paths(project_root: &std::path::Path) -> Vec<String> {
+    let dir = project_root.join(LIVE_BUFFER_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths = std::collections::BTreeSet::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(snapshot) = serde_json::from_str::<LiveBufferSnapshot>(&content) else {
+            continue;
+        };
+        if live_buffer_snapshot_editor_is_live(&snapshot) {
+            paths.insert(snapshot.path);
+        }
+    }
+    paths.into_iter().collect()
+}
+
 /// Return the per-editor sync status for every live-buffer sidecar of `file`.
 ///
 /// The poll is state-vector/epoch based when the editor reports those fields and

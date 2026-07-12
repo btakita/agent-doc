@@ -279,7 +279,13 @@ Refi defaults cover mortgage/payoff statement, note, deed; purchase defaults cov
 **Verified:** new suite 8/8, full suite 1578/0, browser + worker builds clean.
 
 **Queue drained.** This turn shipped all three funding-workflow items: #r08m (wire doc upload), #5q9q (Lender Documents + Funding Package tabs), #r30z (missing-docs email preset). All committed + pushed; deploy stays deferred. Remaining backlog is gated/recommended items and the empty **#sy71** placeholder.
-<!-- agent:boundary:382fd470 -->
+https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=ca0fa649-8782-4af8-aa63-82a6015c2b87&deal_tab=lender-documents > Lender Documents, please break out different sections with uploads for:
+- In deal — term sheet / commitment letter
+- deal-specific proof of funds
+- underwriting conditions
+- counter-signed items
+- funding authorization
+<!-- agent:boundary:1b431267 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -288,6 +294,7 @@ Refi defaults cover mortgage/payoff statement, note, deed; purchase defaults cov
 - 🚧 :round_pushpin: [#sy71]
 - ~~do [#hmw9]. MESSAGE_EMAIL_NOTIFICATIONS_ENABLED should default to true.~~
 - ~~do [#r30z]~~
+- do [#e44f]
 <!-- /agent:queue -->
 
 ## Notes
@@ -311,6 +318,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#e44f] [recommended] Deploy #lender-docs-sections to EFS prod: apply migration 0134 (adds deal_lender_documents.category) to prod D1, then deploy the worker via the clobber-immune clean-worktree recipe, and verify the deal-dialog Lender Documents tab renders the 5 sections. Outward-facing — confirm before deploying.
 - [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 <!-- /agent:backlog -->
 

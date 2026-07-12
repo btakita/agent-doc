@@ -22,6 +22,7 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.34.84" }
 agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.84" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.84" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.84" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.84" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.84" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.84" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.84" }

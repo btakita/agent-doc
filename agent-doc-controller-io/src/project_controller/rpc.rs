@@ -7064,6 +7064,20 @@ pub struct ControllerReliableSyncStatusResponse {
     pub parity: bool,
 }
 
+/// Whether `path` is an agent-doc session document — the same frontmatter/opt-in
+/// classification the plugin liveness gate (`agent_doc_is_session_document`) uses, so
+/// the oracle's sidecar open-set is scoped identically to the plane. A path that no
+/// longer reads is not a session document.
+fn path_is_session_document(path: &str) -> bool {
+    match std::fs::read_to_string(path) {
+        Ok(content) => agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(
+            &content,
+            std::path::Path::new(path),
+        ),
+        Err(_) => false,
+    }
+}
+
 /// Handle the `reliable_sync_status` diagnostic RPC: project the shadow liveness plane
 /// and the sidecar-derived open-set into a single parity view for `[operator-verify]`.
 fn handle_reliable_sync_status(
@@ -7091,7 +7105,12 @@ fn handle_reliable_sync_status(
         agent_doc_debounce::live_buffer_document_paths_with_liveness(&bootstrap.project_root)
     {
         let hash = agent_doc_hash::document_id_for_path(std::path::Path::new(&path));
-        if strictly_live {
+        // The durable open-set is a strictly-live sidecar for an agent-doc **session
+        // document** — the plane is session-scoped (its plugins gate on
+        // `agent_doc_is_session_document`), so the parity basis must match: the
+        // live-buffer path also tracks non-session files (plain specs/plans opened as
+        // tabs) which the plane correctly excludes.
+        if strictly_live && path_is_session_document(&path) {
             sidecar_open.insert(hash.clone());
         }
         hash_to_path.insert(hash, path);

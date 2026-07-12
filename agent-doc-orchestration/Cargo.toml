@@ -128,7 +128,7 @@ agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version =
 agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.84" }
 agent-doc-write-ipc-io = { path = "../agent-doc-write-ipc-io", version = "0.34.84" }
 agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.34.84" }
-lazily = "0.31.0"
+lazily = "0.32.0"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"

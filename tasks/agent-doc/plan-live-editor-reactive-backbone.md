@@ -356,6 +356,11 @@ Each is a candidate stage; none is a regression, all are parity gaps.
   pull+epoch+SQLite for controller→consumer, and move the plugin→controller open-set/lease push onto
   the idempotent CrdtSync plane — retiring the live-buffer + plugin-owner-lease sidecars (the
   stale/phantom/divergent-read race class). Full design + phasing in the linked plan.
+  **Wire codec (decided 2026-07-11):** the cross-language plugin(kt/js)⇄controller(rs) sync stream
+  negotiates lazily's `msgpack` codec (self-describing, evolution-safe, portable), not JSON;
+  `postcard` stays the Rust-only fast path and capnproto/protobuf were rejected (IDL+codegen cost
+  across 8 bindings, opaque payloads waste their typed edge). Formalized in `lazily-spec/protocol.md`
+  § Frame codecs; pinned across all three `IpcMessage` variants in `lazily-rs/tests/ipc.rs`.
 **Can the durable filesystem sidecars be replaced by lazily state? (analysis 2026-07-11)**
 The editor-liveness truth crosses **two OS processes** (plugin ⇄ controller). Today the durable
 carriers are filesystem sidecars: the **plugin-owner lease** (`live_editor_endpoint_attached`,

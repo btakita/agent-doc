@@ -50,6 +50,19 @@ dedup absorbs*, not a file that overwrites authority.
 - **No per-document channel.** One `BridgeHub` = one graph, N peers; no topic/doc field on any
   message. Per-doc isolation today is agent-doc's own `document_hash` tag on every frame +
   `slot_id = fnv1a(document_hash, type_tag, entity_key)` namespacing.
+- **Wire codec is already solved — use `msgpack` (decided 2026-07-11).** lazily has three
+  negotiable frame codecs (`ipc.rs` `IpcCodec`): `json` (canonical/FFI, blob bytes as int arrays),
+  `msgpack` (`rmp-serde` `to_vec_named`, self-describing, evolution-safe), `postcard` (positional,
+  Rust-only fast path). For the cross-language plugin(kt/js)⇄controller(rs) boundary the reliable
+  sync stream negotiates **`msgpack`**, not JSON: it is the only *portable* binary codec (postcard
+  is Rust-affine, capnproto/protobuf would force an IDL+codegen toolchain into 8 bindings incl.
+  weak zig/dart support, and payloads are already opaque bytes so their typed-field edge is wasted).
+  msgpack is *less* byte-compact than postcard but that is the price of portability; vs the JSON
+  status quo it is a net win (no int-array blob bloat). Formalized in
+  `lazily-spec/protocol.md` § Frame codecs + the conformance matrix (`json` **and** `msgpack` MUST
+  round-trip all three `IpcMessage` variants); pinned in `lazily-rs/tests/ipc.rs` `mod msgpack`.
+  Conformance for the map codecs is **semantic round-trip, not byte-identical** (msgpack map key
+  order is encoder-defined) — only `postcard` is byte-canonical.
 
 ### agent-doc already has the retry-safe half
 - Wire: `WireDelta { base_epoch, epoch, document_hash, ops }`
@@ -90,6 +103,7 @@ and portable.
 | At-least-once replay-from-cursor semantics | **lazily** (new `DurableOutbox` trait + protocol) | cursor math is protocol; storage is not |
 | Concrete persistence backend | **app** (agent-doc SQLite) | storage-agnostic by design |
 | Byte transport (which socket) | **app** (UDS `DataChannel`/`IpcSink`) | deployment choice |
+| Frame codec (which serialization) | **lazily** (`msgpack` cross-lang default; `json` canonical/FFI) | protocol; portable + evolution-safe (see grounding fact) |
 | Retry cadence / backoff / threading / clock | **app** (injected `Clock`/scheduler) | policy, no async runtime in core |
 
 ## New lazily surface (sketch — finalized in Phase 0/2)
@@ -147,6 +161,12 @@ Specify the reliable-sync protocol before any code:
 - New conformance fixtures under `lazily-spec/conformance/` covering: a dropped-frame gap →
   resync → convergence; outbox replay after a simulated crash; idempotent re-delivery; a
   multi-epoch-span delta apply. (These become the rs/js/kt cross-language pins.)
+- **Codec: `msgpack` is the negotiated cross-language wire default** (decided; see grounding
+  fact + `protocol.md` § Frame codecs). Any new reliable-sync frame type (resync request,
+  outbox-cursor ack, liveness cell op) MUST round-trip through both `json` and `msgpack` in the
+  conformance fixtures, semantic-round-trip (not byte-identical) for the map codecs. `lazily-rs`
+  already pins the three existing `IpcMessage` variants across `json`/`msgpack`/`postcard`
+  (`tests/ipc.rs`); extend the same coverage to the new frames.
 - Version bump + `cell-model.md`/wire-schema updates.
 
 ### Phase 1 — lazily-formal (#lzsync-lean) — SECOND

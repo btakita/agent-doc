@@ -39,7 +39,51 @@ done
 Compacted content:
 - Archived 5 response topic(s): zero-live relay document authority; harness switch + stale red status; IDEA crash root cause + finalize write-path fix + JB drain backoff; 2 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): JB Run Agent Doc protected draft input
-<!-- agent:boundary:eb99b67b -->
+❯ /goal Please fix "● My response body was dropped (a cell-merge chose the existing content). Let me re-run the cycle cleanly — fresh preflight for a current baseline, then finalize with the response piped in:" that occurred in a equityfundingsource.md turn.
+
+❯ Fix `agent-doc tasks/equityfundingsource.md` is periodically added while the turn is running.
+
+❯ #spec-test-build-install-commit-push
+
+### Re: fix response-drop (cell-merge chose existing content) + periodic re-inject — #spec-test-build-install-commit-push — opus-4-8
+
+Two bugs. Bug 1 (the `/goal`) is **fixed, tested, and shipped**; bug 2 is **precisely diagnosed and queued** because it needs live incident evidence to fix safely. Neither is a lazily-rs bug — no lazily-spec/formal/publish work.
+
+**Bug 1 — response body dropped ("a cell-merge chose the existing content") — FIXED**
+
+Root cause: a `### Re:` response node's identity was the normalized **heading alone** (`r:hash(key)` in `agent-doc-markdown-ast`). A fresh response whose heading coincided with a prior committed turn — a same-topic / same-preset follow-up drained from the queue (e.g. two turns both titled `### Re: #spec-test-build-install-commit-push — opus-4-8`) — collided with that prior turn. The cell merge's append filter (`merge_exchange_inner`) and convergence dedup treated the fresh turn as a duplicate, kept the existing content, and dropped the new response body. Confirmed by the existing design test `duplicate_turn_same_key_is_not_reappended`, which encoded exactly that lossy behavior.
+
+Fix: response identity is now content-derived from **heading + body** via `exchange_tree::response_identity_digest`, normalizing out the transient ` (HEAD)` annotation, `~~…~~` strike wrapper, per-cycle boundary markers, and trailing whitespace. Both identity points use it consistently — `ExchangeNode::node_id` (dedup) and the `merge_exchange_inner` append filter. Byte-identical mirror-ordered duplicates from a failed 3-way merge still share an identity and still collapse; distinct-body same-heading turns are preserved. This is `agent-doc-merge` / `agent-doc-markdown-ast` code — **not lazily-rs**, so no lazily change was needed.
+
+**Bug 2 — `agent-doc tasks/equityfundingsource.md` periodically re-added mid-turn — DIAGNOSED + QUEUED (`#idlewatchturnactive`)**
+
+The pure dispatch decision (`idle_queue_drain_decision`) is already correct — it skips on `turn_active`, on a `/loop` drain lease, and on `last_dispatched` dedup. The defect is an **input false-negative**: `turn_active_for_owned_pane_with_idle_evidence` reads `false` while a turn is genuinely running, via one of three deliberate branches (marker missing/stale past the 1h TTL, marker-pane vs owned-pane mismatch after a reroute, or a premature `prompt_visible && actor_ready` marker clear). Each branch exists for a reason (self-heal a missed `Stop` hook, fail-safe on reroute, legitimate idle proof), so tightening one blind risks regressing the supervisor idle-detection. Pinning the exact branch needs the `equityfundingsource` incident `ops.log`. Full diagnosis + the forensic command + per-branch fix sketch are in `src/agent-doc/tasks/agent-doc/plan-idle-watch-turn-active-false-idle.md`, tracked as `#idlewatchturnactive`.
+
+**`#spec-test-build-install-commit-push` — all steps done for the shipped fix**
+
+- **spec** — documented the body-aware response-identity contract in `specs/14-realtime-workflow.md` (`#qcellmerge-response-body-id`).
+- **test** — added regression tests (node-level + `document_cell_merge` hot-path finalize shape), updated the prior heading-only design test; **full suite green: 7470 passed, clippy clean**.
+- **build / install** — `make install` (binary + cdylib, non-disruptive reload broadcast, controllers recycle at next idle boundary) + `cargo build --release` for the `.bin/agent-doc` symlink. Installed `agent-doc 0.34.84`.
+- **commit / push** — pushed to `agent-doc` and bumped the superproject gitlink (both remotes updated). No version bump / tag / crates publish — that stays gated per the standing release freeze; you didn't ask to publish.
+
+**One transparency note:** three files (`SKILL.md` version bump 0.34.69→0.34.84, plus the `#unsaved-buffer-divergence-valid` invariant in `SPEC.md` and `runbooks/commit.md`) were already **pre-staged in the submodule index by a concurrent session**; my `git commit` swept them into the fix commit. Their content is intact and coherent — committed, not clobbered — just bundled with mine rather than committed separately.
+
+Live editor/pane verification of the response-drop fix on a real same-heading queue drain remains the one operator-gated check.
+```
+com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments: Read access is allowed from inside read-action only (see Application.runReadAction()); If you access or modify model on EDT consider wrapping your code in WriteIntentReadAction  or ReadAction; see https://jb.gg/ij-platform-threading for details
+Current thread: Thread[#219,agent-doc-patch-watcher-agent-loop,6,main] 1963109464 (EventQueue.isDispatchThread()=false)
+SystemEventQueueThread: Thread[#147,AWT-EventQueue-0,6,main] 1683864329
+	at com.intellij.util.concurrency.ThreadingAssertions.createThreadAccessException(ThreadingAssertions.java:270)
+	at com.intellij.util.concurrency.ThreadingAssertions.softAssertReadAccess(ThreadingAssertions.java:159)
+	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerBase.getDocument(FileDocumentManagerBase.java:51)
+	at com.github.btakita.agentdoc.PatchWatcher.currentContentForProjection(PatchWatcher.kt:136)
+	at com.github.btakita.agentdoc.PatchWatcher.writeAlreadyAppliedContentProjection(PatchWatcher.kt:149)
+	at com.github.btakita.agentdoc.PatchWatcher.processPatchFile(PatchWatcher.kt:896)
+	at com.github.btakita.agentdoc.PatchWatcher.watchLoop(PatchWatcher.kt:368)
+	at com.github.btakita.agentdoc.PatchWatcher.registerRoot$lambda$2(PatchWatcher.kt:216)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+```
+<!-- agent:boundary:81111111 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -130,6 +174,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#idlewatchturnactive] #agent-doc-bug idle-watch injects the file drain trigger during an active turn (periodic `agent-doc tasks/equityfundingsource.md` re-add). Root cause is a turn_active input false-negative in turn_active_for_owned_pane_with_idle_evidence (marker missing/stale, pane mismatch, or premature ready-prompt clear). Needs incident ops.log to pin the branch before fixing. Plan: src/agent-doc/tasks/agent-doc/plan-idle-watch-turn-active-false-idle.md
 - [ ] [#jblocalhistverify] [operator-verify] #jblocalhistcrash live proof: install editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.232.zip (uninstall -> restart -> install -> restart), then with a corrupt Local History store trigger Run Agent Doc and confirm dispatch proceeds (no aborting AssertionError) and idea/ops log shows active_document_save_failed then normal sendToTerminal.
 - [ ] [#compactcrdtretry] [focused-cycle] #agent-doc-bug JB Compact Exchange refused (CPC relay, retry_crdt_merge). The ZERO-live-editor variant is now fixed by #stale-lease-cpc-authority (0.34.75, compact converge shares apply_cpc_write). REMAINING: the live-editor concurrent-edit case (operator typing while a real editor is attached) still needs a bounded CAS retry around compact converge with retry-idempotent archive creation; fail closed with an actionable document-changed-during-compaction message when the compacted component drifted. Distinct from #jbcompactcommit. Plan: tasks/agent-doc/plan-compact-crdt-merge-retry.md
 - [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md

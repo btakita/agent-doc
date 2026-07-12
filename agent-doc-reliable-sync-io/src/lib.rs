@@ -32,6 +32,8 @@
 //! isolation invariant (a stale overlay for doc B cannot flip doc A's authority)
 //! at the envelope layer, before the frame is ever decoded.
 
+pub mod liveness;
+
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
@@ -43,6 +45,24 @@ use serde::{Deserialize, Serialize};
 
 /// NDJSON `type` tag for a reliable-sync control frame on the shared socket.
 pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
+
+/// Env var gating the reliable-sync dual-run (sidecar-retirement Phase 3C cutover).
+pub const DUAL_RUN_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_DUAL_RUN";
+
+/// Whether the controller should run the reliable-sync liveness plane alongside
+/// the filesystem sidecars.
+///
+/// **Default OFF.** During migration the sidecars stay the authority; the plane
+/// runs in shadow only when the operator opts in (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`
+/// set to a truthy value), so the derived open-set/lease can be compared against
+/// the sidecar-derived one before the hot path is ever switched. The final cutover
+/// (delete the sidecars, read the plane) is a separate, operator-verified step.
+pub fn dual_run_enabled() -> bool {
+    matches!(
+        std::env::var(DUAL_RUN_ENV).ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "on")
+    )
+}
 
 /// Codec token carried in the envelope (`IpcCodec::MessagePack.name()`).
 const MSGPACK_CODEC: &str = "msgpack";
@@ -436,5 +456,153 @@ mod tests {
         assert!(!inbox.deliver(IpcMessage::OutboxAck(lazily::OutboxAck {
             through_epoch: 1
         })));
+    }
+}
+
+/// End-to-end push loop through the *real* lazily `SyncDriver`, this crate's
+/// `ReliableSyncSink` carrier, and the liveness projection — the Phase 3C proof
+/// that a liveness push lost while the controller is down is re-sent from the
+/// outbox on reconnect (at-least-once), and the controller's derived open-set
+/// converges. SimWorld over mocks (deterministic doubles, no real socket).
+#[cfg(test)]
+mod push_loop_simworld {
+    use super::liveness::{
+        LivenessOp, LivenessProjection, decode_liveness_frame, encode_liveness_frame,
+    };
+    use super::{EnvelopeTransport, ReliableSyncSink, decode_envelope, reliable_sync_channel};
+    use anyhow::{Result, anyhow};
+    use lazily::{Clock, InMemoryOutbox, IpcMessage, Snapshot, SnapshotProvider, SyncDriver};
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeSet;
+    use std::rc::Rc;
+
+    /// In-memory carrier with a controllable `connected` flag: flipping it off
+    /// makes `send` fail, standing in for a downed controller socket.
+    #[derive(Clone)]
+    struct WireTransport {
+        delivered: Rc<RefCell<Vec<serde_json::Value>>>,
+        connected: Rc<Cell<bool>>,
+    }
+
+    impl EnvelopeTransport for WireTransport {
+        fn send_envelope(&self, env: &serde_json::Value) -> Result<()> {
+            if !self.connected.get() {
+                return Err(anyhow!("SimWorld: controller socket down"));
+            }
+            self.delivered.borrow_mut().push(env.clone());
+            Ok(())
+        }
+    }
+
+    struct FixedClock;
+    impl Clock for FixedClock {
+        fn now_millis(&self) -> u64 {
+            0
+        }
+    }
+
+    // Pure-liveness channel never gaps a Delta, so the provider is never invoked.
+    struct TrivialProvider;
+    impl SnapshotProvider for TrivialProvider {
+        fn snapshot(&self, from_epoch: u64) -> IpcMessage {
+            IpcMessage::Snapshot(Snapshot::new(from_epoch, vec![], vec![], vec![]))
+        }
+    }
+
+    /// Controller receive path: decode each delivered socket envelope → liveness
+    /// frame → fold into the projection.
+    fn fold_delivered(delivered: &[serde_json::Value], proj: &mut LivenessProjection) {
+        for env in delivered {
+            let (_hash, msg) = decode_envelope(env)
+                .expect("delivered a reliable-sync envelope")
+                .expect("envelope decodes");
+            if let Some(ops) = decode_liveness_frame(&msg) {
+                proj.apply_batch(&ops.expect("liveness frame decodes"));
+            }
+        }
+    }
+
+    fn open(doc: &str, pid: u64, tag: &str) -> IpcMessage {
+        encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: doc.into(),
+            pid,
+            tag: tag.into(),
+        }])
+        .expect("encode liveness frame")
+    }
+
+    #[test]
+    fn liveness_survives_disconnect_reconnect_at_least_once() {
+        let delivered = Rc::new(RefCell::new(Vec::new()));
+        let connected = Rc::new(Cell::new(true));
+        let transport = WireTransport {
+            delivered: delivered.clone(),
+            connected: connected.clone(),
+        };
+        let sink = ReliableSyncSink::new(transport, "docwire");
+        // Sender's inbound channel (acks/resync) — empty for this push-only test.
+        let (_inbox, source) = reliable_sync_channel("docwire");
+        let mut driver = SyncDriver::new(
+            sink,
+            source,
+            InMemoryOutbox::default(),
+            FixedClock,
+            TrivialProvider,
+        );
+
+        driver.enqueue(1, open("docA", 100, "t1"));
+        driver.enqueue(2, open("docB", 100, "t2"));
+
+        // Controller down: the first send fails, the frame is retained in the
+        // outbox (append-before-send), and the driver stalls.
+        connected.set(false);
+        driver.tick().expect("tick");
+        assert!(driver.is_stalled(), "a failed send stalls the driver");
+        assert!(
+            delivered.borrow().is_empty(),
+            "nothing reaches a downed controller"
+        );
+
+        // Controller back: replay the unacked outbox suffix, then drain the rest.
+        connected.set(true);
+        driver.on_reconnect();
+        driver.tick().expect("tick");
+
+        let mut proj = LivenessProjection::new();
+        fold_delivered(&delivered.borrow(), &mut proj);
+        let expected: BTreeSet<String> = ["docA", "docB"].map(String::from).into_iter().collect();
+        assert_eq!(
+            proj.open_docs(),
+            expected,
+            "both liveness frames converge after reconnect — the disconnect-lost frame was replayed"
+        );
+    }
+
+    #[test]
+    fn redelivered_frames_are_idempotent() {
+        let delivered = Rc::new(RefCell::new(Vec::new()));
+        let connected = Rc::new(Cell::new(true));
+        let transport = WireTransport {
+            delivered: delivered.clone(),
+            connected,
+        };
+        let sink = ReliableSyncSink::new(transport, "docwire");
+        let (_inbox, source) = reliable_sync_channel("docwire");
+        let mut driver = SyncDriver::new(
+            sink,
+            source,
+            InMemoryOutbox::default(),
+            FixedClock,
+            TrivialProvider,
+        );
+        driver.enqueue(1, open("docA", 100, "t1"));
+        driver.tick().expect("tick");
+
+        let mut proj = LivenessProjection::new();
+        // Fold the same delivery twice (a re-delivered frame) — must be a no-op.
+        fold_delivered(&delivered.borrow(), &mut proj);
+        fold_delivered(&delivered.borrow(), &mut proj);
+        assert!(proj.is_open("docA", 100));
+        assert_eq!(proj.open_docs().len(), 1);
     }
 }

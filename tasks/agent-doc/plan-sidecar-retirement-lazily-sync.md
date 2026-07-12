@@ -300,9 +300,21 @@ lazily `0.29.0`, but the reliable-sync surface (`DurableOutbox`/`ResyncCoordinat
 `WireLwwRegister`/`Delta`/`Snapshot` + the `ResyncRequest`/`OutboxAck` `IpcMessage` variants) ships
 in `0.31.0`. Bumped all 12 lazily-consuming crates 0.29.0 → 0.31.0; 0.29→0.30 (`#lzfamilysync`) and
 0.30→0.31 (reliable sync) are both additive feature releases, so the workspace `cargo check
---workspace` stays green (non-breaking, mirrors the earlier 0.21→0.29 milestone). `SyncDriver` is a
-later lazily HEAD commit (unreleased), needed only for 3C's push-loop wiring — a lazily 0.32 release
-+ re-bump lands with that slice.
+--workspace` stays green (non-breaking, mirrors the earlier 0.21→0.29 milestone).
+
+**lazily 0.32.0 RELEASED + re-bump DONE (this pass).** `SyncDriver` was a later lazily HEAD commit
+(unreleased at 0.31.0); Phase 3C's push loop needs it, so **lazily-rs `v0.32.0` was tagged, pushed,
+and published to crates.io** (additive over 0.31.0; `--all-features` clippy clean, reliable-sync +
+ipc tests green). All 14 agent-doc lazily-consuming crates re-bumped `0.31.0 → 0.32.0` (uniform —
+cargo `^0.31.0` excludes 0.32.0, so a partial bump would split lazily; `cargo check --workspace`
+green). Companion **lazily-spec** landed the first-class `IpcSink`/`IpcSource` **transport-seam
+contract** (protocol.md § SyncDriver: send-one / recv-poll `Ok(None)`=exhausted-or-closed /
+recv-`Err`=reconnect-signal / sink-fail=retain-and-stall) + the **backpressure contract** (host
+policy, not driver mechanism: unbounded enqueue + at-least-once outbox retention by design; bound via
+stall/retained signals + coalescing + a spill-to-disk `DurableOutbox`) + a coverage row (rs ✅ only;
+kt/js lack `SyncDriver`). Deliberately **not** formalized in lazily-formal — a sink/source trait has
+no algebraic content; the invariants are already proven over frame sequences, above the transport.
+(tsift's 5 lazily-consuming crates were also bumped 0.21.6 → 0.32.0, caret, separately.)
 
 **3C store DONE (this pass) — `SqliteOutbox`.** `agent-doc-sqlite::reliable_sync_outbox::SqliteOutbox`
 implements lazily's `DurableOutbox` against SQLite (new `reliable_sync_outbox` +
@@ -336,12 +348,40 @@ push-loop wiring + dual-run cutover remain.
   types + `ResyncCoordinator` in place of the bespoke `WireDelta` fold, keeping the
   `state_subscribe(last_epoch)` pull + SQLite resume (already retry-safe). Mostly a type
   unification; behavior-preserving.
-- **3C — plugin→controller open-set/liveness push on the CrdtSync plane.** Model editor
-  open-set + owner-lease as OR-set/LWW liveness cells; the plugin pushes via `SyncDriver` +
-  `DurableOutbox` (agent-doc plugs its SQLite as the store) so a push that fails while the
-  controller is down is re-sent on reconnect from the frontier. The controller derives
-  `editor_open_docs`/`editor_attach`/the `#6b5h` lease decision from the synced cells instead of
-  scanning `.agent-doc/live-buffer/` + `plugin-owner/*.json`.
+- **3C — plugin→controller open-set/liveness push on the CrdtSync plane — RECEIVER CORE + PUSH LOOP
+  DONE (this pass), FFI/listener/plugin-emission REMAINING.** Landed in `agent-doc-reliable-sync-io`:
+  - **`liveness::LivenessProjection`** — the controller's derived-authority engine that *replaces the
+    sidecar scan*. Folds a `LivenessOp` (`Open{doc,pid,tag}` / `Close{doc,pid,observed_tags}` /
+    `Alive{pid,value,stamp}`) into lazily's proven convergent cells (`OrSet` open-set membership,
+    add-wins; `WireLwwRegister<bool>` per-pid `alive`, highest-stamp-wins) and derives `is_open`,
+    `pid_alive` (absent ⇒ presumed alive until a death signal), `open_pids`, `open_docs` (the `#lbreap`
+    live-buffer-scan replacement), and `live_docs` (the derived aggregate with the whole-editor-death
+    cascade for free). Keys namespaced by `document_hash` (per-doc isolation). Uses lazily's types, not
+    a re-implementation, so it inherits the `ReliableSync.crdt_liveness_convergence_under_retry` /
+    `orset_add_wins_over_stale_remove` / `joinReg_*` proofs. **9 tests pinned to the
+    `conformance/reliable-sync/liveness_orset_lww.json` scenarios**: add-wins-over-stale-remove,
+    order-independence + redelivery-noop, LWW highest-stamp, whole-editor-death cascade, shared-doc
+    stays-live-via-second-pid, plus frame round-trip / foreign-frame rejection / malformed-frame error /
+    decoded-frame fold.
+  - **CrdtSync carriage** — `encode_liveness_frame`/`decode_liveness_frame` pack a `LivenessOp` batch
+    into one `IpcMessage::CrdtSync` op as inline bytes (spec § `#lzsync-liveness`: liveness rides the
+    CrdtSync plane), tagged with a sentinel node so a foreign graph `CrdtSync` is not mis-folded; so the
+    batch flows through the same `SyncDriver` + `DurableOutbox` as every other frame (the driver hands an
+    applied `CrdtSync` straight to the host).
+  - **Full push-loop SimWorld** — a `push_loop_simworld` test wires the **real** lazily `SyncDriver`
+    over this crate's `ReliableSyncSink` carrier + `InMemoryOutbox`, and proves the Phase-3C guarantee
+    end to end: a liveness push sent while the controller socket is **down** is retained in the outbox
+    (append-before-send), then **replayed on reconnect** so the controller's derived `open_docs`
+    converges (at-least-once) — and a re-delivered frame is idempotent. SimWorld over mocks (scripted
+    connected-flag transport, no real socket).
+  - **`dual_run_enabled()`** (env `AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`, **default OFF**) — the flag the
+    controller checks so the plane runs in shadow while the sidecars stay authoritative.
+  - **REMAINING:** wire the controller `start_listener` to route inbound `reliable_sync` envelopes to
+    per-doc `ReliableSyncInbox`es; host per-doc `SyncDriver`s in the controller with the `SqliteOutbox`
+    store; the editor-plugin side that *emits* liveness ops (FFI enqueue + JNA/JS calls) — the S4b OS
+    exit watcher feeds the `Alive{value:false}` op; and derive `editor_open_docs`/`editor_attach`/the
+    `#6b5h` lease from `LivenessProjection`. These cross the live editor↔controller boundary and are the
+    `[operator-verify]` slice.
 - **Migration & cutover:** dual-run (sidecar write + sync push) → assert the synced open-set/lease
   matches the sidecar-derived one across a SimWorld of open/close/crash/recycle sequences →
   switch the hot path to read the synced cells → stop reading the sidecars → delete the sidecar

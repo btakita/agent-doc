@@ -70,33 +70,57 @@ class LivenessGraph {
 export function registerReliableSyncLiveness(context: vscode.ExtensionContext): void {
     const graph = new LivenessGraph(process.pid);
 
-    const report = (document: vscode.TextDocument, buildOps: (hash: string) => string | null) => {
-        const root = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath
+    const workspaceRootFor = (document: vscode.TextDocument): string | undefined =>
+        vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath
             ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+    const push = (root: string, documentHash: string, opsJson: string) => {
+        if (reliableSyncLivenessEnqueue(root, documentHash, opsJson) === 0) {
+            reliableSyncLivenessFlush(root, documentHash);
+        }
+    };
+
+    const reportOpen = (document: vscode.TextDocument) => {
+        const root = workspaceRootFor(document);
         if (!root) return;
         const filePath = document.uri.fsPath;
         // Off the event loop's critical path — the flush may do a controller RPC.
         setImmediate(() => {
             // Scope liveness to agent-doc session documents only: a plain source
             // file opened as a tab must not enter the plane (it would over-count the
-            // open-set vs the sidecar `open_agent_docs` ground truth).
+            // open-set vs the sidecar `open_agent_docs` ground truth). This disk read
+            // is appropriate at open time — it is the moment we decide whether to
+            // start tracking a possibly-random `.md` tab at all.
             if (!isSessionDocument(filePath, root)) return;
             const documentHash = documentIdForPath(filePath, root);
             if (!documentHash) return;
-            const opsJson = buildOps(documentHash);
+            push(root, documentHash, graph.open(documentHash));
+        });
+    };
+
+    const reportClose = (document: vscode.TextDocument) => {
+        const root = workspaceRootFor(document);
+        if (!root) return;
+        const filePath = document.uri.fsPath;
+        setImmediate(() => {
+            const documentHash = documentIdForPath(filePath, root);
+            if (!documentHash) return;
+            // `#lzsync-close-no-disk-regate`: do not re-check `isSessionDocument` here
+            // (see the JB `ReliableSyncLivenessListener` for the rationale) — a file
+            // can legitimately become unreadable at close time even though this
+            // editor genuinely opened it as a tracked session document earlier, and
+            // re-gating on a disk read would silently drop the compensating `Close`
+            // op, leaving the plane's OrSet permanently "present". `graph.close()` is
+            // itself the correct gate: it returns null when this editor never opened
+            // the doc.
+            const opsJson = graph.close(documentHash);
             if (!opsJson) return;
-            if (reliableSyncLivenessEnqueue(root, documentHash, opsJson) === 0) {
-                reliableSyncLivenessFlush(root, documentHash);
-            }
+            push(root, documentHash, opsJson);
         });
     };
 
     context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument((document) => {
-            report(document, (hash) => graph.open(hash));
-        }),
-        vscode.workspace.onDidCloseTextDocument((document) => {
-            report(document, (hash) => graph.close(hash));
-        }),
+        vscode.workspace.onDidOpenTextDocument(reportOpen),
+        vscode.workspace.onDidCloseTextDocument(reportClose),
     );
 }

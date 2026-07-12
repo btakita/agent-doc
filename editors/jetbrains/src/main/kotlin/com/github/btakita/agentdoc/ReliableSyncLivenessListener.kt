@@ -29,31 +29,44 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
 
     override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
         val root = project.basePath ?: return
-        reportOnPool(root, file.path) { documentHash -> graph.open(documentHash) }
-    }
-
-    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-        val root = project.basePath ?: return
-        reportOnPool(root, file.path) { documentHash -> graph.close(documentHash) }
-    }
-
-    /**
-     * Resolve the canonical `document_hash`, derive the op batch from the reactive
-     * graph, and push it — all off the EDT (the flush may do a controller RPC).
-     * [buildOps] returns `null` to skip (e.g. a close of a never-opened file).
-     */
-    private fun reportOnPool(projectRoot: String, filePath: String, buildOps: (String) -> String?) {
+        val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
             // Scope liveness to agent-doc session documents only: a plain source file
             // opened as a tab must not enter the plane (it would over-count the
-            // open-set vs the sidecar `open_agent_docs` ground truth).
+            // open-set vs the sidecar `open_agent_docs` ground truth). This disk read
+            // is appropriate at open time — it is the moment we decide whether to
+            // start tracking a possibly-random `.md` tab at all.
             if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
-            val opsJson = buildOps(documentHash) ?: return@executeOnPooledThread
-            if (lib.agent_doc_reliable_sync_liveness_enqueue(projectRoot, documentHash, opsJson) == 0) {
-                lib.agent_doc_reliable_sync_liveness_flush(projectRoot, documentHash)
-            }
+            push(lib, root, documentHash, graph.open(documentHash))
+        }
+    }
+
+    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+        val root = project.basePath ?: return
+        val filePath = file.path
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val lib = AgentDocLib.get() ?: return@executeOnPooledThread
+            val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
+            // `#lzsync-close-no-disk-regate`: do NOT re-check `agent_doc_is_session_document`
+            // here — it reads the file from disk, and a file can legitimately become
+            // unreadable at close time (deleted, renamed, mid-git-checkout, or a
+            // project tearing down) even though this editor genuinely opened it as a
+            // tracked session document earlier. Re-gating on a disk read would
+            // silently drop the compensating `Close` op, leaving the plane's OrSet
+            // permanently "present" with no reaper (unlike the sidecar's `#lbreap`
+            // scan). [ReliableSyncLivenessGraph.close] is itself the correct gate: it
+            // returns null when this editor never opened the doc, which is exactly
+            // the case a disk-read gate was trying to approximate.
+            val opsJson = graph.close(documentHash) ?: return@executeOnPooledThread
+            push(lib, root, documentHash, opsJson)
+        }
+    }
+
+    private fun push(lib: AgentDocLib, projectRoot: String, documentHash: String, opsJson: String) {
+        if (lib.agent_doc_reliable_sync_liveness_enqueue(projectRoot, documentHash, opsJson) == 0) {
+            lib.agent_doc_reliable_sync_liveness_flush(projectRoot, documentHash)
         }
     }
 

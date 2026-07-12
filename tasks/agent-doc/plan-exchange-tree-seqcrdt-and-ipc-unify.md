@@ -76,6 +76,23 @@ NodeId = stable id (content-derived + peer-unique), survives re-parse
 
 ## Phase 3 — Replace yrs with lazily seqcrdt across the system
 
+**Partial landed 2026-07-12 (`25f620be`, structure step):** `yrs` is already fully
+gone (the whole-doc CRDT in `agent-doc-merge/src/crdt.rs` runs on `lazily::TextCrdt`).
+New `agent-doc-merge/src/exchange_seqcrdt.rs` lands the **structural** substrate:
+`ExchangeCrdt` wraps `lazily::SeqCrdt<NodeId, ExchangeNode>` keyed by the body-aware
+`node_id` (Phase 3.1) — every response/prompt is a distinct CRDT element (anti-bleed
+`#qcellmerge1`), forked replicas that each append a turn both survive `SeqCrdt::merge`,
+duplicate identities collapse on construction. `merge_exchange_crdt(base, ours, theirs)`
+is the operator-authoritative merge over that store and additionally uses the `base`
+arg (the one `merge_exchange_nodes` reserved) for an **operator-deletion guard** — a
+turn in base+ours but absent from theirs is not resurrected. 12 tests; full merge suite
+244 green; not yet wired into the hot path (`merge_exchange_inner` unchanged).
+**Remaining Phase 3:** (a) route `merge_by_component`(`exchange`) through the tree
+(the reviewed hot-path swap); (b) **persisted `.seqcrdt` lineage** so node bodies get a
+sound per-node `TextCrdt` char-merge instead of theirs-wins whole-text (independent
+string-rebuilds cannot char-merge a shared node); (c) the `.yrs`→`.seqcrdt` state-file
+step below.
+
 Scope = the 3 yrs files + their callers. Order:
 
 1. `agent-doc-markdown-ast/src/crdt.rs` — swap the yrs document model for

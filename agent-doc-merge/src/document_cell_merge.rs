@@ -987,8 +987,19 @@ fn merge_exchange_inner(
 
     // Heading-prose regime. Preserve theirs' inner verbatim, then append agent-new
     // heading-blocks before a trailing boundary marker (if present), else at end.
-    let theirs_keys: std::collections::HashSet<&str> =
-        theirs_blocks.iter().map(|b| b.key.as_str()).collect();
+    //
+    // `#qcellmerge-response-body-id`: identity is heading **and** body, not heading
+    // alone. A fresh agent response whose heading coincides with a prior turn (a
+    // same-topic / same-preset follow-up drained from the queue) has a different
+    // body, so it is a genuinely new turn that must be appended — keying only on
+    // the heading made it a false duplicate and the merge dropped it ("a cell-merge
+    // chose the existing content"). Byte-identical re-appends still match (same
+    // heading + body) and are still filtered, so idempotent redelivery never
+    // duplicates a turn.
+    let theirs_ids: std::collections::HashSet<String> = theirs_blocks
+        .iter()
+        .map(|b| agent_doc_markdown_ast::exchange_tree::response_identity_digest(&b.lines))
+        .collect();
 
     // Determine the insertion point: theirs' inner is `leading` + each block's
     // lines. A trailing `<!-- agent:boundary:… -->` marker line lives at the very
@@ -997,7 +1008,10 @@ fn merge_exchange_inner(
     // the boundary marker sits relative to the appended blocks.
     let agent_new: Vec<&HeadingBlock> = ours_blocks
         .iter()
-        .filter(|b| !theirs_keys.contains(b.key.as_str()))
+        .filter(|b| {
+            !theirs_ids
+                .contains(&agent_doc_markdown_ast::exchange_tree::response_identity_digest(&b.lines))
+        })
         .collect();
 
     // Flatten theirs' inner back to its line vector, then split off a trailing
@@ -2058,6 +2072,55 @@ Answer to A.
             m.merged_doc
         );
         assert!(m.merged_doc.contains("Answer to A."));
+    }
+
+    #[test]
+    fn exchange_keeps_fresh_same_heading_response_with_distinct_body() {
+        // `#qcellmerge-response-body-id`: the finalize shape that dropped a
+        // response. `base`/`theirs` (the committed doc + the operator's live
+        // buffer) carry a prior `### Re: #preset — opus-4-8` turn. `ours` (agent)
+        // appends a FRESH response that reuses the same heading — a same-preset /
+        // same-topic follow-up drained from the queue — but with a different body.
+        // Heading-only identity treated the fresh turn as a duplicate of the prior
+        // one and dropped it ("a cell-merge chose the existing content"); body-aware
+        // identity keeps it while still collapsing true byte-identical duplicates.
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        // SAFETY: held under the shared env lock; absent var ⇒ default ON.
+        unsafe {
+            std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
+        }
+        let base = "\
+<!-- agent:exchange -->
+### Re: #preset — opus-4-8
+
+Prior answer for the preset run.
+<!-- /agent:exchange -->
+";
+        let theirs = base;
+        let ours = "\
+<!-- agent:exchange -->
+### Re: #preset — opus-4-8
+
+Prior answer for the preset run.
+
+### Re: #preset — opus-4-8
+
+Fresh answer for the next same-preset queue item.
+<!-- /agent:exchange -->
+";
+        let m = document_cell_merge(base, ours, theirs);
+        assert!(
+            m.merged_doc
+                .contains("Fresh answer for the next same-preset queue item."),
+            "the fresh same-heading response body must survive the merge:\n{}",
+            m.merged_doc
+        );
+        assert_eq!(
+            m.merged_doc.matches("### Re: #preset").count(),
+            2,
+            "both the prior and the fresh same-heading turn are kept:\n{}",
+            m.merged_doc
+        );
     }
 
     #[test]

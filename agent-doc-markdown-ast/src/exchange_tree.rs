@@ -51,10 +51,23 @@ impl ExchangeNode {
 
     /// Stable, content-derived identity that survives re-parse (Phase 3 maps it
     /// onto a `lazily::SeqCrdt` element id). Responses key off the normalized
-    /// heading; prompts off their trimmed body text.
+    /// heading **and body** (see [`response_identity_digest`]); prompts off their
+    /// trimmed body text.
+    ///
+    /// `#qcellmerge-response-body-id`: a response identity is heading + body, not
+    /// heading alone. Two response turns that share a heading (a same-topic /
+    /// same-preset follow-up drained from the queue) but carry different bodies are
+    /// **distinct** turns and must never collide — heading-only identity made a
+    /// fresh response a false duplicate of a prior committed turn, so the cell
+    /// merge dropped it ("a cell-merge chose the existing content"). Byte-identical
+    /// mirror-ordered duplicates (a poisoned buffer from a failed 3-way merge)
+    /// still share an identity and still collapse, because their heading **and**
+    /// body match.
     pub fn node_id(&self) -> String {
         match &self.kind {
-            ExchangeNodeKind::Response { key } => format!("r:{}", short_content_hash(key)),
+            ExchangeNodeKind::Response { .. } => {
+                format!("r:{}", short_content_hash(&response_identity_digest(&self.lines)))
+            }
             ExchangeNodeKind::Prompt => {
                 let body = self
                     .lines
@@ -91,6 +104,43 @@ fn normalize_heading_key(trimmed: &str) -> String {
         t = stripped.trim_end();
     }
     t.to_string()
+}
+
+/// Is `trimmed` a transient `<!-- agent:boundary:… -->` marker line? Boundary
+/// markers carry per-cycle ids and ride at the tail of the exchange body, so they
+/// must never contribute to a turn's identity.
+fn is_transient_boundary(trimmed: &str) -> bool {
+    trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
+}
+
+/// Normalize a response turn's verbatim lines into a transient-invariant identity
+/// digest: heading + body, ignoring the working-tree-only ` (HEAD)` annotation, a
+/// `~~…~~` strike wrapper, per-cycle boundary markers, and trailing whitespace /
+/// blank lines. See [`ExchangeNode::node_id`] for why the body — not the heading
+/// alone — is part of the identity (`#qcellmerge-response-body-id`).
+///
+/// The first `### ` heading normalizes through [`normalize_heading_key`]; every
+/// other line keeps its leading whitespace (code / indentation is significant) but
+/// drops trailing whitespace. Boundary markers and trailing blank lines are
+/// removed so two renderings of the same turn that differ only by transient
+/// framing hash identically.
+pub fn response_identity_digest(lines: &[String]) -> String {
+    let mut norm: Vec<String> = Vec::new();
+    for line in lines {
+        let raw = line.trim_end_matches(['\n', '\r']);
+        let trimmed = raw.trim();
+        if is_h3_heading(trimmed) {
+            norm.push(normalize_heading_key(trimmed));
+        } else if is_transient_boundary(trimmed) {
+            continue;
+        } else {
+            norm.push(raw.trim_end().to_string());
+        }
+    }
+    while norm.last().is_some_and(|l| l.trim().is_empty()) {
+        norm.pop();
+    }
+    norm.join("\n")
 }
 
 /// Split a string into lines that each retain their trailing `\n` (unlike

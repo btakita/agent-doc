@@ -163,14 +163,34 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_turn_same_key_is_not_reappended() {
+    fn byte_identical_agent_turn_is_not_reappended() {
         let base = "";
         let theirs = "### Re: A — opus\n\nAnswer A.\n";
-        let ours = "### Re: A — opus\n\nAnswer A (agent copy).\n";
+        // Agent re-delivers the byte-identical turn (idempotent redelivery).
+        let ours = "### Re: A — opus\n\nAnswer A.\n";
         let merged = merge_exchange_nodes(base, ours, theirs);
-        // Only one A heading — the agent's same-key turn is not duplicated, and
-        // the operator's body is kept (no cross-node body overwrite).
+        // Same heading + same body ⇒ same identity ⇒ not duplicated.
         assert_eq!(merged.matches("### Re: A").count(), 1);
+        assert!(merged.contains("Answer A."));
+    }
+
+    #[test]
+    fn same_heading_distinct_body_agent_turn_is_preserved() {
+        // `#qcellmerge-response-body-id`: a fresh agent response whose heading
+        // coincides with a prior turn (same-topic / same-preset follow-up) but
+        // carries a *different* body is a genuinely new turn. Heading-only identity
+        // treated it as a duplicate and the merge dropped the fresh body ("a
+        // cell-merge chose the existing content"). Body-aware identity keeps it.
+        let base = "### Re: A — opus\n\nAnswer A.\n";
+        let theirs = "### Re: A — opus\n\nAnswer A.\n";
+        let ours = "### Re: A — opus\n\nAnswer A.\n\n### Re: A — opus\n\nA totally new answer for the follow-up.\n";
+        let merged = merge_exchange_nodes(base, ours, theirs);
+        assert_eq!(
+            merged.matches("### Re: A").count(),
+            2,
+            "the fresh same-heading turn must be appended, not dropped"
+        );
+        assert!(merged.contains("A totally new answer for the follow-up."));
         assert!(merged.contains("Answer A."));
     }
 

@@ -83,6 +83,20 @@ source-of-truth document, including editor-buffer changes, pluginless disk
 saves, backlog mirror inputs, priority markers, auto-DAG dependencies, and
 exchange body additions/edits.
 
+Exchange response-turn identity is content-derived from the response heading
+**and** body, never the heading alone (`#qcellmerge-response-body-id`). Two
+`### Re:` turns that share a heading — a same-topic or same-preset follow-up
+drained from the queue — but carry different bodies are **distinct** turns and
+must never collide: the cell merge must append the fresh turn, not treat it as a
+duplicate of the prior committed turn and drop it ("a cell-merge chose the
+existing content"). Byte-identical mirror-ordered duplicates left by a failed
+3-way merge still share an identity (same heading and body, modulo the transient
+` (HEAD)` annotation, a `~~…~~` strike wrapper, per-cycle boundary markers, and
+trailing whitespace) and still collapse to one occurrence. This identity is owned
+by `agent_doc_markdown_ast::exchange_tree::response_identity_digest` and is used
+consistently by the append filter and the convergence dedup in
+`agent-doc-merge`.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,

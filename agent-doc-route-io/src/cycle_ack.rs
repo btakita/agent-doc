@@ -583,20 +583,25 @@ mod tests {
         .unwrap();
         let baseline = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
 
-        let doc_for_thread = doc.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            agent_doc_cycle_state_io::start_preflight(&doc_for_thread, None, Some("# Session\n"))
-                .unwrap();
-            agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-                &TEST_PIPELINE_FRONTMATTER_EFFECTS,
-                &doc_for_thread,
-                "commit_success",
-                Some("# Session\n"),
-                Some("# Session\n"),
-            )
-            .unwrap();
-        });
+        // Write the fresh cycle (distinct cycle_id from the prior committed
+        // baseline) all the way to `Committed` *before* the wait, then assert the
+        // wait observes the terminal committed state. Doing this synchronously is
+        // deterministic: the earlier spawn-thread + `sleep` variant was flaky under
+        // CI load because `wait_for_start_ack` returns on the *first* advancing
+        // cycle change, and a 200ms poll could land between the new cycle's
+        // `start_preflight` and `mark_committed` — legitimately returning the
+        // intermediate `PreflightStarted` (a new cycle_id already advances the ack)
+        // and failing `phase == Committed`. The "change arrives during the wait"
+        // path is covered by `wait_for_start_ack_detects_new_preflight_cycle`.
+        agent_doc_cycle_state_io::start_preflight(&doc, None, Some("# Session\n")).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some("# Session\n"),
+            Some("# Session\n"),
+        )
+        .unwrap();
 
         let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_secs(1))
             .expect("new committed cycle should count as startup acknowledgment");

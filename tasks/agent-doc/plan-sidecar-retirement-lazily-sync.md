@@ -566,13 +566,19 @@ start). What is left needs a human watching a real editor and the operator lifti
       (`stateMirrors: Map<string, GraphView>`, summary/reactive/seed) and `extension.ts` (turn-status views,
       `agentDocTurnProjectionFromView`, dropped the now-unneeded `initStateMirror` preload) repointed. Tests
       rewritten to native wire; all 13 pass; `tsc --noEmit` clean; `vsce package` inlines the native fold.
-   4. **Retire the old mirror — PARTIAL / gated follow-up.** JB plugin-local `StateGraphMirror.kt` deleted.
-      The **lazily-kt/js library** `StateGraphMirror` + `WireDelta`/`WireSnapshot` types are NOT yet removed:
-      "once unreferenced" is not satisfied — lazily's own `StateGraphMirrorTest` / `AgentDocStateConformanceTest`
-      and `StateProjectionClient.kt` (kt) plus `state-graph-mirror.js`/`.d.ts` (js) still reference them. That
-      lazily-internal cleanup (delete the types + their tests, port `StateProjectionClient`) is a separate
-      low-risk follow-up, decoupled from this wire flip. Keep the state-wire `WireDelta` internal producer form
-      that `build_delta` emits → the bridge converts it (porting `build_delta` to native is also a follow-up).
+   4. **Retire the old mirror — DONE (2026-07-12).** JB plugin-local `StateGraphMirror.kt` deleted (in the flip).
+      The **lazily-kt/js library** welded types are now removed too (operator-authorized): lazily-kt f669eb7
+      deleted `StateGraphMirror.kt` (StateGraphMirror + `WireDelta`/`WireSnapshot`/`WireDeltaOp`/`WireNodeSnapshot`/
+      `WireEdgeSnapshot`/`WireSubscribe` + `MirrorProjectionSummary` + `MirrorNode`) and its dead consumer
+      `StateProjectionClient.kt` (+ `decodeSubscribe`) + their two tests; lazily-js c2698ca deleted
+      `state-graph-mirror.{js,d.ts}` + test + the `./state-graph-mirror` export. Kept the native
+      `AgentDocStateConformanceTest.kt` (IpcMessage/GraphView replay of the agent-doc fixtures) and js
+      `state-projection.js` (FFI cold-projection consumer). Both libraries green (kt `make check`; js build +
+      343 tests). Superproject gitlinks left unbumped (coordinated with the pending ReactiveMap-migration bump).
+      **Residual follow-ups:** lazily-kt `LazilyFFI.kt` is now orphaned (dead `agent_doc_*` FFI interface —
+      later removal candidate); kt/js cold-consumer asymmetry (js keeps `state-projection.js`, kt dropped its
+      dead client). Keep the Rust state-wire `WireDelta` internal producer form that `build_delta` emits → the
+      bridge converts it (porting `build_delta` to native is still a follow-up).
    5. **Rebuild both plugins — DONE.** JB `make bump-plugin` → v0.2.237 (signed+unsigned zips). VSCode
       → v0.2.45 vsix. Rust `make check` green (7468 tests). `install-full` run.
    6. **`[operator-verify]`:** open a doc → editor sync + inspector (route/transport/proof) still render;

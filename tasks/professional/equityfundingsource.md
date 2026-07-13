@@ -40,8 +40,9 @@ Compacted content:
 <!-- agent:boundary:473799a6 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
-- :round_pushpin: [#sy71]
+<!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#e44f]
+- do [#hmw9]
 <!-- /agent:queue -->
 
 ## Notes

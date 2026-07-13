@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-process-owner-io"
-version = "0.34.88"
+version = "0.34.89"
 edition = "2024"
 description = "Process-tree owner inspection adapters for agent-doc"
 license = "MIT"
@@ -10,4 +10,4 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_process_owner_io"
 
 [dependencies]
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.88" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.89" }

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.89
+
+- **Compact Exchange ignores quarantined stale live-buffer sidecars (`#compact-stale-sidecar-quarantine`).** Files already renamed to `{stem}.stale-*` were re-enumerated as current editor buffers, so an old providerless snapshot could make compaction fail with `live editor buffer unknown lacks required capability operator_text_authority_v1`. Live-buffer enumeration now excludes quarantine files while preserving fail-closed handling for active legacy and named editor snapshots. Coverage spans debounce enumeration and the shared compact/write converger.
+
 ## 0.34.88
 
 - **Reliable-sync liveness now survives controller recycle after the sender has pruned acknowledged frames (`#docop-plane` P4).** The controller commits each receive cursor and liveness batch to SQLite before returning its ACK, restores that journal before exposing a recycled controller socket, and lets cold authority readers fold both the committed receiver state and any unacknowledged sender suffix. Receive cursors use an atomic max UPSERT, so an out-of-order or stale delivery cannot regress the ACK frontier. The controller-originated process-exit fact is journaled before it enters the in-memory projection as well.

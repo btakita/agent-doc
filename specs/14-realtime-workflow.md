@@ -35,6 +35,10 @@ If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
 write as an automatic recovery behind the editor. The legacy live-buffer sidecar
 is compatibility/diagnostic state only; it must not decide document authority.
+Sidecars renamed to `{stem}.stale-*` are quarantined diagnostics and must not
+re-enter current live-buffer enumeration or editor-capability gating.
+Reliable-sync liveness remains the authority proof for deciding whether disk
+convergence must fail closed behind an editor.
 If a hot-path read observes an editor owner but no usable CRDT relay model, the
 binary must first attempt a bounded document-model ensure through read-only
 editor publish/re-registration before returning an error. A failed ensure is a

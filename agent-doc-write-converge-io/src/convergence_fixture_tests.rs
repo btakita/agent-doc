@@ -290,6 +290,50 @@ mod core_tests {
             "no-listener compact must not advertise disk fallback:\n{log}"
         );
     }
+
+    #[test]
+    fn try_compact_editor_converge_ignores_quarantined_stale_live_buffer() {
+        // Quarantined sidecars remain on disk for diagnostics but must not re-enter
+        // live-buffer enumeration and block compaction with `editor_id=unknown`.
+        let dir = TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let current = agent_doc_test_support::drift_baseline();
+        let compacted = agent_doc_test_support::drift_content_ours();
+        fs::write(&doc, &current).unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content(&doc.to_string_lossy(), &current)
+            .unwrap();
+        let sidecar = fs::read_dir(agent_doc_dir.join("live-buffer"))
+            .unwrap()
+            .next()
+            .expect("live-buffer sidecar")
+            .unwrap()
+            .path();
+        let stale_name = format!(
+            "{}.stale-test",
+            sidecar.file_name().unwrap().to_string_lossy()
+        );
+        fs::rename(&sidecar, sidecar.with_file_name(stale_name)).unwrap();
+
+        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
+        assert!(converged, "quarantined sidecar must not block compaction");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), compacted);
+
+        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_writeback")
+                && log.contains("transport=disk_detached")
+                && log.contains("reason=no_listener"),
+            "quarantined sidecar should resolve through disk authority:\n{log}"
+        );
+        assert!(
+            !log.contains("reason=editor_capability_missing") && !log.contains("editor_id=unknown"),
+            "quarantined sidecar must not trigger the editor capability gate:\n{log}"
+        );
+    }
+
     #[test]
     fn try_compact_editor_converge_converges_via_editor_ipc_with_listener() {
         // `#jbcompactcrdt`/`#w42v`: with a live JB IPC listener, compaction must

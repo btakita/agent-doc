@@ -811,12 +811,13 @@ pub fn live_buffer_snapshots(file: &str) -> Vec<LiveBufferSnapshot> {
         return snapshots;
     };
     let prefix = format!("{stem}.");
+    let stale_prefix = format!("{stem}.stale-");
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.starts_with(&prefix) {
+        if !name.starts_with(&prefix) || name.starts_with(&stale_prefix) {
             continue;
         }
         if let Some(snapshot) = read_live_buffer_snapshot(file, &path) {
@@ -2401,6 +2402,22 @@ mod tests {
             .expect("old matching live editor sidecar still lacks safe delivery proof");
         assert_eq!(snap.editor_id.as_deref(), Some("jetbrains-old"));
         assert!(!snap.has_capability(OPERATOR_TEXT_AUTHORITY_CAPABILITY));
+    }
+
+    #[test]
+    fn quarantined_stale_live_buffer_is_not_enumerated_as_current() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc").join("live-buffer")).unwrap();
+        let doc = tmp.path().join("quarantined-stale.md");
+        std::fs::write(&doc, "saved").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        record_live_buffer_digest_content(&doc_str, "saved").unwrap();
+        let (dir, stem) = live_buffer_snapshot_dir_and_stem(&doc_str);
+        std::fs::rename(dir.join(&stem), dir.join(format!("{stem}.stale-test"))).unwrap();
+
+        assert!(live_buffer_snapshots(&doc_str).is_empty());
+        assert!(live_buffer_delivery_missing_operator_text_authority(&doc_str, "saved").is_none());
     }
 
     #[test]

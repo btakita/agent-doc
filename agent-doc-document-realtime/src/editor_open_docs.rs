@@ -29,7 +29,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellFamily, ThreadSafeContext};
+use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 
 /// Per-document open state held in the reactive family.
 ///
@@ -61,7 +61,7 @@ pub struct EditorOpenDocs {
     ctx: ThreadSafeContext,
     /// `path -> DocOpenState`. Deferral-not-dealloc: a closed document's key stays
     /// present-but-closed (bounded per session), never counted as open.
-    docs: ThreadSafeCellFamily<String, DocOpenState>,
+    docs: ThreadSafeCellMap<String, DocOpenState>,
     /// Bumped when a brand-new key is materialized so the derived counts observe it
     /// (a not-yet-observed cell is not yet a dependency; the epoch is).
     epoch: CellHandle<u64>,
@@ -76,11 +76,7 @@ impl EditorOpenDocs {
     pub fn new() -> Self {
         let ctx = ThreadSafeContext::new();
         let epoch = ctx.cell(0u64);
-        let docs: ThreadSafeCellFamily<String, DocOpenState> = ThreadSafeCellFamily::new(
-            &ctx,
-            std::iter::empty::<String>(),
-            |_| DocOpenState::CLOSED_UNKNOWN,
-        );
+        let docs: ThreadSafeCellMap<String, DocOpenState> = ThreadSafeCellMap::new(&ctx);
         let open_count = {
             let docs = docs.clone();
             ctx.computed(move |ctx| {
@@ -89,7 +85,11 @@ impl EditorOpenDocs {
                 let _ = ctx.get_cell(&epoch);
                 docs.present_keys()
                     .into_iter()
-                    .filter(|key| docs.observe(ctx, key.clone()).open)
+                .filter(|key| {
+                    docs.observe(ctx, key)
+                        .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                        .open
+                })
                     .count()
             })
         };
@@ -100,7 +100,9 @@ impl EditorOpenDocs {
                 docs.present_keys()
                     .into_iter()
                     .filter(|key| {
-                        let state = docs.observe(ctx, key.clone());
+                    let state = docs
+                        .observe(ctx, key)
+                        .unwrap_or(DocOpenState::CLOSED_UNKNOWN);
                         state.open && state.is_agent_doc
                     })
                     .count()
@@ -119,8 +121,7 @@ impl EditorOpenDocs {
     /// lock across the `ctx` write (the family releases its lock before touching
     /// `ctx`), so there is no lock-order cycle with any outer registry lock.
     fn set_state(&self, path: &str, state: DocOpenState) {
-        let cell = self.docs.get(&self.ctx, path.to_string());
-        self.ctx.set_cell(&cell, state);
+        self.docs.set(&self.ctx, path.to_string(), state);
     }
 
     fn bump_epoch(&self) {
@@ -152,7 +153,11 @@ impl EditorOpenDocs {
     pub fn mark_open_with(&self, path: &str, classify: impl FnOnce() -> bool) {
         let key = path.to_string();
         if self.docs.is_present(&key) {
-            let is_agent_doc = self.docs.observe(&self.ctx, key).is_agent_doc;
+            let is_agent_doc = self
+                .docs
+                .observe(&self.ctx, &key)
+                .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                .is_agent_doc;
             self.set_state(
                 path,
                 DocOpenState {
@@ -182,7 +187,10 @@ impl EditorOpenDocs {
         let is_agent_doc = if newly_present {
             false
         } else {
-            self.docs.observe(&self.ctx, key).is_agent_doc
+            self.docs
+                .observe(&self.ctx, &key)
+                .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                .is_agent_doc
         };
         self.set_state(
             path,
@@ -204,7 +212,13 @@ impl EditorOpenDocs {
         let open_paths: HashSet<&str> = open.iter().map(|(path, _)| path.as_str()).collect();
         for key in self.docs.present_keys() {
             let still_open = open_paths.contains(key.as_str());
-            if !still_open && self.docs.observe(&self.ctx, key.clone()).open {
+            if !still_open
+                && self
+                    .docs
+                    .observe(&self.ctx, &key)
+                    .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                    .open
+            {
                 self.mark_closed(&key);
             }
         }
@@ -217,7 +231,12 @@ impl EditorOpenDocs {
     /// materialize an entry for a never-seen path.
     pub fn is_open(&self, path: &str) -> bool {
         let key = path.to_string();
-        self.docs.is_present(&key) && self.docs.observe(&self.ctx, key).open
+        self.docs.is_present(&key)
+            && self
+                .docs
+                .observe(&self.ctx, &key)
+                .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                .open
     }
 
     /// Whether `path` has ever been recorded (open OR closed) in this registry. Lets a
@@ -247,7 +266,12 @@ impl EditorOpenDocs {
         self.docs
             .present_keys()
             .into_iter()
-            .filter(|key| self.docs.observe(&self.ctx, key.clone()).open)
+            .filter(|key| {
+                self.docs
+                    .observe(&self.ctx, key)
+                    .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                    .open
+            })
             .collect()
     }
 
@@ -257,7 +281,10 @@ impl EditorOpenDocs {
             .present_keys()
             .into_iter()
             .filter(|key| {
-                let state = self.docs.observe(&self.ctx, key.clone());
+                let state = self
+                    .docs
+                    .observe(&self.ctx, key)
+                    .unwrap_or(DocOpenState::CLOSED_UNKNOWN);
                 state.open && state.is_agent_doc
             })
             .collect()

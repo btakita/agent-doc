@@ -32,6 +32,7 @@
 //! isolation invariant (a stale overlay for doc B cannot flip doc A's authority)
 //! at the envelope layer, before the frame is ever decoded.
 
+pub mod document_op;
 pub mod liveness;
 pub mod plane;
 pub mod push;

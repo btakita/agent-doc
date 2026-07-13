@@ -176,6 +176,13 @@ function resetBindings(): void {
     _plugin_owner_try_acquire = null;
     _plugin_owner_release = null;
     _resolve_project_path = null;
+    _document_id_for_path = null;
+    _is_session_document = null;
+    _reliable_sync_liveness_enqueue = null;
+    _reliable_sync_liveness_flush = null;
+    _reliable_sync_document_op_push = null;
+    _reliable_sync_text_adopt_push = null;
+    _reliable_sync_document_op_flush = null;
     _free_state = null;
     _free_string = null;
     _version = null;
@@ -190,6 +197,8 @@ function resetBindings(): void {
     _replica_open = null;
     _replica_apply_local = null;
     _replica_apply_update = null;
+    _replica_state_vector = null;
+    _replica_diff = null;
     _replica_encode_state = null;
     _replica_text = null;
     _replica_close = null;
@@ -361,6 +370,9 @@ let _document_id_for_path: any = null;
 let _is_session_document: any = null;
 let _reliable_sync_liveness_enqueue: any = null;
 let _reliable_sync_liveness_flush: any = null;
+let _reliable_sync_document_op_push: any = null;
+let _reliable_sync_text_adopt_push: any = null;
+let _reliable_sync_document_op_flush: any = null;
 let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
@@ -376,6 +388,8 @@ let _document_base_hash: any = null;
 let _replica_open: any = null;
 let _replica_apply_local: any = null;
 let _replica_apply_update: any = null;
+let _replica_state_vector: any = null;
+let _replica_diff: any = null;
 let _replica_encode_state: any = null;
 let _replica_text: any = null;
 let _replica_close: any = null;
@@ -486,6 +500,28 @@ function bindFunctions(): void {
         _is_session_document = null;
         _reliable_sync_liveness_enqueue = null;
         _reliable_sync_liveness_flush = null;
+    }
+    try {
+        _reliable_sync_document_op_push = lib.func(
+            'agent_doc_reliable_sync_document_op_push',
+            'int',
+            ['str', 'str', 'str'],
+        );
+        _reliable_sync_text_adopt_push = lib.func(
+            'agent_doc_reliable_sync_text_adopt_push',
+            'int',
+            ['str', 'str', 'str'],
+        );
+        _reliable_sync_document_op_flush = lib.func(
+            'agent_doc_reliable_sync_document_op_flush',
+            'int',
+            ['str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] reliable-sync document wrappers unavailable: ${e.message}`);
+        _reliable_sync_document_op_push = null;
+        _reliable_sync_text_adopt_push = null;
+        _reliable_sync_document_op_flush = null;
     }
     _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
     _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
@@ -619,6 +655,16 @@ function bindFunctions(): void {
             'void*',
             'size_t',
         ]);
+        _replica_state_vector = lib.func(
+            'agent_doc_replica_state_vector',
+            'void*',
+            ['uint64', koffi.out(koffi.pointer('size_t'))],
+        );
+        _replica_diff = lib.func(
+            'agent_doc_replica_diff',
+            'void*',
+            ['uint64', 'void*', 'size_t', koffi.out(koffi.pointer('size_t'))],
+        );
         _replica_encode_state = lib.func(
             'agent_doc_replica_encode_state',
             'void*',
@@ -631,6 +677,8 @@ function bindFunctions(): void {
         _replica_open = null;
         _replica_apply_local = null;
         _replica_apply_update = null;
+        _replica_state_vector = null;
+        _replica_diff = null;
         _replica_encode_state = null;
         _replica_text = null;
         _replica_close = null;
@@ -775,6 +823,37 @@ export class NativeReplicaNode {
         } catch (e: any) {
             console.warn(`[agent-doc/native] replica_apply_update error: ${e.message}`);
             return false;
+        }
+    }
+
+    stateVector(): Uint8Array | null {
+        if (this.clientId == null) return null;
+        if (!ensureLoaded(this.projectRoot)) return null;
+        bindFunctions();
+        if (!_replica_state_vector) return null;
+        const lenOut = [0];
+        try {
+            const ptr = _replica_state_vector(this.clientId, lenOut);
+            return copyStateBuffer(ptr, Number(lenOut[0] ?? 0));
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_state_vector error: ${e.message}`);
+            return null;
+        }
+    }
+
+    diff(theirStateVector: Uint8Array): Uint8Array | null {
+        if (this.clientId == null) return null;
+        if (!ensureLoaded(this.projectRoot)) return null;
+        bindFunctions();
+        if (!_replica_diff) return null;
+        const lenOut = [0];
+        const frontier = Buffer.from(theirStateVector);
+        try {
+            const ptr = _replica_diff(this.clientId, frontier, frontier.length, lenOut);
+            return copyStateBuffer(ptr, Number(lenOut[0] ?? 0));
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] replica_diff error: ${e.message}`);
+            return null;
         }
     }
 
@@ -1713,6 +1792,49 @@ export function reliableSyncLivenessFlush(projectRoot: string, documentHash: str
     } catch (err: any) {
         console.warn(`[agent-doc/native] reliable_sync_liveness_flush error: ${err.message}`);
         return -1;
+    }
+}
+
+export function reliableSyncDocumentOpPush(
+    projectRoot: string,
+    filePath: string,
+    deltaJson: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_reliable_sync_document_op_push) return false;
+    try {
+        return _reliable_sync_document_op_push(projectRoot, filePath, deltaJson) === 0;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] reliable_sync_document_op_push error: ${err.message}`);
+        return false;
+    }
+}
+
+export function reliableSyncTextAdoptPush(
+    projectRoot: string,
+    filePath: string,
+    text: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_reliable_sync_text_adopt_push) return false;
+    try {
+        return _reliable_sync_text_adopt_push(projectRoot, filePath, text) === 0;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] reliable_sync_text_adopt_push error: ${err.message}`);
+        return false;
+    }
+}
+
+export function reliableSyncDocumentOpFlush(projectRoot: string, filePath: string): void {
+    if (!ensureLoaded(projectRoot)) return;
+    bindFunctions();
+    if (!_reliable_sync_document_op_flush) return;
+    try {
+        _reliable_sync_document_op_flush(projectRoot, filePath);
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] reliable_sync_document_op_flush error: ${err.message}`);
     }
 }
 

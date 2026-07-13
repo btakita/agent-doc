@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-prompt-contract"
-version = "0.34.86"
+version = "0.34.87"
 edition = "2024"
 description = "Prompt contract detection and requirement counting policy for agent-doc"
 license = "MIT"
@@ -10,9 +10,9 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_prompt_contract"
 
 [dependencies]
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.86" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.86" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.86" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.87" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.87" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.87" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 

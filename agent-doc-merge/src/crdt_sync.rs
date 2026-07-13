@@ -1,21 +1,20 @@
 //! State-vector sync protocol primitive (`#crdtauth1sv`).
 //!
 //! The deferred half of `#crdtauth1`. Where [`crate::crdt::merge_by_component`]
-//! rebuilds throwaway yrs docs from text and runs a whole-`.yrs`-snapshot merge
+//! rebuilds throwaway CRDTs from text and runs a whole-state merge
 //! every cycle, this module models the **incremental per-replica state-vector
 //! exchange** the CRDT-authority plan calls for
 //! (`tasks/agent-doc/plan-crdt-authority-model.md`, phase 2):
 //!
-//! - Each [`ReplicaState`] keeps its yrs `Doc` **across cycles** (a durable
+//! - Each [`ReplicaState`] keeps its lazily [`TextCrdt`] **across cycles** (a durable
 //!   replica), instead of being rebuilt from text each merge.
 //! - A sync exchanges only the updates the other side is **missing**:
 //!   `peer.encode_state_as_update(my_state_vector)`. The state vector is a compact
 //!   per-client causal summary, not the whole document — so a sync ships a delta,
 //!   not a snapshot.
-//! - Convergence is **commutative, associative, idempotent**, and yrs buffers an
-//!   update whose causal dependencies have not arrived yet (causal buffering), so
-//!   out-of-order / lagged delivery self-heals once the gap is filled — never a
-//!   permanent conflict, never data loss.
+//! - Convergence is **commutative, associative, idempotent**; op identities make
+//!   duplicate and out-of-order delivery safe, so lagged delivery self-heals once
+//!   the gap is filled — never a permanent conflict, never data loss.
 //!
 //! This is the protocol **primitive + tests** only. Rewiring the live
 //! `merge_by_component` call sites onto it and wiring the FFI-node ↔ supervisor
@@ -291,7 +290,7 @@ mod tests {
 
         // Deliver OUT OF ORDER: u2 (which depends on u1) before u1.
         let b = ReplicaState::new(2);
-        b.apply_update(&u2).unwrap(); // buffered by yrs: deps missing
+        b.apply_update(&u2).unwrap(); // dependency gap is safe until the missing op arrives
         assert_ne!(
             b.text(),
             a.text(),

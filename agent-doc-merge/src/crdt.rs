@@ -127,6 +127,61 @@ impl CrdtDoc {
             .map_err(|e| anyhow::anyhow!("failed to decode CRDT state (not UTF-8): {e}"))?;
         Ok(CrdtDoc::from_text(text))
     }
+
+    /// Replication frontier (`#docop-plane`): the compact version vector a partner
+    /// sends so [`delta_since`](Self::delta_since) computes exactly the ops this
+    /// canonical still lacks. This is the reliable-sync cursor that lets the connected
+    /// editor feed the canonical continuously (so it is never frozen-stale).
+    pub fn version_vector(&self) -> lazily::TextVersionVector {
+        self.text.borrow().version_vector()
+    }
+
+    /// The document-op delta this replica holds that `their_vv` has not observed — the
+    /// unit replicated over the reliable-sync document-op channel
+    /// (`agent-doc-reliable-sync-io::document_op`).
+    pub fn delta_since(&self, their_vv: &lazily::TextVersionVector) -> Vec<lazily::TextOp> {
+        self.text.borrow().delta_since(their_vv)
+    }
+
+    /// Fold a replicated document-op delta into the canonical. Commutative,
+    /// associative and idempotent (each op carries its own `OpId`), so a redelivered or
+    /// reordered delta converges — the same contract the reliable-sync at-least-once
+    /// transport relies on. Returns whether the visible text changed. This is the seam
+    /// that keeps the canonical continuously fed and never frozen while an editor is
+    /// connected.
+    pub fn apply_delta(&self, ops: &[lazily::TextOp]) -> bool {
+        self.text.borrow_mut().apply_delta(ops)
+    }
+}
+
+impl lazily::CrdtTree for CrdtDoc {
+    type VersionVector = lazily::TextVersionVector;
+    type Delta = Vec<lazily::TextOp>;
+    type Value = String;
+
+    fn version_vector(&self) -> Self::VersionVector {
+        CrdtDoc::version_vector(self)
+    }
+
+    fn delta_since(&self, version: &Self::VersionVector) -> Self::Delta {
+        CrdtDoc::delta_since(self, version)
+    }
+
+    fn apply_delta(&mut self, delta: &Self::Delta) -> bool {
+        CrdtDoc::apply_delta(self, delta)
+    }
+
+    fn text(&self) -> String {
+        CrdtDoc::to_text(self)
+    }
+
+    fn value(&self) -> Self::Value {
+        CrdtDoc::to_text(self)
+    }
+
+    fn merge_from(&mut self, other: &Self) -> bool {
+        self.text.borrow_mut().merge(&other.text.borrow())
+    }
 }
 
 /// Merge two concurrent text versions against a common base using CRDT.

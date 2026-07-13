@@ -2200,6 +2200,7 @@ class PatchWatcher implements vscode.Disposable {
     private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
     private liveBufferSignalWatcher: vscode.FileSystemWatcher | undefined;
     private crdtReplicaEventWatcher: vscode.FileSystemWatcher | undefined;
+    private readonly processedCrdtEventMs = new Map<string, number>();
     private libReloadBroadcastWatcher: vscode.FileSystemWatcher | undefined;
     private typingListener: vscode.Disposable | undefined;
     private openListener: vscode.Disposable | undefined;
@@ -3279,8 +3280,15 @@ class PatchWatcher implements vscode.Disposable {
     private onCrdtReplicaEvent(uri: vscode.Uri): void {
         try {
             const raw = fs.readFileSync(uri.fsPath, 'utf-8');
-            const event = JSON.parse(raw) as { file?: unknown };
+            const event = JSON.parse(raw) as { file?: unknown; reason?: unknown; signaled_at_ms?: unknown };
             if (typeof event.file === 'string' && event.file.length > 0) {
+                const signaledAtMs = typeof event.signaled_at_ms === 'number' ? event.signaled_at_ms : 0;
+                const previous = this.processedCrdtEventMs.get(event.file) ?? -1;
+                if (signaledAtMs > 0 && signaledAtMs <= previous) return;
+                if (signaledAtMs > 0) this.processedCrdtEventMs.set(event.file, signaledAtMs);
+                if (event.reason === 'request_full_state') {
+                    void this.crdtReplicas?.handleReattachRequest(event.file);
+                }
                 this.crdtReplicas?.requestRemoteDrain(event.file);
             } else {
                 this.crdtReplicas?.requestRemoteDrain();

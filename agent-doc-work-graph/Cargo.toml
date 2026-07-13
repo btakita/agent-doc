@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-work-graph"
-version = "0.34.86"
+version = "0.34.87"
 edition = "2024"
 description = "Pure work-graph analysis and rendering for agent-doc work items"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_work_graph"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.86" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.86" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.86" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.87" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.87" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.87" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

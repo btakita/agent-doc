@@ -64,6 +64,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /** Dedup cache keyed by patch_id (globally unique). Shared across all roots. */
     private val appliedPatchIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val processedCrdtEventMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** Patch files delayed after a failed proof/apply attempt. */
     private val scheduledPatchRetries = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -448,12 +449,24 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun processCrdtReplicaEventFile(file: File) {
         if (!file.exists()) return
-        val filePath = try {
+        val event = try {
             val root = com.google.gson.JsonParser.parseString(file.readText()).asJsonObject
-            root.get("file")?.asString?.takeIf { it.isNotBlank() }
+            Triple(
+                root.get("file")?.asString?.takeIf { it.isNotBlank() },
+                root.get("reason")?.asString,
+                root.get("signaled_at_ms")?.asLong ?: 0L,
+            )
         } catch (e: Exception) {
             LOG.debug("[crdt-replica] failed to parse event ${file.name}: ${e.message}")
-            null
+            Triple(null, null, 0L)
+        }
+        val (filePath, reason, signaledAtMs) = event
+        if (filePath != null && signaledAtMs > 0) {
+            val previous = processedCrdtEventMs.put(filePath, signaledAtMs)
+            if (previous != null && previous >= signaledAtMs) return
+        }
+        if (filePath != null && reason == "request_full_state") {
+            CrdtReplicaManager.requestTextAdopt(project, filePath)
         }
         CrdtReplicaManager.requestRemoteDrain(project, filePath, "crdt-event")
     }

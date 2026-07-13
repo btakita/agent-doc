@@ -749,14 +749,16 @@ impl SimWorld {
     /// the pane (swaps it into view) or falls back to preserving the stale layout.
     /// `proves_live_owner=false` models the mid-recycle case where ownership cannot
     /// be proven — the safe fallback.
-    pub(crate) fn apply_sync_exact_visible_focus_offscreen_owner(&mut self, proves_live_owner: bool) {
+    pub(crate) fn apply_sync_exact_visible_focus_offscreen_owner(
+        &mut self,
+        proves_live_owner: bool,
+    ) {
         self.sync = SyncProjection::exact_visible_offscreen_owner_case();
-        let eligible =
-            agent_doc_sync_io::sync::exact_visible_focus_eligible_for_owned_pane_resolve(
-                true,  // exact-visible --no-autostart
-                true,  // the off-screen owned pane is alive
-                false, // not claimed by another document this run
-            );
+        let eligible = agent_doc_sync_io::sync::exact_visible_focus_eligible_for_owned_pane_resolve(
+            true,  // exact-visible --no-autostart
+            true,  // the off-screen owned pane is alive
+            false, // not claimed by another document this run
+        );
         if eligible && proves_live_owner {
             // Resolve the off-screen owned pane so the reconcile swaps it into view:
             // `focused` becomes visible+active, the previously-visible `onscreen`

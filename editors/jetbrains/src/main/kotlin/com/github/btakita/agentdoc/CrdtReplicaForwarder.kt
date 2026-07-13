@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Thin editor-as-replica forwarding seam (`#crdtauth5`, plan phase 3/5).
  *
- * The plugin stays THIN: it owns no CRDT logic. The yrs replica, state-vector
+ * The plugin stays THIN: it owns no CRDT logic. The lazily replica, state-vector
  * logic, and op encode/decode all live once in the shared Rust cdylib
  * (`agent_doc_replica_*`); this seam is just the binding that
  *
@@ -41,6 +41,7 @@ class CrdtReplicaForwarder(
     private val transport: ReplicaTransport,
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
+    private var pushedVersion: ByteArray? = null
 
     /** True once [register] succeeded and the replica is bound. */
     @Volatile
@@ -83,6 +84,7 @@ class CrdtReplicaForwarder(
                 return false
             }
             attached = true
+            pushedVersion = node.stateVector()
             return true
         } finally {
             logSlow("register", started, warnMs = 100)
@@ -100,15 +102,8 @@ class CrdtReplicaForwarder(
         val applyStarted = System.nanoTime()
         if (!node.applyLocal(clientId, offset, deleteLen, insert)) return
         logSlow("native.applyLocal", applyStarted, details = "offset=$offset delete_cp=$deleteLen insert_chars=${insert.length}")
-        // Encode "everything a fresh peer is missing" — the hub integrates and
-        // re-derives the minimal per-peer delta on the other side.
-        val encodeStarted = System.nanoTime()
-        val update = node.encodeState() ?: return
-        logSlow("native.encodeState", encodeStarted, details = "update_bytes=${update.size}")
-        val broadcastStarted = System.nanoTime()
-        transport.broadcastUpdate(filePath, identity, update)
-        logSlow("transport.broadcastUpdate", broadcastStarted, details = "update_bytes=${update.size}")
-        logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=${update.size}")
+        val updateBytes = publishIncremental("local-delta")
+        logSlow("forwardLocalDelta", started, warnMs = 100, details = "update_bytes=$updateBytes")
     }
 
     /**
@@ -128,14 +123,28 @@ class CrdtReplicaForwarder(
         val applyStarted = System.nanoTime()
         if (!node.applyLocal(clientId, 0, deleteLen, editorText)) return
         logSlow("native.applyLocal", applyStarted, details = "reason=ensureEditorText delete_cp=$deleteLen insert_chars=${editorText.length}")
-        val encodeStarted = System.nanoTime()
-        val update = node.encodeState() ?: return
-        logSlow("native.encodeState", encodeStarted, details = "reason=ensureEditorText update_bytes=${update.size}")
+        // Incremental from the bootstrap frontier. The incident-causing full-state
+        // adopt remains disabled; bounded text adopt is triggered only by an explicit
+        // controller reattach signal.
+        val updateBytes = publishIncremental("ensure-editor-text")
+        logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=$updateBytes")
+    }
+
+    private fun publishIncremental(reason: String): Int {
+        val frontier = pushedVersion ?: node.stateVector() ?: return 0
+        val diffStarted = System.nanoTime()
+        val update = node.diff(frontier) ?: return 0
+        logSlow("native.diff", diffStarted, details = "reason=$reason update_bytes=${update.size}")
+        val durable = transport.pushDocumentOps(filePath, update.toString(Charsets.UTF_8))
+        if (durable) pushedVersion = node.stateVector()
         val broadcastStarted = System.nanoTime()
         transport.broadcastUpdate(filePath, identity, update)
-        logSlow("transport.broadcastUpdate", broadcastStarted, details = "reason=ensureEditorText update_bytes=${update.size}")
-        logSlow("ensureEditorText", started, warnMs = 100, details = "chars=${editorText.length} update_bytes=${update.size}")
+        logSlow("transport.broadcastUpdate", broadcastStarted, details = "reason=$reason update_bytes=${update.size}")
+        return update.size
     }
+
+    /** Genuine-reattach recovery only: bounded authoritative text, never full op-log. */
+    fun pushTextAdopt(editorText: String): Boolean = transport.pushTextAdopt(filePath, editorText)
 
     /**
      * Apply a remote update (a peer's ops fanned out by the document model) into
@@ -148,6 +157,7 @@ class CrdtReplicaForwarder(
         val started = System.nanoTime()
         val applyStarted = System.nanoTime()
         if (!node.applyUpdate(clientId, update)) return null
+        pushedVersion = node.stateVector()
         logSlow("native.applyUpdate", applyStarted, details = "update_bytes=${update.size}")
         val textStarted = System.nanoTime()
         val text = node.text()
@@ -207,6 +217,7 @@ class CrdtReplicaForwarder(
         logSlow("transport.deregister", deregisterStarted)
         val closeStarted = System.nanoTime()
         node.close(clientId)
+        pushedVersion = null
         logSlow("native.close", closeStarted)
         attached = false
     }
@@ -268,8 +279,17 @@ interface ReplicaTransport {
      */
     fun lastRegisterError(): String? = null
 
-    /** `replica_update`: ship a local yrs update to the document model for fan-out. */
+    /** `replica_update`: ship a local lazily delta to the document model for fan-out. */
     fun broadcastUpdate(filePath: String, identity: String, update: ByteArray)
+
+    /** Durable document-op plane; default success keeps test transports thin. */
+    fun pushDocumentOps(filePath: String, deltaJson: String): Boolean = true
+
+    /** Bounded reattach-only adopt; default false means unsupported by a test transport. */
+    fun pushTextAdopt(filePath: String, text: String): Boolean = false
+
+    /** Retry the retained document-op suffix. */
+    fun flushDocumentOps(filePath: String) {}
 
     /** `replica_pull`: fetch pending peer updates queued for this replica. */
     fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> = emptyList()
@@ -335,7 +355,37 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
         send(request)
     }
 
+    override fun pushDocumentOps(filePath: String, deltaJson: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_reliable_sync_document_op_push(projectRoot, filePath, deltaJson) == 0
+        } catch (e: Throwable) {
+            log.warn("[document-op] durable push failed for ${File(filePath).name}: ${e.message}")
+            false
+        }
+    }
+
+    override fun pushTextAdopt(filePath: String, text: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_reliable_sync_text_adopt_push(projectRoot, filePath, text) == 0
+        } catch (e: Throwable) {
+            log.warn("[reattach-adopt] bounded text adopt failed for ${File(filePath).name}: ${e.message}")
+            false
+        }
+    }
+
+    override fun flushDocumentOps(filePath: String) {
+        val lib = AgentDocLib.get() ?: return
+        try {
+            lib.agent_doc_reliable_sync_document_op_flush(projectRoot, filePath)
+        } catch (e: Throwable) {
+            log.debug("[document-op] retained flush failed: ${e.message}")
+        }
+    }
+
     override fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery {
+        flushDocumentOps(filePath)
         val response = send(controllerRequest("replica_pull", filePath, identity))
             ?: return ReplicaPullDelivery.Deltas(emptyList())
         if (!response.ok) return ReplicaPullDelivery.Deltas(emptyList())
@@ -462,6 +512,8 @@ interface ReplicaNode {
     fun applyLocal(clientId: Long, offset: Int, deleteLen: Int, insert: String): Boolean
     fun applyUpdate(clientId: Long, update: ByteArray): Boolean
     fun encodeState(): ByteArray?
+    fun stateVector(): ByteArray? = byteArrayOf()
+    fun diff(theirStateVector: ByteArray): ByteArray? = encodeState()
     fun text(): String?
     fun close(clientId: Long)
 }
@@ -524,6 +576,43 @@ class NativeReplicaNode : ReplicaNode {
             }
         } catch (e: Throwable) {
             log.debug("[native] replica_encode_state failed: ${e.message}")
+            null
+        }
+    }
+
+    override fun stateVector(): ByteArray? {
+        val lib = AgentDocLib.get() ?: return null
+        return try {
+            val outLen = LongByReference()
+            val ptr = lib.agent_doc_replica_state_vector(clientIdForEncode, outLen) ?: return null
+            try {
+                ptr.getByteArray(0, outLen.value.toInt())
+            } finally {
+                lib.agent_doc_free_state(ptr, outLen.value)
+            }
+        } catch (e: Throwable) {
+            log.debug("[native] replica_state_vector failed: ${e.message}")
+            null
+        }
+    }
+
+    override fun diff(theirStateVector: ByteArray): ByteArray? {
+        val lib = AgentDocLib.get() ?: return null
+        return try {
+            val outLen = LongByReference()
+            val ptr = lib.agent_doc_replica_diff(
+                clientIdForEncode,
+                theirStateVector,
+                theirStateVector.size.toLong(),
+                outLen,
+            ) ?: return null
+            try {
+                ptr.getByteArray(0, outLen.value.toInt())
+            } finally {
+                lib.agent_doc_free_state(ptr, outLen.value)
+            }
+        } catch (e: Throwable) {
+            log.debug("[native] replica_diff failed: ${e.message}")
             null
         }
     }

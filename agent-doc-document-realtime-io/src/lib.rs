@@ -1380,11 +1380,24 @@ fn observe_editor_open_in(
     registry.is_open(path)
 }
 
-/// #live-editor-reactive (S2b/S3/S4): observe whether the editor holds `file` open from
-/// the reactive `editor_open_docs` authority, recovering from the durable plugin-owner
-/// lease backup only on a cold miss (see [`observe_editor_open_in`]).
+/// #live-editor-reactive (S2b/S3/S4): observe whether the editor holds `file` open.
+///
+/// Plane-primary (step-3, `#live-editors-lazily-plane`): the lazily reliable-sync
+/// liveness plane (an `OrSet` open-set replicated from the plugin) is the authority
+/// when warm. Its OR-set semantics make this reconnect-safe by construction — a
+/// re-open's fresh add-tag beats a concurrent lagging close — so a controller
+/// recycle / socket reconnect gap cannot spuriously read `live_editors == 0` while
+/// the plugin still holds the doc open. Only on a **cold miss** (`None`: authority
+/// disabled, poisoned lock, or an empty/never-warmed plane) does this fall back to
+/// the reactive `editor_open_docs` registry and the durable plugin-owner lease
+/// backup (see [`observe_editor_open_in`]). This replaces the prior lease-poll-primary
+/// decision with the converged lazily fact so the fragile registration/lease chain is
+/// demoted to a cold-miss backstop.
 fn observe_editor_open(file: &std::path::Path) -> bool {
     let path = file.display().to_string();
+    if let Some(live) = agent_doc_reliable_sync_io::plane_editor_live_for_path(&path) {
+        return live;
+    }
     observe_editor_open_in(
         agent_doc_document_realtime::editor_open_docs::editor_open_docs(),
         &path,

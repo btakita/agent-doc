@@ -591,6 +591,23 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_reliable_sync_liveness_flush(projectRoot: String, documentHash: String): Long
 
+    /** Durably enqueue + flush one incremental `Vec<TextOp>` JSON delta. */
+    fun agent_doc_reliable_sync_document_op_push(
+        projectRoot: String,
+        filePath: String,
+        deltaJson: String,
+    ): Int
+
+    /** Bounded genuine-reattach recovery carrying editor text, never op history. */
+    fun agent_doc_reliable_sync_text_adopt_push(
+        projectRoot: String,
+        filePath: String,
+        text: String,
+    ): Int
+
+    /** Retry a retained document-op suffix without enqueueing a new frame. */
+    fun agent_doc_reliable_sync_document_op_flush(projectRoot: String, filePath: String): Int
+
     /**
      * Commit the document at [filePath] to git.
      * Call after successfully applying a patch as a defense-in-depth guarantee
@@ -667,7 +684,7 @@ interface AgentDocLib : Library {
      * The incremental update carrying exactly the ops [their_sv] is missing — the
      * delta to fan out to a peer. Caller must free with [agent_doc_free_state].
      */
-    fun agent_doc_replica_diff(replica_id: Long, their_sv: Pointer?, their_sv_len: Long, out_len: com.sun.jna.ptr.LongByReference): Pointer?
+    fun agent_doc_replica_diff(replica_id: Long, their_sv: ByteArray?, their_sv_len: Long, out_len: com.sun.jna.ptr.LongByReference): Pointer?
 
     /**
      * Apply a remote update (idempotent + causal-buffered by yrs). Returns 0 on

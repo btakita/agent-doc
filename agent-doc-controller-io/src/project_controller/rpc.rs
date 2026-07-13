@@ -7129,6 +7129,34 @@ pub fn push_reliable_sync_liveness(
     request_controller::<ControllerReliableSyncResponse>(project_root, request)
 }
 
+/// Client side of the `reliable_sync` RPC that ALSO carries the document `file` so the
+/// controller can route document-op / full-state-adopt frames (`#docop-plane` /
+/// `#reattach-adopt`) to the right relay canonical (the liveness path is hash-keyed and
+/// leaves `file` unset). `envelope` wraps the frame; `epoch` is the outbox retention key.
+pub fn push_reliable_sync_frame_for_file(
+    project_root: &Path,
+    file: &Path,
+    epoch: u64,
+    envelope: &serde_json::Value,
+) -> Result<ControllerReliableSyncResponse> {
+    let request = ControllerRequest {
+        command: "reliable_sync".to_string(),
+        file: Some(file.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: Some(epoch),
+        state: None,
+        caller: Some("reliable_sync_frame_push".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(envelope.to_string()),
+    };
+    request_controller::<ControllerReliableSyncResponse>(project_root, request)
+}
+
 /// [`agent_doc_reliable_sync_io::push::LivenessPushTransport`] over the controller
 /// `reliable_sync` RPC — the production transport the plugin-push endpoint flushes
 /// through. One per project root.
@@ -7147,6 +7175,43 @@ impl RpcLivenessPushTransport {
 impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcLivenessPushTransport {
     fn push(&self, _document_hash: &str, epoch: u64, envelope: &serde_json::Value) -> Result<u64> {
         let response = push_reliable_sync_liveness(&self.project_root, epoch, envelope)?;
+        Ok(response.ack_through)
+    }
+}
+
+/// Reliable-sync transport for document-scoped frames. Unlike liveness, the
+/// request carries `file`, allowing the controller to fold the frame into the
+/// correct relay canonical.
+pub struct RpcDocumentPushTransport {
+    project_root: std::path::PathBuf,
+    file: std::path::PathBuf,
+}
+
+impl RpcDocumentPushTransport {
+    pub fn new(
+        project_root: impl Into<std::path::PathBuf>,
+        file: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            project_root: project_root.into(),
+            file: file.into(),
+        }
+    }
+}
+
+impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcDocumentPushTransport {
+    fn push(
+        &self,
+        _document_hash: &str,
+        epoch: u64,
+        envelope: &serde_json::Value,
+    ) -> Result<u64> {
+        let response = push_reliable_sync_frame_for_file(
+            &self.project_root,
+            &self.file,
+            epoch,
+            envelope,
+        )?;
         Ok(response.ack_through)
     }
 }
@@ -7380,6 +7445,111 @@ fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliable
             .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
         plane.ingest(&document_hash, epoch, &message)?
     };
+
+    // `#docop-plane` P2b: a document-op frame folds into the relay canonical so a
+    // connected editor's ops feed it even when its CRDT member registration lapsed
+    // (`live_editors == 0`). Inert for liveness-only frames (no document-op node) and
+    // when no path is supplied. Idempotent + commutative, so a duplicate/out-of-order
+    // frame converges. Serving the fed canonical (removing the frozen-canonical read) is
+    // the separate P3 authority flip — this only keeps the canonical fed.
+    // `#reattach-adopt` (bounded, runaway-safe): a TEXT-adopt frame rebuilds the canonical
+    // from the editor's document text (O(text), self-echo-guarded). This is the path the
+    // new one-shot-on-reattach plugin uses. Checked first.
+    if let Some(file) = request.file.as_deref()
+        && let Some(decoded) =
+            agent_doc_reliable_sync_io::document_op::decode_text_adopt_frame(&message)
+    {
+        match decoded {
+            Ok(text) => {
+                if let Err(e) =
+                    agent_doc_crdt_relay_io::adopt_editor_text_for_file(file, &text)
+                {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!("reliable_sync_text_adopt_failed hash={document_hash} error={e}"),
+                    );
+                }
+            }
+            Err(e) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!("reliable_sync_text_adopt_malformed hash={document_hash} error={e}"),
+            ),
+        }
+    }
+
+    // `#reattach-adopt`: a full-state adopt frame REPLACES the canonical with the
+    // editor's authoritative lazily state (drops `#sy71`-class drift, lineage-intact),
+    // as opposed to the fold path below which union-merges an incremental delta. Checked
+    // first so an adopt frame never falls through to the fold. Inert until the FFI sends
+    // an adopt frame on reattach.
+    if let Some(file) = request.file.as_deref()
+        && let Some(decoded) =
+            agent_doc_reliable_sync_io::document_op::decode_full_state_adopt_frame(&message)
+    {
+        match decoded {
+            Ok(ops) => match serde_json::to_vec(&ops) {
+                Ok(full_state) => {
+                    if let Err(e) =
+                        agent_doc_crdt_relay_io::adopt_editor_full_state_for_file(file, &full_state)
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "reliable_sync_full_state_adopt_failed hash={document_hash} error={e}"
+                            ),
+                        );
+                    }
+                }
+                Err(e) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "reliable_sync_full_state_adopt_reencode_failed hash={document_hash} error={e}"
+                    ),
+                ),
+            },
+            Err(e) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reliable_sync_full_state_adopt_malformed hash={document_hash} error={e}"
+                ),
+            ),
+        }
+    }
+
+    if let Some(file) = request.file.as_deref()
+        && let Some(decoded) =
+            agent_doc_reliable_sync_io::document_op::decode_document_op_frame(&message)
+    {
+        match decoded {
+            Ok(ops) => match serde_json::to_vec(&ops) {
+                Ok(delta) => {
+                    if let Err(e) =
+                        agent_doc_crdt_relay_io::apply_document_op_delta_for_file(file, &delta)
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "reliable_sync_document_op_fold_failed hash={document_hash} error={e}"
+                            ),
+                        );
+                    }
+                }
+                Err(e) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "reliable_sync_document_op_reencode_failed hash={document_hash} error={e}"
+                    ),
+                ),
+            },
+            Err(e) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reliable_sync_document_op_frame_malformed hash={document_hash} error={e}"
+                ),
+            ),
+        }
+    }
+
     Ok(ControllerReliableSyncResponse {
         document_hash,
         ack_through,

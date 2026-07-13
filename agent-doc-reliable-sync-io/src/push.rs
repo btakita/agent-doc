@@ -59,6 +59,63 @@ pub struct LivenessPushEndpoint<O: DurableOutbox> {
     next_epoch: u64,
 }
 
+/// Durable endpoint for an already-encoded reliable-sync frame. Document-op and
+/// bounded text-adopt pushes use this sibling so they share the same ordered
+/// append-before-send protocol without pretending to be liveness operations.
+pub struct FramePushEndpoint<O: DurableOutbox> {
+    document_hash: String,
+    outbox: O,
+    next_epoch: u64,
+}
+
+impl<O: DurableOutbox> FramePushEndpoint<O> {
+    pub fn resuming(
+        document_hash: impl Into<String>,
+        outbox: O,
+        acked_through: u64,
+    ) -> Self {
+        let highest_retained = outbox.retained_epochs().into_iter().max().unwrap_or(0);
+        Self {
+            document_hash: document_hash.into(),
+            outbox,
+            next_epoch: acked_through.max(highest_retained).saturating_add(1).max(1),
+        }
+    }
+
+    /// Persist one frame before any transport attempt.
+    pub fn enqueue_frame(&mut self, frame: lazily::IpcMessage) -> u64 {
+        let epoch = self.next_epoch;
+        self.next_epoch = self.next_epoch.saturating_add(1);
+        self.outbox.append(epoch, frame);
+        epoch
+    }
+
+    /// Replay the unacked suffix in order, pruning only through a controller ack.
+    pub fn flush<T: LivenessPushTransport>(&mut self, transport: &T) -> Result<PushProgress> {
+        let mut progress = PushProgress::default();
+        for (epoch, frame) in self.outbox.replay_from(0) {
+            let envelope = encode_envelope(&self.document_hash, &frame)?;
+            match transport.push(&self.document_hash, epoch, &envelope) {
+                Ok(ack) => {
+                    self.outbox.ack_through(ack);
+                    progress.acked_through = progress.acked_through.max(ack);
+                    progress.sent += 1;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[reliable-sync-push] {}: retain epoch {epoch} after transport failure: {error:#}",
+                        self.document_hash
+                    );
+                    progress.stalled = true;
+                    break;
+                }
+            }
+        }
+        progress.retained = self.outbox.retained_epochs().len();
+        Ok(progress)
+    }
+}
+
 impl<O: DurableOutbox> LivenessPushEndpoint<O> {
     /// Build an endpoint whose next enqueued frame takes `next_epoch`.
     ///

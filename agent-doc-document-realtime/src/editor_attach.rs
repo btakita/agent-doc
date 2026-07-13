@@ -4,12 +4,12 @@
 //! per-decision filesystem lease poll and onto the lazily reactive backbone. Two
 //! reactive inputs and one derived read:
 //!
-//! - `alive: ThreadSafeCellFamily<pid, bool>` — process liveness. Set `true` when an
+//! - `alive: ThreadSafeCellMap<pid, bool>` — process liveness. Set `true` when an
 //!   editor process attaches (register / cold-miss lease seed); set `false` by an OS
 //!   process-exit **event** (see [`ProcessExitWatcher`]). This is the crash signal the
 //!   reactive stream could not observe before S4b: a crashed editor sends no
 //!   `deregister`, but its pid death is an OS event that flips this cell.
-//! - `registered: ThreadSafeCellFamily<(doc, pid), bool>` — per-document editor
+//! - `registered: ThreadSafeCellMap<(doc, pid), bool>` — per-document editor
 //!   attachment, driven by the replica lifecycle (`register`/`reconnect`/`update` →
 //!   `true`, `deregister` → `false`).
 //! - `is_attached(doc)` — the authority read: *any registered `(doc, pid)` whose
@@ -41,7 +41,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellFamily, ThreadSafeContext};
+use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 
 /// A source of process-exit **events** (not a poll on the hot path).
 ///
@@ -72,10 +72,10 @@ pub struct EditorAttach {
     ctx: ThreadSafeContext,
     /// `pid -> alive`. Materialized `true` on attach; flipped `false` by an OS exit
     /// event. Deferral-not-dealloc: a dead pid's key stays present-but-false.
-    alive: ThreadSafeCellFamily<u32, bool>,
+    alive: ThreadSafeCellMap<u32, bool>,
     /// `(doc, pid) -> registered`. Materialized `true` on attach; flipped `false` on an
     /// explicit deregister. A closed pair stays present-but-false (uncounted).
-    registered: ThreadSafeCellFamily<(String, u32), bool>,
+    registered: ThreadSafeCellMap<(String, u32), bool>,
     /// Bumped when a brand-new key is materialized so the derived count observes it.
     epoch: CellHandle<u64>,
     /// Reactive count of distinct currently-attached documents (observability/tests).
@@ -90,10 +90,8 @@ impl EditorAttach {
     pub fn new() -> Self {
         let ctx = ThreadSafeContext::new();
         let epoch = ctx.cell(0u64);
-        let alive: ThreadSafeCellFamily<u32, bool> =
-            ThreadSafeCellFamily::new(&ctx, std::iter::empty::<u32>(), |_| true);
-        let registered: ThreadSafeCellFamily<(String, u32), bool> =
-            ThreadSafeCellFamily::new(&ctx, std::iter::empty::<(String, u32)>(), |_| false);
+        let alive: ThreadSafeCellMap<u32, bool> = ThreadSafeCellMap::new(&ctx);
+        let registered: ThreadSafeCellMap<(String, u32), bool> = ThreadSafeCellMap::new(&ctx);
         let attached_count = {
             let registered = registered.clone();
             let alive = alive.clone();
@@ -104,7 +102,9 @@ impl EditorAttach {
                 let mut docs: BTreeSet<String> = BTreeSet::new();
                 for key in registered.present_keys() {
                     let (doc, pid) = key.clone();
-                    if registered.observe(ctx, key) && alive.observe(ctx, pid) {
+                if registered.observe(ctx, &key).unwrap_or(false)
+                    && alive.observe(ctx, &pid).unwrap_or(false)
+                {
                         docs.insert(doc);
                     }
                 }
@@ -147,16 +147,14 @@ impl EditorAttach {
     fn set_registered(&self, doc: &str, pid: u32, value: bool) -> bool {
         let key = (doc.to_string(), pid);
         let newly_present = !self.registered.is_present(&key);
-        let cell = self.registered.get(&self.ctx, key);
-        self.ctx.set_cell(&cell, value);
+        self.registered.set(&self.ctx, key, value);
         newly_present
     }
 
     /// Set a pid's `alive` cell.
     fn set_alive(&self, pid: u32, value: bool) -> bool {
         let newly_present = !self.alive.is_present(&pid);
-        let cell = self.alive.get(&self.ctx, pid);
-        self.ctx.set_cell(&cell, value);
+        self.alive.set(&self.ctx, pid, value);
         newly_present
     }
 
@@ -193,7 +191,12 @@ impl EditorAttach {
     pub fn detach(&self, doc: &str) {
         let mut freed_pids: Vec<u32> = Vec::new();
         for key in self.registered.present_keys() {
-            if key.0 == doc && self.registered.observe(&self.ctx, key.clone()) {
+            if key.0 == doc
+                && self
+                    .registered
+                    .observe(&self.ctx, &key)
+                    .unwrap_or(false)
+            {
                 let pid = key.1;
                 self.set_registered(doc, pid, false);
                 if !self.pid_has_registered_doc(pid) {
@@ -216,7 +219,13 @@ impl EditorAttach {
         self.registered
             .present_keys()
             .into_iter()
-            .any(|key| key.1 == pid && self.registered.observe(&self.ctx, key))
+            .any(|key| {
+                key.1 == pid
+                    && self
+                        .registered
+                        .observe(&self.ctx, &key)
+                        .unwrap_or(false)
+            })
     }
 
     /// OS exit event: `pid` has exited (crash **or** clean exit). Flips the `alive` cell
@@ -235,8 +244,14 @@ impl EditorAttach {
     pub fn is_attached(&self, doc: &str) -> bool {
         self.registered.present_keys().into_iter().any(|key| {
             key.0 == doc
-                && self.registered.observe(&self.ctx, key.clone())
-                && self.alive.observe(&self.ctx, key.1)
+                && self
+                    .registered
+                    .observe(&self.ctx, &key)
+                    .unwrap_or(false)
+                && self
+                    .alive
+                    .observe(&self.ctx, &key.1)
+                    .unwrap_or(false)
         })
     }
 
@@ -262,7 +277,12 @@ impl EditorAttach {
         let mut docs: BTreeSet<String> = BTreeSet::new();
         for key in self.registered.present_keys() {
             let (doc, pid) = key.clone();
-            if self.registered.observe(&self.ctx, key) && self.alive.observe(&self.ctx, pid) {
+            if self
+                .registered
+                .observe(&self.ctx, &key)
+                .unwrap_or(false)
+                && self.alive.observe(&self.ctx, &pid).unwrap_or(false)
+            {
                 docs.insert(doc);
             }
         }

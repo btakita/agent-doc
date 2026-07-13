@@ -2469,6 +2469,21 @@ static RELIABLE_SYNC_LIVENESS_ENDPOINTS: std::sync::LazyLock<
     >,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// Per-file ordered channel for continuous document deltas and bounded reattach
+/// adopts. It deliberately uses a channel hash distinct from liveness so the
+/// controller's monotone reliable-sync cursor cannot make the two producers
+/// suppress one another.
+static RELIABLE_SYNC_DOCUMENT_ENDPOINTS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            agent_doc_reliable_sync_io::push::FramePushEndpoint<
+                agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
+            >,
+        >,
+    >,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 fn reliable_sync_registry_key(project_root: &Path, document_hash: &str) -> String {
     format!("{}\u{0}{document_hash}", project_root.display())
 }
@@ -2477,6 +2492,59 @@ fn reliable_sync_outbox_path(project_root: &Path) -> PathBuf {
     project_root
         .join(".agent-doc")
         .join("reliable_sync_outbox.db")
+}
+
+fn document_op_channel_hash(file_path: &Path) -> String {
+    format!(
+        "{}:document-op",
+        agent_doc_hash::document_id_for_path(file_path)
+    )
+}
+
+fn with_document_push_endpoint<T>(
+    project_root: &Path,
+    file_path: &Path,
+    operation: impl FnOnce(
+        &mut agent_doc_reliable_sync_io::push::FramePushEndpoint<
+            agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
+        >,
+    ) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let channel_hash = document_op_channel_hash(file_path);
+    let key = reliable_sync_registry_key(project_root, &channel_hash);
+    let mut registry = RELIABLE_SYNC_DOCUMENT_ENDPOINTS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync document registry poisoned"))?;
+    let endpoint = match registry.entry(key) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+                &reliable_sync_outbox_path(project_root),
+                channel_hash.clone(),
+            )?;
+            let acked_through = outbox.acked_through();
+            entry.insert(
+                agent_doc_reliable_sync_io::push::FramePushEndpoint::resuming(
+                    channel_hash,
+                    outbox,
+                    acked_through,
+                ),
+            )
+        }
+    };
+    operation(endpoint)
+}
+
+fn flush_document_push_endpoint(project_root: &Path, file_path: &Path) -> anyhow::Result<()> {
+    with_document_push_endpoint(project_root, file_path, |endpoint| {
+        let transport =
+            agent_doc_controller_io::project_controller::RpcDocumentPushTransport::new(
+                project_root,
+                file_path,
+            );
+        endpoint.flush(&transport)?;
+        Ok(())
+    })
 }
 
 /// Enqueue a JSON batch of `LivenessOp`s into a document's durable push outbox
@@ -2582,6 +2650,141 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_flush(
             -1
         }
     }
+}
+
+/// Durably append and flush one incremental `Vec<TextOp>` produced by
+/// `agent_doc_replica_diff`. The file-scoped controller request continuously feeds
+/// the relay canonical; retries and controller downtime are absorbed by the SQLite
+/// outbox. Returns `0` after durable enqueue (including retain-and-stall), `-1` on
+/// invalid input/internal error.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_push(
+    project_root: *const c_char,
+    file_path: *const c_char,
+    delta_json: *const c_char,
+) -> c_int {
+    let result = (|| -> anyhow::Result<()> {
+        if !agent_doc_reliable_sync_io::dual_run_enabled() {
+            return Ok(());
+        }
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
+        let delta_json = unsafe { required_ffi_string(delta_json, "delta_json") }?;
+        let Some(frame) =
+            agent_doc_reliable_sync_io::document_op::encode_document_op_json_frame(&delta_json)?
+        else {
+            return flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path));
+        };
+        with_document_push_endpoint(
+            Path::new(&project_root),
+            Path::new(&file_path),
+            |endpoint| {
+                endpoint.enqueue_frame(frame);
+                Ok(())
+            },
+        )?;
+        flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path))
+    })();
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_reliable_sync_document_op_push: {error:#}");
+            -1
+        }
+    }
+}
+
+/// One-shot, bounded reattach recovery: enqueue the editor's authoritative UTF-8
+/// text (`O(text)`, never its tombstone history), then synchronously flush it on the
+/// same ordered document channel as incremental ops.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_text_adopt_push(
+    project_root: *const c_char,
+    file_path: *const c_char,
+    text: *const c_char,
+) -> c_int {
+    let result = (|| -> anyhow::Result<()> {
+        if !agent_doc_reliable_sync_io::dual_run_enabled() {
+            return Ok(());
+        }
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
+        let text = unsafe { required_ffi_string(text, "text") }?;
+        let frame = agent_doc_reliable_sync_io::document_op::encode_text_adopt_frame(&text)?;
+        with_document_push_endpoint(
+            Path::new(&project_root),
+            Path::new(&file_path),
+            |endpoint| {
+                endpoint.enqueue_frame(frame);
+                Ok(())
+            },
+        )?;
+        flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path))
+    })();
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_reliable_sync_text_adopt_push: {error:#}");
+            -1
+        }
+    }
+}
+
+/// Retry the retained document-op suffix without enqueueing a new frame.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_flush(
+    project_root: *const c_char,
+    file_path: *const c_char,
+) -> c_int {
+    let result = (|| -> anyhow::Result<()> {
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
+        flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path))
+    })();
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("[ffi] agent_doc_reliable_sync_document_op_flush: {error:#}");
+            -1
+        }
+    }
+}
+
+/// Compatibility-only no-op for plugins that still link the retired full-state-adopt ABI.
+///
+/// Reattach recovery must use [`agent_doc_reliable_sync_text_adopt_push`]. Sending the
+/// replica's full operation log here caused an editor/canonical feedback loop and
+/// unbounded tombstone growth. The symbol remains exported so an older loaded plugin
+/// cannot fail linkage while upgrading, but it deliberately ignores every argument.
+/// Returns `0` unconditionally.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_reliable_sync_push_full_state_adopt(
+    project_root: *const c_char,
+    file_path: *const c_char,
+    full_state_json: *const c_char,
+) -> c_int {
+    let _ = (&project_root, &file_path, &full_state_json);
+    // Retired after the 2026-07-13 live incident: pushing `encode_state` on every buffer
+    // alignment fed canonical output back into the editor and grew tombstones without
+    // bound. Keep the symbol as a permanent no-op for rolling plugin/native upgrades;
+    // the bounded text-adopt endpoint is the supported genuine-reattach recovery path.
+    0
 }
 
 /// Inspect one actor through the project controller and return the same JSON
@@ -3076,6 +3279,12 @@ fn force_link_core_ffi_symbols() {
     let _: unsafe extern "C" fn(u64, *const u8, usize) -> i32 = agent_doc_replica_apply_update;
     let _: unsafe extern "C" fn(u64, *mut usize) -> *mut u8 = agent_doc_replica_encode_state;
     let _: unsafe extern "C" fn(u64) -> i32 = agent_doc_replica_close;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> c_int =
+        agent_doc_reliable_sync_document_op_push;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> c_int =
+        agent_doc_reliable_sync_text_adopt_push;
+    let _: unsafe extern "C" fn(*const c_char, *const c_char) -> c_int =
+        agent_doc_reliable_sync_document_op_flush;
     let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
         agent_doc_reposition_boundary_to_end;
     let _: unsafe extern "C" fn(*const c_char, *const c_char) -> FfiPatchResult =

@@ -1,7 +1,12 @@
 import * as net from 'net';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { NativeReplicaNode } from './native';
+import {
+    NativeReplicaNode,
+    reliableSyncDocumentOpFlush,
+    reliableSyncDocumentOpPush,
+    reliableSyncTextAdoptPush,
+} from './native';
 
 export interface ReplicaRegisterAck {
     clientId: number;
@@ -19,6 +24,9 @@ export interface ReplicaRemoteUpdate {
 export interface ReplicaTransport {
     register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
+    pushDocumentOps?(filePath: string, deltaJson: string): Promise<boolean>;
+    pushTextAdopt?(filePath: string, text: string): Promise<boolean>;
+    flushDocumentOps?(filePath: string): void;
     pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]>;
     /** D2: fetch the pending delivery, distinguishing additive deltas from a replace
      * delivery (out-of-band deletion re-bootstrap). Defaults to wrapping pullUpdates. */
@@ -32,6 +40,8 @@ export interface ReplicaNode {
     applyLocal(clientId: number, offset: number, deleteLen: number, insert: string): boolean;
     applyUpdate(clientId: number, update: Uint8Array): boolean;
     encodeState(): Uint8Array | null;
+    stateVector?(): Uint8Array | null;
+    diff?(theirStateVector: Uint8Array): Uint8Array | null;
     text(): string | null;
     close(clientId?: number): void;
 }
@@ -171,12 +181,25 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         }));
     }
 
+    async pushDocumentOps(filePath: string, deltaJson: string): Promise<boolean> {
+        return reliableSyncDocumentOpPush(this.projectRoot, filePath, deltaJson);
+    }
+
+    async pushTextAdopt(filePath: string, text: string): Promise<boolean> {
+        return reliableSyncTextAdoptPush(this.projectRoot, filePath, text);
+    }
+
+    flushDocumentOps(filePath: string): void {
+        reliableSyncDocumentOpFlush(this.projectRoot, filePath);
+    }
+
     async pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]> {
         const response = await this.send(this.controllerRequest('replica_pull', filePath, identity));
         return response ? parsePullResponse(response) : [];
     }
 
     async pullDelivery(filePath: string, identity: string): Promise<ReplicaPullDelivery> {
+        this.flushDocumentOps(filePath);
         const response = await this.send(this.controllerRequest('replica_pull', filePath, identity));
         return response ? parsePullDelivery(response) : { kind: 'deltas', updates: [] };
     }
@@ -280,6 +303,7 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
 export class CrdtReplicaForwarder {
     attached = false;
     private clientId = 0;
+    private pushedVersion: Uint8Array | null = null;
 
     constructor(
         private readonly filePath: string,
@@ -298,15 +322,14 @@ export class CrdtReplicaForwarder {
         this.clientId = ack.clientId;
         if (!this.node.open(ack.clientId, ack.bootstrap)) return false;
         this.attached = true;
+        this.pushedVersion = this.node.stateVector?.() ?? new Uint8Array();
         return true;
     }
 
     async forwardLocalDelta(offset: number, deleteLen: number, insert: string): Promise<void> {
         if (!this.attached) return;
         if (!this.node.applyLocal(this.clientId, offset, deleteLen, insert)) return;
-        const update = this.node.encodeState();
-        if (!update) return;
-        await this.transport.broadcastUpdate(this.filePath, this.identity, update);
+        await this.publishIncremental();
     }
 
     async ensureEditorText(editorText: string): Promise<void> {
@@ -315,14 +338,30 @@ export class CrdtReplicaForwarder {
         if (current == null || current === editorText) return;
         const deleteLen = Array.from(current).length;
         if (!this.node.applyLocal(this.clientId, 0, deleteLen, editorText)) return;
-        const update = this.node.encodeState();
+        await this.publishIncremental();
+    }
+
+    private async publishIncremental(): Promise<void> {
+        const frontier = this.pushedVersion ?? this.node.stateVector?.() ?? new Uint8Array();
+        const update = this.node.diff?.(frontier) ?? this.node.encodeState();
         if (!update) return;
+        const durable = this.transport.pushDocumentOps
+            ? await this.transport.pushDocumentOps(this.filePath, Buffer.from(update).toString('utf8'))
+            : true;
+        if (durable) this.pushedVersion = this.node.stateVector?.() ?? this.pushedVersion;
         await this.transport.broadcastUpdate(this.filePath, this.identity, update);
+    }
+
+    async pushTextAdopt(editorText: string): Promise<boolean> {
+        return this.transport.pushTextAdopt
+            ? this.transport.pushTextAdopt(this.filePath, editorText)
+            : false;
     }
 
     applyRemoteUpdate(update: Uint8Array): string | null {
         if (!this.attached) return null;
         if (!this.node.applyUpdate(this.clientId, update)) return null;
+        this.pushedVersion = this.node.stateVector?.() ?? this.pushedVersion;
         return this.node.text();
     }
 
@@ -357,6 +396,7 @@ export class CrdtReplicaForwarder {
         if (!this.attached) return;
         await this.transport.deregister(this.filePath, this.identity);
         this.node.close(this.clientId);
+        this.pushedVersion = null;
         this.attached = false;
     }
 }
@@ -380,6 +420,7 @@ export class CrdtReplicaManager {
     private readonly forwarders = new Map<string, CrdtReplicaForwarder>();
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
+    private readonly reattachRecovering = new Set<string>();
     private readonly pendingLocalEdits = new Map<string, number>();
     private readonly drainRequestedPaths = new Set<string>();
     private drainAllRequested = false;
@@ -542,6 +583,25 @@ export class CrdtReplicaManager {
             this.drainTimer = undefined;
             void this.drainRequestedRemoteUpdates();
         }, 0);
+    }
+
+    /** Controller-proven genuine reattach: bounded text adopt, then re-bootstrap. */
+    async handleReattachRequest(filePath: string): Promise<void> {
+        if (this.reattachRecovering.has(filePath)) return;
+        this.reattachRecovering.add(filePath);
+        try {
+        const forwarder = this.forwarders.get(filePath);
+        if (!forwarder) return;
+        const editorText = this.currentEditorText(filePath) ?? this.shadows.get(filePath);
+        if (editorText === undefined || !(await forwarder.pushTextAdopt(editorText))) return;
+        if (this.forwarders.get(filePath) !== forwarder) return;
+        this.forwarders.delete(filePath);
+        await forwarder.deregister();
+        const reattached = await this.forwarderFor(filePath);
+        if (reattached) this.requestRemoteDrain(filePath);
+        } finally {
+            this.reattachRecovering.delete(filePath);
+        }
     }
 
     async drainRemoteUpdates(filePath?: string): Promise<void> {

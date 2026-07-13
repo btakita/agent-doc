@@ -19,7 +19,7 @@
 //! - **Awareness / presence** ([`AwarenessChannel`]) is a SEPARATE in-memory
 //!   structure (cursor / selection / user per client-id). It is explicitly **NOT
 //!   part of the document CRDT, NOT persisted, NOT committed** — it is dropped on
-//!   deregister and never reaches `.yrs` / git.
+//!   deregister and never reaches the durable CRDT projection / git.
 //! - The **commit barrier is a consistent cut of the currently-live replicas**:
 //!   [`RelayHub::commit_barrier`] flushes only the live members (reusing
 //!   [`agent_doc_merge::crdt_sync::flush_to_commit_barrier`]) and never blocks on a
@@ -31,7 +31,7 @@
 //!   missed updates flow back into it).
 //!
 //! Disk demotion (plan phase 6) lives alongside this: the canonical replica is
-//! the live authority while a session is up; the `.yrs` projection is a
+//! the live authority while a session is up; the durable CRDT projection is a
 //! write-through **recovery projection only**. See [`RelayHub::projection_bytes`],
 //! [`RelayHub::recover_from_projection`], [`RelayHub::reconcile_disk_projection`],
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
@@ -39,7 +39,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellFamily, ThreadSafeContext};
+use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
@@ -47,7 +47,7 @@ use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_co
 use crate::crdt_authority::CrdtAuthority;
 
 /// **Disk-demotion contract (plan phase 6).** The persisted
-/// `.agent-doc/crdt/<hash>.yrs` is a write-through **durable recovery projection
+/// `.agent-doc/crdt/<hash>` state is a write-through **durable recovery projection
 /// only** — never the coordination medium and never the source of truth while a
 /// session is live. The in-memory canonical replica is authoritative; disk is
 /// recovered-from on restart (losing at most one flush). This constant is the
@@ -154,14 +154,14 @@ pub struct RelayHub {
     /// The thread-safe reactive graph that owns member liveness (#live-editor-reactive).
     /// `RelayHub` lives in a `static Mutex<HashMap<String, RelayHub>>`, so every
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
-    /// `Arc`-based [`ThreadSafeCellFamily`]/[`CellHandle`]/[`SlotHandle`] all qualify.
+    /// `Arc`-based [`ThreadSafeCellMap`]/[`CellHandle`]/[`SlotHandle`] all qualify.
     ctx: ThreadSafeContext,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
     /// de-allocation): a deregistered `client_id`'s cell stays present-but-false, so it
     /// is bounded per session and never counted as live.
-    liveness: ThreadSafeCellFamily<u64, bool>,
+    liveness: ThreadSafeCellMap<u64, bool>,
     /// Bumped on [`Self::register`] so the derived count picks up a newly-present key
     /// (a brand-new cell is not yet a dependency of `live_editor_count`; the epoch is,
     /// so the register forces a recompute that then observes the new cell).
@@ -178,7 +178,7 @@ impl RelayHub {
     /// epoch cell, and the derived live-member count slot.
     fn build_liveness_core() -> (
         ThreadSafeContext,
-        ThreadSafeCellFamily<u64, bool>,
+        ThreadSafeCellMap<u64, bool>,
         CellHandle<u64>,
         SlotHandle<usize>,
     ) {
@@ -186,8 +186,7 @@ impl RelayHub {
         let membership_epoch = ctx.cell(0u64);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set_cell` in `set_live`.
-        let liveness: ThreadSafeCellFamily<u64, bool> =
-            ThreadSafeCellFamily::new(&ctx, std::iter::empty::<u64>(), |_| true);
+        let liveness: ThreadSafeCellMap<u64, bool> = ThreadSafeCellMap::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
             ctx.computed(move |ctx| {
@@ -197,7 +196,7 @@ impl RelayHub {
                 liveness
                     .present_keys()
                     .into_iter()
-                    .filter(|id| liveness.observe(ctx, *id))
+                    .filter(|id| liveness.observe(ctx, id).unwrap_or(false))
                     .count()
             })
         };
@@ -208,8 +207,7 @@ impl RelayHub {
     /// the family lock across the `ctx` write (the family releases its lock before
     /// touching `ctx`), so there is no lock-order cycle with the registry mutex.
     fn set_live(&self, client_id: u64, live: bool) {
-        let cell = self.liveness.get(&self.ctx, client_id);
-        self.ctx.set_cell(&cell, live);
+        self.liveness.set(&self.ctx, client_id, live);
     }
 
     /// Bump the membership epoch so `live_editor_count` recomputes and counts a
@@ -225,10 +223,12 @@ impl RelayHub {
     /// replaced `Member.live`). Delta-routing / barrier sites read this instead of a
     /// per-member `live` field.
     fn is_live(&self, client_id: u64) -> bool {
-        self.liveness.observe(&self.ctx, client_id)
+        self.liveness
+            .observe(&self.ctx, &client_id)
+            .unwrap_or(false)
     }
-    /// Create a hub whose canonical replica uses `canonical_id` as its yrs client
-    /// id. `canonical_id` is reserved — no member may register with it.
+    /// Create a hub whose canonical replica uses `canonical_id` as its CRDT peer
+    /// peer id. `canonical_id` is reserved — no member may register with it.
     pub fn new(canonical_id: u64) -> Self {
         let (ctx, liveness, membership_epoch, live_editor_count) = Self::build_liveness_core();
         Self {
@@ -256,7 +256,7 @@ impl RelayHub {
     }
 
     /// Recover a hub from a durable disk **recovery projection** (plan phase 6):
-    /// rebuild the in-memory canonical replica from the last `.yrs` snapshot on
+    /// rebuild the in-memory canonical replica from the last durable snapshot on
     /// restart. At most one flush is lost; live editors re-sync their newer ops on
     /// reconnect. The projection is a recovery input, never authority.
     pub fn recover_from_projection(canonical_id: u64, projection: &[u8]) -> Result<Self> {
@@ -442,7 +442,7 @@ impl RelayHub {
         Ok(packet)
     }
 
-    /// Apply a **raw encoded yrs update** from member `client_id` to that
+    /// Apply a raw encoded lazily `TextCrdt` delta from member `client_id` to that
     /// member's hub-side mirror, integrate the new op(s) into the canonical
     /// replica, and capture the fan-out packet of those op(s) for every OTHER
     /// live member **without delivering it** (the caller controls delivery — the
@@ -454,7 +454,7 @@ impl RelayHub {
     /// `relay_capture` works from a `local_edit` (offset/len) applied to the
     /// mirror, this accepts the encoded update the editor's FFI node produced
     /// (`agent_doc_replica_diff`) so the editor — not the hub — owns the local
-    /// edit. yrs guarantees the apply is idempotent + causal-buffered, so a
+    /// edit. Operation identities make apply idempotent and reorder-safe, so a
     /// duplicate or out-of-order update converges rather than corrupting.
     pub fn relay_update_capture(
         &mut self,
@@ -487,7 +487,7 @@ impl RelayHub {
         Ok(packet)
     }
 
-    /// Apply a raw encoded yrs update from `client_id` and **immediately
+    /// Apply a raw encoded lazily `TextCrdt` delta from `client_id` and **immediately
     /// broadcast** the resulting delta to every other live member's hub-side
     /// mirror (the normal live IPC path). Returns the delivered packet so the
     /// caller can also relay the per-target delta out over the socket to the
@@ -500,6 +500,130 @@ impl RelayHub {
         Ok(packet)
     }
 
+    /// Adopt an editor's **authoritative full lazily state** as the canonical,
+    /// lineage-intact — the reattach acute-wedge fix (`#reattach-adopt`).
+    ///
+    /// `full_state` is the editor's whole `ReplicaState::encode_state()` (a
+    /// `serde_json` `Vec<TextOp>` = `delta_since(∅)`, carrying the editor's own
+    /// `OpId`s). The recovered durable canonical can carry **drift** — an op the
+    /// operator already deleted (e.g. `#sy71`) that a mere union-merge of the
+    /// editor's *incremental* update cannot remove (there is no counterpart delete).
+    /// So on reattach the editor's full state is the authority: rebuild the canonical
+    /// **from the editor's ops** (replacing the drifted one), which drops the drift
+    /// AND keeps the editor's `OpId` lineage so later editor deltas still merge
+    /// conflict-free (unlike `apply_canonical_replace`, which mints fresh ids from
+    /// text and would duplicate). Any *other* live members are flagged to rebootstrap
+    /// (the lineage changed under them); on the reattach path there are none
+    /// (`live_editors == 0`).
+    /// Bounded, one-shot reattach adopt (`#reattach-adopt`, the runaway-safe path):
+    /// rebuild the canonical from the editor's authoritative **TEXT** (`O(text)`, not the
+    /// unbounded tombstone op-log that caused the 2026-07-13 runaway). Safe on reattach
+    /// because `live_editors == 0` means no other live member to conflict with a fresh
+    /// lineage. Self-echo guarded: a no-op when the canonical already shows this text (so a
+    /// repeated push can't pump a feedback loop). Any other live members rebootstrap.
+    pub fn adopt_editor_text(&mut self, text: &str) -> Result<BroadcastPacket> {
+        if self.canonical.text() == text {
+            return Ok(BroadcastPacket {
+                origin: self.canonical_id,
+                update: Vec::new(),
+                targets: Vec::new(),
+            });
+        }
+        let before = self.canonical.state_vector();
+        self.canonical = ReplicaState::from_text(self.canonical_id, text);
+        self.last_committed_text = None;
+        let out = self.canonical.diff(&before)?;
+        let mut targets: Vec<u64> = self
+            .members
+            .keys()
+            .copied()
+            .filter(|id| self.is_live(*id))
+            .collect();
+        targets.sort_unstable();
+        self.pending_rebootstrap.extend(targets.iter().copied());
+        let packet = BroadcastPacket {
+            origin: self.canonical_id,
+            update: out,
+            targets,
+        };
+        self.enqueue_delivery(&packet);
+        Ok(packet)
+    }
+
+    pub fn adopt_editor_full_state(&mut self, full_state: &[u8]) -> Result<BroadcastPacket> {
+        let adopted = ReplicaState::from_encoded(self.canonical_id, full_state)?;
+        // Self-echo guard (`#reattach-adopt`, fixes the 2026-07-13 runaway): if the
+        // editor's state has the SAME visible text as the canonical, adopting changes
+        // nothing — it would only fan an empty delta back to editors, which re-aligned and
+        // re-pushed a growing op-log (77MB→167MB feedback loop). Skip entirely: no replace
+        // (so the canonical never accretes the editor's tombstone bloat), no broadcast, no
+        // rebootstrap. Only a genuine text divergence (real drift to correct) proceeds.
+        if adopted.text() == self.canonical.text() {
+            return Ok(BroadcastPacket {
+                origin: self.canonical_id,
+                update: Vec::new(),
+                targets: Vec::new(),
+            });
+        }
+        let before = self.canonical.state_vector();
+        self.canonical = adopted;
+        // The adopted state is not a committed-to-disk baseline; clear the marker so
+        // `#staleinmem` re-detects on the next commit rather than trusting stale text.
+        self.last_committed_text = None;
+        let out = self.canonical.diff(&before)?;
+        let mut targets: Vec<u64> = self
+            .members
+            .keys()
+            .copied()
+            .filter(|id| self.is_live(*id))
+            .collect();
+        targets.sort_unstable();
+        // Lineage changed under any live peer → they must REPLACE, not merge.
+        self.pending_rebootstrap.extend(targets.iter().copied());
+        let packet = BroadcastPacket {
+            origin: self.canonical_id,
+            update: out,
+            targets,
+        };
+        self.enqueue_delivery(&packet);
+        Ok(packet)
+    }
+
+    /// Fold a document-op **delta frame** straight into the canonical replica
+    /// **without requiring a registered member** — the durable document-op
+    /// replication path (`#docop-plane`, P2). `delta` is the same wire unit as
+    /// [`Self::relay_update`]: a `serde_json` `Vec<lazily::TextOp>` (a
+    /// `ReplicaState::diff` / `agent-doc-reliable-sync-io::document_op` frame body).
+    ///
+    /// This is the fix for the `live_editors == 0` freeze: [`Self::relay_update`]
+    /// only reaches the canonical through a live registered member, so a connected
+    /// plugin whose CRDT member registration lapsed (the phantom lease) could not
+    /// feed the canonical and it went stale. A durably-replicated document-op frame
+    /// lands here regardless of member state, so the canonical is never frozen while
+    /// an editor is connected. Applying is idempotent + commutative (each `TextOp`
+    /// carries its `OpId`), so a duplicate or out-of-order frame converges rather
+    /// than corrupting. The resulting canonical delta is broadcast to every live
+    /// member so connected editors also converge. Returns the broadcast packet;
+    /// `packet.update` is the empty-delta encoding when the frame added nothing new.
+    pub fn apply_document_op_delta(&mut self, delta: &[u8]) -> Result<BroadcastPacket> {
+        let before = self.canonical.state_vector();
+        self.canonical.apply_update(delta)?;
+        let out = self.canonical.diff(&before)?;
+        let targets: Vec<u64> = self
+            .members
+            .keys()
+            .copied()
+            .filter(|id| self.is_live(*id))
+            .collect();
+        let packet = BroadcastPacket {
+            origin: self.canonical_id,
+            update: out,
+            targets,
+        };
+        self.enqueue_delivery(&packet);
+        Ok(packet)
+    }
+
     /// The canonical replica's encoded state — the bootstrap snapshot a freshly
     /// registering editor needs on first contact (all later traffic is deltas).
     pub fn canonical_encoded_state(&self) -> Vec<u8> {
@@ -507,7 +631,7 @@ impl RelayHub {
     }
 
     /// Deliver an update to one target replica (idempotent + causal-buffered by
-    /// yrs, so out-of-order delivery self-heals once causal deps arrive). A no-op
+    /// the CRDT, so out-of-order delivery self-heals once missing ops arrive). A no-op
     /// if the target is gone.
     pub fn deliver(&self, target: u64, update: &[u8]) -> Result<()> {
         if let Some(member) = self.members.get(&target) {
@@ -728,7 +852,7 @@ impl RelayHub {
     // --- Disk demotion (plan phase 6) ----------------------------------------
 
     /// The write-through durable **recovery projection** bytes for the canonical
-    /// replica — what the supervisor flushes to `.agent-doc/crdt/<hash>.yrs`.
+    /// replica — what the supervisor flushes to the durable CRDT projection.
     /// This is a projection of the live authority, NOT the coordination medium:
     /// it exists only so a restart can recover ([`Self::recover_from_projection`]).
     pub fn projection_bytes(&self) -> Vec<u8> {
@@ -993,7 +1117,7 @@ fn apply_canonical_document_tree_replace(current: &str, content: &str) -> Result
 }
 
 /// One replica's ephemeral presence: cursor / selection / a display name. NONE of
-/// this is part of the document CRDT — it is never persisted to `.yrs` and never
+/// this is part of the document CRDT — it is never persisted to the recovery state and never
 /// committed to git.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AwarenessState {
@@ -1060,13 +1184,12 @@ impl AwarenessChannel {
     }
 }
 
-/// Deterministically mint a stable, unique-by-construction yrs client-id from a
+/// Deterministically mint a stable, unique-by-construction CRDT peer id from a
 /// stable string identity (an editor process identity, e.g. `"intellij:<pid>"`).
 ///
 /// The same identity always yields the same id (stable across reconnects); two
-/// distinct identities collide only on a hash collision in the 53-bit space.
-/// yrs requires client-ids to fit in 53 bits (the Yjs-compatible range), so the
-/// hash is masked to the low 53 bits. Callers must still
+/// distinct identities collide only on a hash collision in the legacy 53-bit
+/// compatibility space. The mask preserves already-persisted peer identities. Callers must still
 /// [`RelayHub::validate_unique`] before registering (collision = corruption per
 /// the plan, surfaced as a hard error rather than silently shared state).
 pub fn mint_client_id(identity: &str) -> u64 {
@@ -1076,7 +1199,7 @@ pub fn mint_client_id(identity: &str) -> u64 {
     "agent-doc-replica\0".hash(&mut hasher);
     identity.hash(&mut hasher);
     identity.len().hash(&mut hasher);
-    // yrs client-ids must fit in 53 bits (Yjs-compatible range).
+    // Preserve the legacy 53-bit peer-id space so persisted identities stay stable.
     const CLIENT_ID_MASK: u64 = (1u64 << 53) - 1;
     hasher.finish() & CLIENT_ID_MASK
 }
@@ -1128,6 +1251,159 @@ mod tests {
             "hello-ipc",
             "the raw-update fan-out reached the other live replica's mirror"
         );
+    }
+
+    #[test]
+    fn adopt_editor_full_state_drops_canonical_drift_lineage_intact() {
+        // The reattach acute-wedge fix (`#reattach-adopt`): the recovered canonical
+        // carries drift the operator already deleted (`sy71-drift`); the editor's
+        // authoritative full state lacks it. Adopting the editor's full state drops the
+        // drift and keeps the editor's lineage so a later editor delta still merges.
+        let mut hub = RelayHub::from_text(1, "hello\nsy71-drift\n");
+        let editor = ReplicaState::from_text(2, "hello\n");
+        let full_state = editor.encode_state();
+
+        hub.adopt_editor_full_state(&full_state).unwrap();
+        assert_eq!(
+            hub.canonical_text(),
+            "hello\n",
+            "drift dropped — canonical adopts the editor's authoritative full state"
+        );
+
+        // Lineage-intact: a later incremental editor delta merges cleanly (no dup),
+        // because the canonical now carries the editor's OpIds, not fresh-minted ones.
+        let base = editor.state_vector();
+        editor.apply_local_edit(6, 0, "world\n"); // "hello\n" -> "hello\nworld\n"
+        let delta = editor.diff(&base).unwrap();
+        hub.apply_document_op_delta(&delta).unwrap();
+        assert_eq!(
+            hub.canonical_text(),
+            "hello\nworld\n",
+            "later editor delta merged lineage-intact — the drift did not reappear"
+        );
+    }
+
+    #[test]
+    fn adopt_editor_text_is_bounded_drops_drift_and_self_echoes() {
+        // Bounded reattach adopt: rebuild the canonical from the editor's TEXT. Drops drift
+        // (a line the operator deleted) and is O(text) not O(op-log). Self-echoes on same text.
+        let mut hub = RelayHub::from_text(1, "hello\nsy71-drift\n");
+        let packet = hub.adopt_editor_text("hello\n").unwrap();
+        assert!(!packet.update.is_empty(), "a real text change adopts");
+        assert_eq!(hub.canonical_text(), "hello\n", "drift dropped via text rebuild");
+        // Self-echo: re-adopting the same text is a no-op (no broadcast) — no feedback loop.
+        let echo = hub.adopt_editor_text("hello\n").unwrap();
+        assert!(
+            echo.update.is_empty() && echo.targets.is_empty(),
+            "same-text adopt is a no-op"
+        );
+        assert_eq!(hub.canonical_text(), "hello\n");
+    }
+
+    #[test]
+    fn adopt_editor_full_state_self_echo_is_a_no_op_no_broadcast() {
+        // Runaway fix (2026-07-13): adopting a state whose visible text already equals the
+        // canonical must NOT replace the canonical or broadcast — otherwise a churned editor
+        // buffer (same text, ever-growing tombstone op-log) pumps an endless adopt→re-align
+        // →re-push feedback loop. Here a "different-lineage same-text" state must be a no-op.
+        let mut hub = RelayHub::from_text(1, "hello world\n");
+        // A separate replica that reaches the SAME text via its own ops (different OpIds,
+        // larger op-log) — the "bloated encode_state with identical text" case.
+        let editor = ReplicaState::new(2);
+        editor.apply_local_edit(0, 0, "hello there\n");
+        editor.apply_local_edit(6, 5, "world"); // "hello there\n" -> "hello world\n"
+        assert_eq!(editor.text(), "hello world\n");
+        let bloated_same_text = editor.encode_state();
+
+        let packet = hub.adopt_editor_full_state(&bloated_same_text).unwrap();
+        assert!(
+            packet.targets.is_empty() && packet.update.is_empty(),
+            "same-text adopt must not broadcast (no fan-back → no feedback loop)"
+        );
+        assert_eq!(hub.canonical_text(), "hello world\n", "text unchanged");
+        // The canonical must NOT have been replaced with the bloated op-log (no accretion):
+        // its state vector still reflects only its own (peer-1) lineage.
+        let sv = hub.canonical.state_vector();
+        assert!(
+            !sv.is_empty(),
+            "canonical keeps its own lineage; it did not adopt the editor's bloated op-log"
+        );
+    }
+
+    #[test]
+    fn repeated_same_text_adopts_converge_without_growth_feedback_loop_gate() {
+        // SimWorld reproduction of the 2026-07-13 runaway: a churning editor buffer whose
+        // op-log grows every align (each align delete-all+reinsert mints fresh tombstones)
+        // but whose TEXT stays the same. Before the self-echo guard, each adopt replaced the
+        // canonical with the bloated op-log AND fanned back → editor re-align → bigger push.
+        // With the guard, every same-text adopt is a no-op: the canonical never grows and
+        // never broadcasts, so the loop converges. This is the gate the plan requires before
+        // re-enabling the FFI push.
+        let mut hub = RelayHub::from_text(1, "stable text\n");
+        let baseline_sv_len = hub.canonical.state_vector().len();
+
+        // A churning editor: 20 rounds, each rebuilding the same text via delete-all+reinsert
+        // (tombstone growth) and pushing its full (ever-larger) encode_state.
+        let editor = ReplicaState::from_text(2, "stable text\n");
+        let mut last_state_len = 0usize;
+        for round in 0..20 {
+            let cur = editor.text();
+            let chars = cur.chars().count() as u32;
+            editor.apply_local_edit(0, chars, "stable text\n"); // same text, +tombstones
+            let bloated = editor.encode_state();
+            assert!(
+                bloated.len() >= last_state_len,
+                "round {round}: editor op-log is growing (the runaway input shape)"
+            );
+            last_state_len = bloated.len();
+
+            let packet = hub.adopt_editor_full_state(&bloated).unwrap();
+            assert!(
+                packet.targets.is_empty() && packet.update.is_empty(),
+                "round {round}: same-text adopt must be a no-op (no fan-back)"
+            );
+        }
+        // The canonical never grew and never changed — the loop is broken.
+        assert_eq!(hub.canonical_text(), "stable text\n");
+        assert_eq!(
+            hub.canonical.state_vector().len(),
+            baseline_sv_len,
+            "canonical did not accrete any of the editor's 20 rounds of tombstone bloat"
+        );
+    }
+
+    #[test]
+    fn apply_document_op_delta_feeds_canonical_with_no_live_editors() {
+        // The `live_editors == 0` freeze fix (`#docop-plane`, P2): a durably-replicated
+        // document-op delta feeds the canonical even though NO editor member is
+        // registered — the phantom-lease case where the member `relay_update` path is
+        // dead and the canonical used to go stale (the `#sy71`-class resurrection).
+        let mut hub = RelayHub::from_text(1, "hello\n");
+        assert_eq!(hub.live_count(), 0, "no members registered — the phantom-lease case");
+
+        // A connected plugin bootstraps a replica from the canonical snapshot (shared
+        // OpIds) and makes the operator's edit — what the durable document-op push carries.
+        let editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let base_vv = editor.state_vector(); // == canonical's frontier (bootstrapped from it)
+        editor.apply_local_edit(5, 0, " world"); // "hello\n" -> "hello world\n"
+        let delta = editor.diff(&base_vv).unwrap(); // just the operator's new ops
+
+        // The member relay path can't help (live_editors == 0); the document-op fold does.
+        let packet = hub.apply_document_op_delta(&delta).unwrap();
+        assert_eq!(
+            packet.targets,
+            Vec::<u64>::new(),
+            "no live members to broadcast to"
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            "hello world\n",
+            "canonical fed the operator's delta despite live_editors == 0 — never frozen"
+        );
+
+        // Idempotent: a duplicate frame (at-least-once redelivery) is a no-op.
+        hub.apply_document_op_delta(&delta).unwrap();
+        assert_eq!(hub.canonical_text(), "hello world\n");
     }
 
     #[test]
@@ -1414,7 +1690,7 @@ mod tests {
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();
         hub.apply_local(2, 0, 0, "v1").unwrap();
-        // Flush a durable recovery projection (what hits .yrs).
+        // Flush a durable recovery projection.
         let stale_projection = hub.projection_bytes();
 
         // The live session advances past the projection.

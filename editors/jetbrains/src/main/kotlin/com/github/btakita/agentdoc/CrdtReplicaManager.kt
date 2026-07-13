@@ -247,6 +247,34 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
     }
 
+    /**
+     * Controller-proven reattach recovery. This is intentionally the only path
+     * that sends a bounded text adopt: push the authoritative editor text, then
+     * re-register so the native replica/frontier bootstraps from the rebuilt
+     * canonical before another incremental op can be emitted.
+     */
+    fun requestTextAdopt(filePath: String) {
+        executor.execute {
+            val forwarder = forwarders[filePath] ?: return@execute
+            val editorText = shadows[filePath] ?: return@execute
+            if (!forwarder.pushTextAdopt(editorText)) return@execute
+            if (forwarders.remove(filePath, forwarder)) {
+                forwarder.deregister()
+                val reattached = forwarderFor(
+                    filePath,
+                    editorText,
+                    alignExisting = false,
+                    bypassRegisterBackoff = true,
+                )
+                log.info(
+                    "[reattach-adopt] bounded text adopted for ${File(filePath).name}; " +
+                        "reattached=${reattached != null} chars=${editorText.length}",
+                )
+                requestRemoteDrain(filePath, "reattach-text-adopt")
+            }
+        }
+    }
+
     private fun nextNoOpRescheduleBackoffMs(): Long {
         val n = consecutiveNoOpReschedules.incrementAndGet()
         val shifted = 1L shl minOf(n - 1, 12)
@@ -686,6 +714,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
             instances[project]?.requestRemoteDrain(filePath, reason)
+        }
+
+        fun requestTextAdopt(project: Project, filePath: String) {
+            instances[project]?.requestTextAdopt(filePath)
         }
 
         fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {

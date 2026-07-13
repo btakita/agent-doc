@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux"
-version = "0.34.86"
+version = "0.34.87"
 edition = "2024"
 description = "Pure tmux realtime model state for agent-doc"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_tmux"
 
 [dependencies]
-lazily = { version = "0.32.0", features = ["thread-safe"] }
+lazily = { version = "0.38.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

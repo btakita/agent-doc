@@ -1175,6 +1175,22 @@ pub fn relay_replica_update_for_file(
                 client_id,
             ),
         );
+        // `#reattach-adopt`: the member was just re-seeded from the recovered canonical,
+        // which may carry drift the operator already deleted (`#sy71`) that this
+        // incremental update's union-merge cannot remove. Ask the editor to re-announce
+        // its FULL authoritative state (adopt frame) so the controller REPLACES the
+        // drifted canonical. Additive + regression-safe: the union-merge above already
+        // kept the editor's edits; the adopt corrects the drift when it lands, and once
+        // the canonical is clean subsequent updates fold onto it with nothing to re-add.
+        if let Err(err) = signal_crdt_replica_event(file, "request_full_state", 0) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_replica_event_signal_failed file={} reason=request_full_state error={err}",
+                    file.display(),
+                ),
+            );
+        }
     }
     let canonical_len =
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
@@ -1272,35 +1288,10 @@ pub fn apply_cpc_write_for_file(
     if !authority.editor_attached() {
         return Ok(None);
     }
-    // #stale-lease-cpc-authority: the plugin-owner lease still claims editor
-    // attachment, but real write authority requires a LIVE registered replica. When
-    // a hub exists yet reports zero live editors, the editor exited without
-    // releasing the lease — the CPC canonical is a frozen, non-authoritative
-    // projection whose text will never match `expected_current`, so every write
-    // CAS-refuses forever with `retry_crdt_merge`. That is the wedge that strands
-    // finalize/compact in `response_captured` and churns preflight repair (the live
-    // repro: `authority=cpc_model live_editors=0`, disk drifted from a stale relay
-    // canonical). Mirror the read path
-    // (`realtime_doc_resolve_crdt_no_live_editors_disk_authority`): with no live
-    // replica there is no editor buffer to protect, so resolve to disk authority
-    // (`Ok(None)`) and let the caller commit the write to disk. The controller's
-    // disk-change watcher then reconciles the stale relay canonical against the new
-    // disk content, so it cannot resurrect over disk when an editor re-attaches. A
-    // missing hub (`with_existing_hub` → `None`) is a different case
-    // (#cpcwritemissingreplica) handled by the durable-projection recovery below.
-    if with_existing_hub(file, |hub| hub.live_count() == 0)?.unwrap_or(false) {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_cpc_write_disk_authority_stale_lease file={} source={} live_editors=0 content_len={} content_hash={} recovery=disk_authority_no_live_replica",
-                file.display(),
-                source,
-                content.len(),
-                agent_doc_hash::content_hash(content),
-            ),
-        );
-        return Ok(None);
-    }
+    // The document-op plane feeds the canonical independently of the transient
+    // registered-replica count. A zero-live hub is therefore still a current CRDT
+    // authority; demoting it to disk here would reintroduce the frozen-canonical
+    // wedge this path used to work around. The CAS below remains the safety gate.
     // First attempt against an already-registered live relay hub. When the editor
     // is attached but this process has no registered replica (a transient gap after
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
@@ -2147,6 +2138,98 @@ pub fn adopt_authoritative_text_for_file(file: &Path, text: &str) -> Result<Opti
     Ok(Some(changed))
 }
 
+/// Adopt an editor's authoritative **full lazily state** as the relay canonical for
+/// `file`, lineage-intact — the reattach acute-wedge fix (`#reattach-adopt`).
+///
+/// `full_state` is the editor's whole `ReplicaState::encode_state()` (`serde_json`
+/// `Vec<TextOp>`). Use this (NOT [`apply_document_op_delta_for_file`], which
+/// union-merges) when the editor re-announces after its registration lapsed: the
+/// recovered canonical may carry drift the operator already deleted (`#sy71`) with no
+/// counterpart delete op, so a fold would keep it — adoption replaces the drifted
+/// canonical with the editor's authoritative state, dropping the drift while keeping
+/// the editor's `OpId` lineage. Returns `Ok(Some(text_changed))` when a live relay
+/// model exists, `Ok(None)` headless. The FFI/plugin must send the editor's full
+/// state (not an incremental delta) on reattach for this to be correct.
+pub fn adopt_editor_full_state_for_file(file: &Path, full_state: &[u8]) -> Result<Option<bool>> {
+    let Some(changed) = with_existing_hub(file, |hub| {
+        let before = hub.canonical_text();
+        hub.adopt_editor_full_state(full_state)
+            .map(|_| hub.canonical_text() != before)
+    })?
+    else {
+        return Ok(None);
+    };
+    let changed = changed?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_editor_full_state_adopted file={} authority=multi_replica changed={} state_len={} recovery=reattach_drop_drift",
+            file.display(),
+            changed,
+            full_state.len(),
+        ),
+    );
+    Ok(Some(changed))
+}
+
+/// Adopt the editor's authoritative **TEXT** as the relay canonical for `file` — the
+/// bounded, runaway-safe reattach path (`#reattach-adopt`). `text` is the editor's document
+/// text (`O(text)`, not the op-log). Rebuilds the canonical from text with a self-echo guard
+/// (`RelayHub::adopt_editor_text`). Returns `Ok(Some(changed))` when a hub exists.
+pub fn adopt_editor_text_for_file(file: &Path, text: &str) -> Result<Option<bool>> {
+    let Some(changed) = with_existing_hub(file, |hub| {
+        let before = hub.canonical_text();
+        hub.adopt_editor_text(text)
+            .map(|_| hub.canonical_text() != before)
+    })?
+    else {
+        return Ok(None);
+    };
+    let changed = changed?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_editor_text_adopted file={} authority=multi_replica changed={} text_len={} recovery=reattach_drop_drift_bounded",
+            file.display(),
+            changed,
+            text.len(),
+        ),
+    );
+    Ok(Some(changed))
+}
+
+/// Fold a durably-replicated document-op **delta frame** into the relay canonical
+/// for `file` — the `#docop-plane` P2 ingest that keeps the canonical un-frozen when
+/// a connected editor's CRDT member registration has lapsed (`live_editors == 0`).
+///
+/// `delta` is the `serde_json` `Vec<lazily::TextOp>` body a plugin pushes over the
+/// reliable-sync RPC (a `document_op` frame payload / `ReplicaState::diff` output).
+/// Returns `Ok(Some(text_changed))` when a live relay model exists, `Ok(None)` when
+/// there is no hub (headless — nothing to feed). Safe regardless of `live_editors`:
+/// applying the delta is idempotent + commutative, so a duplicate / out-of-order /
+/// stale frame converges rather than corrupting the canonical.
+pub fn apply_document_op_delta_for_file(file: &Path, delta: &[u8]) -> Result<Option<bool>> {
+    let Some(changed) = with_existing_hub(file, |hub| {
+        let before = hub.canonical_text();
+        hub.apply_document_op_delta(delta)
+            .map(|_| hub.canonical_text() != before)
+    })?
+    else {
+        return Ok(None);
+    };
+    let changed = changed?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_document_op_delta_applied file={} authority=multi_replica changed={} delta_len={}",
+            file.display(),
+            changed,
+            delta.len(),
+        ),
+    );
+    Ok(Some(changed))
+}
+
 pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Result<Option<bool>> {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
@@ -2581,14 +2664,9 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_stale_lease_zero_live_editors_resolves_to_disk_authority() {
-        // Regression for the finalize/compact `response_captured` churn: the
-        // plugin-owner lease still claims editor attachment, but the editor exited
-        // and no replica is live (`live_count() == 0`). The CPC canonical is a
-        // frozen stale projection whose text will never match `expected_current`.
-        // The write MUST NOT CAS-refuse with `retry_crdt_merge` (which wedges the
-        // cycle); it must mirror the read path and resolve to disk authority
-        // (`Ok(None)`) so the caller commits the write to disk. (#stale-lease-cpc-authority)
+    fn cpc_relay_write_zero_live_editors_keeps_doc_op_canonical_authority() {
+        // The document-op plane feeds canonical independently of relay-member
+        // liveness. Zero live members must not demote an existing hub to disk.
         let (_dir, doc) = temp_doc("cpc-stale-lease.md");
         let file_str = doc.display().to_string();
         seed_live_plugin_owner_lease(&file_str);
@@ -2599,9 +2677,7 @@ mod tests {
             CurrentText::Current { text, .. } => text,
             other => panic!("expected relay current text, got {other:?}"),
         };
-        // Editor exits without releasing the lease: the member goes offline
-        // (`live=false`), the canonical stays frozen at `baseline`, but the lease
-        // still reports `editor_attached`.
+        // The member goes offline without releasing the authority lease.
         let client_id = mint_client_id("intellij:cpc-stale");
         with_hub(&doc, |hub| {
             assert!(hub.disconnect(client_id), "disconnect should mark member offline");
@@ -2609,16 +2685,13 @@ mod tests {
         })
         .unwrap();
 
-        // Finalize computes `expected_current` from DISK, which has drifted from the
-        // frozen stale relay canonical — the exact CAS mismatch that used to refuse.
-        let stale_expected = format!("{baseline}\ndrifted disk tail\n");
-        let next = format!("{baseline}\n### Re: unstuck — gpt-5\n\nDisk authority.\n");
-        let result = apply_cpc_write_for_file(&doc, &stale_expected, &next, "test_cpc_relay")
-            .expect("stale-lease zero-live write must not error with retry_crdt_merge");
-        assert!(
-            result.is_none(),
-            "zero live editors under a stale lease must resolve to disk authority (Ok(None)), not CAS-refuse"
-        );
+        let next = format!("{baseline}\n### Re: current — gpt-5\n\nCanonical authority.\n");
+        let result = apply_cpc_write_for_file(&doc, &baseline, &next, "test_cpc_relay")
+            .expect("zero-live canonical write should pass its CAS")
+            .expect("an existing doc-op canonical must not demote to disk");
+        assert!(result.applied);
+        assert_eq!(result.live_editors, 0);
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
     }
 
     #[test]

@@ -36,26 +36,27 @@ complete
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Lender Documents UI parity and release closeout; CI/tooling cl...
-### Re: Uploaded document types in Lender Documents — gpt-5
+❯ Please revert the last change. The Lender Documents are incoming from the lender. Uploaded documents should not be a part of this.
+❯ #spec-test-commit-push-deploy
+### Re: Revert uploaded documents from Lender Documents — gpt-5
 
-Implemented, committed, and deployed the Lender Documents catalogue expansion.
+Reverted the uploaded-loan-document catalogue integration and restored the Lender Documents boundary.
 
-- **Behavior:** **Add a document type** now includes every type represented by a non-deleted uploaded loan document, including custom `document_types.is_custom=1` entries. Those types become upload rows automatically, with their existing files shown as download links.
-- **Ownership:** Existing `loan_documents` are reused, not copied. They remain removable only from their original document workflow; lender-tab uploads retain their existing remove control.
-- **Scope:** An uploaded document type is accepted as a lender-document category only for the same loan.
-- **Production data:** Deal `ca0fa649-8782-4af8-aa63-82a6015c2b87` currently has six typed groups and seven uploaded files, so Appraisal Report, Preliminary Title Report, Property Photos (2), Purchase Agreement, Executed Promissory Note, and Deed of Trust now populate the tab. That deal currently has no uploaded custom type; custom types are covered by the same query and regression.
-- **Verification:** Focused lender-document tests passed; full `make check` passed twice after the final formatting review. This repo has no GitHub Actions workflows configured.
-- **Release:** EFS commit `a5dcbc1`; Worker version `bff854d3-4a7c-410c-bec0-5b915df9f8f9`. Post-deploy checks found no pending D1 migrations, public `/` returned 200, and the protected admin URL returned the expected 303 authentication redirect. The EFS commit is pushed immediately after this binary-owned session closeout.
+- **Behavior:** Ordinary `loan_documents` no longer populate Lender Documents types, rows, or file links. The tab now contains only its built-in categories, per-loan custom lender-document types, and documents stored in the lender-document workflow.
+- **Spec and regression:** The PRD now states that borrower/admin upload workflows remain separate. A regression test locks the repository, list response, and UI against reintroducing `uploaded_document_types` or querying `loan_documents`.
+- **Verification:** The focused suite passed (21 tests, 0 failures), and full `make check` completed successfully. This repo has no GitHub Actions workflow named `CI`.
+- **Commit:** EFS `12b2ccb` (`revert(admin): isolate lender document types (#lender-doc-types)`), containing only the five intended implementation/spec/test paths.
+- **Release:** Deployed Worker version `49a9c080-e6a5-4ab2-a83b-94f7ae147091`. Pre- and post-deploy checks found no pending D1 migrations; D1 Time Travel returned a current recovery bookmark; the public site returned 200 and the protected admin pipeline returned the expected 303 Access redirect. The EFS commit is pushed immediately after this binary-owned session closeout.
 
 Suggested commit message (used):
 
 ```txt
-feat(admin): reuse uploaded types in lender documents (#lender-doc-types)
+revert(admin): isolate lender document types (#lender-doc-types)
 
-Include uploaded loan-document types and their existing files in the Lender
-Documents catalogue while preserving document ownership and loan scoping.
+Remove ordinary loan-document catalogue merging from the Lender Documents API
+and UI, clarify workflow ownership in the PRD, and add regression coverage.
 ```
-<!-- agent:boundary:ae7583ee -->
+<!-- agent:boundary:e9ca8868 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

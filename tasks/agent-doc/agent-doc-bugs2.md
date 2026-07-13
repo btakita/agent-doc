@@ -57,7 +57,50 @@ Fixed all reproduced contributing factors and released the implementation as age
 - **Build/install:** installed CLI/native library 0.34.91 and JetBrains plugin 0.2.244. IntelliJ IDEA must be restarted to activate the new plugin; the required one-click operator verification is tracked in the backlog.
 - **Commits:** agent-doc `d488d1ec7edddf6e8daea6e6581056add2af29c3`; superproject pointer `b17652fc0`.
 - **Release:** pushed agent-doc `main` and tag `v0.34.91`. The tag-triggered Release workflow is running. Manual crates.io publication advanced through the ordered workspace until crates.io's one-existing-crate-update-per-minute limit made the remaining serial publication unsuitable for this interactive closeout.
-<!-- agent:boundary:6a813c01 -->
+- `make install-full`, with the installed CLI reporting 0.34.94
+- signed plugin build
+- full JetBrains `test buildPlugin`
+- `make check`
+- JetBrains transient-status tests
+- focused Rust commit-scope tests
+❯ When I run JB `Compact Exchange`, the compaction happens quickly but the git commit takes ~20-30 seconds. Can we speed up the git commit? Please add Compacting Exchange to the custom Plugin status bar at the top of the document (we use it for turns).
+
+### Re: Compact Exchange latency and progress — gpt-5
+
+Implemented and released in agent-doc 0.34.94 (commit `e2d43a44`) with JetBrains plugin 0.2.245.
+
+The 20–30 second delay was not the Git commit itself. During a CPC-managed commit, the commit path repeatedly opened controller socket reads back into the same controller even though the commit barrier had already converged the canonical CRDT document. Git completed quickly, but those serialized reads accumulated latency.
+
+The CPC commit path now reads the converged document directly from the controller-local CRDT relay while the commit scope is active, with the existing controller resolver retained as a fallback when local state is detached, missing, or still syncing. This removes the self-round-trips without weakening the commit barrier.
+
+Compact Exchange also immediately overlays the plugin's top-of-document status banner with `⟳ agent-doc: Compacting Exchange`. The status is cleared on success, failure, or cancellation. Token-guarded updates prevent an older overlapping action from clearing a newer status.
+
+Verification passed:
+
+- focused Rust commit-scope tests
+- JetBrains transient-status tests
+- `make check`
+- full JetBrains `test buildPlugin`
+- signed plugin build
+- `make install-full`, with the installed CLI reporting 0.34.94
+
+The source, tag `v0.34.94`, and release automation are upstream. GitHub Release and compatible multi-platform PyPI wheel jobs were running at closeout. A local generic `linux_x86_64` wheel was rejected by PyPI, so the manylinux CI build is the authoritative publish path.
+
+[operator-verify] Non-blocking follow-up: in a live JetBrains document, run Compact Exchange and confirm the banner appears immediately and the post-compaction commit phase no longer has the previous delay.
+
+### Re: Private Cargo packages — gpt-5
+
+Completed in agent-doc 0.34.93 (commit `b99f2e33`). Every Cargo package now has `publish = false`; release and upgrade flows no longer depend on publishing the internal workspace crate graph. Rust binaries are distributed through GitHub Releases and the Python package through PyPI.
+
+Crates.io does not support deleting published crate versions. Yanking would only prevent new dependency resolution and could break fresh installs; it would not remove the packages or their pages. The existing healthy versions were therefore left intact, while all future publishing is disabled.
+
+Cargo publishing reference: https://doc.rust-lang.org/cargo/reference/publishing.html  
+Cargo yank behavior: https://doc.rust-lang.org/cargo/commands/cargo-yank.html
+
+### Re: Codex skill mismatch auto-restart — gpt-5
+
+Completed in agent-doc 0.34.92 (commit `fa516fc5`). When CPC detects that Codex loaded a stale agent-doc skill instruction version, it now initiates a supervisor restart immediately, resumes the latest Codex session with `codex resume --last`, and resubmits the trigger. The operator no longer needs to restart Codex manually for this mismatch.
+<!-- agent:boundary:5179a058 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -149,6 +192,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
+  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [ ] [#jbcompactexchange] #agent-doc-bug JB Compact Exchange action fails: `agent-doc command failed (exit 1)` after 'Tagged pre-compact state'. Triage the compact subcommand exit-1 path surfaced through the JB CompactExchangeAction; capture the full stderr and fix the failing compact step.
 - [ ] [#goal1d0k] #agent-doc /goal Implement backlog item(s): #1d0k — pick up on the next drain cycle.
@@ -162,6 +207,8 @@ What are #next-steps to fix bugs?
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
 - [ ] [#restartstderrbleed2] #restartstderrbleed2 #agent-doc-bug Fresh route-owned start bleeds CLI boot stderr into the agent pane (visible on first manual submit); distinct from shipped #restartstderrbleed. Plan: src/agent-doc/tasks/agent-doc/plan-fresh-start-stderr-bleed.md
 - [ ] [#5bzd] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%25 actor_generation=1137 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=12773 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783437151060-direct_pane_dispatch_start_unproven-codex-_25-9831ae756eb0.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
+  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=none elapsed_ms=10168 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783978049569-direct_pane_dispatch_start_unproven-codex-_83-627a6490e502.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof)
+  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=none elapsed_ms=10147 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783978049960-direct_pane_dispatch_start_unproven-codex-_83-627a6490e502.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
 - [ ] [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md

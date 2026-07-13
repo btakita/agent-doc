@@ -1605,6 +1605,7 @@ version = "0.34.85"
 dependencies = [
  "agent-doc-capture-io",
  "agent-doc-codex-hook-io",
+ "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-diff",
  "agent-doc-document",

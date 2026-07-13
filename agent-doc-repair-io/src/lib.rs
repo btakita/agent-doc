@@ -1698,6 +1698,20 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
         &head_doc,
     ) {
         agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
+        // `#external-commit-crdt-staleness`: reconciling the snapshot to HEAD makes
+        // the cold-load baseline-wins path (`crdt_merge_base_state_with`) discard a
+        // stale `.yrs` whose projection no longer matches the baseline, but a WARM
+        // live/phantom-frozen canonical replica can still hold the pre-commit text
+        // and out-vote HEAD on the next merge (the `#compact-overlay-crdt-staleness`
+        // mechanism, generalized to any external commit). Converge the live CRDT
+        // canonical to HEAD too. Only safe in this `basis=head` branch: here the
+        // whole document is at HEAD (`current_doc` normalizes equal), so no operator
+        // content beyond HEAD exists to drop — the follow-up/local-drift branch
+        // below deliberately does NOT converge (it would clobber a live operator
+        // follow-up). Authority-gated + best-effort: headless returns `Ok(None)`
+        // (cold-load baseline-wins already owns it) and a convergence error is
+        // logged, never failing the snapshot repair that already succeeded.
+        converge_crdt_canonical_to_head(file, &head_doc);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -1737,6 +1751,34 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     }
 
     Ok(None)
+}
+
+/// Converge the live CRDT canonical replica to `head_doc` after a snapshot→HEAD
+/// repair, so a warm (or phantom-frozen) replica cannot replay pre-commit text and
+/// revert an externally committed mutation (`#external-commit-crdt-staleness`).
+///
+/// Authority-gated by `adopt_authoritative_text_for_file`: headless returns
+/// `Ok(None)` and does nothing (the cold-load baseline-wins path already discards a
+/// stale disk `.yrs`). Best-effort: a convergence error is logged, never
+/// propagated — the snapshot repair that already landed is the primary guarantee.
+fn converge_crdt_canonical_to_head(file: &Path, head_doc: &str) {
+    match agent_doc_crdt_relay_io::adopt_authoritative_text_for_file(file, head_doc) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!(
+                "[repair] warning: could not converge CRDT canonical to HEAD after snapshot repair for {} (cold-load baseline-wins still owns staleness): {e}",
+                file.display()
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "snapshot_repair_crdt_converge_warning file={} err={}",
+                    file.display(),
+                    e
+                ),
+            );
+        }
+    }
 }
 
 fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) -> bool {
@@ -2122,6 +2164,74 @@ mod tests {
         assert!(json.contains("\"reason\": \"agent markers\""));
         assert!(json.contains("\"response_body\": \"response body\""));
         assert!(json.contains("\"payload_sha256\""));
+    }
+
+    #[test]
+    fn repair_converges_crdt_and_lands_snapshot_on_external_commit() {
+        // `#external-commit-crdt-staleness`: an external commit lands a new
+        // historical `### Re:` turn in HEAD that the snapshot does not reflect. The
+        // repair must reconcile the snapshot to HEAD (basis=head) AND run the
+        // CRDT-canonical convergence wiring without error. Headless (no attached
+        // editor) the convergence is an authority-gated no-op — the warm-path
+        // convergence itself is covered by crdt-relay-io's
+        // `adopt_authoritative_text_converges_a_stale_canonical_for_the_commit_read`.
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(root.join("README.md"), "# test\n").unwrap();
+        git(&["add", "README.md"]);
+        git(&["commit", "-m", "initial", "--no-verify"]);
+
+        let doc = root.join("session.md");
+        let old = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, old).unwrap();
+        agent_doc_snapshot_io::save(&doc, old, agent_doc_ops_log_io::log_op).unwrap();
+        git(&["add", "session.md"]);
+        git(&["commit", "-m", "add doc", "--no-verify"]);
+
+        // External commit lands a new historical turn in HEAD (and on disk).
+        let externally_committed = "---\nagent_doc_session: test\n---\n\n\
+            <!-- agent:exchange patch=append -->\n\
+            ### Re: older\n\
+            old body\n\
+            ### Re: external\n\
+            committed elsewhere\n\
+            <!-- /agent:exchange -->\n";
+        std::fs::write(&doc, externally_committed).unwrap();
+        git(&["add", "session.md"]);
+        git(&["commit", "-m", "external commit", "--no-verify"]);
+        // Snapshot still lags at the pre-commit content.
+        agent_doc_snapshot_io::save(&doc, old, agent_doc_ops_log_io::log_op).unwrap();
+
+        let reason = repair_committed_historical_snapshot_drift(&doc)
+            .expect("repair must not error while converging the CRDT canonical");
+        assert_eq!(
+            reason,
+            Some("exchange"),
+            "external commit is a committed historical exchange mutation"
+        );
+
+        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert!(
+            snap.contains("### Re: external\n"),
+            "snapshot must reconcile to the externally committed HEAD:\n{snap}"
+        );
     }
 
     #[test]

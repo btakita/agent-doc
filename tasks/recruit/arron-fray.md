@@ -288,21 +288,12 @@ I used the current project name `lazily-formal` for the Lean layer; that is the 
 > **Queue prompt:** [x] ~~In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"~~ — done (data.toml + BrianTakita.md)
 
 This item was completed in an earlier cycle and is retained only as checked queue history. No additional work is pending for it.
-<!-- agent:boundary:a1ef8ca7 -->
+<!-- agent:boundary:7760c939 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- [x] ~~In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"~~ — done (data.toml + BrianTakita.md)
-- [x] ~~Resume: Under Open Source: Make lazily first. Mention all projects, including lazily-spec and lazily-formal. Include FFI, IPC, Web Sockets, WebRTC, and WASM. Mention primitives including state machines and state planes.~~ — done
-- [x] ~~resume: Under Open Source: Make signal-space second.~~ — done (new entry)
-- [x] ~~resume: Under Open Source: Make agent-doc third.~~ — done
-- [x] ~~resume: Under Open Source: Make tsift fourth. Mention MemGraphRag, GraphDB, BM25, Sqlite/LibSql.~~ — done (MemGraphRAG/GraphDB/BM25/SQLite·LibSQL)
-- [x] ~~resume: Under Open Source: Make corky fourth.~~ — corky placed 5th (right after tsift); conflicts with "tsift fourth" — see response
-- [x] ~~Ensure the lazily description mentions Harel Statecharts. Highlight the interoperability of the lazily family.~~ — done
-- [x] ~~Create a custom resume for the job description.~~ — profiles/arron-fray.toml → BrianTakita-arron-fray.pdf
-- [x] ~~Draft a linked in message for arron-fray.~~ — drafted in response (no auto-send)
 <!-- /agent:queue -->
 
 ## Backlog

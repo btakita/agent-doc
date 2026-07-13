@@ -4276,7 +4276,65 @@ fn reject_cross_document_owner_pane(
         }
         return None;
     }
+    // `#cross-repo-owner-guard`: a pane whose working directory lives in a
+    // *different git repository* than `file` must never be surfaced as the
+    // document's owner. Nested git submodules that carry no local `.agent-doc/`
+    // collapse up into the superproject's `.agent-doc/` keyspace under
+    // `find_project_root`, so `.agent-doc`-root equality
+    // (`pane_assignment_matches_document_root`) cannot tell a `src/lazily-rs`
+    // submodule pane apart from a superproject `tasks/…` document — every
+    // root-equality check compares `superproject == superproject`. That blind
+    // spot let a supervisor restart re-attach a submodule agent session (e.g. a
+    // lazily Claude pane) onto a superproject document's pane. Comparing git
+    // toplevels rejects the cross-repo pane so the caller cold-starts / fails
+    // closed with the correct owner. This also closes the bare-foreign-session
+    // gap that `pane_runs_other_document_owner` misses (a raw `claude`/`codex`
+    // pane carries no agent-doc `.md` path in its cmdline).
+    if pane_in_foreign_git_repo(tmux, &pane, file) {
+        if log_hits {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "[sync] owner candidate pane {} lives in a different git repository than {}; not surfacing (cross-repo guard #cross-repo-owner-guard)",
+                    pane,
+                    file.display()
+                ),
+            );
+        }
+        return None;
+    }
     Some(pane)
+}
+
+/// The git-repository toplevel that owns `file`, or `None` when it cannot be
+/// resolved (git unavailable, path outside any repo). Used to draw the durable
+/// project boundary the nearest-`.agent-doc` collapse erases.
+fn document_git_repo(file: &Path) -> Option<PathBuf> {
+    let absolute = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
+    let dir = absolute.parent().filter(|p| !p.as_os_str().is_empty())?;
+    agent_doc_git_io::dirs::git_toplevel_at(dir)
+}
+
+/// True only when `pane_id`'s working directory and `file` resolve to
+/// *provably different* git repositories (e.g. a `src/lazily-rs` submodule pane
+/// vs a superproject document). Returns `false` when the boundary cannot be
+/// proven — missing git info, a non-git tree, or the same repository — so the
+/// check only ever rejects a demonstrable cross-repo pane and never breaks
+/// same-repo owner resolution. See `#cross-repo-owner-guard`.
+fn pane_in_foreign_git_repo(tmux: &Tmux, pane_id: &str, file: &Path) -> bool {
+    let doc_repo = document_git_repo(file);
+    let pane_repo = agent_doc_tmux_io::pane_current_path(tmux, pane_id)
+        .and_then(|cwd| agent_doc_git_io::dirs::git_toplevel_at(&cwd));
+    git_repos_are_foreign(doc_repo.as_deref(), pane_repo.as_deref())
+}
+
+/// Pure boundary decision for `#cross-repo-owner-guard`. Two git toplevels are
+/// *foreign* only when both are known and differ. An unknown toplevel on either
+/// side (git unavailable, non-git tree) is never treated as foreign, so the
+/// guard stays a strict tightening: it can only reject a demonstrable cross-repo
+/// pane, never an ordinary same-repo owner it merely failed to resolve.
+fn git_repos_are_foreign(doc_repo: Option<&Path>, pane_repo: Option<&Path>) -> bool {
+    matches!((doc_repo, pane_repo), (Some(doc), Some(pane)) if doc != pane)
 }
 
 pub fn find_live_owner_pane_excluding(
@@ -5427,6 +5485,64 @@ mod tests {
             reject_cross_document_owner_pane(&tmux, bare.clone(), file, false),
             bare,
             "guard must not reject a candidate it cannot prove owns another document"
+        );
+    }
+
+    #[test]
+    fn git_repos_are_foreign_only_when_both_known_and_differ() {
+        // `#cross-repo-owner-guard` pure decision. The guard must be a strict
+        // tightening: reject only a *provable* cross-repo pane.
+        let sup = Path::new("/repo");
+        let sub = Path::new("/repo/src/lazily-rs");
+
+        // Same repo → owner survives the guard.
+        assert!(!git_repos_are_foreign(Some(sup), Some(sup)));
+        // Different repos (superproject document vs submodule pane) → rejected.
+        assert!(git_repos_are_foreign(Some(sup), Some(sub)));
+        assert!(git_repos_are_foreign(Some(sub), Some(sup)));
+        // Either side unknown (git unavailable / non-git tree) → never foreign,
+        // so an ordinary same-repo owner is not spuriously cold-started.
+        assert!(!git_repos_are_foreign(None, Some(sup)));
+        assert!(!git_repos_are_foreign(Some(sup), None));
+        assert!(!git_repos_are_foreign(None, None));
+    }
+
+    #[test]
+    fn document_git_repo_distinguishes_submodule_from_superproject_root() {
+        // Reproduces the misroute condition: a nested submodule (its own git
+        // repo) that carries NO local `.agent-doc/` sits inside a superproject
+        // that DOES. `find_project_root` collapses the submodule path up to the
+        // superproject, but `document_git_repo` must key off the git toplevel so
+        // the two documents resolve to distinct repositories — the boundary the
+        // `#cross-repo-owner-guard` relies on.
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Canonicalize so the fixture path matches `git rev-parse --show-toplevel`
+        // output on platforms (e.g. macOS) where TempDir lives under a symlink.
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+
+        // Superproject: git repo + `.agent-doc/` + a tracked document.
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("tasks/professional")).unwrap();
+        let super_doc = root.join("tasks/professional/equityfundingsource.md");
+        std::fs::write(&super_doc, "# efs\n").unwrap();
+        init_git_repo(&root, &super_doc);
+
+        // Nested submodule: an independent git repo, NO `.agent-doc/` of its own.
+        let sub_root = root.join("src/lazily-rs");
+        std::fs::create_dir_all(&sub_root).unwrap();
+        let sub_doc = sub_root.join("BENCHMARKS.md");
+        std::fs::write(&sub_doc, "# bench\n").unwrap();
+        init_git_repo(&sub_root, &sub_doc);
+
+        let super_repo = document_git_repo(&super_doc).map(|r| std::fs::canonicalize(r).unwrap());
+        let sub_repo = document_git_repo(&sub_doc).map(|r| std::fs::canonicalize(r).unwrap());
+
+        assert_eq!(super_repo.as_deref(), Some(root.as_path()));
+        assert_eq!(sub_repo.as_deref(), Some(sub_root.as_path()));
+        assert!(
+            git_repos_are_foreign(super_repo.as_deref(), sub_repo.as_deref()),
+            "a submodule pane must be foreign to a superproject document (#cross-repo-owner-guard); \
+             super={super_repo:?} sub={sub_repo:?}"
         );
     }
 

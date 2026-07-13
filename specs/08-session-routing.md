@@ -222,11 +222,37 @@ When the user navigates to a document in the editor:
    - Registers the session→pane **Binding** in `sessions.json`
    - Starts Claude asynchronously in the new pane
 
+### Cross-Repository Owner Guard (`#cross-repo-owner-guard`)
+
+Nearest-`.agent-doc` resolution alone does **not** isolate sibling repositories when a
+nested git submodule carries no local `.agent-doc/`. `find_project_root` walks up to the
+nearest ancestor that contains `.agent-doc/`, so a document under a submodule such as
+`src/lazily-rs/` (no `.agent-doc/` of its own) collapses up to the **superproject** root —
+the same root as a superproject document like `tasks/professional/equityfundingsource.md`.
+The submodule and superproject then share one `.agent-doc/` keyspace (registry, controller
+store, supervisor sockets, session logs), and every `.agent-doc`-root equality check
+(`pane_assignment_matches_document_root`, `registry_entry_matches_document_root`) compares
+`superproject == superproject` and cannot tell a submodule pane apart from a superproject
+document. Left unguarded this let a supervisor restart re-attach a submodule agent session
+(e.g. a lazily Claude pane) onto a superproject document's pane.
+
+Owner resolution therefore draws the durable project boundary at the **git repository**, not
+the nearest `.agent-doc/`. `reject_cross_document_owner_pane` — the single chokepoint that
+both the heuristic (`find_live_owner_pane*`) and normal-path (`find_normal_path_owner_pane*`)
+resolvers funnel their candidate through — rejects any pane whose working-directory
+`git rev-parse --show-toplevel` differs from the document's git toplevel. The comparison is a
+strict tightening: an unknown toplevel on either side (git unavailable, non-git tree) is never
+treated as foreign, so an ordinary same-repo owner is never spuriously cold-started. This also
+closes the bare-foreign-session gap that the `.md`-document cross-document check misses — a raw
+`claude`/`codex` pane carries no agent-doc document path in its command line, but its git
+repository still identifies it as foreign.
+
 ### Invariants
 
 | Invariant | Enforcement |
 |-----------|-------------|
 | One document per pane | Registry check in `claim::run()` and transaction-level actor-store handoff that closes and clears displaced cross-document owners |
+| A pane never owns a document from a different git repository (`#cross-repo-owner-guard`) | `reject_cross_document_owner_pane` drops any owner candidate whose working directory resolves to a different `git rev-parse --show-toplevel` than the document, so a nested submodule pane cannot be re-attached to a superproject document (and vice versa) |
 | Document drives, pane follows | Sync resolves files first, then matches to panes |
 | Editor-selected document owns the requested pane | `auto_start` creates new panes when needed; actor-store writes recover stale aliases by making the incoming document authoritative and clearing displaced owners |
 | Stashed panes stay alive | `join-pane` moves to stash, doesn't kill |

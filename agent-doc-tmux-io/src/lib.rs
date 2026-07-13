@@ -155,6 +155,21 @@ pub fn pane_project_root(
     project_root_for_pane_current_path(&output)
 }
 
+/// The pane's raw working directory (`#{pane_current_path}`), *without* the
+/// nearest-`.agent-doc` collapse that [`pane_project_root`] applies. Callers
+/// that need the real git-repository boundary of the pane (e.g. to tell a
+/// nested submodule pane apart from a superproject document) must use this, not
+/// `pane_project_root`, because a submodule pane with no local `.agent-doc/`
+/// collapses up to the superproject root under `find_project_root`.
+pub fn pane_current_path(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    pane_id: &str,
+) -> Option<PathBuf> {
+    let output = display_message_value(runner, Some(pane_id), "#{pane_current_path}")?;
+    let trimmed = output.trim();
+    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+}
+
 pub fn pane_pid(runner: &(impl TmuxCommandRunner + ?Sized), pane_id: &str) -> Option<u32> {
     display_message_value(runner, Some(pane_id), "#{pane_pid}")?
         .parse::<u32>()

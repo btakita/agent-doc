@@ -497,5 +497,6 @@ without that compatibility migration.
 
 Remaining release operations are external credential/rate gates, not parity gaps: PyPI needs
 an upload token, npm needs the package's trusted-publisher/passkey configuration corrected,
-and crates.io is rate-limiting the incremental first publication of agent-doc's decomposed
-crates. The idempotent `make publish-crate` resumes from the first unpublished crate.
+and crates.io is rate-limiting the agent-doc 0.34.88 workspace rollout. The closeout attempt
+published 33 crates before the rolling update limit recurred; the idempotent
+`make publish-crate` resumes at `agent-doc-merge` after the registry window clears.

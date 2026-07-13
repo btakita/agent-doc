@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -36,13 +36,29 @@ complete
 
 Compacted content:
 - Archived 3 response topic(s): #hmw9; #hmw9 closeout; #hmw9 queue reconciliation
-<!-- agent:boundary:2c83ca49 -->
+> **Queue prompt:** 📌 - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.
+
+### Re: Lender Documents UI parity and release closeout — gpt-5
+
+The interrupted cycle is fully reconciled: the recovered request was to make **Lender Documents** match the **Required Documents** UI and complete the spec, tests, commit, push, and deployment.
+
+- **UI:** Lender Documents now uses compact keyboard/click and drag-and-drop upload rows, a visible Upload button, inline document links, uploaded-state counts, and per-file removal. Empty categories say “No file” rather than implying every lender document is mandatory.
+- **Compatibility:** The five lender-document categories and legacy **Other** bucket remain. Admin uploads persist `source=admin_on_behalf`; existing API, R2, and D1 contracts are unchanged.
+- **Spec/tests:** Added `prds/deal-lender-documents.md` and expanded `tests/deal-lender-documents.test.ts`. Focused suite: 17 passed. Full `make check`: 1,585 tests passed, application build passed, and Worker bundle passed.
+- **Release:** Commit `ab9365f` was pushed to `origin/main`. Worker version `549d4ad0-731d-46a9-9d11-7cdec0060be8` was deployed. Post-deploy checks found no pending D1 migrations; the public root returned HTTP 200 and the protected admin route returned HTTP 303 as expected.
+- **CI/tooling:** The repo has no GitHub Actions workflow named `CI`, so the complete local suite served as the release gate. Existing untracked `.agent-doc/` and `.claude/` metadata were intentionally left untouched.
+
+Commit message used:
+
+```txt
+feat(admin): align lender document upload rows (#lender-docs-required-ui)
+
+Match the Lender Documents tab to the compact Required Documents row UI with click/drag uploads, inline downloads, counts, and per-file removal. Add the focused product spec and regression coverage without changing the existing persistence or endpoint contracts.
+```
+<!-- agent:boundary:6de3ec13 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#e44f]~~
-- ~~⏭️ do [#hmw9]~~
-- 📌 - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.
 <!-- /agent:queue -->
 
 ## Notes

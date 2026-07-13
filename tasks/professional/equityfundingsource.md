@@ -52,7 +52,17 @@ Verification run:
 - `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this EFS repo, so there was no CI run to inspect.
 
 No EFS source changes were needed for this queue item, so there was no code commit or push to make beyond this agent-doc closeout.
-<!-- agent:boundary:bc455ad2 -->
+
+### Re: #hmw9 closeout — gpt-5
+
+Closed `#hmw9` after re-confirming the production configuration against Cloudflare.
+
+- Changed paths: no EFS source files; only this agent-doc session document is updated by closeout.
+- Commands: `bun run cf:whoami`, `bun run cf:secrets:list`, Wrangler deployment/version inspection, the focused borrower-message notification test, and the required CI lookup.
+- Verification: production version `62bc5e10-c12c-4fcf-a3ef-45b215646d3a` remains at 100%; message email notifications are enabled; sender/account/admin-recipient bindings are present; fallback Cloudflare credential secrets are present; `bun test tests/borrower-message-notify.test.ts` passed.
+- Confidence: high. This verifies configuration and code behavior without sending a synthetic production email.
+- Escalation: none. `gh run list --workflow CI --limit 1` reports that this repository has no workflow named `CI`.
+<!-- agent:boundary:6ee0a3d6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -81,7 +91,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 <!-- /agent:backlog -->
 
 ## Review

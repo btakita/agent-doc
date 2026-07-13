@@ -251,6 +251,15 @@ pub struct CycleState {
     /// doctor, and hooks one canonical recovery surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked_closeout: Option<BlockedCloseout>,
+    /// `#queueskip`: id-backed queue heads the binary has SKIPPED — each was
+    /// dispatched, came back unconsumed, and the queue advanced past it to a
+    /// non-dependent drainable head so the loop does not wedge re-dispatching a
+    /// dead ref. Accumulated across cycles (carried forward by
+    /// [`start_preflight_with_task`]) and cleared for an id once it is consumed
+    /// (resolved/reaped) or no longer present. Preflight stamps the visible `⏭️`
+    /// skip marker on these heads and excludes them from selection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_queue_head_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -868,6 +877,16 @@ pub fn start_preflight_with_task(
     // drops. Driven by the `surfaced` flag rather than a cycle-id comparison
     // because `cycle_id` is millisecond-derived and can collide across cycles.
     let carried_semantic_merge_acks = document_cell_merge_acks_to_carry(file).unwrap_or_default();
+    // `#queueskip`: carry forward the skipped-head accumulator so a head marked
+    // skippable in a prior cycle stays skipped until it is consumed or removed
+    // (preflight recomputes/clears it each cycle). Without this the flag would
+    // reset every cycle and the dead head would be re-dispatched on alternating
+    // cycles instead of staying skipped.
+    let carried_skipped_queue_head_ids = load(file)
+        .ok()
+        .flatten()
+        .map(|prior| prior.skipped_queue_head_ids)
+        .unwrap_or_default();
     let phase = CyclePhaseMachine::transition(CyclePhase::Committed, CycleEvent::StartPreflight)
         .unwrap_or(CyclePhase::PreflightStarted);
     let state = CycleState {
@@ -913,6 +932,7 @@ pub fn start_preflight_with_task(
             .unwrap_or_default(),
         pending_semantic_merge_acks: carried_semantic_merge_acks,
         blocked_closeout: None,
+        skipped_queue_head_ids: carried_skipped_queue_head_ids,
     };
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::PreflightStarted)?;
@@ -1208,6 +1228,28 @@ pub fn record_reaped_pending_ids(file: &Path, ids: &[String]) -> Result<Option<C
     }
 
     if changed {
+        state.updated_at = now_secs();
+        save(file, &state)?;
+    }
+    Ok(Some(state))
+}
+
+/// `#queueskip`: overwrite the skipped-head accumulator with the fully-recomputed
+/// set for this cycle (carry-forward + newly-stalled heads, minus any that were
+/// consumed or are no longer present). Preflight owns the recompute, so this is a
+/// replace, not an append.
+pub fn set_skipped_queue_head_ids(file: &Path, ids: &[String]) -> Result<Option<CycleState>> {
+    let Some(mut state) = load(file)? else {
+        return Ok(None);
+    };
+    let mut seen = std::collections::HashSet::new();
+    let normalized: Vec<String> = ids
+        .iter()
+        .map(|id| normalize_pending_id(id))
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect();
+    if state.skipped_queue_head_ids != normalized {
+        state.skipped_queue_head_ids = normalized;
         state.updated_at = now_secs();
         save(file, &state)?;
     }
@@ -2031,6 +2073,7 @@ fn synthetic_state_with_id(
         active_free_text_queue_heads: Vec::new(),
         pending_semantic_merge_acks: Vec::new(),
         blocked_closeout: None,
+        skipped_queue_head_ids: Vec::new(),
     }
 }
 

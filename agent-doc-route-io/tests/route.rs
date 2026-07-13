@@ -1081,7 +1081,7 @@ mod tests {
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue go -->\n",
-            "- :pushpin: manual preempt prompt\n",
+            "- 📌 manual preempt prompt\n",
             "- existing queued prompt\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
@@ -1169,7 +1169,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             updated.contains(
-                "- :pushpin: manual preempt prompt\n- concurrent editor prompt\n- existing queued prompt"
+                "- 📌 manual preempt prompt\n- concurrent editor prompt\n- existing queued prompt"
             ),
             "retry must preserve concurrent editor queue edits while inserting manual dispatch:\n{updated}"
         );
@@ -1878,7 +1878,7 @@ mod tests {
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated.contains(
-                "- :pushpin: manual preempt prompt\n- first queued prompt\n- second queued prompt"
+                "- 📌 manual preempt prompt\n- first queued prompt\n- second queued prompt"
             ),
             "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
         );
@@ -1926,7 +1926,7 @@ mod tests {
         assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
-            updated.contains("- :pushpin: manual preempt prompt\n- pending auto-loop item"),
+            updated.contains("- 📌 manual preempt prompt\n- pending auto-loop item"),
             "priority dispatch must preserve the pending item and run ahead of it with operator pin:\n{updated}"
         );
     }
@@ -1972,7 +1972,7 @@ mod tests {
             .find("preset #spec")
             .expect("preset directive preserved");
         let preempt_pos = updated
-            .find("- :pushpin: manual preempt prompt")
+            .find("- 📌 manual preempt prompt")
             .expect("preempt prompt inserted");
         let first_pos = updated
             .find("- first queued prompt")

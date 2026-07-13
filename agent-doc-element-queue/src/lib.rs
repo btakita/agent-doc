@@ -260,6 +260,7 @@ fn strip_priority_markers(text: &str) -> String {
             ":round_pushpin:",
             "📍",
             "🚧",
+            "⏭\u{fe0f}",
         ]
         .iter()
         .find_map(|marker| trimmed.strip_prefix(marker));

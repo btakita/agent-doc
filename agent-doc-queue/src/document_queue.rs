@@ -914,6 +914,41 @@ pub fn set_prompts_in_progress(
     changed.then_some(out)
 }
 
+/// `#queueskip`: stamp the visible `⏭️` skip marker on every live prompt whose
+/// `#id` is in `skipped_ids`, and remove a stale `⏭️` from any prompt no longer
+/// skipped. Run AFTER [`set_prompts_in_progress`] (which stamps `🚧` on the
+/// selected head and strips markers elsewhere), so a skipped head that was left
+/// bare gets its marker back and a head that stopped being skipped loses it.
+/// Returns `Some(new_entries)` when any marker changed, `None` otherwise.
+pub fn set_prompts_skipped(
+    entries: &[QueueEntry],
+    skipped_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    let mut changed = false;
+    let out = entries
+        .iter()
+        .map(|entry| match entry {
+            QueueEntry::Prompt(prompt) => {
+                let mut next = prompt.clone();
+                let id = do_prompt_id(&next.text);
+                let should_skip = id.is_some_and(|id| skipped_ids.contains(&id));
+                let has_marker = agent_doc_document::queue_projection::has_skip_marker(&next.text);
+                if should_skip && !has_marker {
+                    next.text = agent_doc_document::queue_projection::apply_skip_marker(&next.text);
+                    changed = true;
+                } else if !should_skip && has_marker {
+                    next.text =
+                        agent_doc_document::queue_projection::strip_in_progress_marker(&next.text);
+                    changed = true;
+                }
+                QueueEntry::Prompt(next)
+            }
+            _ => entry.clone(),
+        })
+        .collect::<Vec<_>>();
+    changed.then_some(out)
+}
+
 /// Apply the canonical operator pin to a head **idempotently** (`#pushpinaccum`).
 ///
 /// A queue head carries exactly **one** leading priority marker. This strips any
@@ -2741,10 +2776,7 @@ mod tests {
         let after = parse("- do [#high]\n- do [#low]\n").unwrap();
         let marked =
             annotate_agent_priority_promotions(&before, &after).expect("promotion should annotate");
-        assert_eq!(
-            render(&marked),
-            "- :round_pushpin: do [#high]\n- do [#low]\n"
-        );
+        assert_eq!(render(&marked), "- 📍 do [#high]\n- do [#low]\n");
     }
 
     #[test]
@@ -2755,31 +2787,29 @@ mod tests {
         let marked = annotate_operator_priority_reorders(&snapshot, &current)
             .expect("manual promotion should annotate");
 
-        assert_eq!(
-            render(&marked),
-            "- :pushpin: do [#c]\n- do [#a]\n- do [#b]\n"
-        );
+        assert_eq!(render(&marked), "- 📌 do [#c]\n- do [#a]\n- do [#b]\n");
     }
 
     #[test]
     fn annotate_operator_priority_reorders_upgrades_agent_pin() {
-        // #pushpinaccum: promoting a `:round_pushpin:` (agent) head to an operator
-        // pin REPLACES the marker — the result carries a single `:pushpin:`, never
-        // the accumulated `:pushpin: :round_pushpin:`.
+        // #pushpinaccum: promoting an agent pin (`:round_pushpin:` / 📍) head to an
+        // operator pin REPLACES the marker — the result carries a single operator
+        // pin (📌), never an accumulated `📌 :round_pushpin:`.
         let snapshot = parse("- do [#a]\n- :round_pushpin: do [#b]\n").unwrap();
         let current = parse("- :round_pushpin: do [#b]\n- do [#a]\n").unwrap();
 
         let marked = annotate_operator_priority_reorders(&snapshot, &current)
             .expect("operator move should add operator pin");
 
-        assert_eq!(render(&marked), "- :pushpin: do [#b]\n- do [#a]\n");
+        assert_eq!(render(&marked), "- 📌 do [#b]\n- do [#a]\n");
     }
 
     #[test]
     fn annotate_operator_priority_reorders_repin_is_idempotent() {
-        // #pushpinaccum: an already-`:pushpin:` head that the operator moves earlier
-        // is left as-is (the existing-operator-pin guard) — it never stacks a second
-        // `:pushpin:`. Move an unpinned neighbor so the function returns Some.
+        // #pushpinaccum: an already-pinned head (here the legacy `:pushpin:`
+        // shortcode) that the operator moves earlier is left as-is (the
+        // existing-operator-pin guard recognizes both spellings) — it never stacks
+        // a second pin. The moved unpinned neighbor gets a fresh operator pin (📌).
         let snapshot = parse("- :pushpin: do [#b]\n- do [#a]\n- do [#c]\n").unwrap();
         let current = parse("- :pushpin: do [#b]\n- do [#c]\n- do [#a]\n").unwrap();
 
@@ -2788,22 +2818,20 @@ mod tests {
 
         assert_eq!(
             render(&marked),
-            "- :pushpin: do [#b]\n- :pushpin: do [#c]\n- do [#a]\n"
+            "- :pushpin: do [#b]\n- 📌 do [#c]\n- do [#a]\n"
         );
     }
 
     #[test]
     fn apply_operator_pin_is_idempotent_and_dedupes() {
-        // #pushpinaccum: one leading marker, always.
-        assert_eq!(apply_operator_pin("do [#x]"), ":pushpin: do [#x]");
-        assert_eq!(apply_operator_pin(":pushpin: do [#x]"), ":pushpin: do [#x]");
-        assert_eq!(
-            apply_operator_pin(":round_pushpin: do [#x]"),
-            ":pushpin: do [#x]"
-        );
+        // #pushpinaccum: one leading marker, always — normalized to the canonical
+        // operator emoji (📌), regardless of which legacy spelling was present.
+        assert_eq!(apply_operator_pin("do [#x]"), "📌 do [#x]");
+        assert_eq!(apply_operator_pin(":pushpin: do [#x]"), "📌 do [#x]");
+        assert_eq!(apply_operator_pin(":round_pushpin: do [#x]"), "📌 do [#x]");
         assert_eq!(
             apply_operator_pin(":pushpin: :round_pushpin: do [#x]"),
-            ":pushpin: do [#x]"
+            "📌 do [#x]"
         );
     }
 

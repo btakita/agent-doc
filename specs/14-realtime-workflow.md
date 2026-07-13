@@ -108,8 +108,27 @@ have multiple heads.
 The `🚧` marker is a projection of the active HEAD set into the visible document;
 it is not operator intent, not queue identity, and not an independent scheduling
 input. Realtime must update the document so every actively running HEAD carries
-the `🚧` marker, and no inactive/drained head carries it. Cosmetic markers such
-as `🚧`, `:pushpin:`, and `:round_pushpin:` do not change selected head identity.
+the `🚧` marker, and no inactive/drained head carries it. Cosmetic markers do not
+change selected head identity. The canonical marker vocabulary is:
+
+- `🚧` — active/in-progress HEAD projection (the head being dispatched this cycle).
+- `⏭️` — SKIPPED head projection (`#queueskip`): a head that was dispatched, came
+  back unconsumed, and was passed over so the queue could advance to a
+  non-dependent drainable head. It is a re-derived cosmetic projection like `🚧`,
+  never changes identity, and clears automatically once the head is consumed or is
+  no longer a live head. A skipped head is left in the queue for the operator (it
+  is never auto-marked-done or dropped — halt-safety is preserved); the binary
+  decides the skip deterministically so the agent is never asked to reconcile it.
+- `📌` (operator pin) / `📍` (agent pin) — priority pins. The binary INJECTS the
+  direct emoji; the `:pushpin:` / `:round_pushpin:` shortcodes (and the
+  `**pin**` / `*prioritized*` emphasis spellings) remain accepted on parse, so
+  existing documents keep working. All are stripped for identity comparison.
+
+The skip decision is cycle-state driven: a head skipped after coming back
+unconsumed once is recorded in `skipped_queue_head_ids` and carried forward until
+resolved. When every remaining head is skipped or depends (via the `after=` DAG)
+on a skipped head, selection is empty and the queue falls back to stall-stop.
+
 If the operator moves `🚧` in the current realtime source epoch, realtime treats
 that as a retarget request, validates it through the same auto-DAG dependency
 projection, and projects `🚧` onto the selected head plus required prerequisites.

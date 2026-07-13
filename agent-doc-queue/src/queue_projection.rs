@@ -75,12 +75,14 @@ pub fn active_queue_prompt_projection(
     entries: &[QueueEntry],
     deps: &HashMap<String, Vec<String>>,
     honor_in_progress_markers: bool,
+    skipped_ids: &std::collections::HashSet<String>,
 ) -> ActiveQueuePromptProjection {
     let rows = queue_prompt_projection_rows(content, entries);
     agent_doc_document::queue_projection::project_active_queue_prompts(
         &rows,
         deps,
         honor_in_progress_markers,
+        skipped_ids,
     )
 }
 
@@ -247,7 +249,13 @@ mod tests {
 <!-- /agent:queue -->
 ";
         let entries = parse("- do [#alpha]\n- 🚧 do [#beta]\n").unwrap();
-        let projection = active_queue_prompt_projection(content, &entries, &HashMap::new(), true);
+        let projection = active_queue_prompt_projection(
+            content,
+            &entries,
+            &HashMap::new(),
+            true,
+            &std::collections::HashSet::new(),
+        );
         assert_eq!(projection.prompts, vec!["do [#beta]"]);
         assert!(projection.retargeted);
         assert!(in_progress_marker_retarget_requested(

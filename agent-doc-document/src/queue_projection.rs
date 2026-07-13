@@ -25,9 +25,21 @@ pub const AGENT_PRIORITIZED_MARKERS: [&str; 6] = [
     ":round_pushpin:",
     "📍",
 ];
-pub const PRIORITIZED_MARKER: &str = ":pushpin:";
-pub const AGENT_PRIORITIZED_MARKER: &str = ":round_pushpin:";
+// Canonical pin markers the binary INJECTS use the direct emoji (📌 / 📍) rather
+// than the `:pushpin:` / `:round_pushpin:` shortcodes, matching the `🚧`
+// in-progress marker. Both shortcode and emoji spellings remain accepted on parse
+// (see `PRIORITIZED_MARKERS` / `AGENT_PRIORITIZED_MARKERS`), so existing documents
+// that already carry the shortcodes keep working unchanged.
+pub const PRIORITIZED_MARKER: &str = "📌";
+pub const AGENT_PRIORITIZED_MARKER: &str = "📍";
 pub const IN_PROGRESS_MARKER: &str = "🚧";
+/// Visible projection marker for a queue head the binary has SKIPPED: it was
+/// dispatched, came back unconsumed, and the queue advanced past it to a
+/// non-dependent drainable head (`#orphanqhead` / `#queueskip`). Like `🚧`, it is
+/// a re-derived cosmetic projection — it never changes the head's identity (it is
+/// stripped by `strip_in_progress_marker` / `strip_priority_markers`) and clears
+/// automatically once the head becomes drainable/consumed again.
+pub const SKIP_MARKER: &str = "⏭\u{fe0f}";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuePromptRow {
@@ -67,7 +79,10 @@ pub fn strip_in_progress_marker(text: &str) -> String {
     let mut kept_prefixes = Vec::new();
     loop {
         let trimmed = rest.trim_start();
-        if let Some(after_marker) = trimmed.strip_prefix(IN_PROGRESS_MARKER) {
+        if let Some(after_marker) = trimmed
+            .strip_prefix(IN_PROGRESS_MARKER)
+            .or_else(|| trimmed.strip_prefix(SKIP_MARKER))
+        {
             rest = after_marker.trim_start();
             continue;
         }
@@ -99,16 +114,32 @@ pub fn apply_in_progress_marker(text: &str) -> String {
     format!("{IN_PROGRESS_MARKER} {}", strip_in_progress_marker(text))
 }
 
+/// Prepend the skip projection marker (`⏭️`) to a queue head, preserving pins and
+/// dropping any existing in-progress/skip marker so exactly one lifecycle marker
+/// leads the line.
+pub fn apply_skip_marker(text: &str) -> String {
+    format!("{SKIP_MARKER} {}", strip_in_progress_marker(text))
+}
+
 pub fn has_in_progress_marker(text: &str) -> bool {
+    has_leading_lifecycle_marker(text, IN_PROGRESS_MARKER)
+}
+
+/// True when the head carries a leading skip marker (`⏭️`), past any pins.
+pub fn has_skip_marker(text: &str) -> bool {
+    has_leading_lifecycle_marker(text, SKIP_MARKER)
+}
+
+fn has_leading_lifecycle_marker(text: &str, marker: &str) -> bool {
     let mut rest = text.trim_start();
     loop {
-        if rest.starts_with(IN_PROGRESS_MARKER) {
+        if rest.starts_with(marker) {
             return true;
         }
         if let Some(after_marker) = PRIORITIZED_MARKERS
             .iter()
             .chain(AGENT_PRIORITIZED_MARKERS.iter())
-            .find_map(|marker| rest.strip_prefix(marker))
+            .find_map(|m| rest.strip_prefix(m))
         {
             rest = after_marker.trim_start();
             continue;
@@ -180,17 +211,21 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
     updated
 }
 
-/// Strip priority and in-progress markers from the visible prompt identity.
+/// Strip priority, in-progress, and skip markers from the visible prompt
+/// identity, so a `🚧`/`⏭️`/pin-decorated head compares equal to its bare form.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     loop {
         let trimmed = t.trim_start();
-        let stripped = trimmed.strip_prefix(IN_PROGRESS_MARKER).or_else(|| {
-            PRIORITIZED_MARKERS
-                .iter()
-                .chain(AGENT_PRIORITIZED_MARKERS.iter())
-                .find_map(|m| trimmed.strip_prefix(m))
-        });
+        let stripped = trimmed
+            .strip_prefix(IN_PROGRESS_MARKER)
+            .or_else(|| trimmed.strip_prefix(SKIP_MARKER))
+            .or_else(|| {
+                PRIORITIZED_MARKERS
+                    .iter()
+                    .chain(AGENT_PRIORITIZED_MARKERS.iter())
+                    .find_map(|m| trimmed.strip_prefix(m))
+            });
         match stripped {
             Some(rest) => t = rest.trim_start(),
             None => break,
@@ -218,6 +253,7 @@ pub fn project_active_queue_prompts(
     rows: &[QueuePromptRow],
     after_deps: &HashMap<String, Vec<String>>,
     honor_in_progress_markers: bool,
+    skipped_ids: &HashSet<String>,
 ) -> ActiveQueuePromptProjection {
     let normalized = rows
         .iter()
@@ -226,7 +262,11 @@ pub fn project_active_queue_prompts(
                 row.unmarked_text(),
                 row.id.clone(),
                 row.marked_in_progress(),
-                row.projectable_default,
+                // `#queueskip`: a head whose id is in the skipped set is not a
+                // dispatch target — treat it as non-projectable so selection
+                // advances past it. (It stays in the queue with a `⏭️` marker.)
+                row.projectable_default
+                    && !row.id.as_ref().is_some_and(|id| skipped_ids.contains(id)),
             )
         })
         .collect::<Vec<_>>();
@@ -241,13 +281,63 @@ pub fn project_active_queue_prompts(
         Vec::new()
     };
     if marked.is_empty() {
+        // `#queueskip`: pick the first projectable head, but SKIP any head whose
+        // transitive `after=` closure depends on a skipped head — that follower is
+        // NOT "non-dependent", so it must not run ahead of the skipped blocker. If
+        // every projectable head depends on a skipped head (or none are
+        // projectable), the selection is empty and today's stall-stop applies.
+        let mut id_present = HashSet::<String>::new();
+        let mut id_deps_local = HashMap::<String, Vec<String>>::new();
+        for (text, id, _, _) in &normalized {
+            if let Some(id) = id {
+                id_present.insert(id.clone());
+                let mut merged = after_deps.get(id).cloned().unwrap_or_default();
+                for inline in agent_doc_element_backlog::backlog::item_after_deps(text) {
+                    if !merged.contains(&inline) {
+                        merged.push(inline);
+                    }
+                }
+                if !merged.is_empty() {
+                    id_deps_local.entry(id.clone()).or_insert(merged);
+                }
+            }
+        }
+        fn depends_on_skipped(
+            id: &str,
+            id_deps: &HashMap<String, Vec<String>>,
+            id_present: &HashSet<String>,
+            skipped_ids: &HashSet<String>,
+            visiting: &mut HashSet<String>,
+        ) -> bool {
+            if !visiting.insert(id.to_string()) {
+                return false;
+            }
+            let blocked = id_deps.get(id).is_some_and(|deps| {
+                deps.iter().any(|dep| {
+                    (id_present.contains(dep) && skipped_ids.contains(dep))
+                        || depends_on_skipped(dep, id_deps, id_present, skipped_ids, visiting)
+                })
+            });
+            visiting.remove(id);
+            blocked
+        }
+        let selected = normalized
+            .iter()
+            .find(|(_, id, _, projectable)| {
+                *projectable
+                    && id.as_ref().is_none_or(|id| {
+                        !depends_on_skipped(
+                            id,
+                            &id_deps_local,
+                            &id_present,
+                            skipped_ids,
+                            &mut HashSet::new(),
+                        )
+                    })
+            })
+            .map(|(text, _, _, _)| text.clone());
         return ActiveQueuePromptProjection {
-            prompts: normalized
-                .iter()
-                .find(|(_, _, _, projectable)| *projectable)
-                .map(|(text, _, _, _)| text.clone())
-                .into_iter()
-                .collect(),
+            prompts: selected.into_iter().collect(),
             retargeted: false,
             missing_dependency_ids: Vec::new(),
         };
@@ -366,6 +456,35 @@ mod tests {
     }
 
     #[test]
+    fn skip_marker_is_cosmetic_for_identity() {
+        // `⏭️` behaves like `🚧`: stripped for identity, past pins, apply is
+        // idempotent, and it never leaks into `strip_priority_markers` output.
+        assert_eq!(apply_skip_marker("do [#sy71]"), "⏭\u{fe0f} do [#sy71]");
+        assert_eq!(
+            apply_skip_marker("🚧 do [#sy71]"),
+            "⏭\u{fe0f} do [#sy71]",
+            "apply replaces any existing lifecycle marker"
+        );
+        assert_eq!(
+            apply_skip_marker(":round_pushpin: do [#sy71]"),
+            "⏭\u{fe0f} :round_pushpin: do [#sy71]",
+            "pins are preserved"
+        );
+        assert!(has_skip_marker("⏭\u{fe0f} do [#sy71]"));
+        assert!(has_skip_marker(":pushpin: ⏭\u{fe0f} do [#sy71]"));
+        assert!(!has_skip_marker("🚧 do [#sy71]"));
+        assert!(!has_in_progress_marker("⏭\u{fe0f} do [#sy71]"));
+        assert_eq!(
+            strip_priority_markers("⏭\u{fe0f} :round_pushpin: do [#sy71]"),
+            "do [#sy71]"
+        );
+        assert_eq!(
+            strip_in_progress_marker("⏭\u{fe0f} do [#sy71]"),
+            "do [#sy71]"
+        );
+    }
+
+    #[test]
     fn set_in_progress_work_item_markers_updates_tracked_components() {
         let content = concat!(
             "<!-- agent:backlog -->\n",
@@ -419,10 +538,49 @@ mod tests {
             QueuePromptRow::new("do [#ready]", Some("ready".to_string()), true),
         ];
 
-        let projection = project_active_queue_prompts(&rows, &HashMap::new(), false);
+        let projection = project_active_queue_prompts(&rows, &HashMap::new(), false, &HashSet::new());
 
         assert_eq!(projection.prompts, vec!["do [#ready]"]);
         assert!(!projection.retargeted);
+    }
+
+    #[test]
+    fn skip_advances_to_next_nondependent_head() {
+        // #queueskip: a skipped head is passed over; selection advances to the next
+        // projectable head that does not depend on it.
+        let rows = vec![
+            QueuePromptRow::new("do [#sy71]", Some("sy71".to_string()), true),
+            QueuePromptRow::new("do [#hmw9]", Some("hmw9".to_string()), true),
+        ];
+        let skipped: HashSet<String> = ["sy71".to_string()].into_iter().collect();
+        let projection = project_active_queue_prompts(&rows, &HashMap::new(), false, &skipped);
+        assert_eq!(projection.prompts, vec!["do [#hmw9]"]);
+    }
+
+    #[test]
+    fn skip_holds_follower_that_depends_on_skipped_head() {
+        // #queueskip: a follower whose `after=` closure includes the skipped head is
+        // NOT "non-dependent", so it must not run ahead — selection stalls (empty).
+        let rows = vec![
+            QueuePromptRow::new("do [#sy71]", Some("sy71".to_string()), true),
+            QueuePromptRow::new("do [#dep]", Some("dep".to_string()), true),
+        ];
+        let deps = HashMap::from([("dep".to_string(), vec!["sy71".to_string()])]);
+        let skipped: HashSet<String> = ["sy71".to_string()].into_iter().collect();
+        let projection = project_active_queue_prompts(&rows, &deps, false, &skipped);
+        assert!(
+            projection.prompts.is_empty(),
+            "dependent follower must not run ahead of a skipped blocker: {:?}",
+            projection.prompts
+        );
+    }
+
+    #[test]
+    fn skip_empty_set_is_unchanged() {
+        let rows = vec![QueuePromptRow::new("do [#a]", Some("a".to_string()), true)];
+        let projection =
+            project_active_queue_prompts(&rows, &HashMap::new(), false, &HashSet::new());
+        assert_eq!(projection.prompts, vec!["do [#a]"]);
     }
 
     #[test]
@@ -437,7 +595,7 @@ mod tests {
             ),
         ];
         let deps = HashMap::from([("ship".to_string(), vec!["setup".to_string()])]);
-        let projection = project_active_queue_prompts(&rows, &deps, true);
+        let projection = project_active_queue_prompts(&rows, &deps, true, &HashSet::new());
 
         assert_eq!(
             projection.prompts,

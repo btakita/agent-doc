@@ -2275,6 +2275,12 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         )
         .is_some();
+    let skipped_queue_head_ids: std::collections::HashSet<String> =
+        agent_doc_cycle_state_io::load(file)
+            .ok()
+            .flatten()
+            .map(|state| state.skipped_queue_head_ids.into_iter().collect())
+            .unwrap_or_default();
     let selected_queue_prompts = if activation.active {
         agent_doc_queue::queue_projection::active_queue_prompt_projection(
             &drainability_content,
@@ -2285,6 +2291,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
                 &drainability_content,
                 &activation.entries_after,
             ),
+            &skipped_queue_head_ids,
         )
         .prompts
     } else {
@@ -3738,6 +3745,64 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         eprintln!("[preflight] queue: set queue: stop");
     }
 
+    // `#queueskip`: recompute the skipped-head set for this cycle. A head that was
+    // dispatched last cycle and came back unconsumed (its `#id` never entered the
+    // prior cycle's resolved/gated set) yet is still a live head is confirmed
+    // stalled — skip it so the queue advances to a non-dependent drainable head
+    // instead of re-dispatching a dead ref. Carried skips persist until their id
+    // is consumed or no longer a live head. Computed from the PRIOR cycle sidecar,
+    // which is still on disk here (`start_preflight` overwrites it later this run).
+    let skipped_queue_head_ids: std::collections::HashSet<String> = if activation.active {
+        let current_live_ids: std::collections::HashSet<String> = activation
+            .entries_after
+            .iter()
+            .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
+            .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+            .collect();
+        let prior = agent_doc_cycle_state_io::load(file).ok().flatten();
+        let carried: std::collections::HashSet<String> = prior
+            .as_ref()
+            .map(|s| s.skipped_queue_head_ids.iter().cloned().collect())
+            .unwrap_or_default();
+        let prior_resolved: std::collections::HashSet<String> = prior
+            .as_ref()
+            .map(|s| {
+                s.pending_done_ids
+                    .iter()
+                    .chain(s.reaped_pending_ids.iter())
+                    .chain(s.pending_gated_ids.iter())
+                    .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The head the prior cycle actually dispatched: its first live id-backed
+        // head that was not already skipped.
+        let prior_dispatched = prior.as_ref().and_then(|s| {
+            s.active_queue_heads
+                .iter()
+                .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
+                .find(|id| !carried.contains(id))
+        });
+        let mut fresh = carried;
+        if let Some(id) = prior_dispatched
+            && !prior_resolved.contains(&id)
+            && current_live_ids.contains(&id)
+        {
+            fresh.insert(id);
+        }
+        // Clear ids that are no longer live heads or were just consumed.
+        fresh.retain(|id| current_live_ids.contains(id) && !prior_resolved.contains(id));
+        fresh
+    } else {
+        std::collections::HashSet::new()
+    };
+    if let Err(err) = agent_doc_cycle_state_io::set_skipped_queue_head_ids(
+        file,
+        &skipped_queue_head_ids.iter().cloned().collect::<Vec<_>>(),
+    ) {
+        eprintln!("[preflight] queue: failed to persist skipped-head set ({err:#})");
+    }
+
     let mut in_progress_markers_changed = false;
     let active_queue_projection = if activation.active {
         let current_components = agent_doc_element::element::parse(&current_content)?;
@@ -3753,10 +3818,21 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 &current_content,
                 &activation.entries_after,
             ),
+            &skipped_queue_head_ids,
         )
     } else {
         agent_doc_document::queue_projection::ActiveQueuePromptProjection::default()
     };
+    if !skipped_queue_head_ids.is_empty() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_queue_skip file={} skipped={} (#queueskip)",
+                file.display(),
+                skipped_queue_head_ids.len(),
+            ),
+        );
+    }
     if active_queue_projection.retargeted {
         eprintln!(
             "[preflight] queue: honored operator in-progress marker retarget to {} active head(s)",
@@ -3798,6 +3874,26 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             q.replace_content(&current_content, &new_body)
         };
         activation.entries_after = marked_entries;
+        mutated = true;
+        in_progress_markers_changed = true;
+    }
+    // `#queueskip`: stamp `⏭️` on skipped heads (and clear it from heads no longer
+    // skipped), AFTER the `🚧` pass so the selected head keeps `🚧` and skipped
+    // heads carry the visible skip marker.
+    if let Some(skip_marked) = agent_doc_queue::document_queue::set_prompts_skipped(
+        &activation.entries_after,
+        &skipped_queue_head_ids,
+    ) {
+        let new_body = agent_doc_queue::document_queue::render(&skip_marked);
+        current_content = {
+            let comps = agent_doc_element::element::parse(&current_content)?;
+            let q = comps
+                .iter()
+                .find(|c| c.name == "queue")
+                .context("queue maintenance: queue component vanished before skip marker")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = skip_marked;
         mutated = true;
         in_progress_markers_changed = true;
     }
@@ -4728,6 +4824,78 @@ mod tests {
     }
 
     #[test]
+    fn run_queue_maintenance_skips_stalled_head_and_advances() {
+        // #queueskip: a head dispatched last cycle that came back unconsumed is
+        // skipped this cycle; selection advances to the next non-dependent
+        // drainable head, the skipped head stays queued with a `⏭️` marker (never
+        // struck/dropped), and its id is persisted in cycle-state.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#sy71]\n",
+            "- do [#hmw9]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#hmw9] a real open task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+
+        // Simulate the PRIOR cycle: it dispatched #sy71 (first head) and committed
+        // WITHOUT consuming it (no reap/done recorded).
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
+            .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        // Selection advanced past #sy71 to the drainable #hmw9.
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do [#hmw9]".to_string()],
+            "selection must advance past the stalled #sy71:\n{updated}"
+        );
+
+        // #sy71 is skipped (persisted) and carries the ⏭️ marker but stays a live
+        // (unstruck) Prompt.
+        let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(persisted.skipped_queue_head_ids, vec!["sy71".to_string()]);
+        let comps = agent_doc_element::element::parse(&updated).unwrap();
+        let queue = comps.iter().find(|c| c.name == "queue").unwrap();
+        let entries = agent_doc_queue::document_queue::parse(queue.content(&updated)).unwrap();
+        let sy71 = entries
+            .iter()
+            .find(|e| {
+                agent_doc_queue::queue_projection::queue_entry_do_id(e).as_deref() == Some("sy71")
+            })
+            .expect("sy71 present");
+        assert!(
+            matches!(sy71, agent_doc_queue::document_queue::QueueEntry::Prompt(_)),
+            "#sy71 stays a live prompt (not struck/dropped): {sy71:?}"
+        );
+        assert!(
+            queue.content(&updated).contains("⏭\u{fe0f}")
+                && queue
+                    .content(&updated)
+                    .lines()
+                    .any(|l| l.contains("⏭\u{fe0f}") && l.contains("[#sy71]")),
+            "the skipped #sy71 head must carry the ⏭️ marker:\n{updated}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_syncs_backlog_into_empty_queue() {
         // #backlog-queue-sync-attr: a backlog carrying `queue=sync` regenerates
         // the (empty) queue with `do [#id]` for active items; gated/done excluded.
@@ -5046,7 +5214,7 @@ mod tests {
             "queue fallback must opt into the existing priority/auto-DAG path:\n{updated}"
         );
         assert!(
-            queue.contains("- 🚧 :round_pushpin: do [#setup]\n- do [#ship]"),
+            queue.contains("- 🚧 📍 do [#setup]\n- do [#ship]"),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -6581,7 +6749,7 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 :round_pushpin: do [#fast]\n- do [#slow]"),
+            updated.contains("- 🚧 📍 do [#fast]\n- do [#slow]"),
             "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
         );
     }
@@ -6774,14 +6942,11 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         assert_eq!(
             state.selected_queue_prompts,
-            vec![
-                ":round_pushpin: do [#setup]".to_string(),
-                "do [#ship]".to_string()
-            ]
+            vec!["📍 do [#setup]".to_string(), "do [#ship]".to_string()]
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 :round_pushpin: do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
+            updated.contains("- 🚧 📍 do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
@@ -6906,8 +7071,8 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 :pushpin: do [#slow]\n- do [#fast]\n- do [#medium]"),
-            "operator-moved queue prompt should become sticky with :pushpin::\n{updated}"
+            updated.contains("- 🚧 📌 do [#slow]\n- do [#fast]\n- do [#medium]"),
+            "operator-moved queue prompt should become sticky with an operator pin (📌):\n{updated}"
         );
     }
     #[test]
@@ -8505,7 +8670,7 @@ mod tests {
         let high = queue_region.find("do [#high]").unwrap();
         let low = queue_region.find("do [#low]").unwrap();
         assert!(
-            queue_region.contains(":round_pushpin: do [#high]"),
+            queue_region.contains("📍 do [#high]"),
             "auto-promoted queue item should carry an agent-priority marker:\n{queue_region}"
         );
         assert!(

@@ -460,11 +460,11 @@ mod tests {
     fn priority_prompt_is_operator_pinned_except_slash_command() {
         assert_eq!(
             operator_prioritize_route_prompt("do [#x]".to_string()),
-            ":pushpin: do [#x]"
+            "📌 do [#x]"
         );
         assert_eq!(
             operator_prioritize_route_prompt(":round_pushpin: do [#x]".to_string()),
-            ":pushpin: do [#x]"
+            "📌 do [#x]"
         );
         assert_eq!(
             operator_prioritize_route_prompt("/clear".to_string()),
@@ -539,7 +539,7 @@ mod tests {
         assert!(
             update
                 .content
-                .contains("preset #spec\n- :pushpin: manual preempt\n- first\n- second")
+                .contains("preset #spec\n- 📌 manual preempt\n- first\n- second")
         );
     }
 

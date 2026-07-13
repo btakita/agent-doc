@@ -70,11 +70,17 @@ unavailable (`Detached`, `EditorAttachedMissingReplica`, `EditorSyncPending`).
 
 ### Phases
 
-1. **`current` from relay (spike + guard).** Add a relay-sourced branch to
-   `wait_for_stable_content` gated on `CurrentText::Current`; fall back to disk
-   on any non-current relay state. Prove `current` (relay) and the disk file
-   converge at rest with a SimWorld/relay test; assert the diff is byte-identical
-   to the disk path when idle.
+1. **`current` from relay (spike + guard). — DONE (`948c74b5`).** Added a
+   `LiveCurrentSource` DI seam to `agent-doc-diff-io` (it is a leaf beneath
+   `crdt-relay-io → snapshot-io → diff-io`, so a direct dep would cycle).
+   `wait_for_stable_content` settles on disk first (prompt-completeness), then
+   sources `current` from the reactive model via `durable_buffer_state`, which
+   returns `Some` only when a live editor buffer diverged from disk and `None`
+   otherwise (byte-identical to the disk path at rest). Wired at the single
+   `compute_with_current` production caller in `preflight-command-io`. Tests:
+   `wait_for_stable_content_prefers_live_reactive_over_disk`,
+   `wait_for_stable_content_none_live_matches_disk_byte_for_byte`,
+   `compute_with_current_uses_live_reactive_content_for_diff`.
 2. **Baseline alignment.** `save_baseline_content(file, &result.current)` and the
    `#qconvbaseline` realignment must consume the relay-sourced `current` so the
    finalize merge baseline matches the buffer the operator sees. Verify no

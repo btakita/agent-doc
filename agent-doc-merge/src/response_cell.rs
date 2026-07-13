@@ -1,9 +1,9 @@
 //! Atomic assistant-response cells for the realtime document backbone.
 //!
-//! A response is one body-aware exchange node.  The operation is intentionally
-//! smaller than a template patch or whole-document replacement: replaying the
-//! same node is a no-op, while a response with the same heading and a different
-//! body remains a distinct cell.
+//! A response is one body-aware cell containing one or more assistant exchange
+//! nodes. The operation is intentionally smaller than a template patch or
+//! whole-document replacement: replaying the same cell is a no-op, while a
+//! response with the same heading and a different body remains distinct.
 
 use agent_doc_element::element;
 use agent_doc_markdown_ast::exchange_tree::{ExchangeNode, ExchangeNodeKind, parse_exchange_nodes};
@@ -15,35 +15,51 @@ pub struct ResponseCellAddOutcome {
     pub applied: bool,
 }
 
-fn parse_response_cell(response: &str) -> anyhow::Result<(ExchangeNode, String)> {
+fn parse_response_cell(response: &str) -> anyhow::Result<(Vec<ExchangeNode>, String)> {
     let response = response.trim_matches(['\n', '\r']);
     if response.is_empty() {
         anyhow::bail!("response cell is empty");
     }
     let rendered = format!("{}\n", response.trim_end());
     let nodes = parse_exchange_nodes(&rendered);
-    if nodes.len() != 1 {
-        anyhow::bail!(
-            "response cell must contain exactly one exchange node (found {})",
-            nodes.len()
-        );
+    if nodes.is_empty() {
+        anyhow::bail!("response cell has no exchange nodes");
     }
-    let node = nodes.into_iter().next().expect("length checked");
-    if !matches!(node.kind, ExchangeNodeKind::Response { .. }) {
-        anyhow::bail!("response cell must begin with an assistant response heading");
+    if nodes
+        .iter()
+        .any(|node| !matches!(node.kind, ExchangeNodeKind::Response { .. }))
+    {
+        anyhow::bail!("response cell may contain only assistant response nodes");
     }
-    Ok((node, rendered))
+    Ok((nodes, rendered))
 }
 
-/// Add one assistant response node to the first `agent:exchange` component.
+fn response_cell_id(nodes: &[ExchangeNode]) -> String {
+    if nodes.len() == 1 {
+        return nodes[0].node_id();
+    }
+    format!(
+        "response-cell:{}",
+        nodes
+            .iter()
+            .map(ExchangeNode::node_id)
+            .collect::<Vec<_>>()
+            .join("+")
+    )
+}
+
+/// Add one assistant response cell to the first `agent:exchange` component.
 ///
-/// The body-aware node id makes this operation idempotent across retries.  The
-/// current document is parsed at apply time, so operator prompts appended while
-/// the agent was working remain before the new response instead of being
-/// overwritten by a stale whole-document candidate.
+/// A cell may contain multiple response headings (for example, one closeout
+/// answering several operator topics), but never prompt nodes. The ordered,
+/// body-aware node ids make the group idempotent across retries. The current
+/// document is parsed at apply time, so operator prompts appended while the agent
+/// was working remain before the new response instead of being overwritten by a
+/// stale whole-document candidate.
 pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCellAddOutcome> {
-    let (node, rendered) = parse_response_cell(response)?;
-    let cell_id = node.node_id();
+    let (nodes, rendered) = parse_response_cell(response)?;
+    let cell_id = response_cell_id(&nodes);
+    let node_ids = nodes.iter().map(ExchangeNode::node_id).collect::<Vec<_>>();
     let components = element::parse(doc)?;
     let exchange = components
         .iter()
@@ -51,9 +67,13 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
         .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
     let current = exchange.content(doc);
 
-    if parse_exchange_nodes(current)
+    let current_node_ids = parse_exchange_nodes(current)
         .iter()
-        .any(|existing| existing.node_id() == cell_id)
+        .map(ExchangeNode::node_id)
+        .collect::<Vec<_>>();
+    if current_node_ids
+        .windows(node_ids.len())
+        .any(|window| window == node_ids)
     {
         return Ok(ResponseCellAddOutcome {
             content: doc.to_string(),
@@ -105,5 +125,27 @@ mod tests {
         assert!(second.applied);
         assert_ne!(second.cell_id, first.cell_id);
         assert_eq!(second.content.matches("### Re: topic").count(), 2);
+    }
+
+    #[test]
+    fn multiple_response_nodes_are_one_replay_safe_cell() {
+        let response =
+            "### Re: first topic — gpt-5\n\nFirst.\n\n### Re: second topic — gpt-5\n\nSecond.";
+        let first = add_response_cell(DOC, response).unwrap();
+        assert!(first.applied);
+        assert!(first.cell_id.starts_with("response-cell:r:"));
+        assert_eq!(first.content.matches("### Re:").count(), 2);
+
+        let replay = add_response_cell(&first.content, response).unwrap();
+        assert!(!replay.applied);
+        assert_eq!(replay.cell_id, first.cell_id);
+        assert_eq!(replay.content, first.content);
+    }
+
+    #[test]
+    fn response_cell_rejects_embedded_operator_prompt() {
+        let response = "### Re: topic — gpt-5\n\nDone.\n\n❯ operator prompt";
+        let err = add_response_cell(DOC, response).unwrap_err();
+        assert!(err.to_string().contains("only assistant response nodes"));
     }
 }

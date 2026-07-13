@@ -7,6 +7,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 ## 0.34.96
 
 - **The printed preserve-session baseline recovery now actually unblocks retained-response replay.** `reset --from-current --preserve-session` continues to preserve the response payload, capture state, cycle, and visible document, but explicitly rebases the active capture's file/snapshot hashes to the operator-approved current markdown. A following `write --commit` no longer loops forever on the same stale-baseline refusal.
+- **A response CRDT cell may atomically contain several assistant headings.** Multi-topic closeouts remain one ordered, body-aware, replay-safe cell; any embedded operator prompt still fails closed instead of being absorbed into agent output.
 
 ## 0.34.95
 

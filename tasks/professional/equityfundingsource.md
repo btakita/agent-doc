@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -9,7 +9,6 @@ links:
 - ./judith-krug.md
 - ./robert-waldman.md
 - ../personal/robert-ward.md
-- ./bob-remeika.md
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
@@ -37,12 +36,12 @@ complete
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 19 response topic(s): Transcribe + diarize the 2026-07-10 call; Analyze the transcr...
-<!-- agent:boundary:69193263 -->
+<!-- agent:boundary:e3b3a84c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#e44f]~~
-- 🚧 do [#hmw9]
+- ⏭️ do [#hmw9]
 <!-- /agent:queue -->
 
 ## Notes

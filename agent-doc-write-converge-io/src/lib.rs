@@ -412,6 +412,29 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         }
 
         if !response_present {
+            // A socket `already_applied` result proves that an editor observed
+            // the patch, but a disk read does not prove what that editor
+            // currently contains.  In particular, disk may predate an unsaved
+            // operator prompt.  Never manufacture a whole-buffer repair from
+            // that stale replica: fall back to patch-based editor delivery and
+            // leave disk/snapshot untouched until editor content is proven.
+            if !current_source.permits_missing_response_whole_buffer_repair(editor_id.is_some()) {
+                log_ipc_proof_failure_with_recycle(
+                    file,
+                    "socket_already_applied",
+                    Some(patch_id),
+                    "attached_editor_content_unproven",
+                    "file_ipc_fallback_without_disk_write",
+                    &format!(
+                        "response_sha256={} current_source={} current_len={} current_hash={}",
+                        agent_doc_hash::content_hash(expected_response),
+                        current_source.label(),
+                        current.len(),
+                        agent_doc_hash::content_hash(current)
+                    ),
+                );
+                return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+            }
             if let Some(repaired_current) =
                 materialize_response_in_current_exchange(current, expected_response)
             {

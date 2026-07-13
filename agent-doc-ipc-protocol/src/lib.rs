@@ -202,6 +202,16 @@ impl IpcSnapshotSource {
     pub const fn is_visible_write_proven(self) -> bool {
         matches!(self, Self::LazilyVisibleWriteEvent)
     }
+
+    /// Whether this source may seed a whole-buffer missing-response repair.
+    ///
+    /// An attached socket editor can contain unsaved operator text that a disk
+    /// or sidecar replica has never observed, so only editor-proven content may
+    /// seed that repair while the editor remains attached.  Detached recovery
+    /// may use the disk replica.
+    pub const fn permits_missing_response_whole_buffer_repair(self, editor_attached: bool) -> bool {
+        !editor_attached || self.is_visible_write_proven()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1411,6 +1421,15 @@ mod tests {
         assert!(IpcSnapshotSource::LazilyVisibleWriteEvent.is_visible_write_proven());
         assert!(!IpcSnapshotSource::LegacySidecarProjection.is_visible_write_proven());
         assert!(!IpcSnapshotSource::FileRead.is_visible_write_proven());
+        assert!(
+            IpcSnapshotSource::LazilyVisibleWriteEvent
+                .permits_missing_response_whole_buffer_repair(true)
+        );
+        assert!(IpcSnapshotSource::FileRead.permits_missing_response_whole_buffer_repair(false));
+        assert!(
+            !IpcSnapshotSource::FileRead.permits_missing_response_whole_buffer_repair(true),
+            "an attached editor makes disk an unproven whole-buffer repair source"
+        );
 
         assert_eq!(
             IpcDiskRepairReason::PrefixDivergence.label(),

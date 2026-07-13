@@ -890,10 +890,10 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("visible_write_crdt_current_drift")
-                && log.contains("visible_write_deferred_current_changed")
+            log.contains("invariant=attached_editor_content_unproven")
+                && log.contains("recovery=file_ipc_fallback_without_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
-            "stale live-editor visible-write receipt should fail closed before snapshot adoption:\n{log}"
+            "an attached editor without current content proof should fail over before snapshot adoption:\n{log}"
         );
     }
 
@@ -1160,6 +1160,64 @@ mod submodule_patch_routing_tests {
                 && log.contains("recovery=content_ours_snapshot_visible_response_repair")
                 && !log.contains("ipc_socket_already_applied_fallback_to_file_ipc"),
             "missing-response already_applied must not reapply through file IPC:\n{log}"
+        );
+    }
+
+    // An `already_applied` receipt names the socket editor that observed the patch.
+    // If its visible-write content is unavailable, the disk replica is not allowed
+    // to stand in for that editor: it may predate an unsaved operator prompt.  The
+    // only authority-preserving recovery is patch-based editor delivery.
+    #[test]
+    fn already_applied_missing_response_without_editor_content_proof_preserves_editor_authority() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
+            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = root.join("session.md");
+        let disk_baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let content_ours = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Answered.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, disk_baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, disk_baseline, agent_doc_ops_log_io::log_op).unwrap();
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            AlreadyAppliedSocketSnapshotContext {
+                file: &doc,
+                patch_id: "already-applied-editor-content-unproven",
+                editor_id: Some("jetbrains-attached-editor"),
+                baseline: Some(disk_baseline),
+                content_ours: Some(content_ours),
+                normalize_prefix_lines: None,
+                expected_response: "### Re: Please reply — gpt-5\n\nAnswered.\n",
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsFileFallback,
+            "an attached editor without content proof must recover through patch-based editor delivery"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            disk_baseline,
+            "disk repair could replace an editor-only operator prompt and must not run"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            Some(disk_baseline),
+            "an unproven disk replica must not become the recovery snapshot"
         );
     }
 

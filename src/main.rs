@@ -389,7 +389,19 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         &self,
         file: &Path,
     ) -> anyhow::Result<agent_doc_compact_io::CompactCommitOutcome> {
-        let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
+        // `#jb-compact-commit-historical-patchback-guard`: this is the PRODUCTION
+        // compaction closeout. Route through the compaction-aware commit entry —
+        // otherwise the committed-historical response-patchback guard refuses the
+        // compacted document because HEAD still carries the `### Re:` turns the
+        // compaction just archived, and Compact Exchange fails closed with
+        // "refusing to auto-adopt committed historical response patchback"
+        // (observed live on agent-doc-bugs2.md). dd9ca291 fixed only the test
+        // double (`TestCompactRuntimeEffects`); this CLI impl was still on the
+        // plain `commit_with_outcome`, so the authoritative-compaction stand-down
+        // never engaged in the real binary. Correctness stays enforced by
+        // `verify_compact_head_landed` afterward. Keep this in lockstep with the
+        // test double.
+        let outcome = agent_doc_commit_io::commit_with_authoritative_compaction(file)?;
         Ok(agent_doc_compact_io::CompactCommitOutcome {
             did_commit: outcome.did_commit,
             vcs_refresh_signaled: outcome.vcs_refresh_signaled,

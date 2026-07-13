@@ -283,7 +283,12 @@ Here’s a 288-word version that stays specific without reading like an architec
 > Now the visible editor state is authoritative. Snapshots and logs still support recovery, while the live model decides what the current document is. Editor attachment, epochs, in-flight writes, acknowledgements, and conflicts are typed transitions that propagate through the reactive graph. I can test those transitions directly instead of waiting for an unlucky interleaving to expose a race.
 
 I used the current project name `lazily-formal` for the Lean layer; that is the repo/package corresponding to “lazily-lean.”
-<!-- agent:boundary:eeae6e4b -->
+### Re: Historical completed queue item — gpt-5
+
+> **Queue prompt:** [x] ~~In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"~~ — done (data.toml + BrianTakita.md)
+
+This item was completed in an earlier cycle and is retained only as checked queue history. No additional work is pending for it.
+<!-- agent:boundary:a1ef8ca7 -->
 <!-- /agent:exchange -->
 
 ## Queue

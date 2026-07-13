@@ -2054,6 +2054,7 @@ mod th {
             active_queue_heads: Vec::new(),
             active_free_text_queue_heads: Vec::new(),
             pending_semantic_merge_acks: Vec::new(),
+            skipped_queue_head_ids: Vec::new(),
             blocked_closeout: None,
         }
     }

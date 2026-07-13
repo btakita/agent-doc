@@ -211,7 +211,7 @@ Index and search session memory from `agent:backlog`, `agent:review`, `agent:don
 agent-doc upgrade
 ```
 
-Check crates.io for the latest version and upgrade. Tries GitHub Releases binary download first, then `cargo install`, then `pip install --upgrade`.
+Check GitHub Releases for the latest version and upgrade. Tries the prebuilt GitHub binary first, then `pip install --upgrade`.
 
 ## Global flags
 

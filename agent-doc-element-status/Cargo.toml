@@ -1,13 +1,14 @@
 [package]
 name = "agent-doc-element-status"
-version = "0.34.92"
+version = "0.34.93"
 edition = "2024"
 description = "Status element descriptor for agent-doc"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
+publish = false
 
 [lib]
 name = "agent_doc_element_status"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.92" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.93" }

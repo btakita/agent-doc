@@ -1,14 +1,13 @@
 //! # Module: upgrade
 //!
 //! ## Spec
-//! - `run()` is the `agent-doc upgrade` subcommand handler. It checks crates.io for
-//!   the latest version and upgrades the binary in place using three ordered strategies:
+//! - `run()` is the `agent-doc upgrade` subcommand handler. It checks GitHub Releases for
+//!   the latest version and upgrades the binary in place using two ordered strategies:
 //!   1. Download prebuilt binary from GitHub Releases (`tar.gz` for detected target triple).
-//!   2. `cargo install <crate>` fallback.
-//!   3. `pip install --upgrade <crate>` fallback.
+//!   2. `pip install --upgrade <crate>` fallback.
 //!
 //!   If all strategies fail, prints manual installation instructions and returns `Ok(())`.
-//! - `warn_if_outdated()` is called on every startup. Checks crates.io with a 24-hour
+//! - `warn_if_outdated()` is called on every startup. Checks GitHub Releases with a 24-hour
 //!   disk cache (`~/.cache/agent-doc/version-cache.json`) and prints a one-line warning
 //!   to stderr if a newer version is available. Silently swallows all errors.
 //! - Version comparison uses simple semver tuple ordering `(major, minor, patch)`.
@@ -17,8 +16,8 @@
 //!   `aarch64-apple-darwin`); returns `None` for unsupported platforms.
 //! - GitHub Releases download writes to a temp file alongside the binary, extracts via
 //!   `tar xzf`, sets `0o755` permissions, then atomically renames into place.
-//! - `fetch_latest_version()` hits `https://crates.io/api/v1/crates/<name>` and reads
-//!   `/crate/max_version`.
+//! - `fetch_latest_release_version()` hits the GitHub latest-release API and reads
+//!   `tag_name`, accepting the repository's conventional leading `v`.
 //! - Cache TTL is 24 hours; stale or missing cache triggers a live network fetch.
 //!
 //! ## Agentic Contracts
@@ -40,6 +39,7 @@
 //! - test_cache_roundtrip: write then read cache file → version and timestamp preserved
 //! - test_detect_target: current platform → `Some` string containing a dash
 //! - test_github_release_url_format: version + detected target → URL starts with correct GitHub prefix, ends with `.tar.gz`
+//! - test_release_version_from_github_tag: a leading `v` is normalized from the latest-release response
 
 use anyhow::Result;
 use serde_json::Value;
@@ -176,10 +176,10 @@ fn try_github_release_upgrade(version: &str) -> bool {
 pub fn run() -> Result<()> {
     eprintln!("Checking for updates...");
 
-    let latest = match fetch_latest_version(CRATE_NAME) {
+    let latest = match fetch_latest_release_version() {
         Some(v) => v,
         None => {
-            eprintln!("Could not determine the latest version from crates.io.");
+            eprintln!("Could not determine the latest version from GitHub Releases.");
             return Ok(());
         }
     };
@@ -197,21 +197,8 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
-    // Strategy 2: cargo install
-    eprintln!("Attempting: cargo install {CRATE_NAME}");
-    let cargo_status = std::process::Command::new("cargo")
-        .args(["install", CRATE_NAME])
-        .status();
-
-    if let Ok(status) = cargo_status
-        && status.success()
-    {
-        eprintln!("Successfully upgraded to v{latest} via cargo.");
-        return Ok(());
-    }
-
-    // Strategy 3: pip install
-    eprintln!("cargo install failed, trying: pip install --upgrade {CRATE_NAME}");
+    // Strategy 2: pip install
+    eprintln!("GitHub binary upgrade failed, trying: pip install --upgrade {CRATE_NAME}");
     let pip_status = std::process::Command::new("pip")
         .args(["install", "--upgrade", CRATE_NAME])
         .status();
@@ -227,8 +214,6 @@ pub fn run() -> Result<()> {
     eprintln!(
         "\nAutomatic upgrade failed. You can upgrade manually:\n\
          \n  curl -sSf https://raw.githubusercontent.com/{GITHUB_REPO}/main/install.sh | sh\n\
-         \nor:\n\
-         \n  cargo install {CRATE_NAME}\n\
          \nor:\n\
          \n  pip install --upgrade {CRATE_NAME}\n"
     );
@@ -247,7 +232,7 @@ fn check_for_update() -> Option<String> {
     }
 
     // Fetch from network
-    let latest = fetch_latest_version(CRATE_NAME)?;
+    let latest = fetch_latest_release_version()?;
     // Write to cache regardless of whether it's newer
     let _ = write_cache(&latest);
     if version_is_newer(&latest, CURRENT_VERSION) {
@@ -289,16 +274,27 @@ fn write_cache(version: &str) -> Option<()> {
     Some(())
 }
 
-fn fetch_latest_version(crate_name: &str) -> Option<String> {
-    let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+fn release_version_from_response(body: &Value) -> Option<String> {
+    let version = body.get("tag_name")?.as_str()?.trim_start_matches('v');
+    if version.is_empty() {
+        return None;
+    }
+    Some(version.to_string())
+}
+
+fn fetch_latest_release_version() -> Option<String> {
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(5)))
         .build()
         .into();
-    let resp = agent.get(&url).call().ok()?;
+    let resp = agent
+        .get(&url)
+        .header("User-Agent", CRATE_NAME)
+        .call()
+        .ok()?;
     let body: Value = resp.into_body().read_json().ok()?;
-    let max_version = body.pointer("/crate/max_version")?.as_str()?.to_string();
-    Some(max_version)
+    release_version_from_response(&body)
 }
 
 fn version_is_newer(latest: &str, current: &str) -> bool {
@@ -437,5 +433,20 @@ mod tests {
         );
         assert!(url.starts_with("https://github.com/btakita/agent-doc/releases/download/v1.2.3/"));
         assert!(url.ends_with(".tar.gz"));
+    }
+
+    #[test]
+    fn test_release_version_from_github_tag() {
+        let response = serde_json::json!({ "tag_name": "v1.2.3" });
+        assert_eq!(
+            release_version_from_response(&response).as_deref(),
+            Some("1.2.3")
+        );
+
+        let response = serde_json::json!({ "tag_name": "1.2.4" });
+        assert_eq!(
+            release_version_from_response(&response).as_deref(),
+            Some("1.2.4")
+        );
     }
 }

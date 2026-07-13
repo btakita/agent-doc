@@ -4,7 +4,7 @@ fn main() {
     // `#stale-plugin-detect`: bake the expected editor-plugin versions from their
     // source-of-truth files so preflight can warn when a live plugin is older
     // than the build this binary ships with. Fail-open when editor sources are
-    // absent, for example a crates.io build without the `editors/` tree.
+    // absent, for example a packaged build without the `editors/` tree.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let editors = Path::new(&manifest_dir).join("../editors");
 

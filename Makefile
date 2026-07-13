@@ -1,4 +1,4 @@
-.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-crate publish-pypi bump-plugin lean
+.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-pypi bump-plugin lean
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -10,146 +10,6 @@ LOCAL_INSTALL_TARGET_DIR ?= target/local-install
 LOCAL_LINKER ?= $(shell if command -v mold >/dev/null 2>&1; then printf '%s' mold; elif command -v ld.lld >/dev/null 2>&1 || command -v lld >/dev/null 2>&1; then printf '%s' lld; fi)
 LOCAL_RUSTFLAGS ?= $(if $(LOCAL_LINKER),-C link-arg=-fuse-ld=$(LOCAL_LINKER),)
 LOCAL_CARGO_ENV = CARGO_INCREMENTAL=1
-CRATES_IO_PUBLISH_ORDER = tmux-router \
-	agent-doc-element \
-	agent-doc-flow \
-	agent-doc-hash \
-	agent-doc-lease \
-	agent-doc-log-time \
-	agent-doc-prompt-cache \
-	agent-doc-secret-redact \
-	agent-doc-session-registry \
-	agent-doc-tmux \
-	agent-doc-tmux-commands \
-	agent-doc-topic \
-	agent-doc-debounce \
-	agent-doc-element-boundary \
-	agent-doc-element-icebox \
-	agent-doc-element-queue \
-	agent-doc-element-signals \
-	agent-doc-element-status \
-	agent-doc-element-unknown \
-	agent-doc-fs \
-	agent-doc-markdown-ast \
-	agent-doc-prompt-cache-io \
-	agent-doc-response-toc \
-	agent-doc-session-accretion \
-	agent-doc-syntax \
-	agent-doc-ipc-protocol \
-	agent-doc-lease-io \
-	agent-doc-markdown-lossless \
-	agent-doc-model-tier \
-	agent-doc-tmux-io \
-	agent-doc-callback-io \
-	agent-doc-frontmatter \
-	agent-doc-config \
-	agent-doc-element-backlog \
-	agent-doc-merge \
-	agent-doc-project-config-io \
-	agent-doc-turn-executor \
-	agent-doc-write-command-io \
-	agent-doc-element-done \
-	agent-doc-element-review \
-	agent-doc-frontmatter-io \
-	agent-doc-memory \
-	agent-doc-op-capture-io \
-	agent-doc-prompt-lines \
-	agent-doc-turn-executor-tmux \
-	agent-doc-work-graph \
-	agent-doc-diff \
-	agent-doc-diff-io \
-	agent-doc-element-exchange \
-	agent-doc-prompt-context \
-	agent-doc-prompt-contract \
-	agent-doc-element-registry \
-	agent-doc-harness \
-	agent-doc-document \
-	agent-doc-queue \
-	agent-doc-template \
-	agent-doc-ffi \
-	agent-doc-supervisor \
-	agent-doc-turn \
-	agent-doc-controller \
-	agent-doc-element-exchange-io \
-	agent-doc-memory-io \
-	agent-doc-owner-pane-io \
-	agent-doc-sqlite \
-	agent-doc-state-backbone \
-	agent-doc-sync \
-	agent-doc-turn-scope-io \
-	agent-doc-workflow \
-	agent-doc-document-realtime \
-	agent-doc-process-owner-io \
-	agent-doc-state-wire \
-	agent-doc-git \
-	agent-doc-plugin-owner \
-	agent-doc-git-io \
-	agent-doc-plugin-owner-io \
-	agent-doc-agent-io \
-	agent-doc-project-root-io \
-	agent-doc-admin-io \
-	agent-doc-archive-io \
-	agent-doc-ipc-forensics-io \
-	agent-doc-session-actor-io \
-	agent-doc-turn-status-io \
-	agent-doc-session-registry-io \
-	agent-doc-focus-io \
-	agent-doc-snapshot-io \
-	agent-doc-supervisor-io \
-	agent-doc-cycle-state-io \
-	agent-doc-gc-io \
-	agent-doc-merge-io \
-	agent-doc-ops-log-io \
-	agent-doc-run-context-io \
-	agent-doc-workflow-io \
-	agent-doc-capture-io \
-	agent-doc-element-backlog-io \
-	agent-doc-ipc-io \
-	agent-doc-session-accretion-io \
-	agent-doc-supervisor-process \
-	agent-doc-codex-hook-io \
-	agent-doc-crdt-relay-io \
-	agent-doc-state-observer-io \
-	agent-doc-supervisor-process-io \
-	agent-doc-watch-io \
-	agent-doc-compact-io \
-	agent-doc-controller-io \
-	agent-doc-queue-io \
-	agent-doc-sync-io \
-	agent-doc-test-support \
-	agent-doc-write-converge-io \
-	agent-doc-claim-io \
-	agent-doc-preflight-io \
-	agent-doc-flow-io \
-	agent-doc-document-realtime-io \
-	agent-doc-boundary-io \
-	agent-doc-element-backlog-runtime-io \
-	agent-doc-hooks-io \
-	agent-doc-lint-io \
-	agent-doc-prompt-io \
-	agent-doc-response-replay-io \
-	agent-doc-response-toc-io \
-	agent-doc-session-check-io \
-	agent-doc-status-io \
-	agent-doc-template-io \
-	agent-doc-prompt-context-io \
-	agent-doc-repair-io \
-	agent-doc-write-ipc-io \
-	agent-doc-commit-io \
-	agent-doc-run-io \
-	agent-doc-stream-io \
-	agent-doc-preflight-runtime-io \
-	agent-doc-start-io \
-	agent-doc-closeout-runtime-io \
-	agent-doc-start-runtime-io \
-	agent-doc-repair-runtime-io \
-	agent-doc-route-io \
-	agent-doc-run-runtime-io \
-	agent-doc-write-runtime-io \
-	agent-doc-codex-stop-io \
-	agent-doc-preflight-command-io \
-	agent-doc-repair-command-io \
-	agent-doc
 ifneq ($(strip $(LOCAL_RUSTFLAGS)),)
 LOCAL_CARGO_ENV += RUSTFLAGS="$(LOCAL_RUSTFLAGS)"
 endif
@@ -226,7 +86,7 @@ tmux-ci:
 clippy:
 	@cargo clippy --quiet -- -D warnings
 
-# Verify Cargo.toml, pyproject.toml, and internal publish-unit versions match
+# Verify package versions match and every agent-doc crate stays private.
 version-sync:
 	@cargo_ver=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 	pypi_ver=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/'); \
@@ -238,6 +98,12 @@ version-sync:
 		crate_ver=$$(grep '^version' "$$manifest" | head -1 | sed 's/.*"\(.*\)"/\1/'); \
 		if [ "$$cargo_ver" != "$$crate_ver" ]; then \
 			echo "ERROR: version mismatch — Cargo.toml=$$cargo_ver $$manifest=$$crate_ver"; \
+			exit 1; \
+		fi; \
+	done; \
+	for manifest in Cargo.toml */Cargo.toml; do \
+		if ! grep -qx 'publish = false' "$$manifest"; then \
+			echo "ERROR: agent-doc package must be private — $$manifest lacks 'publish = false'"; \
 			exit 1; \
 		fi; \
 	done
@@ -338,41 +204,9 @@ init-python:
 wheel:
 	.venv/bin/maturin develop --release
 
-# Publish to crates.io
-publish-crate:
-	@set -e; \
-	for crate in $(CRATES_IO_PUBLISH_ORDER); do \
-		if [ "$$crate" = "tmux-router" ]; then \
-			manifest="../tmux-router/Cargo.toml"; \
-			publish_cmd="cargo publish --manifest-path ../tmux-router/Cargo.toml"; \
-		else \
-			manifest="Cargo.toml"; \
-			publish_cmd="cargo publish -p $$crate"; \
-		fi; \
-		version=$$(awk 'found && /^version[[:space:]]*=/ { gsub(/"/, "", $$3); print $$3; exit } /^\[package\]/ { found=1 }' "$$manifest"); \
-		if cargo search "$$crate" --limit 5 | grep -Eq "^$$crate = \"$$version\""; then \
-			echo "[publish-crate] $$crate $$version already exists on crates.io; skipping"; \
-			continue; \
-		fi; \
-		echo "[publish-crate] publishing $$crate $$version"; \
-		$$publish_cmd; \
-		echo "[publish-crate] waiting for $$crate $$version in crates.io index"; \
-		for attempt in $$(seq 1 60); do \
-			if cargo search "$$crate" --limit 5 | grep -Eq "^$$crate = \"$$version\""; then \
-				echo "[publish-crate] $$crate $$version visible in crates.io index"; \
-				break; \
-			fi; \
-			if [ "$$attempt" = "60" ]; then \
-				echo "ERROR: $$crate $$version did not appear in crates.io index after publish"; \
-				exit 1; \
-			fi; \
-			sleep 5; \
-		done; \
-	done
-
 # Publish to PyPI
 publish-pypi:
 	.venv/bin/maturin publish --skip-existing --no-sdist
 
-# Publish to both crates.io and PyPI
-publish: publish-crate publish-pypi
+# agent-doc's Rust workspace is private; release binaries through GitHub and PyPI.
+publish: publish-pypi

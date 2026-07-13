@@ -17,9 +17,6 @@ curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh |
 **Alternatives:**
 
 ```sh
-# From crates.io
-cargo install agent-doc
-
 # From PyPI
 pip install agent-doc
 
@@ -29,6 +26,10 @@ cargo install --path src/agent-doc --force
 # Or from inside src/agent-doc
 cargo install --path . --force
 ```
+
+The Rust workspace is an implementation detail: every agent-doc Cargo package is
+marked `publish = false`. New releases ship through GitHub Releases and PyPI;
+older crates.io uploads remain as immutable historical artifacts.
 
 ## Quick Start
 

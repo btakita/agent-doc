@@ -58,7 +58,7 @@ When the exchange grows too large (hundreds of lines of conversation), the devel
 
 ```bash
 # Install agent-doc
-cargo install agent-doc
+curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
 
 # Create a new task document
 cat > my-project.md << 'EOF'

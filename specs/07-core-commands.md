@@ -135,7 +135,7 @@ Two modes:
 
 `agent-doc preflight <FILE>` emits non-blocking `warnings[]` in its JSON contract. When frontmatter `agent:` is set and differs from the active harness detected from Claude Code, Codex, or OpenCode environment markers after alias normalization, preflight emits `code: "harness_mismatch"` and keeps running; the skill surfaces the warning and continues with the active harness attribution and closeout path.
 
-When the active document lives in (or beside) an `agent-doc` source checkout, preflight also emits `code: "stale_install"` if any installed/built artifact (`~/.cargo/bin/agent-doc`, the lib-installed `~/.cargo/bin/libagent_doc-*.so` cdylib, or the freshest built binary/cdylib from `target/release` and `target/local-install/release-local`) predates the latest buildable source commit by more than a 300-second grace window (`#install-stale-guard`). This catches the failure mode where a same-version commit ships new behavior but `make install` was not re-run, so live tmux / JetBrains sessions silently execute stale code. The check is best-effort and silently no-ops when no `agent-doc` source repo is locatable (for example a crates.io install); the source repo is found at the document's git root or its `src/agent-doc` submodule, and staleness is keyed off the last commit touching `*.rs` / `Cargo.toml` / `Cargo.lock` / `build.rs` so doc-only commits never trip it.
+When the active document lives in (or beside) an `agent-doc` source checkout, preflight also emits `code: "stale_install"` if any installed/built artifact (`~/.cargo/bin/agent-doc`, the lib-installed `~/.cargo/bin/libagent_doc-*.so` cdylib, or the freshest built binary/cdylib from `target/release` and `target/local-install/release-local`) predates the latest buildable source commit by more than a 300-second grace window (`#install-stale-guard`). This catches the failure mode where a same-version commit ships new behavior but `make install` was not re-run, so live tmux / JetBrains sessions silently execute stale code. The check is best-effort and silently no-ops when no `agent-doc` source repo is locatable (for example a prebuilt or PyPI install); the source repo is found at the document's git root or its `src/agent-doc` submodule, and staleness is keyed off the last commit touching `*.rs` / `Cargo.toml` / `Cargo.lock` / `build.rs` so doc-only commits never trip it.
 
 Before preflight performs document-mutating recovery, commit, pending maintenance, or duplicate-residue cleanup, it waits for the shared editor typing indicator to become idle. The emitted `baseline_file` is captured from the same stable visible content used for diff computation, not from an earlier pre-debounce cleanup projection.
 
@@ -194,7 +194,7 @@ Before preflight performs document-mutating recovery, commit, pending maintenanc
 
 ## upgrade
 
-`agent-doc upgrade` checks crates.io for a newer release and upgrades through the GitHub Release / `cargo install` / `pip` cascade.
+`agent-doc upgrade` checks GitHub Releases for a newer version and upgrades through the prebuilt GitHub binary / `pip` cascade. The agent-doc Rust workspace is private and is not a crates.io upgrade source.
 
 The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.json`.
 

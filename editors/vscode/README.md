@@ -15,7 +15,7 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 
 ## Requirements
 
-- [agent-doc](https://github.com/btakita/agent-doc) CLI installed (`cargo install agent-doc`)
+- [agent-doc](https://github.com/btakita/agent-doc) CLI installed (release installer or `pip install agent-doc`)
 - [tmux](https://github.com/tmux/tmux) for session management
 - [Claude Code](https://claude.ai/claude-code) for the AI agent backend
 
@@ -60,5 +60,4 @@ Download `agent-doc-0.2.0.vsix` from [releases](https://github.com/btakita/agent
 ## Links
 
 - [agent-doc CLI](https://github.com/btakita/agent-doc)
-- [crates.io](https://crates.io/crates/agent-doc)
 - [PyPI](https://pypi.org/project/agent-doc/)

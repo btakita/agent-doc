@@ -109,7 +109,7 @@ src/
   resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix [--session <target>])
   session_cmd.rs    # Show/set configured tmux session with pane migration
   history.rs        # Exchange version history from git + restore
-  upgrade.rs        # Self-update via crates.io / GitHub Releases
+  upgrade.rs        # Self-update via GitHub Releases / PyPI
   plugin.rs         # Editor plugin install/update/list via GitHub Releases
   write.rs          # Write command: parse patches, IPC-first writes, disk fallback
   template.rs       # Template mode: patch parsing, apply_patches, boundary lifecycle
@@ -157,12 +157,11 @@ editors/
 2. Update `VERSIONS.md` with a new version entry summarizing the changes
 3. `make check` (clippy + test)
 4. `make install-full` — install a full release-profile local build and verify the changed behavior end-to-end (the agent runs `make check` + automated checks as the verification; do not wait on a human)
-5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-10 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
+5. **No operator gate on agent-doable steps (`#deploy-just-do-it`):** proceed straight through steps 6-9 without asking. The only operator-gated step is a live human eyeball of the changed behavior in a real editor/pane — record it as a non-blocking `[operator-verify]` follow-up; it never blocks the build/install/push/publish/recycle.
 6. Branch → PR → squash merge to main (or commit + push to main directly in this dogfooding repo)
 7. Tag: `git tag v<version> && git push origin v<version>`
-8. `make publish-crate` (crates.io; publishes dependency graph in order)
-9. `maturin publish` (PyPI)
-10. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
+8. `maturin publish` (PyPI); every agent-doc Cargo package has `publish = false`
+9. `gh release create v<version> --generate-notes` with prebuilt binary (GitHub Release)
 
 ## Agent Backend Contract
 

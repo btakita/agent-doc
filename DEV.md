@@ -1,11 +1,9 @@
 ---
 project_type: rust-maturin
 publication_targets:
-  - crates.io
   - pypi
   - github-release
 secret_paths:
-  crates_io: "btak/CARGO_REGISTRY_TOKEN"
   pypi: "pypi/token"
 post_release:
   - "cargo install --path ."

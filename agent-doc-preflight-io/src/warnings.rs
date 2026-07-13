@@ -153,7 +153,7 @@ pub fn document_cell_merge_ack_warning(
 /// source edit, so live sessions (tmux, JetBrains) do not silently run stale code
 /// at an unchanged version string (`#install-stale-guard`). Best-effort: only
 /// fires when an `agent-doc` source repo is locatable (development / dogfooding)
-/// and silently no-ops otherwise (for example a crates.io install with no source).
+/// and silently no-ops otherwise (for example a prebuilt or PyPI install with no source).
 ///
 /// `#supstaledetect`: the staleness basis is the newest source-FILE mtime
 /// (`newest_crate_source_mtime_secs`, the same signal the supervisor auto-install

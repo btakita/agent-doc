@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.93
+
+- **The agent-doc Rust workspace is private and releases no longer fan out across crates.io.** Every root and internal Cargo package now declares `publish = false`, and `make version-sync` fails if a new package omits that boundary. The release target publishes only the PyPI distribution; GitHub Releases remain the primary binary channel, while `tmux-router` keeps its independent public release lifecycle. Installation docs no longer advertise `cargo install agent-doc`, and `agent-doc upgrade` discovers versions from the GitHub latest-release API before trying the prebuilt binary and PyPI fallback. Existing crates.io uploads cannot be deleted under the registry's permanent-archive contract and remain historical artifacts rather than receiving new versions.
+
 ## 0.34.92
 
 - **Codex skill-version mismatches now self-heal through the project controller (`#codex-skill-reload-cpc-restart`).** After a real `agent-doc skill install --harness codex --reload restart` update, the installed Codex instructions immediately request `agent-doc session restart-supervisor <FILE>` and stop. CPC accepts the busy owner-pane handoff, restarts the child in continue mode (`codex resume --last`), and automatically re-submits the document trigger with the updated skill. A successful managed-session handoff no longer asks the operator to restart manually; manual guidance remains only for an unmanaged session that CPC cannot restart. The generic skill source, Codex-rendered instruction surface, harness invocation runbook, README, functional spec, and generated-content tests carry the same contract.

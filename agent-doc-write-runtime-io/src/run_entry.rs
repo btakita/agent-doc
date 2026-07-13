@@ -877,26 +877,23 @@ pub(crate) fn run_stream(
         // write never manufactures a raw-disk File Cache Conflict; the disk
         // unproven IPC attempt below fails closed instead of writing behind the editor.
         //
-        // `#6b5h-write-path-parity`: when the relay reports zero live editors
-        // with a converged delivery cut, disk is the write authority (same rule
-        // as the read-path demotion and the `--force-disk` authority gate). Skip
-        // the socket→file-IPC cascade — it cannot get an editor ACK with no live
-        // editor and only accumulates the 6s socket + 2s file-IPC timeouts before
-        // reaching the disk path below.
-        let no_live_editors = write_path_relay_has_no_live_editors(file);
-        if no_live_editors {
+        // `#docop-plane` P4: relay membership is transport state, not editor
+        // liveness. Only an authoritative reliable-sync Close permits the disk
+        // path to skip the socket→file-IPC cascade.
+        let editor_absent = write_path_editor_absent(file);
+        if editor_absent {
             eprintln!(
-                "[write] relay reports zero live editors — disk is document authority, skipping IPC cascade"
+                "[write] reliable-sync reports the editor absent — disk is document authority, skipping IPC cascade"
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "write_ipc_no_live_editors_disk_authority file={} reason=crdt_relay_no_live_editors recovery=direct_disk_write",
+                    "write_ipc_editor_absent_disk_authority file={} reason=reliable_sync_editor_absent recovery=direct_disk_write",
                     file.display(),
                 ),
             );
         }
-        if patches_dir.exists() && !no_live_editors {
+        if patches_dir.exists() && !editor_absent {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
@@ -2146,43 +2143,13 @@ fn merge_template_document_model(
 }
 
 fn editor_crdt_authority_attached(file: &Path) -> bool {
-    agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
-        .editor_attached()
+    agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
 }
 
-/// Whether the CRDT relay reports zero live editors with a converged delivery
-/// cut for `file`.
-///
-/// Mirrors the read-path demotion in `try_resolve_current_doc_with_disk_inner`
-/// (`agent-doc-document-realtime-io`) and the force-disk gate in
-/// `ensure_force_disk_editor_authority_ready`: when no live editor owns the
-/// document, disk is the write authority and the socket→file-IPC cascade can
-/// never obtain an editor ACK — it only accumulates timeouts before reaching
-/// the same disk path. Returning `true` here lets `run_stream` skip that
-/// cascade for pure-CLI / no-live-editor sessions (#6b5h write-path parity).
-///
-/// The controller is queried first because it holds the authoritative relay
-/// hub state (the CLI subprocess does not carry an in-memory hub); the local
-/// nonblocking relay probe is the fallback when the controller is unreachable.
-fn write_path_relay_has_no_live_editors(file: &Path) -> bool {
-    let current = match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
-        file,
-        "write_path_no_live_editor_probe",
-    ) {
-        Ok(Some(current)) => current,
-        _ => match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file) {
-            Ok(current) => current,
-            Err(_) => return false,
-        },
-    };
-    matches!(
-        current,
-        agent_doc_crdt_relay_io::CurrentText::Current {
-            live_editors: 0,
-            delivery_converged: true,
-            ..
-        }
-    )
+/// Whether the durable reliable-sync authority says no editor holds `file`.
+/// Relay member count cannot answer this during a transient reattach gap.
+fn write_path_editor_absent(file: &Path) -> bool {
+    !agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
 }
 
 fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
@@ -2235,18 +2202,32 @@ fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
             return Ok(());
         }
         Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
             live_editors: 0,
             delivery_converged: true,
-            ..
         }) => {
+            let disk_matches_canonical = resolve_disk_document_content(
+                file,
+                "force_disk_editor_authority_zero_member_projection_check",
+            )
+            .map(|disk| disk == text)
+            .unwrap_or(false);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "force_disk_editor_authority_ready file={} status=no_live_editor_replicas",
-                    file.display()
+                    "force_disk_editor_authority_{} file={} status=editor_open_zero_relay_members disk_matches_canonical={}",
+                    if disk_matches_canonical {
+                        "ready"
+                    } else {
+                        "unavailable"
+                    },
+                    file.display(),
+                    disk_matches_canonical
                 ),
             );
-            return Ok(());
+            if disk_matches_canonical {
+                return Ok(());
+            }
         }
         Some(agent_doc_crdt_relay_io::CurrentText::Current {
             live_editors,
@@ -2264,16 +2245,6 @@ fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
             );
         }
         Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-            if force_disk_missing_replica_can_use_stale_owner_disk_recovery(file) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "force_disk_editor_authority_ready file={} status=stale_owner_missing_replica_recovery",
-                        file.display()
-                    ),
-                );
-                return Ok(());
-            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -2312,25 +2283,6 @@ fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
         "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as write authority",
         file.display()
     )
-}
-
-fn force_disk_missing_replica_can_use_stale_owner_disk_recovery(file: &Path) -> bool {
-    let file_arg = file.display().to_string();
-    let liveness = agent_doc_plugin_owner::ownership_liveness_for_file(&file_arg);
-    let allow = liveness.lease_present && liveness.pid_live && !liveness.heartbeat_fresh;
-    if allow {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "force_disk_editor_authority_stale_owner_missing_replica file={} lease_present={} pid_live={} heartbeat_fresh={} recovery=explicit_force_disk",
-                file.display(),
-                liveness.lease_present,
-                liveness.pid_live,
-                liveness.heartbeat_fresh
-            ),
-        );
-    }
-    allow
 }
 
 fn force_disk_current_text_status_label(
@@ -3028,27 +2980,23 @@ mod tests {
     }
 
     #[test]
-    fn write_path_relay_has_no_live_editors_skips_ipc_when_zero_live_editors() {
-        // #6b5h write-path parity: when the relay hub exists but has zero live
-        // editor replicas, disk is the write authority and the IPC cascade must
-        // be skipped (it can never get an editor ACK). The controller probe
-        // fails here (no controller in the unit test), so the local nonblocking
-        // relay probe — which shares this process's hub registry — must report
-        // Current { live_editors: 0 }.
+    fn write_path_reliable_sync_authority_controls_ipc_skip() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("zero-live.md");
         fs::write(&doc, "# Doc\n\nbody\n").unwrap();
-        let canonical = doc.canonicalize().unwrap();
         let owner = "test-write-path-zero-live";
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(
-                &canonical.display().to_string(),
-                owner,
-                std::process::id(),
-            ),
-            "should acquire plugin-owner lease"
-        );
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let pid = std::process::id().into();
+        let first_tag = format!("{owner}:open-1");
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid,
+                tag: first_tag.clone(),
+            }]);
         agent_doc_crdt_relay_io::register_replica_for_file(&doc, owner)
             .unwrap()
             .expect("hub allocated with a registered editor replica");
@@ -3059,19 +3007,37 @@ mod tests {
         );
 
         assert!(
-            write_path_relay_has_no_live_editors(&doc),
-            "zero-live-editor relay should signal IPC skip (disk is authority)"
+            !write_path_editor_absent(&doc),
+            "zero relay members must not demote a durably open editor"
         );
 
-        // Re-register a live editor → probe must report live_editors > 0 → no skip.
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
+                document_hash: document_hash.clone(),
+                pid,
+                observed_tags: vec![first_tag],
+            }]);
+        assert!(
+            write_path_editor_absent(&doc),
+            "an authoritative reliable-sync Close permits the IPC skip"
+        );
+
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid,
+                tag: format!("{owner}:open-2"),
+            }]);
         agent_doc_crdt_relay_io::register_replica_for_file(&doc, owner)
             .unwrap()
             .expect("re-register an editor replica");
         assert!(
-            !write_path_relay_has_no_live_editors(&doc),
-            "a live editor replica must NOT trigger the IPC skip"
+            !write_path_editor_absent(&doc),
+            "a reliable-sync reopen must cancel the IPC skip"
         );
-
-        agent_doc_plugin_owner::release_plugin_owner(&canonical.display().to_string(), owner);
     }
 }

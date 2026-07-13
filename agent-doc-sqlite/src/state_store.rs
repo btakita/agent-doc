@@ -358,9 +358,7 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
             // -wal/-shm siblings and rebuild a fresh DB; the JSON sidecars remain the
             // authoritative fallback the state backbone rebuilds from, so this loses no
             // durable authority — only the derived projection cache.
-            eprintln!(
-                "[state-db] state.db is corrupt ({e:#}); quarantining and rebuilding fresh"
-            );
+            eprintln!("[state-db] state.db is corrupt ({e:#}); quarantining and rebuilding fresh");
             quarantine_corrupt_state_db(&path);
             open_and_init_state_db(&path).with_context(|| {
                 format!(
@@ -2331,7 +2329,10 @@ mod tests {
         // Open must succeed by quarantining the corrupt file and rebuilding fresh.
         let conn = open_state_db(root)?;
         let count: i64 = conn.query_row("SELECT count(*) FROM documents", [], |r| r.get(0))?;
-        assert_eq!(count, 0, "rebuilt state.db should have an empty documents table");
+        assert_eq!(
+            count, 0,
+            "rebuilt state.db should have an empty documents table"
+        );
 
         // The corrupt image was moved aside (a *.corrupt-* sibling), not deleted.
         let quarantined = std::fs::read_dir(root.join(".agent-doc"))?
@@ -2464,7 +2465,9 @@ mod tests {
         // earlier `open_state_db` in this test binary. Cap to the newest 10.
         prune_crash_recovery_markers_to(&conn, 10)?;
         let remaining: i64 =
-            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| r.get(0))?;
+            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| {
+                r.get(0)
+            })?;
         assert_eq!(remaining, 10, "only the newest `max_rows` markers survive");
         let oldest_kept: i64 = conn.query_row(
             "SELECT MIN(timestamp) FROM crash_recovery_markers",
@@ -2476,7 +2479,9 @@ mod tests {
         // A second pass on an already-capped table is a no-op.
         prune_crash_recovery_markers_to(&conn, 10)?;
         let after: i64 =
-            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| r.get(0))?;
+            conn.query_row("SELECT COUNT(*) FROM crash_recovery_markers", [], |r| {
+                r.get(0)
+            })?;
         assert_eq!(after, 10);
         Ok(())
     }

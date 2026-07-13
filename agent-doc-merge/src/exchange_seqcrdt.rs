@@ -248,12 +248,17 @@ mod tests {
     fn round_trips_an_exchange_body_byte_stable_through_the_crdt() {
         let inner = "❯ First prompt.\n\n### Re: A — opus\n\nAnswer A.\n\n❯ Second prompt.\n";
         let tree = ExchangeCrdt::from_inner(THEIRS_PEER, inner, T0);
-        assert_eq!(tree.render(), inner, "parse→SeqCrdt→render must be byte-stable");
+        assert_eq!(
+            tree.render(),
+            inner,
+            "parse→SeqCrdt→render must be byte-stable"
+        );
     }
 
     #[test]
     fn every_node_is_a_distinct_crdt_element_no_cross_bleed() {
-        let inner = "### Re: A — opus\n\nAnswer A.\n\n❯ A prompt.\n\n### Re: B — opus\n\nAnswer B.\n";
+        let inner =
+            "### Re: A — opus\n\nAnswer A.\n\n❯ A prompt.\n\n### Re: B — opus\n\nAnswer B.\n";
         let tree = ExchangeCrdt::from_inner(THEIRS_PEER, inner, T0);
         // Three distinct elements: response A, prompt, response B.
         assert_eq!(tree.ids().len(), 3, "each turn is its own SeqCrdt element");

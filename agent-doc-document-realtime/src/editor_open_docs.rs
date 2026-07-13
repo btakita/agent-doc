@@ -85,11 +85,11 @@ impl EditorOpenDocs {
                 let _ = ctx.get_cell(&epoch);
                 docs.present_keys()
                     .into_iter()
-                .filter(|key| {
-                    docs.observe(ctx, key)
-                        .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
-                        .open
-                })
+                    .filter(|key| {
+                        docs.observe(ctx, key)
+                            .unwrap_or(DocOpenState::CLOSED_UNKNOWN)
+                            .open
+                    })
                     .count()
             })
         };
@@ -100,9 +100,9 @@ impl EditorOpenDocs {
                 docs.present_keys()
                     .into_iter()
                     .filter(|key| {
-                    let state = docs
-                        .observe(ctx, key)
-                        .unwrap_or(DocOpenState::CLOSED_UNKNOWN);
+                        let state = docs
+                            .observe(ctx, key)
+                            .unwrap_or(DocOpenState::CLOSED_UNKNOWN);
                         state.open && state.is_agent_doc
                     })
                     .count()
@@ -395,7 +395,11 @@ mod tests {
         open_docs.sort();
         assert_eq!(open_docs, vec!["plan.md".to_string()]);
         assert_eq!(reg.open_agent_doc_count(), 1);
-        assert_eq!(reg.open_count(), 2, "the non-agent-doc source file is still open");
+        assert_eq!(
+            reg.open_count(),
+            2,
+            "the non-agent-doc source file is still open"
+        );
     }
 
     #[test]
@@ -445,7 +449,11 @@ mod tests {
         open.sort();
         assert_eq!(open, vec!["b.rs".to_string(), "d.md".to_string()]);
         assert_eq!(reg.open_count(), 2);
-        assert_eq!(reg.open_agent_doc_count(), 1, "only d.md is an open agent doc");
+        assert_eq!(
+            reg.open_agent_doc_count(),
+            1,
+            "only d.md is an open agent doc"
+        );
         assert!(!reg.is_open("a.md"), "a.md was dropped from the open set");
         assert!(!reg.is_open("c.md"), "c.md was dropped from the open set");
     }

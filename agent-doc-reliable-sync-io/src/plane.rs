@@ -68,6 +68,20 @@ impl ControllerLivenessPlane {
         self.projection.apply(op);
     }
 
+    /// Rehydrate a durably journaled liveness batch after a controller recycle.
+    /// No receive cursor is implied: locally-originated facts and pending sender
+    /// outbox frames use this path as well.
+    pub fn restore_liveness(&mut self, ops: &[LivenessOp]) {
+        self.projection.apply_batch(ops);
+    }
+
+    /// Rehydrate a durable receive cursor. The join is monotone so stale process
+    /// state can never regress an acknowledgement after a recycle.
+    pub fn restore_cursor(&mut self, document_hash: &str, epoch: u64) {
+        let cursor = self.cursors.entry(document_hash.to_string()).or_insert(0);
+        *cursor = (*cursor).max(epoch);
+    }
+
     /// The derived-authority projection (open-set / live-docs / per-pid alive).
     pub fn projection(&self) -> &LivenessProjection {
         &self.projection

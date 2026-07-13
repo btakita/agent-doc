@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-merge"
-version = "0.34.87"
+version = "0.34.88"
 edition = "2024"
 description = "Pure merge policy functions for agent-doc documents"
 license = "MIT"
@@ -10,13 +10,13 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_merge"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.87" }
-agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.87" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.87" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.87" }
-agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.34.87" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.88" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.34.88" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.88" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.88" }
+agent-doc-markdown-lossless = { path = "../agent-doc-markdown-lossless", version = "0.34.88" }
 anyhow = "1"
-lazily = { version = "0.38.0", features = ["serde", "thread-safe", "lossless-tree"] }
+lazily = { version = "0.38.1", features = ["serde", "thread-safe", "lossless-tree"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 similar = "3"

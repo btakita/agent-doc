@@ -1009,8 +1009,9 @@ fn merge_exchange_inner(
     let agent_new: Vec<&HeadingBlock> = ours_blocks
         .iter()
         .filter(|b| {
-            !theirs_ids
-                .contains(&agent_doc_markdown_ast::exchange_tree::response_identity_digest(&b.lines))
+            !theirs_ids.contains(
+                &agent_doc_markdown_ast::exchange_tree::response_identity_digest(&b.lines),
+            )
         })
         .collect();
 

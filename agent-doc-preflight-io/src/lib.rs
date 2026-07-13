@@ -4576,7 +4576,8 @@ mod tests {
             Self {
                 authority_checks: std::cell::Cell::new(0),
                 converge_calls: std::cell::Cell::new(0),
-                visible_write_error: "failed to resolve editor authority for test document".to_string(),
+                visible_write_error: "failed to resolve editor authority for test document"
+                    .to_string(),
             }
         }
     }
@@ -5505,11 +5506,15 @@ mod tests {
         let canonical = doc.canonicalize().unwrap();
         let canonical_key = canonical.to_string_lossy().to_string();
         let editor_id = "preflight-queue-maintenance-test";
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &canonical_key,
-            editor_id,
-            std::process::id(),
-        ));
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: editor_id.to_string(),
+            }]);
         let identity = format!("{editor_id}:{canonical_key}");
         let (client_id, bootstrap) =
             agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)

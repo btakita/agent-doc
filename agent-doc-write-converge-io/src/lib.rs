@@ -2614,50 +2614,16 @@ pub fn live_prompt_drift_response_patches(
     Ok(patches)
 }
 
-/// The plugin-owner lease still claims an attached editor, but the CRDT recovery
-/// authority proves zero live replicas with delivery converged. That is a stale
-/// lease: the editor process exited (or the controller recycled and the editor
-/// has not re-registered its replica) without releasing the plugin-owner marker,
-/// so `editor_attached()` / `live_editor_attached()` keep reporting a live editor
-/// that no longer has a convergeable buffer. Attempting editor-IPC convergence in
-/// this state ACKs/rejects against a phantom endpoint and then refuses the disk
-/// write forever (`no_visible_write_receipt` — the reported JB `Compact Exchange`
-/// exit-1). Mirror the relay's own disk-authority resolution
-/// (`crdt_cpc_write_disk_authority_stale_lease`, `#stale-lease-cpc-authority`):
-/// with no live replica there is no editor buffer to protect, so disk is the
-/// authority and the guarded disk write is safe (the controller's disk-change
-/// watcher reconciles the stale relay canonical when an editor re-attaches).
-///
-/// Requires `delivery_converged` so a transient attach/sync gap (a real editor
-/// mid-registration, briefly `live_editors == 0`) is not mistaken for a stale
-/// lease. On any recovery-authority error or non-`Current` state this returns
-/// `false` (conservative: keep the editor-authority refusal).
-fn stale_owner_zero_live_replica(file: &Path, source: &str) -> bool {
-    matches!(
-        current_text_via_recovery_authority(file, source),
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
-            live_editors: 0,
-            delivery_converged: true,
-            ..
-        }))
-    )
-}
-
 fn refuse_unproven_editor_delivery(
     file: &Path,
     source: &str,
     reason: &str,
     patch_id: Option<&str>,
 ) -> Result<bool> {
-    let sidecar_live = live_editor_attached(file);
-    let owner_holds =
-        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
     let editor_endpoint = if should_refuse_disk_fallback(
-        sidecar_live,
-        owner_holds,
+        live_editor_attached(file),
         editor_ipc_listener_active(file),
-    ) && !stale_owner_zero_live_replica(file, "refuse_unproven_editor_delivery_stale_lease_probe")
-    {
+    ) {
         "live"
     } else {
         "absent"
@@ -2690,17 +2656,9 @@ fn refuse_unproven_editor_delivery(
 }
 
 fn live_editor_attached(file: &Path) -> bool {
-    let indicator_path = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    // Step 3 (plane-primary): the reliable-sync plane decides editor-attached on the hot
-    // path when warm; cold miss falls back to the sidecar lease (background durability).
-    match agent_doc_reliable_sync_io::plane_editor_live_for_path(&indicator_path) {
-        Some(live) => live,
-        None => agent_doc_plugin_owner::live_plugin_owner_consumer_id(&indicator_path).is_some(),
-    }
+    // P4: one authority function owns both the warm CRDT read and durable cold
+    // replay. The write-convergence path no longer reads plugin-owner leases.
+    agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
 }
 
 fn editor_ipc_listener_active(file: &Path) -> bool {
@@ -2720,14 +2678,7 @@ fn try_detached_disk_write(
     reason: &str,
 ) -> Result<bool> {
     let editor_attached = live_editor_attached(file);
-    let owner_holds =
-        !agent_doc_plugin_owner::disk_write_permitted_for_file(&file.to_string_lossy());
-    if should_refuse_disk_fallback(
-        editor_attached,
-        owner_holds,
-        editor_ipc_listener_active(file),
-    ) && !stale_owner_zero_live_replica(file, "detached_disk_write_stale_lease_probe")
-    {
+    if should_refuse_disk_fallback(editor_attached, editor_ipc_listener_active(file)) {
         return Ok(false);
     }
 
@@ -2958,10 +2909,11 @@ fn wait_for_operator_text_authority_refresh(
     mut latest_missing: agent_doc_debounce::LiveBufferSnapshot,
 ) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
     for _ in 0..20 {
-        let still_missing = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
-            indicator_path,
-            content,
-        )?;
+        let still_missing =
+            agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
+                indicator_path,
+                content,
+            )?;
         latest_missing = still_missing;
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
@@ -3851,13 +3803,11 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
-    // `Some` means a LIVE CRDT replica accepted the canonical write (a real editor
-    // buffer to converge). `None` means the relay resolved to disk authority — either
-    // no editor is attached, or the plugin-owner lease is stale (attached lease but
-    // zero live replicas, `#stale-lease-cpc-authority`). We use this below to skip a
-    // controller round-trip on the healthy live-editor path.
-    let cpc_relay_write =
-        effects.apply_canonical_replace_if_attached(file, current_content, target, source)?;
+    // `Some` means the editor-fed canonical accepted the write. `None` means the
+    // relay resolved to disk authority. Durable reliable-sync liveness, rather
+    // than relay membership or a plugin-owner lease, decides whether an editor
+    // endpoint must still be protected below.
+    effects.apply_canonical_replace_if_attached(file, current_content, target, source)?;
     if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
         &canonical_file,
         current_content,
@@ -3881,38 +3831,6 @@ pub fn try_editor_converge(
             editor_id,
             agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
         );
-    }
-    // `#stale-lease-cpc-authority` (write-converge mirror): the plugin-owner lease
-    // still claims an attached editor, but the CRDT recovery authority just proved
-    // zero live replicas with delivery converged — the editor exited (or the
-    // controller recycled and the editor has not re-registered its replica) without
-    // releasing the lease. There is no live editor buffer to converge, so attempting
-    // editor-IPC convergence would ACK/reject against a phantom endpoint and then
-    // refuse the disk write forever (`no_visible_write_receipt` — the reported JB
-    // `Compact Exchange` exit-1). Resolve to the guarded disk write now, exactly as
-    // the relay's own disk-authority resolution intends; the controller disk-change
-    // watcher reconciles the stale relay canonical when an editor re-attaches.
-    if cpc_relay_write.is_none()
-        && live_editor_attached(file)
-        && stale_owner_zero_live_replica(&canonical_file, source)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} transport=disk_stale_lease reason=zero_live_replica_disk_authority action=demote_phantom_editor",
-                file.display()
-            ),
-        );
-        if try_detached_disk_write(
-            effects,
-            file,
-            current_content,
-            target,
-            source,
-            "stale_lease_zero_live_replica",
-        )? {
-            return Ok(true);
-        }
     }
     match ipc_direct_disk_degraded(&project_root, file) {
         Ok(true) => {

@@ -671,8 +671,7 @@ fn auto_trigger_inject_command(
             .to_string();
     let current_harness = shared.current_harness();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile =
-            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
+        let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger",
@@ -682,11 +681,11 @@ fn auto_trigger_inject_command(
             profile.transform(),
             profile.submit_key(),
         );
-        let outcome =
-            match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness) {
-                Ok(()) => AutoTriggerOutcome::Sent,
-                Err(_) => AutoTriggerOutcome::SendFailed,
-            };
+        let outcome = match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
+        {
+            Ok(()) => AutoTriggerOutcome::Sent,
+            Err(_) => AutoTriggerOutcome::SendFailed,
+        };
         if outcome != AutoTriggerOutcome::Sent
             && let Some(key) = projection_key.as_deref()
         {
@@ -764,8 +763,7 @@ fn auto_trigger_clear_command(
             .to_string();
     let current_harness = shared.current_harness();
     if let Some(pane_id) = shared.inject_pane.as_deref() {
-        let profile =
-            agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
+        let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(&current_harness);
         agent_doc_tmux_io::input_diag::log_text_submit(
             agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
             "supervisor.auto_trigger_clear",
@@ -775,8 +773,7 @@ fn auto_trigger_clear_command(
             profile.transform(),
             profile.submit_key(),
         );
-        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
-        {
+        return match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness) {
             Ok(()) => AutoTriggerOutcome::Sent,
             Err(_) => AutoTriggerOutcome::SendFailed,
         };

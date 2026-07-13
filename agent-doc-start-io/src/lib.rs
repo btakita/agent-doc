@@ -1199,13 +1199,16 @@ mod tests {
         handle.write_all(disk.as_bytes()).unwrap();
         drop(handle);
 
-        let file_str = file.to_string_lossy().to_string();
         let pid = std::process::id();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &file_str,
-            &format!("test-editor-{pid}"),
-            pid
-        ));
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: pid.into(),
+                tag: format!("test-editor-{pid}"),
+            }]);
 
         let document = resolve_start_admission_document(&file).unwrap();
 

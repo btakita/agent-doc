@@ -3932,7 +3932,10 @@ Done.\n\
 
         let all = all_unstarted_prompt_bearing_changes_from_diff(&diff, current);
         assert_eq!(all.len(), 2, "both appended prompts must be returned");
-        assert!(all.iter().all(|c| c.kind == PromptBearingChangeKind::PromptTarget));
+        assert!(
+            all.iter()
+                .all(|c| c.kind == PromptBearingChangeKind::PromptTarget)
+        );
         assert!(all[0].text.contains("Fix the markdown parser"));
         assert!(all[1].text.contains("strengthen the SimWorld tests"));
 

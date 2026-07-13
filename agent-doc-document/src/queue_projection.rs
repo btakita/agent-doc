@@ -538,7 +538,8 @@ mod tests {
             QueuePromptRow::new("do [#ready]", Some("ready".to_string()), true),
         ];
 
-        let projection = project_active_queue_prompts(&rows, &HashMap::new(), false, &HashSet::new());
+        let projection =
+            project_active_queue_prompts(&rows, &HashMap::new(), false, &HashSet::new());
 
         assert_eq!(projection.prompts, vec!["do [#ready]"]);
         assert!(!projection.retargeted);

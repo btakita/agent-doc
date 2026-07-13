@@ -846,7 +846,9 @@ fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveB
 /// comparison for the reliable-sync plane, which likewise only reflects live editors)
 /// and the full list as a hash→path index to resolve the plane's hashes to readable
 /// paths.
-pub fn live_buffer_document_paths_with_liveness(project_root: &std::path::Path) -> Vec<(String, bool)> {
+pub fn live_buffer_document_paths_with_liveness(
+    project_root: &std::path::Path,
+) -> Vec<(String, bool)> {
     let dir = project_root.join(LIVE_BUFFER_DIR);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();

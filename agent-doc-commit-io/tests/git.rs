@@ -4458,8 +4458,8 @@ Duplicate replay should stay live.
 
         // Plain commit must still fail closed — the guard is intact for
         // non-compaction callers.
-        let err = commit(&doc)
-            .expect_err("plain commit must still block the historical patchback drift");
+        let err =
+            commit(&doc).expect_err("plain commit must still block the historical patchback drift");
         assert!(
             err.to_string()
                 .contains("committed historical response patchback"),

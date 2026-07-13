@@ -91,6 +91,25 @@ fn crdt_path(root: &Path, doc: &Path) -> PathBuf {
         .join(format!("{}.yrs", doc_hash(doc)))
 }
 
+fn seed_reliable_sync_open(doc: &Path, tag: &str) {
+    let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
+    let document_hash = agent_doc_hash::document_id_for_path(doc);
+    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        document_hash: document_hash.clone(),
+        pid: std::process::id().into(),
+        tag: tag.to_string(),
+    }];
+    agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &project_root
+            .join(".agent-doc")
+            .join("reliable_sync_outbox.db"),
+        &document_hash,
+        1,
+        Some(&serde_json::to_string(&ops).unwrap()),
+    )
+    .expect("seed durable reliable-sync Open fact");
+}
+
 fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
     root.join(".agent-doc/snapshots")
         .join(format!("{}.md", doc_hash(doc)))
@@ -389,7 +408,7 @@ fn write_commit_empty_stdin_does_not_commit_live_prompt_drift() {
 }
 
 #[test]
-fn stream_ipc_timeout_recovers_when_document_is_detached() {
+fn stream_editor_absent_skips_ipc_and_writes_directly() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -398,7 +417,6 @@ fn stream_ipc_timeout_recovers_when_document_is_detached() {
 
     agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args([
             "write",
             doc.to_str().unwrap(),
@@ -412,18 +430,18 @@ fn stream_ipc_timeout_recovers_when_document_is_detached() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "recovering through document authority (detached_disk_authority)",
+            "reliable-sync reports the editor absent",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         content.contains("### Re: ipc timeout — gpt-5"),
-        "detached timeout recovery should materialize the response:\n{content}"
+        "editor-absent direct write should materialize the response:\n{content}"
     );
     assert_ne!(
         initial_head,
         head_blob(tmp.path()),
-        "detached timeout recovery should commit the response"
+        "editor-absent direct write should commit the response"
     );
 
     let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
@@ -433,12 +451,12 @@ fn stream_ipc_timeout_recovers_when_document_is_detached() {
         .collect::<Vec<_>>();
     assert!(
         patch_jsons.is_empty(),
-        "detached timeout recovery should cancel the queued file IPC patch"
+        "editor-absent direct write must not queue a file IPC patch"
     );
 }
 
 #[test]
-fn finalize_ipc_timeout_applies_done_after_detached_response_recovery() {
+fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
     let (tmp, doc) = setup_session_stream_doc();
     insert_pending_item(&doc, "- [ ] [#done1] Close the loop\n");
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
@@ -447,7 +465,6 @@ fn finalize_ipc_timeout_applies_done_after_detached_response_recovery() {
 
     agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args(["finalize", doc.to_str().unwrap(), "--done", "done1"])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: #done1 close the loop — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
@@ -455,13 +472,13 @@ fn finalize_ipc_timeout_applies_done_after_detached_response_recovery() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "recovering through document authority (detached_disk_authority)",
+            "reliable-sync reports the editor absent",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         content.contains("### Re: #done1 close the loop — gpt-5"),
-        "detached timeout recovery should materialize the response:\n{content}"
+        "editor-absent direct write should materialize the response:\n{content}"
     );
     assert!(
         !content.contains("- [ ] [#done1] Close the loop"),
@@ -471,12 +488,12 @@ fn finalize_ipc_timeout_applies_done_after_detached_response_recovery() {
         content.contains("<!-- agent:done -->")
             && content.contains("[#done1] Close the loop")
             && content.contains("## Completed / Reaped"),
-        "--done should be reaped only after detached response recovery succeeds:\n{content}"
+        "--done should be reaped only after the direct write succeeds:\n{content}"
     );
     assert_ne!(
         initial_head,
         head_blob(tmp.path()),
-        "detached timeout recovery should commit the response and tracked-work mutation"
+        "editor-absent direct write should commit the response and tracked-work mutation"
     );
 }
 
@@ -516,6 +533,7 @@ fn write_commit_force_disk_with_editor_owner_fails_before_disk_write_when_crdt_p
 
     agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_RELIABLE_SYNC_AUTHORITY", "0")
         .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
@@ -574,6 +592,7 @@ fn finalize_force_disk_with_editor_owner_fails_before_disk_write_when_crdt_pendi
 
     agent_doc()
         .current_dir(tmp.path())
+        .env("AGENT_DOC_RELIABLE_SYNC_AUTHORITY", "0")
         .args([
             "finalize",
             doc.to_str().unwrap(),
@@ -623,6 +642,7 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
     ] {
         fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
     }
+    fs::write(tmp.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
     let doc = tmp.path().join("session.md");
     let base = concat!(
         "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
@@ -657,15 +677,11 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
 
     // `#6b5hprimary`/`#g9d7`: this scenario models a LIVE editor — the "while
     // typing note" is unsaved editor typing that must survive for retry. Seed a
-    // live plugin-owner lease so run_ipc classifies it as editor-attached and
+    // durable reliable-sync Open fact so run_ipc classifies it as editor-attached and
     // keeps the fail-closed retry instead of taking the editor-less disk fallback
     // (the editor-less fallback is exercised separately, gated on the absence of
-    // exactly this lease).
-    agent_doc_plugin_owner::try_acquire_plugin_owner(
-        doc.to_str().unwrap(),
-        "jetbrains-test-owner",
-        std::process::id(),
-    );
+    // exactly this Open fact).
+    seed_reliable_sync_open(&doc, "jetbrains-test-owner-ipc");
 
     agent_doc()
         .current_dir(tmp.path())

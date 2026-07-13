@@ -616,6 +616,18 @@ fn poll_save_document_visible_write_receipt(
 mod tests {
     use super::*;
 
+    fn seed_reliable_sync_open(file: &Path, tag: &str) {
+        let document_hash = agent_doc_hash::document_id_for_path(file);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: tag.to_string(),
+            }]);
+    }
+
     #[test]
     fn preflight_missing_editor_model_uses_idle_disk_without_model_ensure() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -625,12 +637,8 @@ mod tests {
         let disk = "---\nagent: codex\n---\n\nbody\n";
         std::fs::write(&file, disk).unwrap();
         let file = file.canonicalize().unwrap();
-        let file_str = file.to_string_lossy().to_string();
         let owner = "preflight-missing-editor-model-test";
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(&file_str, owner, std::process::id()),
-            "test setup should acquire editor authority"
-        );
+        seed_reliable_sync_open(&file, owner);
 
         let current = resolve_current_preflight_document(&file, "test")
             .expect("idle missing editor model should fall back to the disk session document");
@@ -649,8 +657,6 @@ mod tests {
             !ops_log.contains("preflight_current_document_local_relay_unavailable"),
             "preflight must not fast-fail before shared recovery:\n{ops_log}"
         );
-
-        agent_doc_plugin_owner::release_plugin_owner(&file_str, owner);
     }
 
     #[test]
@@ -662,12 +668,8 @@ mod tests {
         let disk = "---\nagent: codex\n---\n\nbody\n";
         std::fs::write(&file, disk).unwrap();
         let file = file.canonicalize().unwrap();
-        let file_str = file.to_string_lossy().to_string();
         let owner = "preflight-missing-editor-model-recover-test";
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(&file_str, owner, std::process::id()),
-            "test setup should acquire editor authority"
-        );
+        seed_reliable_sync_open(&file, owner);
 
         let file_for_register = file.clone();
         let register = std::thread::spawn(move || {
@@ -699,7 +701,5 @@ mod tests {
             !ops_log.contains("preflight_current_document_local_relay_unavailable"),
             "preflight must not use the stale local fast-fail guard:\n{ops_log}"
         );
-
-        agent_doc_plugin_owner::release_plugin_owner(&file_str, owner);
     }
 }

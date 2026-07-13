@@ -36,7 +36,8 @@ class ReliableSyncLivenessGraph(private val pid: Long) {
      * `Open` `LivenessOp` batch JSON to push.
      */
     @Synchronized
-    fun open(documentHash: String): String {
+    fun open(documentHash: String): String? {
+        if (docs[documentHash]?.orSet?.present() == true) return null
         val tag = UUID.randomUUID().toString()
         val state = docs.getOrPut(documentHash) { DocState() }
         state.orSet.add(tag)

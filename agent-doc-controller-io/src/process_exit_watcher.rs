@@ -26,6 +26,7 @@
 //! fake one and drive synthetic exit events (see `editor_attach`'s SimWorld tests).
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -45,20 +46,14 @@ pub struct OsProcessExitWatcher {
 impl OsProcessExitWatcher {
     /// Spawn the background poller thread and return the watcher handle. The thread runs
     /// for the lifetime of the controller process (it exits when the process does).
-    pub fn new() -> Self {
+    pub fn new(project_root: PathBuf) -> Self {
         let watched: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::new()));
         let thread_watched = Arc::clone(&watched);
         thread::Builder::new()
             .name("agent-doc-process-exit-watcher".to_string())
-            .spawn(move || run_poll_loop(thread_watched))
+            .spawn(move || run_poll_loop(thread_watched, project_root))
             .expect("spawn agent-doc process-exit watcher thread");
         Self { watched }
-    }
-}
-
-impl Default for OsProcessExitWatcher {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -81,11 +76,11 @@ impl ProcessExitWatcher for OsProcessExitWatcher {
 /// Install the OS process-exit watcher on the process-global editor-attachment registry.
 /// Idempotent-safe to call once at controller startup; after this the registry seeds its
 /// reactive authority on attach and the hot path reads pure reactive state.
-pub fn install_process_exit_watcher() {
-    editor_attach().install_watcher(Arc::new(OsProcessExitWatcher::new()));
+pub fn install_process_exit_watcher(project_root: PathBuf) {
+    editor_attach().install_watcher(Arc::new(OsProcessExitWatcher::new(project_root)));
 }
 
-fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>) {
+fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
     loop {
         thread::sleep(POLL_INTERVAL);
         let snapshot: Vec<u32> = {
@@ -105,7 +100,10 @@ fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>) {
                 // Sidecar-retirement Phase 3C: also write the reliable-sync
                 // `Alive{false}` so the shadow liveness plane cascades the same
                 // crash demote (no-op unless dual-run is on).
-                crate::project_controller::record_reliable_sync_editor_exit(pid as u64);
+                crate::project_controller::record_reliable_sync_editor_exit(
+                    &project_root,
+                    pid as u64,
+                );
                 watched
                     .lock()
                     .expect("process-exit watcher lock")

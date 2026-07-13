@@ -351,13 +351,16 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, expanded).unwrap();
-        let file_str = doc.display().to_string();
         let pid = std::process::id();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &file_str,
-            &format!("test-editor-{pid}"),
-            pid
-        ));
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: pid.into(),
+                tag: format!("test-editor-{pid}:{}", doc.display()),
+            }]);
         agent_doc_crdt_relay_io::register_replica_for_file(&doc, "intellij:reset-stale")
             .unwrap()
             .expect("test relay should attach");

@@ -102,9 +102,9 @@ impl EditorAttach {
                 let mut docs: BTreeSet<String> = BTreeSet::new();
                 for key in registered.present_keys() {
                     let (doc, pid) = key.clone();
-                if registered.observe(ctx, &key).unwrap_or(false)
-                    && alive.observe(ctx, &pid).unwrap_or(false)
-                {
+                    if registered.observe(ctx, &key).unwrap_or(false)
+                        && alive.observe(ctx, &pid).unwrap_or(false)
+                    {
                         docs.insert(doc);
                     }
                 }
@@ -191,12 +191,7 @@ impl EditorAttach {
     pub fn detach(&self, doc: &str) {
         let mut freed_pids: Vec<u32> = Vec::new();
         for key in self.registered.present_keys() {
-            if key.0 == doc
-                && self
-                    .registered
-                    .observe(&self.ctx, &key)
-                    .unwrap_or(false)
-            {
+            if key.0 == doc && self.registered.observe(&self.ctx, &key).unwrap_or(false) {
                 let pid = key.1;
                 self.set_registered(doc, pid, false);
                 if !self.pid_has_registered_doc(pid) {
@@ -205,8 +200,11 @@ impl EditorAttach {
             }
         }
         if !freed_pids.is_empty()
-            && let Some(watcher) =
-                self.watcher.lock().expect("editor_attach watcher lock").as_ref()
+            && let Some(watcher) = self
+                .watcher
+                .lock()
+                .expect("editor_attach watcher lock")
+                .as_ref()
         {
             for pid in freed_pids {
                 watcher.unwatch(pid);
@@ -219,13 +217,7 @@ impl EditorAttach {
         self.registered
             .present_keys()
             .into_iter()
-            .any(|key| {
-                key.1 == pid
-                    && self
-                        .registered
-                        .observe(&self.ctx, &key)
-                        .unwrap_or(false)
-            })
+            .any(|key| key.1 == pid && self.registered.observe(&self.ctx, &key).unwrap_or(false))
     }
 
     /// OS exit event: `pid` has exited (crash **or** clean exit). Flips the `alive` cell
@@ -244,14 +236,8 @@ impl EditorAttach {
     pub fn is_attached(&self, doc: &str) -> bool {
         self.registered.present_keys().into_iter().any(|key| {
             key.0 == doc
-                && self
-                    .registered
-                    .observe(&self.ctx, &key)
-                    .unwrap_or(false)
-                && self
-                    .alive
-                    .observe(&self.ctx, &key.1)
-                    .unwrap_or(false)
+                && self.registered.observe(&self.ctx, &key).unwrap_or(false)
+                && self.alive.observe(&self.ctx, &key.1).unwrap_or(false)
         })
     }
 
@@ -277,10 +263,7 @@ impl EditorAttach {
         let mut docs: BTreeSet<String> = BTreeSet::new();
         for key in self.registered.present_keys() {
             let (doc, pid) = key.clone();
-            if self
-                .registered
-                .observe(&self.ctx, &key)
-                .unwrap_or(false)
+            if self.registered.observe(&self.ctx, &key).unwrap_or(false)
                 && self.alive.observe(&self.ctx, &pid).unwrap_or(false)
             {
                 docs.insert(doc);
@@ -353,7 +336,10 @@ mod tests {
         assert!(ea.is_tracked("plan.md"));
         assert!(ea.is_attached("plan.md"));
         assert_eq!(ea.attached_count(), 1);
-        assert!(w.watched.lock().unwrap().contains(&1234), "attach requested a watch");
+        assert!(
+            w.watched.lock().unwrap().contains(&1234),
+            "attach requested a watch"
+        );
     }
 
     #[test]
@@ -411,7 +397,10 @@ mod tests {
 
         ea.detach("a.md");
         assert!(!ea.is_attached("a.md"));
-        assert!(ea.is_attached("b.md"), "b.md still attached to the live pid");
+        assert!(
+            ea.is_attached("b.md"),
+            "b.md still attached to the live pid"
+        );
         assert!(
             !w.unwatched.lock().unwrap().contains(&100),
             "pid still owns b.md ⇒ watch not released yet"

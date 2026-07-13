@@ -189,9 +189,7 @@ pub fn complete_required_closeout_with_options(
     // no editor endpoint proves delivery. Detached closeout has no editor buffer
     // to protect, so use the explicit force-disk maintenance path there; keep
     // editor-attached closeout on the guarded IPC convergence path.
-    let editor_attached =
-        agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
-            .editor_attached();
+    let editor_attached = agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached();
     let pending_maintenance =
         effects.run_pending_maintenance(file, options.force_disk || !editor_attached);
     match pending_maintenance {

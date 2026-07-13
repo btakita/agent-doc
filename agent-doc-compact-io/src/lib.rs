@@ -1417,9 +1417,12 @@ mod tests {
         };
         let doc = std::path::Path::new("/tmp/does-not-matter.md");
         let err = converge_compacted_with_retry(&effects, doc, "compacted\n", "prompt\n")
-            .expect_err("a genuine concurrent edit must fail closed, not rewrite the stale compaction");
+            .expect_err(
+                "a genuine concurrent edit must fail closed, not rewrite the stale compaction",
+            );
         assert!(
-            err.to_string().contains("document changed during compaction"),
+            err.to_string()
+                .contains("document changed during compaction"),
             "unexpected error: {err:#}"
         );
     }
@@ -1976,12 +1979,6 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("plugin-owner")).unwrap();
         std::fs::write(agent_doc_dir.join("test-local-crdt-relay"), "").unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
-        let canonical = file.canonicalize().unwrap();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            canonical.to_string_lossy().as_ref(),
-            COMPACT_TEST_EDITOR_ID,
-            std::process::id(),
-        ));
         let _editor = CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
 
         run_component_compact_force_disk(&file, doc, "exchange", Some("Compacted summary."), false)
@@ -3208,11 +3205,6 @@ mod tests {
         );
         fs::write(&file, doc).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            file.to_str().unwrap(),
-            COMPACT_TEST_EDITOR_ID,
-            std::process::id(),
-        ));
         let _initial_editor =
             CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
         git(root, &["add", "session.md"]);
@@ -3365,6 +3357,15 @@ mod tests {
     impl CompactTestEditorBuffer {
         fn attach(file: &Path, editor_id: &str, seed: &str) -> Result<Self> {
             let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+            agent_doc_reliable_sync_io::global_liveness_plane()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compact test liveness plane mutex poisoned"))?
+                .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash,
+                    pid: std::process::id().into(),
+                    tag: format!("compact-test:{editor_id}:{}", canonical.display()),
+                }]);
             let replica_identity = format!("{}:{}", editor_id, canonical.display());
             let (client_id, bootstrap) =
                 agent_doc_crdt_relay_io::register_replica_for_file(file, &replica_identity)?
@@ -3605,12 +3606,6 @@ mod tests {
         );
         fs::write(&file, doc).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
-        let canonical = file.canonicalize().unwrap();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            canonical.to_string_lossy().as_ref(),
-            COMPACT_TEST_EDITOR_ID,
-            std::process::id(),
-        ));
         let _initial_editor =
             CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, doc).unwrap();
         git(root, &["add", "session.md"]);

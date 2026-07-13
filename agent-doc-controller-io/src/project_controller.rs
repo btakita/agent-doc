@@ -2668,6 +2668,18 @@ mod tests {
         assert!(ops_log.contains("reason=detached_authority"));
     }
 
+    fn seed_reliable_sync_editor_open(doc: &std::path::Path, tag: &str) {
+        let document_hash = agent_doc_hash::document_id_for_path(doc);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: format!("{tag}:{}", doc.display()),
+            }]);
+    }
+
     #[test]
     fn crdt_checkpoint_defers_editor_attached_actor_without_supervisor_route() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -2676,11 +2688,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &document_id,
-            "jetbrains-test",
-            std::process::id()
-        ));
+        seed_reliable_sync_editor_open(&doc, "jetbrains-test-deferred");
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
@@ -2705,11 +2713,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &document_id,
-            "jetbrains-test",
-            std::process::id()
-        ));
+        seed_reliable_sync_editor_open(&doc, "jetbrains-test-recycle");
         let mut record = actor_record(&document_id, "%41", "@1");
         record.state = agent_doc_sqlite::state_store::ActorState::Ready;
         store_actor_record(dir.path(), Some(0), &record).unwrap();
@@ -2732,11 +2736,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
         let document_id = doc.to_string_lossy().to_string();
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &document_id,
-            "jetbrains-test",
-            std::process::id()
-        ));
+        seed_reliable_sync_editor_open(&doc, "jetbrains-test-current");
         agent_doc_crdt_relay_io::register_replica_for_file(&doc, "intellij:test")
             .unwrap()
             .expect("editor-attached register should allocate model");

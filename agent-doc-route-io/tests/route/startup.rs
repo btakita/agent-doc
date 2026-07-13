@@ -1588,8 +1588,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         // A pane that once owned the document, recorded in the session log...
         let dead_pane = iso.auto_start(session, &cwd).unwrap();
         let doc = dir.path().join("session.md");
-        let snapshot =
-            "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
+        let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();

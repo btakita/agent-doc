@@ -210,10 +210,39 @@ fn setup_project(with_patches_dir: bool) -> (TempDir, PathBuf, PathBuf, String) 
         .assert()
         .success();
     clear_patch_jsons(&agent_doc_dir.join("patches"));
-
     let baseline = tmp.path().join("baseline.md");
     fs::write(&baseline, &original).unwrap();
     (tmp, doc, baseline, original)
+}
+
+fn seed_durable_reliable_sync_open(root: &Path, doc: &Path) {
+    let document_hash = agent_doc_hash::document_id_for_path(doc);
+    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        document_hash: document_hash.clone(),
+        pid: std::process::id().into(),
+        tag: TEST_EDITOR_ID.to_string(),
+    }];
+    agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &root.join(".agent-doc/reliable_sync_outbox.db"),
+        &document_hash,
+        1,
+        Some(&serde_json::to_string(&ops).unwrap()),
+    )
+    .expect("seed durable reliable-sync Open fact for IPC test");
+}
+
+fn publish_editor_text_via_crdt_relay(doc: &Path, content: &str) {
+    let identity = format!("{TEST_EDITOR_ID}:{}", doc.display());
+    let (client_id, bootstrap) = agent_doc_crdt_relay_io::register_replica_for_file(doc, &identity)
+        .expect("register test editor through CRDT relay")
+        .expect("durable reliable-sync Open should attach the test editor");
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+        .expect("decode test editor relay bootstrap");
+    let replica_text = replica.text();
+    replica.apply_local_edit(0, replica_text.len() as u32, content);
+    agent_doc_crdt_relay_io::relay_replica_update_for_file(doc, &identity, &replica.encode_state())
+        .expect("publish test editor relay update")
+        .expect("test editor relay update should be accepted");
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -515,6 +544,7 @@ proptest! {
 fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
     let (tmp, doc, baseline, original) = setup_project(true);
     let root = tmp.path();
+    seed_durable_reliable_sync_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
     let ack_dir = agent_doc_dir.join("ack-content");
@@ -596,6 +626,7 @@ fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
 fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
+    seed_durable_reliable_sync_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
     let response = response_text("partial response");
@@ -685,6 +716,7 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
 fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
+    seed_durable_reliable_sync_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
     let live_note = "Typing below exchange during closeout. #next-steps";
     let current_with_note = fs::read_to_string(&doc)
@@ -716,6 +748,7 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
                 Some(after)
             })?;
             record_operator_buffer(&doc_for_listener, &after_apply);
+            publish_editor_text_via_crdt_relay(&doc_for_listener, &after_apply);
             agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                 &doc_for_listener,
                 &id,
@@ -739,12 +772,23 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
         "fake socket listener did not start"
     );
 
-    run_finalize_expect(
-        root,
-        &doc,
-        &baseline,
-        &response_text("socket prompt drift"),
-        0,
+    let output = agent_doc()
+        .current_dir(root)
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--baseline-file",
+            baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(response_text("socket prompt drift"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "socket finalize failed:\n{}\nops log:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap_or_default()
     );
 
     let _ = fs::remove_file(agent_doc_ipc_io::socket_path(root));
@@ -890,14 +934,13 @@ fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
 }
 
 #[test]
-fn file_ipc_timeout_recovers_when_document_is_detached() {
+fn file_ipc_capability_with_editor_absent_skips_queue_and_writes_directly() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
     let initial_head = head_blob(root);
 
     agent_doc()
         .current_dir(root)
-        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "50")
         .args([
             "write",
             doc.to_str().unwrap(),
@@ -910,18 +953,18 @@ fn file_ipc_timeout_recovers_when_document_is_detached() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "recovering through document authority (detached_disk_authority)",
+            "reliable-sync reports the editor absent",
         ));
 
     let head = head_blob(root);
     assert_ne!(
         initial_head, head,
-        "detached recovery should commit the response after IPC timeout"
+        "editor-absent direct write should commit the response"
     );
     let visible = fs::read_to_string(&doc).unwrap();
     assert!(
         visible.contains(&response_body("stale patch replay")),
-        "detached recovery should write the response through document authority:\n{visible}"
+        "editor-absent direct write should materialize the response:\n{visible}"
     );
 
     let patch_jsons = fs::read_dir(root.join(".agent-doc/patches"))
@@ -931,22 +974,13 @@ fn file_ipc_timeout_recovers_when_document_is_detached() {
         .collect::<Vec<_>>();
     assert!(
         patch_jsons.is_empty(),
-        "document-authority recovery should cancel the stale file IPC payload"
+        "editor-absent direct write must not queue a file IPC payload"
     );
 
-    let claimed_entries = fs::read_dir(root.join(".agent-doc/claimed-patches"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
-    assert!(
-        !claimed_entries.is_empty(),
-        "cancelled file IPC payload should be claimed so it cannot apply later"
-    );
     let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("run_stream_ipc_recover_via_document_authority")
-            && ops_log.contains("recovery=detached_disk_authority")
-            && ops_log.contains("ipc_patch_cancelled_for_document_authority"),
-        "IPC timeout should recover through document authority and cancel file IPC:\n{ops_log}"
+        ops_log.contains("write_ipc_editor_absent_disk_authority")
+            && ops_log.contains("reason=reliable_sync_editor_absent"),
+        "editor absence should select direct disk authority before IPC:\n{ops_log}"
     );
 }

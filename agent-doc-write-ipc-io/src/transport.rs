@@ -61,6 +61,32 @@ fn ipc_response_materialized_or_fallback(
     )
 }
 
+fn fold_visible_write_into_canonical(
+    file: &Path,
+    patch_id: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    let changed =
+        agent_doc_document_realtime_io::adopt_verified_editor_text_through_relay_authority(
+            file, content, source,
+        )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "ipc_visible_write_canonical_adopt file={} patch_id={} source={} changed={} content_hash={}",
+            file.display(),
+            patch_id,
+            source,
+            changed
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "editor_absent".to_string()),
+            agent_doc_hash::content_hash(content),
+        ),
+    );
+    Ok(())
+}
+
 fn log_ipc_proof_failure(
     file: &Path,
     source: &str,
@@ -642,6 +668,12 @@ fn try_ipc_inner(
                                 skipped_committed_cycle: false,
                             });
                         }
+                        fold_visible_write_into_canonical(
+                            file,
+                            &patch_id,
+                            &repair_decision.snapshot_content,
+                            "socket_visible_write",
+                        )?;
                         mark_visible_write_live_buffer_synced_after_write(
                             file,
                             &patch_id,
@@ -1377,6 +1409,12 @@ pub(crate) fn write_ipc_and_poll(
             if !disk_synced {
                 return Ok(false);
             }
+            fold_visible_write_into_canonical(
+                doc_file,
+                patch_id,
+                &repair_decision.snapshot_content,
+                "file_visible_write",
+            )?;
             mark_visible_write_live_buffer_synced_after_write(
                 doc_file,
                 patch_id,

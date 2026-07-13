@@ -222,17 +222,13 @@ pub fn decode_text_adopt_frame(message: &IpcMessage) -> Option<Result<String>> {
         )));
     };
     Some(
-        String::from_utf8(bytes.clone())
-            .map_err(|e| anyhow!("text-adopt frame is not UTF-8: {e}")),
+        String::from_utf8(bytes.clone()).map_err(|e| anyhow!("text-adopt frame is not UTF-8: {e}")),
     )
 }
 
 /// One-call envelope for a bounded text adopt from the editor's document `text` — the FFI
 /// push path uses this (no `TextOp` knowledge, bounded payload).
-pub fn encode_text_adopt_envelope(
-    document_hash: &str,
-    text: &str,
-) -> Result<serde_json::Value> {
+pub fn encode_text_adopt_envelope(document_hash: &str, text: &str) -> Result<serde_json::Value> {
     let frame = encode_text_adopt_frame(text)?;
     super::encode_envelope(document_hash, &frame)
 }
@@ -331,15 +327,25 @@ mod tests {
         // Each decodes as its own kind and is invisible to the other's decoder, so the
         // controller routes adopt→replace vs fold→union-merge without ambiguity.
         assert_eq!(
-            decode_full_state_adopt_frame(&adopt).expect("is adopt").expect("decodes"),
+            decode_full_state_adopt_frame(&adopt)
+                .expect("is adopt")
+                .expect("decodes"),
             ops
         );
-        assert!(decode_document_op_frame(&adopt).is_none(), "adopt is not a fold frame");
+        assert!(
+            decode_document_op_frame(&adopt).is_none(),
+            "adopt is not a fold frame"
+        );
         assert_eq!(
-            decode_document_op_frame(&fold).expect("is fold").expect("decodes"),
+            decode_document_op_frame(&fold)
+                .expect("is fold")
+                .expect("decodes"),
             ops
         );
-        assert!(decode_full_state_adopt_frame(&fold).is_none(), "fold is not an adopt frame");
+        assert!(
+            decode_full_state_adopt_frame(&fold).is_none(),
+            "fold is not an adopt frame"
+        );
     }
 
     #[test]
@@ -379,7 +385,11 @@ mod tests {
         // Redeliver the exact same frame twice more.
         assert!(!fold.ingest(&frame).expect("redeliver is a no-op"));
         assert!(!fold.ingest(&frame).expect("redeliver is a no-op"));
-        assert_eq!(fold.text(), once, "redelivery is idempotent — no duplication");
+        assert_eq!(
+            fold.text(),
+            once,
+            "redelivery is idempotent — no duplication"
+        );
         assert_eq!(fold.text(), editor.text(), "canonical matches the editor");
     }
 

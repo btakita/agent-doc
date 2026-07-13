@@ -59,11 +59,11 @@ pub const AUTHORITY_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_AUTHORITY";
 /// Whether the reliable-sync plane is the **hot-path CRDT authority**. **Default ON.**
 ///
 /// When on, `authority_for_file` (and the editor-attached gate) derives from the
-/// plane's `LivenessProjection`; the filesystem sidecars (plugin-owner lease,
-/// `.agent-doc/live-buffer/`) are demoted to **background durability** + the cold-miss
-/// backstop only. The plane is durable via its outbox, so promoting it does not lose
-/// the on-disk durability the sidecars gave. Explicitly disable with a falsey value
-/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY=0|false|no|off`) to keep the sidecars authoritative.
+/// plane's `LivenessProjection`. A cold process rebuilds that projection from the
+/// controller's commit-before-ACK receiver journal plus any sender suffix still
+/// retained in the durable outbox; plugin-owner leases and live-buffer sidecars
+/// are not authority inputs. Explicitly disable with a falsey value
+/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY=0|false|no|off`) for the legacy rollback.
 pub fn authority_enabled() -> bool {
     !matches!(
         std::env::var(AUTHORITY_ENV).ok().as_deref(),
@@ -73,12 +73,11 @@ pub fn authority_enabled() -> bool {
 
 /// Process-global reliable-sync liveness plane — the hot-path authority source
 /// (sidecar-retirement step 3). The controller feeds it (`ingest`); authority reads
-/// (`agent-doc-plugin-owner::authority_for_file`) derive from its projection. It is
+/// through `agent-doc-crdt-relay-io` derive from its projection. It is
 /// in-memory **per process**: warm in the controller (fed by editor pushes over the
-/// reliable-sync RPC), empty in a short-lived CLI — which cold-misses to the durable
-/// sidecar backstop so cross-process authority stays correct. Lives here (not in
-/// `controller-io`) so the low-level `plugin-owner` authority read can reach it without
-/// a dependency cycle (`controller-io` already depends on `plugin-owner`).
+/// reliable-sync RPC) and hydrated by controller-io from durable reliable-sync state
+/// in a short-lived CLI. It lives here so every controller/realtime consumer reads
+/// the same process projection.
 pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLivenessPlane> {
     static PLANE: std::sync::LazyLock<std::sync::Mutex<plane::ControllerLivenessPlane>> =
         std::sync::LazyLock::new(|| std::sync::Mutex::new(plane::ControllerLivenessPlane::new()));
@@ -86,37 +85,33 @@ pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLiv
 }
 
 /// Plane-primary "is a live editor attached to `file`?" — the shared hot-path authority
-/// read for the step-3 flip. Returns `Some(true/false)` when the plane is authoritative
-/// for this process (authority enabled **and** the plane is *warm* = holds ≥1 open doc,
-/// true in the controller fed by editor pushes); returns `None` on a **cold miss**
-/// (authority disabled, a poisoned lock, or an empty plane) so the caller falls back to
-/// the sidecar backstop. Both `controller-io::crdt_authority_for_file` and the
+/// read for the step-3 flip. Returns `Some(true/false)` when the plane has ever
+/// received an open/close fact for this document (including a durably known closed
+/// document); returns `None` only on a true cold miss (authority disabled, a
+/// poisoned lock, or a never-hydrated document). Both
+/// `controller-io::crdt_authority_for_file` and the
 /// `document-realtime-io` `#6b5h` disk-write guard route through this so every hot-path
-/// reader agrees; the filesystem sidecars are demoted to background durability + cold-miss.
+/// reader agrees. Controller-io owns durable hydration when this returns `None`.
 pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
     if !authority_enabled() {
         return None;
     }
     let plane = global_liveness_plane().lock().ok()?;
     let projection = plane.projection();
-    if projection.open_docs().is_empty() {
+    let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
+    if !projection.tracks_document(&document_hash) {
         return None;
     }
-    let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
     Some(projection.live_docs().contains(&document_hash))
 }
 
-/// Whether the controller should run the reliable-sync liveness plane alongside
-/// the filesystem sidecars.
+/// Whether the controller should run the reliable-sync liveness plane.
 ///
-/// **Default ON.** The plane runs in *shadow* by default (both the controller
-/// process and the plugin-loaded native lib call this same gate, so a single
-/// default covers "controller and plugin env"): inbound liveness frames are
-/// folded into the derived `LivenessProjection` so its open-set/lease can be
-/// compared against the sidecar-derived one live. This is shadow only — the
-/// sidecars remain the hot-path **authority** until the separate authority-flip
-/// step lands, so default-ON is safe. Explicitly disable with a falsey value
-/// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0|false|no|off`) to keep the plane dark.
+/// **Default ON.** Both the controller process and plugin-loaded native library
+/// call this gate, so one setting covers sender and receiver. The historical
+/// name remains for rollout compatibility; the plane is now authoritative and
+/// the sidecar model is diagnostic parity evidence only. Explicitly disable with
+/// a falsey value (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0|false|no|off`).
 pub fn dual_run_enabled() -> bool {
     !matches!(
         std::env::var(DUAL_RUN_ENV).ok().as_deref(),

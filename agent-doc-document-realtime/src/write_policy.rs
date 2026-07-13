@@ -409,19 +409,17 @@ pub fn reconcile_visible_write<C: ?Sized, T>(
 ///
 /// An active editor authority means the editor buffer, not the disk replica, owns
 /// the current document text — but only while its IPC transport is answering.
-/// Both the editor-authority signal (a live plugin-owner pid) and the owner-holds
-/// signal require a live, answering listener to force a refusal. A pid-live
-/// sidecar on a dead socket means the editor is no longer reachable (the document
-/// was closed, the plugin unloaded, or the listener crashed): the editor can
-/// neither receive nor re-save the write, so refusing disk would wedge the
-/// document forever instead of demoting the stale attachment
-/// (`#staleattachdemote`, stale attached-editor demotion).
+/// The durable reliable-sync liveness projection is the sole editor-authority
+/// signal. It still requires a live, answering listener to force a refusal: an
+/// open fact with a dead socket means the editor cannot receive or re-save the
+/// write, so refusing disk would wedge the document forever
+/// (`#staleattachdemote`, stale attached-editor demotion). Plugin-owner leases are
+/// deliberately absent from this decision; P4 retired that divergent cold path.
 pub fn should_refuse_disk_fallback(
     editor_authority_active: bool,
-    owner_holds: bool,
     listener_answering: bool,
 ) -> bool {
-    listener_answering && (editor_authority_active || owner_holds)
+    listener_answering && editor_authority_active
 }
 
 /// Apply `❯ ` prefix to lines in `content` that appear in `prefix_lines`.
@@ -2603,52 +2601,34 @@ mod tests {
     #[test]
     fn direct_disk_fallback_refusal_tracks_live_editor_authority() {
         assert!(
-            !should_refuse_disk_fallback(false, true, false),
-            "stale lease + dead socket + no sidecar must allow the disk fallback"
+            !should_refuse_disk_fallback(false, false),
+            "no reliable-sync authority + dead socket must allow the disk fallback"
         );
         assert!(
-            !should_refuse_disk_fallback(false, false, false),
-            "no sidecar + no owner + dead socket must allow the disk fallback"
+            should_refuse_disk_fallback(true, true),
+            "durably live editor + answering socket must fail closed"
         );
         assert!(
-            should_refuse_disk_fallback(true, true, true),
-            "capable sidecar + answering socket must fail closed"
-        );
-        assert!(
-            should_refuse_disk_fallback(false, true, true),
-            "lease + answering socket must refuse the disk fallback"
-        );
-        assert!(
-            !should_refuse_disk_fallback(false, false, true),
-            "answering socket with no owner/sidecar must allow the disk fallback"
+            !should_refuse_disk_fallback(false, true),
+            "answering socket without reliable-sync authority must allow the disk fallback"
         );
     }
 
     #[test]
     fn stale_attached_editor_on_dead_socket_demotes_instead_of_wedging() {
-        // #staleattachdemote: the plugin-owner pid is still live (the IDE process
-        // is running) but the document was closed, so the IPC listener is gone.
-        // A pid-live sidecar on a dead socket is a stale attachment, not an
-        // active editor authority — the editor can neither receive nor re-save
-        // the write, so refusing disk here would wedge the document forever.
+        // #staleattachdemote: a retained open fact with a dead socket cannot
+        // receive or re-save the write, so refusing disk here would wedge the
+        // document forever.
         assert!(
-            !should_refuse_disk_fallback(true, false, false),
-            "live pid sidecar + dead socket must demote and allow the disk fallback"
-        );
-        assert!(
-            !should_refuse_disk_fallback(true, true, false),
-            "live pid sidecar + owner holds + dead socket must demote and allow the disk fallback"
+            !should_refuse_disk_fallback(true, false),
+            "durably live editor + dead socket must demote and allow the disk fallback"
         );
         // The same authority with a live, answering transport still protects the
         // editor buffer — demotion is keyed off the dead transport, not off the
         // authority signal itself.
         assert!(
-            should_refuse_disk_fallback(true, false, true),
-            "live pid sidecar + answering socket must still fail closed"
-        );
-        assert!(
-            should_refuse_disk_fallback(true, true, true),
-            "live pid sidecar + owner holds + answering socket must still fail closed"
+            should_refuse_disk_fallback(true, true),
+            "durably live editor + answering socket must still fail closed"
         );
     }
 

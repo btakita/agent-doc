@@ -7,10 +7,10 @@
  * convergent cell the controller's `LivenessProjection` folds), derives the
  * externally-tagged `LivenessOp` batch it pushes, and hands it to the Rust FFI
  * (`reliableSyncLivenessEnqueue` / `Flush`) which keeps the durable outbox + the
- * controller socket. The FFI enqueue is a no-op unless the controller dual-run
- * flag is on, so this is safe on every install — sidecars stay authoritative
- * until the operator opts into the cutover. `Alive{false}` is injected
- * controller-side by the S4b OS exit watcher, not here.
+ * controller socket. The historical dual-run flag can still disable the channel
+ * for rollback; default-on delivery feeds the authoritative, durably journaled
+ * controller projection. `Alive{false}` is injected controller-side by the S4b
+ * OS exit watcher, not here.
  */
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
@@ -30,8 +30,9 @@ class LivenessGraph {
 
     constructor(private readonly pid: number) {}
 
-    /** Mark `documentHash` opened; returns the `Open` op batch JSON to push. */
-    open(documentHash: string): string {
+    /** Mark `documentHash` opened once; returns null for a duplicate IDE event. */
+    open(documentHash: string): string | null {
+        if (this.docs.get(documentHash)?.orSet.present() === true) return null;
         const tag = randomUUID();
         let state = this.docs.get(documentHash);
         if (!state) {
@@ -94,7 +95,9 @@ export function registerReliableSyncLiveness(context: vscode.ExtensionContext): 
             if (!isSessionDocument(filePath, root)) return;
             const documentHash = documentIdForPath(filePath, root);
             if (!documentHash) return;
-            push(root, documentHash, graph.open(documentHash));
+            const opsJson = graph.open(documentHash);
+            if (!opsJson) return;
+            push(root, documentHash, opsJson);
         });
     };
 
@@ -123,4 +126,9 @@ export function registerReliableSyncLiveness(context: vscode.ExtensionContext): 
         vscode.workspace.onDidOpenTextDocument(reportOpen),
         vscode.workspace.onDidCloseTextDocument(reportClose),
     );
+
+    // Activation can occur after VS Code has restored editor tabs, in which case
+    // no fresh onDidOpen event is emitted. Seed those already-open documents so a
+    // new installation/controller has a durable liveness fact immediately.
+    for (const document of vscode.workspace.textDocuments) reportOpen(document);
 }

@@ -87,6 +87,25 @@ fn record_operator_buffer(file: &Path, content: &str) {
     .unwrap();
 }
 
+fn seed_reliable_sync_open(doc: &Path, tag: &str) {
+    let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
+    let document_hash = agent_doc_hash::document_id_for_path(doc);
+    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        document_hash: document_hash.clone(),
+        pid: std::process::id().into(),
+        tag: tag.to_string(),
+    }];
+    agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &project_root
+            .join(".agent-doc")
+            .join("reliable_sync_outbox.db"),
+        &document_hash,
+        1,
+        Some(&serde_json::to_string(&ops).unwrap()),
+    )
+    .expect("seed durable reliable-sync Open fact");
+}
+
 fn init_git_repo(root: &Path, tracked: &Path) {
     ProcessCommand::new("git")
         .current_dir(root)
@@ -371,6 +390,7 @@ fn patch_jsons(project: &ReplayProject) -> Vec<PathBuf> {
 #[test]
 fn socket_ipc_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
+    seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
@@ -429,6 +449,7 @@ fn socket_ipc_replays_live_typing_during_finalize() {
 #[test]
 fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
+    seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
 
     let patches_dir = project.patches_dir();
@@ -486,7 +507,7 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
 }
 
 #[test]
-fn live_typing_timeout_recovers_detached_response_and_keeps_prompt_uncommitted() {
+fn detached_live_typing_skips_ipc_and_keeps_prompt_uncommitted() {
     let project = setup_replay_project(true);
     project.type_live_prompt_after_preflight();
 
@@ -504,7 +525,7 @@ fn live_typing_timeout_recovers_detached_response_and_keeps_prompt_uncommitted()
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "recovering through document authority (detached_disk_authority)",
+            "reliable-sync reports the editor absent — disk is document authority, skipping IPC cascade",
         ));
 
     assert_live_prompt_visible_but_uncommitted(&project, "stale patch live typing replay");
@@ -523,9 +544,9 @@ fn live_typing_timeout_recovers_detached_response_and_keeps_prompt_uncommitted()
     );
     let ops_log = fs::read_to_string(project.agent_doc_dir().join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("recovery=detached_disk_authority")
-            && ops_log.contains("ipc_patch_cancelled_for_document_authority"),
-        "IPC timeout should recover through detached document authority:\n{ops_log}"
+        ops_log.contains("write_ipc_editor_absent_disk_authority")
+            && ops_log.contains("recovery=direct_disk_write"),
+        "durable detached authority should bypass IPC before queueing:\n{ops_log}"
     );
 }
 

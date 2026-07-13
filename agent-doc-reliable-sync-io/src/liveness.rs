@@ -151,6 +151,15 @@ impl LivenessProjection {
             .collect()
     }
 
+    /// Whether this projection has ever received an open/close fact for the
+    /// document. Unlike `open_docs().is_empty()`, this distinguishes a durably
+    /// known closed document from a never-hydrated cold process.
+    pub fn tracks_document(&self, document_hash: &str) -> bool {
+        self.open_set
+            .keys()
+            .any(|(known_document, _)| known_document == document_hash)
+    }
+
     /// Every document with at least one present `(doc, pid)` (open-set ground truth,
     /// independent of alive) — the replacement for the `#lbreap` live-buffer scan.
     pub fn open_docs(&self) -> BTreeSet<String> {
@@ -279,6 +288,20 @@ mod tests {
             p.is_open("docA", 100),
             "re-open tag t3 not observed by the close"
         );
+    }
+
+    #[test]
+    fn closed_document_remains_tracked_for_authoritative_false_reads() {
+        let mut projection = LivenessProjection::new();
+        projection.apply(&LivenessOp::Close {
+            document_hash: "known-closed".into(),
+            pid: 9,
+            observed_tags: vec!["old-open".into()],
+        });
+
+        assert!(projection.tracks_document("known-closed"));
+        assert!(!projection.open_docs().contains("known-closed"));
+        assert!(!projection.tracks_document("never-seen"));
     }
 
     // Order independence + re-delivery no-op for the same scenario.

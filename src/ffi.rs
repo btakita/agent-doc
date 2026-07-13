@@ -2537,11 +2537,10 @@ fn with_document_push_endpoint<T>(
 
 fn flush_document_push_endpoint(project_root: &Path, file_path: &Path) -> anyhow::Result<()> {
     with_document_push_endpoint(project_root, file_path, |endpoint| {
-        let transport =
-            agent_doc_controller_io::project_controller::RpcDocumentPushTransport::new(
-                project_root,
-                file_path,
-            );
+        let transport = agent_doc_controller_io::project_controller::RpcDocumentPushTransport::new(
+            project_root,
+            file_path,
+        );
         endpoint.flush(&transport)?;
         Ok(())
     })

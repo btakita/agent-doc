@@ -202,16 +202,17 @@ mod tests {
         }
     }
 
-    fn seed_live_plugin_owner_lease(file: &str) {
+    fn seed_live_reliable_sync_open(file: &Path) {
+        let document_hash = agent_doc_hash::document_id_for_path(file);
         let pid = std::process::id();
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(
-                file,
-                &format!("test-editor-{pid}"),
-                pid
-            ),
-            "test setup should acquire a live plugin-owner lease"
-        );
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: pid.into(),
+                tag: format!("test-editor-{pid}:{}", file.display()),
+            }]);
     }
 
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -380,15 +381,10 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
-        let file_str = doc.display().to_string();
-
-        // Make the document editor-attached (MultiReplica): a live owner lease
-        // for the current test process makes `authority_for_file` take the real
-        // editor-attached path.
-        seed_live_plugin_owner_lease(&file_str);
-        assert!(
-            agent_doc_plugin_owner::crdt_authority::authority_for_file(&file_str).editor_attached()
-        );
+        // Make the document editor-attached (MultiReplica): a reliable-sync Open
+        // fact for the current test process takes the real editor-attached path.
+        seed_live_reliable_sync_open(&doc);
+        assert!(agent_doc_crdt_relay_io::crdt_authority_for_file(&doc).editor_attached());
 
         let (a_id, a_bootstrap) =
             agent_doc_crdt_relay_io::register_replica_for_file(&doc, "vscode:a")
@@ -667,7 +663,7 @@ mod tests {
         std::fs::write(&doc, &visible).unwrap();
         let canonical = doc.canonicalize().unwrap();
         let canonical_key = canonical.to_string_lossy();
-        seed_live_plugin_owner_lease(canonical_key.as_ref());
+        seed_live_reliable_sync_open(&canonical);
         assert!(
             agent_doc_crdt_relay_io::register_replica_for_file(
                 &canonical,

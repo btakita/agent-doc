@@ -6743,6 +6743,7 @@ struct SimEditor {
     /// Canonical path string used by compatibility projections and plugin-owner
     /// lease keys.
     key: String,
+    liveness_tag: String,
     replica_identity: String,
     replica: agent_doc_merge::crdt_sync::ReplicaState,
     buffer: String,
@@ -6763,6 +6764,16 @@ impl SimEditor {
         let key = editor_buffer_key(path);
         let _ =
             agent_doc_plugin_owner::try_acquire_plugin_owner(&key, editor_id, std::process::id());
+        let document_hash = agent_doc_hash::document_id_for_path(path);
+        let liveness_tag = format!("sim-editor:{editor_id}:{key}");
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .map_err(|_| anyhow!("SimEditor liveness plane mutex poisoned"))?
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: liveness_tag.clone(),
+            }]);
         let replica_identity = format!("{editor_id}:{key}");
         let (client_id, bootstrap) =
             agent_doc_crdt_relay_io::register_replica_for_file(path, &replica_identity)?
@@ -6774,6 +6785,7 @@ impl SimEditor {
             editor_id: editor_id.to_string(),
             path: path.to_path_buf(),
             key,
+            liveness_tag,
             replica_identity,
             replica,
             buffer,
@@ -6823,6 +6835,15 @@ impl SimEditor {
             &self.path,
             &self.replica_identity,
         )?;
+        let document_hash = agent_doc_hash::document_id_for_path(&self.path);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .map_err(|_| anyhow!("SimEditor liveness plane mutex poisoned"))?
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
+                document_hash,
+                pid: std::process::id().into(),
+                observed_tags: vec![self.liveness_tag.clone()],
+            }]);
         agent_doc_plugin_owner::release_plugin_owner(&self.key, &self.editor_id);
         agent_doc_debounce::clear_live_buffer_for_editor(&self.key, Some(&self.editor_id))
             .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))

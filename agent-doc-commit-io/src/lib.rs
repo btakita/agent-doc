@@ -1749,8 +1749,7 @@ mod controller_commit_scope_tests {
             let prev = slot.replace(true);
             assert!(controller_commit_in_progress());
             assert!(
-                RuntimeLiveBufferGuardEffects
-                    .commit_barrier_ready(Path::new("/does/not/exist.md")),
+                RuntimeLiveBufferGuardEffects.commit_barrier_ready(Path::new("/does/not/exist.md")),
                 "barrier must be pre-converged inside the controller commit scope"
             );
             slot.set(prev);

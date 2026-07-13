@@ -28405,8 +28405,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "agent-doc-fs",
         "agent-doc-git-io",
         "agent-doc-ipc-io",
-        "agent-doc-plugin-owner",
         "agent-doc-project-root-io",
+        "agent-doc-reliable-sync-io",
     ] {
         assert!(
             realtime_io_dependencies.contains_key(required_dependency),
@@ -28853,16 +28853,28 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
             "{relative} must not import CrdtAuthority through orchestration"
         );
     }
-    for relative in [
-        "agent-doc-crdt-relay-io/src/lib.rs",
-        "agent-doc-flow-io/src/closeout.rs",
-        "agent-doc-repair-io/src/lib.rs",
-        "agent-doc-controller-io/src/project_controller/rpc.rs",
+    for (relative, authority_adapter) in [
+        (
+            "agent-doc-crdt-relay-io/src/lib.rs",
+            "pub fn crdt_authority_for_file(file: &Path)",
+        ),
+        (
+            "agent-doc-flow-io/src/closeout.rs",
+            "agent_doc_crdt_relay_io::crdt_authority_for_file(file)",
+        ),
+        (
+            "agent-doc-repair-io/src/lib.rs",
+            "agent_doc_crdt_relay_io::crdt_authority_for_file(file)",
+        ),
+        (
+            "agent-doc-controller-io/src/project_controller/rpc.rs",
+            "agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)",
+        ),
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
-            source.contains("agent_doc_plugin_owner::crdt_authority::authority_for_file"),
-            "{relative} should call the focused plugin-owner CRDT authority adapter directly"
+            source.contains(authority_adapter),
+            "{relative} should call the durable reliable-sync CRDT authority adapter"
         );
         for forbidden in [
             "crate::crdt_authority::authority_for_file",
@@ -28873,7 +28885,27 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
                 "{relative} must not route CRDT authority through orchestration: {forbidden}"
             );
         }
+        assert!(
+            !realtime_io_dependencies.contains_key("agent-doc-plugin-owner"),
+            "document realtime IO must consume reliable-sync authority, not the retired plugin-owner lease"
+        );
     }
+    let relay_authority =
+        fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
+    assert!(
+        relay_authority.contains("agent_doc_reliable_sync_io::plane_editor_live_for_path")
+            && relay_authority.contains("agent_doc_sqlite::reliable_sync_inbox::load"),
+        "the focused relay authority adapter must hydrate reliable-sync durable state"
+    );
+    let reliable_authority_adapter = relay_authority
+        .split("pub fn reliable_sync_editor_live_for_file")
+        .nth(1)
+        .and_then(|suffix| suffix.split("pub fn crdt_authority_for_file").next())
+        .expect("reliable-sync authority adapter body");
+    assert!(
+        !reliable_authority_adapter.contains("editor_open_docs"),
+        "default reliable-sync authority must not fall back to the process-local open-docs compatibility projection"
+    );
     for forbidden in [
         "agent-doc-core",
         "agent-doc-orchestration",

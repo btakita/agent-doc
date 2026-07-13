@@ -5064,7 +5064,10 @@ mod tests {
         // Same-root column preserved; cross-root column blanked to hold its slot.
         assert_eq!(sanitized.len(), 2);
         assert_eq!(sanitized[0], same_root_doc.to_string_lossy());
-        assert_eq!(sanitized[1], "", "cross-root column becomes an empty placeholder");
+        assert_eq!(
+            sanitized[1], "",
+            "cross-root column becomes an empty placeholder"
+        );
     }
 
     struct TestPipelineFrontmatterEffects;

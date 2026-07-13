@@ -69,11 +69,7 @@ pub struct FramePushEndpoint<O: DurableOutbox> {
 }
 
 impl<O: DurableOutbox> FramePushEndpoint<O> {
-    pub fn resuming(
-        document_hash: impl Into<String>,
-        outbox: O,
-        acked_through: u64,
-    ) -> Self {
+    pub fn resuming(document_hash: impl Into<String>, outbox: O, acked_through: u64) -> Self {
         let highest_retained = outbox.retained_epochs().into_iter().max().unwrap_or(0);
         Self {
             document_hash: document_hash.into(),

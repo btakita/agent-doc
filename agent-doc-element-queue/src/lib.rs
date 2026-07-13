@@ -93,11 +93,9 @@ impl QueueItemIdentity {
             // the convergence pass treats them as distinct free-text heads and
             // cannot collapse a resurrected copy against the bare original
             // (`#qdedup-directive-twin` free-text variant).
-            None => {
-                QueueItemIdentity::FreeText(normalize_multiline_dedup_text(&strip_priority_markers(
-                    prompt,
-                )))
-            }
+            None => QueueItemIdentity::FreeText(normalize_multiline_dedup_text(
+                &strip_priority_markers(prompt),
+            )),
         }
     }
 

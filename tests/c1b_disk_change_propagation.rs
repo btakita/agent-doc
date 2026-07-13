@@ -1,11 +1,11 @@
 //! Integration: the C1b disk-change → CPC-replica reconcile vertical, end-to-end
 //! in one process, against a genuinely **editor-attached** document.
 //!
-//! Editor-attachment is real, not mocked: the test holds a plugin-owner lease
-//! keyed to its own live PID, so `authority_for_file` resolves to `MultiReplica`
-//! and a canonical `RelayHub` is allocated with a registered editor replica —
-//! exactly the state a live JetBrains/VS Code plugin establishes. It then drives
-//! the shipped producer/consumer:
+//! Editor-attachment is real, not mocked: the test folds an Open fact into the
+//! reliable-sync OR-set, so `authority_for_file` resolves to `MultiReplica` and a
+//! canonical `RelayHub` is allocated with a registered editor replica — exactly
+//! the state a live JetBrains/VS Code plugin establishes. It then drives the
+//! shipped producer/consumer:
 //!
 //!   route_disk_change_signal (watch-daemon side, uses decide_watch_action)
 //!     -> `.agent-doc/disk-change-requests/<hash>.json` marker
@@ -24,23 +24,24 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Build a temp project with a tracked, **editor-attached** document seeded from
-/// `body`: hold a plugin-owner lease with this process's live pid, register an
-/// editor replica in the hub, and record the on-disk baseline.
+/// `body`: publish a reliable-sync Open fact, register an editor replica in the
+/// hub, and record the on-disk baseline.
 fn attached_doc(name: &str, body: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
     let file = dir.path().join(name);
     fs::write(&file, body).unwrap();
 
-    // Editor-attached = a plugin-owner lease held by a LIVE pid (this process).
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &file.display().to_string(),
-            "c1b-integration",
-            std::process::id(),
-        ),
-        "should acquire the plugin-owner lease for the test process"
-    );
+    // Editor-attached = a durable-plane Open fact held by this live process.
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    agent_doc_reliable_sync_io::global_liveness_plane()
+        .lock()
+        .unwrap()
+        .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash,
+            pid: std::process::id().into(),
+            tag: format!("c1b-integration:{}", file.display()),
+        }]);
 
     // Allocate the canonical hub + a registered editor replica, then record the
     // committed baseline so an out-of-band correction is detectable.
@@ -104,7 +105,7 @@ fn out_of_band_deletion_rebuilds_canonical_and_flags_editors() {
 
 #[test]
 fn headless_document_gets_no_marker() {
-    // No plugin-owner lease → not editor-attached → the disk-authority load path
+    // No reliable-sync Open fact → not editor-attached → the disk-authority load path
     // owns the change and no marker is dropped for a supervisor to consume.
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

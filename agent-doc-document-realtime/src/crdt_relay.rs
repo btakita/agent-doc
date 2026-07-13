@@ -1290,7 +1290,11 @@ mod tests {
         let mut hub = RelayHub::from_text(1, "hello\nsy71-drift\n");
         let packet = hub.adopt_editor_text("hello\n").unwrap();
         assert!(!packet.update.is_empty(), "a real text change adopts");
-        assert_eq!(hub.canonical_text(), "hello\n", "drift dropped via text rebuild");
+        assert_eq!(
+            hub.canonical_text(),
+            "hello\n",
+            "drift dropped via text rebuild"
+        );
         // Self-echo: re-adopting the same text is a no-op (no broadcast) — no feedback loop.
         let echo = hub.adopt_editor_text("hello\n").unwrap();
         assert!(
@@ -1379,7 +1383,11 @@ mod tests {
         // registered — the phantom-lease case where the member `relay_update` path is
         // dead and the canonical used to go stale (the `#sy71`-class resurrection).
         let mut hub = RelayHub::from_text(1, "hello\n");
-        assert_eq!(hub.live_count(), 0, "no members registered — the phantom-lease case");
+        assert_eq!(
+            hub.live_count(),
+            0,
+            "no members registered — the phantom-lease case"
+        );
 
         // A connected plugin bootstraps a replica from the canonical snapshot (shared
         // OpIds) and makes the operator's edit — what the durable document-op push carries.
@@ -2124,11 +2132,19 @@ mod tests {
         assert_eq!(hub.live_count(), 2);
 
         hub.deregister(2);
-        assert_eq!(hub.live_count(), 1, "deregistered member drops out of the count");
+        assert_eq!(
+            hub.live_count(),
+            1,
+            "deregistered member drops out of the count"
+        );
 
         // Re-registering the same id flips the retained cell back to true.
         hub.register(2).unwrap();
-        assert_eq!(hub.live_count(), 2, "re-register flips the retained cell live");
+        assert_eq!(
+            hub.live_count(),
+            2,
+            "re-register flips the retained cell live"
+        );
     }
 
     #[test]
@@ -2141,9 +2157,17 @@ mod tests {
         assert_eq!(hub.live_count(), 2);
 
         hub.disconnect(3);
-        assert_eq!(hub.live_count(), 1, "disconnect recomputes the derived count");
+        assert_eq!(
+            hub.live_count(),
+            1,
+            "disconnect recomputes the derived count"
+        );
 
         hub.reconnect(3).unwrap();
-        assert_eq!(hub.live_count(), 2, "reconnect recomputes the derived count");
+        assert_eq!(
+            hub.live_count(),
+            2,
+            "reconnect recomputes the derived count"
+        );
     }
 }

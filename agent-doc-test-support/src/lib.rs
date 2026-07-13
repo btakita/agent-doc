@@ -156,6 +156,7 @@ pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Opti
 pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     mark_test_local_crdt_relay(&canonical);
+    seed_reliable_sync_open(&canonical, editor_id);
     let canonical_key = canonical.to_string_lossy().to_string();
     assert!(
         agent_doc_plugin_owner::try_acquire_plugin_owner(
@@ -456,6 +457,7 @@ pub fn seed_live_plugin_owner_lease(file: &str) {
         agent_doc_plugin_owner::try_acquire_plugin_owner(file, &format!("test-editor-{pid}"), pid),
         "test setup should acquire a live plugin-owner lease"
     );
+    seed_reliable_sync_open(Path::new(file), &format!("test-editor-{pid}"));
 }
 
 /// Model the "phantom editor" state a controller/supervisor recycle leaves
@@ -469,28 +471,33 @@ pub fn seed_live_plugin_owner_lease(file: &str) {
 /// Registers a live replica (which also acquires the plugin-owner lease and marks
 /// the test-local CRDT relay), then deregisters it so the hub keeps the canonical
 /// but reports zero live editors. The lease is left held.
-pub fn seed_stale_editor_lease_zero_live_replica(file: &Path, editor_id: &str) {
+pub fn seed_durable_open_zero_live_replica(file: &Path, editor_id: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     mark_test_local_crdt_relay(&canonical);
+    seed_reliable_sync_open(&canonical, editor_id);
     let canonical_key = canonical.to_string_lossy().to_string();
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &canonical_key,
-            editor_id,
-            std::process::id(),
-        ),
-        "test setup should acquire a live plugin-owner lease"
-    );
     let identity = format!("{editor_id}:{canonical_key}");
     agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
         .expect("test editor should register through CRDT relay")
-        .expect("test editor should attach under plugin-owner authority");
+        .expect("test editor should attach under durable reliable-sync authority");
     let removed = agent_doc_crdt_relay_io::deregister_replica_for_file(&canonical, &identity)
         .expect("test editor deregister should succeed");
     assert!(
         removed,
         "deregistering the only live replica should drop the hub mirror to zero live editors"
     );
+}
+
+fn seed_reliable_sync_open(file: &Path, tag: &str) {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    agent_doc_reliable_sync_io::global_liveness_plane()
+        .lock()
+        .unwrap()
+        .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash,
+            pid: std::process::id().into(),
+            tag: tag.to_string(),
+        }]);
 }
 
 pub fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {

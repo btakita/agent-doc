@@ -14,10 +14,9 @@ import com.intellij.openapi.vfs.VirtualFile
  * reactive liveness state lives in [ReliableSyncLivenessGraph] (a real lazily-kt
  * graph), and all durability + the controller socket live in the Rust FFI
  * ([AgentDocLib.agent_doc_reliable_sync_liveness_enqueue] /
- * [AgentDocLib.agent_doc_reliable_sync_liveness_flush]). The FFI enqueue is a
- * no-op unless the controller dual-run flag is on, so this is safe on every
- * install: the sidecars stay authoritative until the operator opts into the
- * cutover.
+ * [AgentDocLib.agent_doc_reliable_sync_liveness_flush]). The historical dual-run
+ * flag can disable the channel for rollback; default-on delivery feeds the
+ * authoritative, durably journaled controller projection.
  *
  * The whole-editor-death signal (`Alive{false}`) is NOT reported here — a dead
  * editor cannot report — it is injected controller-side by the S4b OS
@@ -27,7 +26,21 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     private val pid: Long = ProcessHandle.current().pid()
     private val graph = ReliableSyncLivenessGraph(pid)
 
+    init {
+        // Project listeners can be created after the IDE restored its editor tabs;
+        // seed that existing open set because no new fileOpened event is guaranteed.
+        ApplicationManager.getApplication().invokeLater {
+            if (!project.isDisposed) {
+                FileEditorManager.getInstance(project).openFiles.forEach(::reportOpen)
+            }
+        }
+    }
+
     override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+        reportOpen(file)
+    }
+
+    private fun reportOpen(file: VirtualFile) {
         val root = project.basePath ?: return
         val filePath = file.path
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -39,7 +52,8 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             // start tracking a possibly-random `.md` tab at all.
             if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
-            push(lib, root, documentHash, graph.open(documentHash))
+            val opsJson = graph.open(documentHash) ?: return@executeOnPooledThread
+            push(lib, root, documentHash, opsJson)
         }
     }
 

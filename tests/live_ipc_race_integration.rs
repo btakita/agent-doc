@@ -55,6 +55,25 @@ fn record_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
         );
 }
 
+fn seed_reliable_sync_open(doc: &Path, tag: &str) {
+    let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
+    let document_hash = agent_doc_hash::document_id_for_path(doc);
+    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        document_hash: document_hash.clone(),
+        pid: std::process::id().into(),
+        tag: tag.to_string(),
+    }];
+    agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &project_root
+            .join(".agent-doc")
+            .join("reliable_sync_outbox.db"),
+        &document_hash,
+        1,
+        Some(&serde_json::to_string(&ops).unwrap()),
+    )
+    .expect("seed durable reliable-sync Open fact");
+}
+
 fn apply_first_component_patch(current: &str, payload: &Value) -> Option<String> {
     let patch = payload
         .get("patches")
@@ -165,6 +184,7 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
         &format!("<!-- agent:queue -->\n{live_queue_prompt}\n<!-- /agent:queue -->"),
     );
     fs::write(&doc, &current_with_queue).unwrap();
+    seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
     record_operator_buffer(&doc, &current_with_queue);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
@@ -357,6 +377,7 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
         .unwrap()
         .replace("<!--\n-->", &scratch_comment);
     fs::write(&doc, &current_with_scratch).unwrap();
+    seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
     record_operator_buffer(&doc, &current_with_scratch);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));

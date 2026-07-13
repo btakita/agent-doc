@@ -1258,8 +1258,10 @@ mod tests {
         // When the dangling head is the sole live prompt, the queue is fully
         // undrainable, so `queue_continuation_required` (active && count > 0) is
         // false and the loop stops.
-        let only_dangling =
-            doc_with_backlog(&[":round_pushpin: [#sy71]"], &["- [ ] [#hmw9] a real open task"]);
+        let only_dangling = doc_with_backlog(
+            &[":round_pushpin: [#sy71]"],
+            &["- [ ] [#hmw9] a real open task"],
+        );
         assert_eq!(drainable_head_count(&only_dangling), 0);
     }
 

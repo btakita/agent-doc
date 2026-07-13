@@ -66,7 +66,10 @@ impl ExchangeNode {
     pub fn node_id(&self) -> String {
         match &self.kind {
             ExchangeNodeKind::Response { .. } => {
-                format!("r:{}", short_content_hash(&response_identity_digest(&self.lines)))
+                format!(
+                    "r:{}",
+                    short_content_hash(&response_identity_digest(&self.lines))
+                )
             }
             ExchangeNodeKind::Prompt => {
                 let body = self

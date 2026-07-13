@@ -93,5 +93,22 @@ zero divergence. Keep `SidecarOpenSetModel` as the parity oracle through P3.
 - Feedback regressions cover same-text self-echo and twenty tombstone-churning cycles;
   restart/outbox replay, controller parity, and plugin transport paths are covered by the
   workspace suites.
-- Verification passed: `make check`, `make tmux-ci`, 148 VS Code tests, JetBrains
-  `test buildPlugin`, and `make install-full` for agent-doc 0.34.87 / plugin 0.2.241.
+- Final verification passed: `make check` (7,523 passed, 240 skipped), `make tmux-ci`,
+149 VS Code tests, JetBrains `test buildPlugin` and `signPlugin`, and `make install-full`
+for agent-doc 0.34.88 / JetBrains 0.2.242 / VS Code 0.2.47.
+- P4 receive durability is implemented in 0.34.88: the controller journals liveness and
+  its monotone receive cursor before ACK, restores that state before exposing a recycled
+  socket, and cold readers also fold the sender's still-retained suffix. Controller-local
+  process-exit facts use the same durable-before-visible boundary.
+- The default authority/write-convergence paths no longer consult plugin-owner leases or
+  demote on zero relay membership. JetBrains 0.2.242 and VS Code 0.2.47 enumerate tabs that
+  were already open at plugin activation and suppress duplicate Open facts. Regressions
+  cover receiver recycle, stale/out-of-order cursor delivery, cold journal hydration, and
+  startup enumeration idempotency.
+- Verified socket/file visible-write receipts now adopt through the project controller,
+so the controller-owned canonical and its commit barrier observe the same text as the
+short-lived CLI. Durable editor absence bypasses IPC before queueing; durable Open with
+zero relay members remains editor authority and fails closed without a visible receipt.
+- The follow-up full lazily parity pass is green across spec, formal, and all eight language
+bindings. Every durable-store fixture mirror is byte-identical (Rust reads the spec fixture
+directly), all repository gates and package dry-runs pass, and every worktree remains clean.

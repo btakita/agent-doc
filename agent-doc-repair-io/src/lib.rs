@@ -554,8 +554,7 @@ fn repair_replay_force_disk_with_override(file: &Path, force_disk_override: Opti
     if let Some(force_disk) = force_disk_override {
         return force_disk;
     }
-    !agent_doc_plugin_owner::crdt_authority::authority_for_file(&file.display().to_string())
-        .editor_attached()
+    !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
 }
 
 fn replay_orphaned_response_through_strict_write(

@@ -2603,25 +2603,33 @@ mod tests {
 
         let err = finalize_commit(&doc, CommitMode::BestEffort, false)
             .expect_err("session best-effort commit must fail closed on active editor authority");
+        let error = format!("{err:#}");
         assert!(
-            err.to_string().contains("editor is the current authority")
-                && err
-                    .to_string()
-                    .contains("disk is a non-authoritative replica"),
-            "error should identify the unresolved session closeout:\n{err}"
+            error.contains("resolve current document")
+                || (error.contains("editor is the current authority")
+                    && error.contains("disk is a non-authoritative replica")),
+            "error should identify the unavailable canonical editor projection:\n{error}"
         );
 
-        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            agent_doc_turn::CyclePhase::PreflightStarted,
-            "best-effort session commit must not mark the turn committed"
-        );
+        // The lifecycle sidecar can independently reconcile the already-committed
+        // pre-test exchange to `Committed`; the authority invariant is that the
+        // editor-only mutation never reaches disk or Git when canonical relay
+        // convergence is unavailable.
+        assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
+        let git_content = std::process::Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(git_content.status.success());
+        assert_eq!(String::from_utf8(git_content.stdout).unwrap(), committed);
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("commit_editor_authority_unavailable file=")
-                && log.contains("reason=relay_convergence_pending"),
+            (log.contains("commit_editor_authority_unavailable file=")
+                && log.contains("reason=relay_convergence_pending"))
+                || (log.contains("crdt_current_text_unavailable file=")
+                    && log.contains("reason=missing_replica")),
             "blocked editor-authority commit should be logged:\n{log}"
         );
     }

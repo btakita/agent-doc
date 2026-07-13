@@ -772,11 +772,12 @@ mod tests {
             reactive: Some("baseline line\nreactive addition\n".to_string()),
             seen_disk: std::cell::RefCell::new(None),
         };
-        let result =
-            compute_with_current(&TestSnapshotStore, &doc, Some(&live)).unwrap();
+        let result = compute_with_current(&TestSnapshotStore, &doc, Some(&live)).unwrap();
 
         assert_eq!(result.current, "baseline line\nreactive addition\n");
-        let diff = result.diff.expect("reactive addition should surface as a diff");
+        let diff = result
+            .diff
+            .expect("reactive addition should surface as a diff");
         assert!(
             diff.contains("reactive addition"),
             "diff must reflect the reactive-sourced current, got: {diff}"

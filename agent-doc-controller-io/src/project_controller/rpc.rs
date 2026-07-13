@@ -3700,6 +3700,66 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ControllerCrdtTextAdoptResult {
+    pub changed: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerCrdtTextAdoptPayload {
+    text: String,
+    source: Option<String>,
+}
+
+/// Fold editor-visible text into the controller-owned canonical relay model.
+///
+/// Callers must already have a verified editor receipt. This is the process
+/// boundary companion to `adopt_editor_text_for_file`: the project controller,
+/// rather than a short-lived CLI process, owns the canonical model consumed by
+/// the closeout commit barrier.
+pub fn adopt_editor_text_via_controller_model_for_doc(
+    doc: &Path,
+    text: &str,
+    source: &str,
+) -> Result<Option<bool>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "controller_crdt_text_adopt_skipped file={} source={} reason=no_project_root",
+                doc.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = ControllerCrdtTextAdoptPayload {
+        text: text.to_string(),
+        source: Some(source.to_string()),
+    };
+    let result: ControllerCrdtTextAdoptResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "crdt_text_adopt".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("verified_editor_receipt".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )?;
+    Ok(result.changed)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerDiskChangeReconcileResult {
     pub outcome: Option<agent_doc_document_realtime::crdt_relay::DiskChangeOutcome>,
 }
@@ -4411,6 +4471,37 @@ fn handle_crdt_cpc_write_rpc(
         source,
     )?;
     Ok(ControllerCrdtCpcWriteResult { write })
+}
+
+fn handle_crdt_text_adopt_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerCrdtTextAdoptResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerCrdtTextAdoptPayload =
+        serde_json::from_str(&payload_json).context("failed to parse CRDT text-adopt payload")?;
+    let source = payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("controller_text_adopt");
+    let changed = agent_doc_crdt_relay_io::adopt_editor_text_for_file(&canonical, &payload.text)?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_crdt_text_adopt file={} source={} changed={} content_hash={}",
+            canonical.display(),
+            source,
+            changed
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            agent_doc_hash::content_hash(&payload.text),
+        ),
+    );
+    Ok(ControllerCrdtTextAdoptResult { changed })
 }
 
 fn handle_crdt_replica_rpc(
@@ -5874,14 +5965,19 @@ pub(crate) fn serve_with_options(
     } else {
         write_bootstrap(project_root, launch_mode)?
     };
+    let durable_project_root = bootstrap.project_root.clone();
     let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+    // P4: rebuild every controller-acknowledged liveness fact before the socket
+    // becomes visible. Sender frames may already have been pruned after their ACK;
+    // the receiver journal is therefore the recycle authority, not a lease scan.
+    restore_reliable_sync_liveness(&durable_project_root)?;
     // #s4b: install the OS process-exit watcher on the process-global editor-attachment
     // registry so the editor-attached authority (`authority_for_file`) can read pure
     // reactive state on the hot path and learn about editor **crashes** (which send no
     // `deregister`) from a bounded-latency liveness poller instead of a per-decision
-    // filesystem lease read. Controller-only: a short-lived CLI installs no watcher, so it
-    // keeps cold-missing to the durable lease (unchanged, crash-safe).
-    crate::process_exit_watcher::install_process_exit_watcher();
+    // filesystem lease read. A short-lived CLI hydrates from the durable receiver
+    // journal and retained sender suffix instead of scanning lease sidecars.
+    crate::process_exit_watcher::install_process_exit_watcher(durable_project_root);
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)
@@ -6949,7 +7045,10 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_tmux_layout_sync_state(&bootstrap_snapshot, request))
         }
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
-        "reliable_sync" => controller_envelope(handle_reliable_sync(request)),
+        "reliable_sync" => controller_envelope(handle_reliable_sync(
+            &bootstrap_snapshot.project_root,
+            request,
+        )),
         "reliable_sync_status" => {
             controller_envelope(handle_reliable_sync_status(&bootstrap_snapshot))
         }
@@ -6999,6 +7098,9 @@ pub(crate) fn handle_request_locked(
         }
         "crdt_cpc_write" => {
             controller_envelope(handle_crdt_cpc_write_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_text_adopt" => {
+            controller_envelope(handle_crdt_text_adopt_rpc(&bootstrap_snapshot, request))
         }
         "crdt_disk_change_reconcile" => controller_envelope(handle_crdt_disk_change_reconcile_rpc(
             &bootstrap_snapshot,
@@ -7200,18 +7302,9 @@ impl RpcDocumentPushTransport {
 }
 
 impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcDocumentPushTransport {
-    fn push(
-        &self,
-        _document_hash: &str,
-        epoch: u64,
-        envelope: &serde_json::Value,
-    ) -> Result<u64> {
-        let response = push_reliable_sync_frame_for_file(
-            &self.project_root,
-            &self.file,
-            epoch,
-            envelope,
-        )?;
+    fn push(&self, _document_hash: &str, epoch: u64, envelope: &serde_json::Value) -> Result<u64> {
+        let response =
+            push_reliable_sync_frame_for_file(&self.project_root, &self.file, epoch, envelope)?;
         Ok(response.ack_through)
     }
 }
@@ -7226,24 +7319,91 @@ fn controller_liveness_plane()
     agent_doc_reliable_sync_io::global_liveness_plane()
 }
 
-/// The hot-path CRDT authority for `file` (sidecar-retirement step 3 — the authority
-/// flip). The reliable-sync plane is **primary**: when the process-global plane is *warm*
-/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY` on, default, and the plane holds at least one open
-/// doc — true in the controller, fed by editor pushes), its `live_docs` decides
-/// `MultiReplica` / `GitAuthoritative` and the filesystem sidecars are **not** consulted.
-/// On a plane cold miss (authority disabled, a poisoned lock, or an empty plane — a
-/// short-lived CLI that never received a push) it falls back to the sidecar-backed
-/// [`agent_doc_plugin_owner::crdt_authority::authority_for_file`] so cross-process
-/// authority stays correct. This is the single hot-path authority entry the controller
-/// and `commit-io` share; the sidecars are demoted to background durability + cold-miss.
+fn reliable_sync_database_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join("reliable_sync_outbox.db")
+}
+
+fn restored_reliable_sync_projects() -> &'static std::sync::Mutex<BTreeSet<PathBuf>> {
+    static RESTORED: std::sync::LazyLock<std::sync::Mutex<BTreeSet<PathBuf>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeSet::new()));
+    &RESTORED
+}
+
+/// Rebuild the in-memory liveness plane from facts the receiver committed before
+/// acknowledging them. This is intentionally idempotent: CRDT joins and cursor
+/// maxima make duplicate hydration harmless.
+fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
+    let project_key = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    if restored_reliable_sync_projects()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync restored-project set poisoned"))?
+        .contains(&project_key)
+    {
+        return Ok(());
+    }
+
+    let snapshot =
+        agent_doc_sqlite::reliable_sync_inbox::load(&reliable_sync_database_path(project_root))?;
+    let batches = snapshot
+        .liveness
+        .iter()
+        .map(|record| {
+            serde_json::from_str::<Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>>(
+                &record.ops_json,
+            )
+            .with_context(|| {
+                format!(
+                    "decode durable reliable-sync liveness source={} epoch={}",
+                    record.source_key, record.epoch
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    {
+        let mut plane = controller_liveness_plane()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+        for batch in &batches {
+            plane.restore_liveness(batch);
+        }
+        for cursor in &snapshot.cursors {
+            plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
+        }
+    }
+    restored_reliable_sync_projects()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync restored-project set poisoned"))?
+        .insert(project_key);
+    Ok(())
+}
+
+/// Default-on liveness authority with a durable cold path. The hot path is one
+/// in-memory CRDT projection read. A cold process replays the receiver journal
+/// plus the sender's retained suffix; it never reconciles live-buffer sidecars or
+/// consults a plugin-owner lease. The explicit authority-off rollback retains the
+/// legacy lease behavior by operator request.
+pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
+    agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
+}
+
+/// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4). The
+/// reliable-sync plane is **primary**: its `live_docs` decides `MultiReplica` /
+/// `GitAuthoritative`, and a cold process first hydrates the receiver journal plus
+/// retained sender suffix. Filesystem leases and live-buffer sidecars are not read
+/// unless the operator explicitly disables reliable-sync authority for rollback.
+/// This is the single authority entry shared by controller and write paths.
 pub fn crdt_authority_for_file(
     file: &str,
 ) -> agent_doc_document_realtime::crdt_authority::CrdtAuthority {
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-    match agent_doc_reliable_sync_io::plane_editor_live_for_path(file) {
-        Some(true) => CrdtAuthority::MultiReplica,
-        Some(false) => CrdtAuthority::GitAuthoritative,
-        None => agent_doc_plugin_owner::crdt_authority::authority_for_file(file),
+    if reliable_sync_editor_live_for_file(Path::new(file)) {
+        CrdtAuthority::MultiReplica
+    } else {
+        CrdtAuthority::GitAuthoritative
     }
 }
 
@@ -7385,7 +7545,7 @@ pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyn
 /// to not-live — the reliable-sync equivalent of the sidecar path's crash demote.
 /// No-op only when dual-run is explicitly disabled; the shadow plane is ON by
 /// default (sidecars remain the hot-path authority until the separate flip).
-pub fn record_reliable_sync_editor_exit(pid: u64) {
+pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
     if !agent_doc_reliable_sync_io::dual_run_enabled() {
         return;
     }
@@ -7402,6 +7562,27 @@ pub fn record_reliable_sync_editor_exit(pid: u64) {
             peer: 0,
         },
     };
+    let ops_json = match serde_json::to_string(&vec![op.clone()]) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!(
+                "[reliable-sync] record_reliable_sync_editor_exit: serialize failed: {error}"
+            );
+            return;
+        }
+    };
+    let source_key = format!("controller-alive:{pid}");
+    if let Err(error) = agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+        &reliable_sync_database_path(project_root),
+        &source_key,
+        wall_time,
+        &ops_json,
+    ) {
+        eprintln!(
+            "[reliable-sync] record_reliable_sync_editor_exit: durable write failed: {error:#}"
+        );
+        return;
+    }
     match controller_liveness_plane().lock() {
         Ok(mut plane) => plane.apply_local(&op),
         Err(_) => eprintln!(
@@ -7418,7 +7599,10 @@ pub fn record_reliable_sync_editor_exit(pid: u64) {
 /// is not consumed and the ack is `0` — sidecars stay authoritative. When on, the
 /// frame folds into the shadow `ControllerLivenessPlane` and the returned
 /// `ack_through` lets the plugin outbox prune / resume from the frontier.
-fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliableSyncResponse> {
+fn handle_reliable_sync(
+    project_root: &Path,
+    request: ControllerRequest,
+) -> Result<ControllerReliableSyncResponse> {
     let payload_str = request
         .diagnostic_payload
         .as_deref()
@@ -7438,13 +7622,8 @@ fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliable
             dual_run: false,
         });
     }
-
-    let ack_through = {
-        let mut plane = controller_liveness_plane()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
-        plane.ingest(&document_hash, epoch, &message)?
-    };
+    let liveness_ops =
+        agent_doc_reliable_sync_io::liveness::decode_liveness_frame(&message).transpose()?;
 
     // `#docop-plane` P2b: a document-op frame folds into the relay canonical so a
     // connected editor's ops feed it even when its CRDT member registration lapsed
@@ -7459,22 +7638,10 @@ fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliable
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_text_adopt_frame(&message)
     {
-        match decoded {
-            Ok(text) => {
-                if let Err(e) =
-                    agent_doc_crdt_relay_io::adopt_editor_text_for_file(file, &text)
-                {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!("reliable_sync_text_adopt_failed hash={document_hash} error={e}"),
-                    );
-                }
-            }
-            Err(e) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!("reliable_sync_text_adopt_malformed hash={document_hash} error={e}"),
-            ),
-        }
+        let text = decoded
+            .with_context(|| format!("reliable_sync_text_adopt_malformed hash={document_hash}"))?;
+        agent_doc_crdt_relay_io::adopt_editor_text_for_file(file, &text)
+            .with_context(|| format!("reliable_sync_text_adopt_failed hash={document_hash}"))?;
     }
 
     // `#reattach-adopt`: a full-state adopt frame REPLACES the canonical with the
@@ -7486,68 +7653,55 @@ fn handle_reliable_sync(request: ControllerRequest) -> Result<ControllerReliable
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_full_state_adopt_frame(&message)
     {
-        match decoded {
-            Ok(ops) => match serde_json::to_vec(&ops) {
-                Ok(full_state) => {
-                    if let Err(e) =
-                        agent_doc_crdt_relay_io::adopt_editor_full_state_for_file(file, &full_state)
-                    {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "reliable_sync_full_state_adopt_failed hash={document_hash} error={e}"
-                            ),
-                        );
-                    }
-                }
-                Err(e) => agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "reliable_sync_full_state_adopt_reencode_failed hash={document_hash} error={e}"
-                    ),
-                ),
-            },
-            Err(e) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "reliable_sync_full_state_adopt_malformed hash={document_hash} error={e}"
-                ),
-            ),
-        }
+        let ops = decoded.with_context(|| {
+            format!("reliable_sync_full_state_adopt_malformed hash={document_hash}")
+        })?;
+        let full_state = serde_json::to_vec(&ops).with_context(|| {
+            format!("reliable_sync_full_state_adopt_reencode_failed hash={document_hash}")
+        })?;
+        agent_doc_crdt_relay_io::adopt_editor_full_state_for_file(file, &full_state).with_context(
+            || format!("reliable_sync_full_state_adopt_failed hash={document_hash}"),
+        )?;
     }
 
     if let Some(file) = request.file.as_deref()
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_document_op_frame(&message)
     {
-        match decoded {
-            Ok(ops) => match serde_json::to_vec(&ops) {
-                Ok(delta) => {
-                    if let Err(e) =
-                        agent_doc_crdt_relay_io::apply_document_op_delta_for_file(file, &delta)
-                    {
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "reliable_sync_document_op_fold_failed hash={document_hash} error={e}"
-                            ),
-                        );
-                    }
-                }
-                Err(e) => agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "reliable_sync_document_op_reencode_failed hash={document_hash} error={e}"
-                    ),
-                ),
-            },
-            Err(e) => agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "reliable_sync_document_op_frame_malformed hash={document_hash} error={e}"
-                ),
-            ),
+        let ops = decoded.with_context(|| {
+            format!("reliable_sync_document_op_frame_malformed hash={document_hash}")
+        })?;
+        let delta = serde_json::to_vec(&ops).with_context(|| {
+            format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
+        })?;
+        agent_doc_crdt_relay_io::apply_document_op_delta_for_file(file, &delta).with_context(
+            || format!("reliable_sync_document_op_fold_failed hash={document_hash}"),
+        )?;
+    }
+
+    // P4 receive durability boundary: every document-side effect above completes
+    // before the receiver cursor advances. The liveness batch and cursor then
+    // commit in one SQLite transaction before the ACK becomes observable. A crash
+    // before this point leaves the sender frame retained; a crash after it can
+    // rebuild the projection from the receiver journal.
+    let liveness_ops_json = liveness_ops
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
+    let ack_through = agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &reliable_sync_database_path(project_root),
+        &document_hash,
+        epoch,
+        liveness_ops_json.as_deref(),
+    )?;
+    {
+        let mut plane = controller_liveness_plane()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+        if let Some(ops) = &liveness_ops {
+            plane.restore_liveness(ops);
         }
+        plane.restore_cursor(&document_hash, ack_through);
     }
 
     Ok(ControllerReliableSyncResponse {
@@ -11966,15 +12120,15 @@ mod tests {
         let doc = dir.path().join("tasks/current-text.md");
         std::fs::write(&doc, "Body\n").unwrap();
         let canonical = doc.canonicalize().unwrap();
-        let file_key = canonical.to_string_lossy().to_string();
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(
-                &file_key,
-                "test-editor-current-text",
-                std::process::id(),
-            ),
-            "test setup should seed a live editor-attached authority lease"
-        );
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-current-text".into(),
+            }]);
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
 
@@ -12024,15 +12178,15 @@ mod tests {
         let doc = dir.path().join("tasks/current-text-recover.md");
         std::fs::write(&doc, "Body\n").unwrap();
         let canonical = doc.canonicalize().unwrap();
-        let file_key = canonical.to_string_lossy().to_string();
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(
-                &file_key,
-                "test-editor-current-text-recover",
-                std::process::id(),
-            ),
-            "test setup should seed a live editor-attached authority lease"
-        );
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        controller_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: "test-editor-current-text-recover".into(),
+            }]);
         let mut prior = agent_doc_document_realtime::crdt_relay::RelayHub::new(1);
         let editor =
             agent_doc_document_realtime::crdt_relay::mint_client_id("intellij:controller-recover");
@@ -14822,6 +14976,11 @@ mod tests {
         assert_eq!(record.pane_id, "%162");
     }
 
+    fn reliable_sync_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().expect("reliable-sync env test lock")
+    }
+
     fn reliable_sync_open_request(document_hash: &str) -> ControllerRequest {
         use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
         // A valid 3A reliable-sync envelope carrying one liveness Open op.
@@ -14852,11 +15011,12 @@ mod tests {
 
     #[test]
     fn reliable_sync_handler_explicit_off_is_noop_ack_zero() {
+        let _env = reliable_sync_env_lock();
         // Explicitly disabled ⇒ dual-run OFF: sidecars authoritative, frame not consumed.
         unsafe {
             std::env::set_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV, "0");
         }
-        let resp = handle_reliable_sync(reliable_sync_open_request("docwire-off"))
+        let resp = handle_reliable_sync(Path::new("."), reliable_sync_open_request("docwire-off"))
             .expect("handler ok");
         assert!(!resp.dual_run);
         assert_eq!(resp.ack_through, 0);
@@ -14868,13 +15028,15 @@ mod tests {
 
     #[test]
     fn reliable_sync_handler_default_on_folds_frame() {
+        let _env = reliable_sync_env_lock();
         // Env unset ⇒ dual-run ON by default: the plane runs in shadow and folds
         // the inbound liveness frame (authority is still the sidecars until the
         // separate flip). The handler reports dual_run and advances the ack cursor.
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
         }
-        let resp = handle_reliable_sync(reliable_sync_open_request("docwire-on"))
+        let dir = tempfile::tempdir().unwrap();
+        let resp = handle_reliable_sync(dir.path(), reliable_sync_open_request("docwire-on"))
             .expect("handler ok");
         assert!(resp.dual_run);
         assert_eq!(resp.document_hash, "docwire-on");
@@ -14883,13 +15045,85 @@ mod tests {
     }
 
     #[test]
-    fn crdt_authority_for_file_reads_warm_plane_over_sidecar() {
+    fn reliable_sync_ack_is_receiver_durable_and_stale_delivery_cannot_regress_it() {
+        let _env = reliable_sync_env_lock();
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let document_hash = "docwire-durable-receiver";
+        let mut newest = reliable_sync_open_request(document_hash);
+        newest.generation = Some(12);
+        let first = handle_reliable_sync(dir.path(), newest).expect("newest frame");
+        assert_eq!(first.ack_through, 12);
+
+        let mut stale = reliable_sync_open_request(document_hash);
+        stale.generation = Some(3);
+        let replay = handle_reliable_sync(dir.path(), stale).expect("stale replay");
+        assert_eq!(replay.ack_through, 12, "receiver ACK must be monotone");
+
+        let snapshot =
+            agent_doc_sqlite::reliable_sync_inbox::load(&reliable_sync_database_path(dir.path()))
+                .expect("durable receiver snapshot");
+        let mut recycled = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::recycle();
+        for record in &snapshot.liveness {
+            let ops: Vec<agent_doc_reliable_sync_io::liveness::LivenessOp> =
+                serde_json::from_str(&record.ops_json).unwrap();
+            recycled.restore_liveness(&ops);
+        }
+        for cursor in &snapshot.cursors {
+            recycled.restore_cursor(&cursor.document_hash, cursor.ack_through);
+        }
+
+        assert_eq!(recycled.ack_cursor(document_hash), 12);
+        assert!(recycled.projection().tracks_document(document_hash));
+        assert!(recycled.projection().live_docs().contains(document_hash));
+    }
+
+    #[test]
+    fn cold_authority_reader_rehydrates_receiver_journal_without_a_lease() {
+        let _env = reliable_sync_env_lock();
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(
+            &file,
+            "---\nagent_doc_session: durable-cold-read\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: 987_654,
+            tag: "durable-open".into(),
+        }];
+        agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+            &reliable_sync_database_path(dir.path()),
+            &document_hash,
+            4,
+            Some(&serde_json::to_string(&ops).unwrap()),
+        )
+        .unwrap();
+
+        assert!(reliable_sync_editor_live_for_file(&file));
+        assert_eq!(
+            agent_doc_reliable_sync_io::plane_editor_live_for_path(&file.to_string_lossy()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn crdt_authority_for_file_reads_reliable_sync_projection_without_sidecar() {
+        let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
         use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
         }
-        // Warm the process-global plane with an Open for a specific path's hash.
+        // Seed the process-global plane with an Open for a specific path's hash.
         let live_path = "/tmp/agent-doc-authority-test/open-doc.md";
         let live_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(live_path));
         let frame = encode_liveness_frame(&[LivenessOp::Open {
@@ -14902,10 +15136,13 @@ mod tests {
             let mut plane = controller_liveness_plane().lock().unwrap();
             plane.ingest(&live_hash, 1, &frame).expect("ingest");
         }
-        // The warm plane is authoritative: the open doc is MultiReplica...
-        assert_eq!(crdt_authority_for_file(live_path), CrdtAuthority::MultiReplica);
-        // ...and a different path the warm plane does not hold is GitAuthoritative
-        // (authoritatively detached — the sidecar is NOT consulted while the plane is warm).
+        // The reliable-sync plane is authoritative: the open doc is MultiReplica...
+        assert_eq!(
+            crdt_authority_for_file(live_path),
+            CrdtAuthority::MultiReplica
+        );
+        // ...and a different path the plane does not hold is GitAuthoritative.
+        // No lease or live-buffer sidecar is consulted.
         assert_eq!(
             crdt_authority_for_file("/tmp/agent-doc-authority-test/other-doc.md"),
             CrdtAuthority::GitAuthoritative
@@ -14914,6 +15151,7 @@ mod tests {
 
     #[test]
     fn crdt_authority_for_file_disabled_falls_back_to_sidecar() {
+        let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
         // Explicitly disabled ⇒ the plane is never consulted; a never-tracked path
         // resolves through the sidecar-backed path as GitAuthoritative.
@@ -14931,6 +15169,7 @@ mod tests {
 
     #[test]
     fn commit_document_via_controller_is_none_for_headless_document() {
+        let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
         // `#cpc-commit`: a headless document has no live editor authority to defer
         // to, so the CLI commits locally — `commit_document_via_controller` must
@@ -14969,6 +15208,7 @@ mod tests {
 
     #[test]
     fn reliable_sync_status_projects_plane_open_set_and_parity() {
+        let _env = reliable_sync_env_lock();
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
         }
@@ -14987,12 +15227,24 @@ mod tests {
             previous_controller_pid: None,
         };
         // Fold an Open frame so the shadow plane derives one open doc (pid 100).
-        handle_reliable_sync(reliable_sync_open_request("docwire-status")).expect("fold");
+        handle_reliable_sync(
+            &bootstrap.project_root,
+            reliable_sync_open_request("docwire-status"),
+        )
+        .expect("fold");
         let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
         assert!(status.dual_run);
-        assert!(status.plane_open_docs.contains(&"docwire-status".to_string()));
+        assert!(
+            status
+                .plane_open_docs
+                .contains(&"docwire-status".to_string())
+        );
         // Absent death signal ⇒ pid presumed alive ⇒ the doc is also live.
-        assert!(status.plane_live_docs.contains(&"docwire-status".to_string()));
+        assert!(
+            status
+                .plane_live_docs
+                .contains(&"docwire-status".to_string())
+        );
         let pids = status
             .per_doc_pids
             .iter()

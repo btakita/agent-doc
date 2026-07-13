@@ -13,8 +13,8 @@
 //! ## Authority gate is load-bearing
 //!
 //! Every entry point here resolves the document's [`CrdtAuthority`] first (cheaply,
-//! per-document, fail-safe to `GitAuthoritative`) via
-//! [`agent_doc_plugin_owner::crdt_authority::authority_for_file`]:
+//! per-document, fail-safe to `GitAuthoritative`) via the durable reliable-sync
+//! liveness projection:
 //!
 //! - [`CrdtAuthority::GitAuthoritative`] (**Detached** — no live editor): every
 //!   entry point is a **no-op** that returns the trivially-ready / unchanged
@@ -65,7 +65,101 @@ use agent_doc_document_realtime::crdt_relay::{
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
 };
-use agent_doc_plugin_owner::crdt_authority::authority_for_file;
+use lazily::DurableOutbox;
+
+fn reliable_sync_database_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join("reliable_sync_outbox.db")
+}
+
+fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+        return Ok(());
+    };
+    let database_path = reliable_sync_database_path(&project_root);
+    let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(&database_path)?;
+    let mut batches = snapshot
+        .liveness
+        .iter()
+        .map(|record| {
+            serde_json::from_str::<Vec<agent_doc_reliable_sync_io::liveness::LivenessOp>>(
+                &record.ops_json,
+            )
+            .with_context(|| {
+                format!(
+                    "decode durable reliable-sync liveness source={} epoch={}",
+                    record.source_key, record.epoch
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if database_path.exists() {
+        let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+            &database_path,
+            document_hash.to_string(),
+        )?;
+        for (epoch, message) in outbox.replay_from(0) {
+            if let Some(decoded) =
+                agent_doc_reliable_sync_io::liveness::decode_liveness_frame(&message)
+            {
+                batches.push(decoded.with_context(|| {
+                    format!(
+                        "decode pending reliable-sync liveness document_hash={document_hash} epoch={epoch}"
+                    )
+                })?);
+            }
+        }
+    }
+    let mut plane = agent_doc_reliable_sync_io::global_liveness_plane()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+    for batch in &batches {
+        plane.restore_liveness(batch);
+    }
+    for cursor in &snapshot.cursors {
+        plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
+    }
+    Ok(())
+}
+
+/// Default-on editor liveness authority shared by relay, controller, closeout,
+/// repair, and write convergence. Cold readers rebuild the receiver journal and
+/// retained sender suffix; only the explicit authority-off rollback reads the
+/// historical plugin-owner lease.
+pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
+    let file_string = file.to_string_lossy();
+    if !agent_doc_reliable_sync_io::authority_enabled() {
+        return agent_doc_plugin_owner::live_editor_endpoint_attached(&file_string);
+    }
+    if let Some(live) = agent_doc_reliable_sync_io::plane_editor_live_for_path(&file_string) {
+        return live;
+    }
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    if let Err(error) = restore_durable_liveness(file, &document_hash) {
+        eprintln!(
+            "[reliable-sync] durable authority hydration failed for {}: {error:#}",
+            file.display()
+        );
+    }
+    if let Some(live) = agent_doc_reliable_sync_io::plane_editor_live_for_path(&file_string) {
+        return live;
+    }
+    false
+}
+
+/// Resolve CRDT authority from the shared durable reliable-sync liveness plane.
+pub fn crdt_authority_for_file(file: &Path) -> CrdtAuthority {
+    if reliable_sync_editor_live_for_file(file) {
+        CrdtAuthority::MultiReplica
+    } else {
+        CrdtAuthority::GitAuthoritative
+    }
+}
+
+fn authority_for_file(file: &str) -> CrdtAuthority {
+    crdt_authority_for_file(Path::new(file))
+}
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
 /// CPC/controller-owned canonical replica is the hub authority; editor replicas
@@ -206,7 +300,7 @@ pub fn current_text_for_file_nonblocking(file: &Path) -> Result<CurrentText> {
 }
 
 /// [`current_text_for_file`] with an explicitly-resolved authority for tests and
-/// callers that already hold the authority lease state.
+/// callers that already hold the authority decision.
 pub fn current_text_for_file_with_authority(
     file: &Path,
     authority: CrdtAuthority,
@@ -499,11 +593,12 @@ fn ensure_document_model_with_current_text_observer_inner(
 
     // `#missingreplicarecycle`: bound how long we wait before recycling the
     // document model from the durable projection. `EditorAttachedMissingReplica`
-    // means the editor holds the document (a live plugin-owner lease) but no CRDT
+    // means the durable reliable-sync open set says the editor holds the document,
+    // but no CRDT
     // replica is registered at all — the registry has no hub for this doc. A
     // healthy editor registers its replica on open, so a *persistently* missing
     // replica is a stale/half-synced editor (e.g. a JetBrains buffer that
-    // heartbeats its lease and pulls, yet never publishes a replica). Waiting the
+    // keeps its durable Open fact live, yet never publishes a replica). Waiting the
     // full publish timeout on every read then wedges the single-threaded controller
     // and times out every other reader (idle-watch reads give up at 750ms). Give
     // such an editor only a brief window to answer the publish request above, then
@@ -518,8 +613,7 @@ fn ensure_document_model_with_current_text_observer_inner(
     } else {
         DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
     };
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
     loop {
@@ -1008,30 +1102,45 @@ fn mark_editor_open_docs_open(file: &Path) {
 
 /// #live-editor-reactive: mark this document closed in the reactive authority. Called on
 /// an explicit editor `replica_deregister` (the editor detached / closed the buffer). A
-/// controller recycle sends no deregister, so it leaves the authority untracked instead —
-/// the resolver then recovers that cold miss from the durable lease backup.
+/// controller recycle sends no deregister, so it leaves this compatibility projection
+/// untracked; the resolver restores authority from durable reliable-sync state.
 fn mark_editor_open_docs_closed(file: &Path) {
     agent_doc_document_realtime::editor_open_docs::editor_open_docs()
         .mark_closed(&file.display().to_string());
 }
 
-/// #s4b: seed the reactive **editor-attach** authority for this document from the durable
-/// plugin-owner lease (which records the editor process pid, `#8bfz`). This is the
-/// register/attach event where the pid is learned once. A no-op when no OS process-exit
-/// watcher is installed (a short-lived CLI): only the long-lived controller installs the
-/// watcher, so only it trusts the reactive `alive` cell; a watcher-less process keeps
-/// cold-missing `authority_for_file` to the lease. `attach` re-asserts liveness for the
-/// pid, so this also re-seeds after a controller recycle wiped the in-memory state.
+/// Seed the legacy process-exit watcher projection from the reliable-sync open pids.
+/// Durable hydration runs first, so a controller recycle does not need a lease read.
+/// The plugin-owner pid is consulted only in the explicit authority rollback mode.
 fn mark_editor_attach_open(file: &Path) {
     let doc = file.display().to_string();
-    if let Some(lease) = agent_doc_plugin_owner::read_plugin_owner_lease(&doc) {
+    if agent_doc_reliable_sync_io::authority_enabled() {
+        let _ = reliable_sync_editor_live_for_file(file);
+        let document_hash = agent_doc_hash::document_id_for_path(file);
+        let pids = agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .ok()
+            .map(|plane| {
+                plane
+                    .projection()
+                    .open_pids(&document_hash)
+                    .into_iter()
+                    .filter(|pid| plane.projection().pid_alive(*pid))
+                    .filter_map(|pid| u32::try_from(pid).ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for pid in pids {
+            agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, pid);
+        }
+    } else if let Some(lease) = agent_doc_plugin_owner::read_plugin_owner_lease(&doc) {
         agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, lease.pid);
     }
 }
 
-/// #s4b: re-seed the reactive editor-attach authority from the lease **only if** the
+/// Re-seed the reactive editor-attach watcher projection **only if** the
 /// document is not already reactively attached. Called on the high-frequency editor
-/// `replica_update` path so the once-per-attach lease read is not repeated per keystroke;
+/// `replica_update` path so durable hydration is not repeated per keystroke;
 /// it fires only to recover after a controller recycle (in-memory state lost) or a stale
 /// exit mark, matching the phantom-heal reattach next to it. A genuine update proves the
 /// editor is alive, so re-asserting `alive` is correct.
@@ -1044,8 +1153,7 @@ fn reseed_editor_attach_if_needed(file: &Path) {
 
 /// #s4b: mark this document detached in the reactive editor-attach authority on an
 /// explicit editor `replica_deregister` (mirrors [`mark_editor_open_docs_closed`]). A
-/// controller recycle sends no deregister, so it leaves the authority untracked → cold-miss
-/// recovery from the durable lease, not a stale detached state.
+/// controller recycle sends no deregister, so durable reliable-sync hydration restores it.
 fn mark_editor_attach_closed(file: &Path) {
     agent_doc_document_realtime::editor_attach::editor_attach().detach(&file.display().to_string());
 }
@@ -1070,8 +1178,7 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
     })??;
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
-    // #s4b: seed the reactive editor-attach authority (pid learned from the lease) so the
-    // hot-path `authority_for_file` gate reads pure reactive state under the controller.
+    // Seed the legacy process-exit watcher from durable reliable-sync open pids.
     mark_editor_attach_open(file);
     agent_doc_ops_log_io::log_op(
         file,
@@ -1097,11 +1204,11 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
     // Editor detach is an explicit event → mark the reactive open-docs authority closed.
-    // (A controller recycle sends no deregister, so it stays untracked → cold-miss
-    // recovery from the durable lease, not a stale closed state.)
+    // (A controller recycle sends no deregister; durable reliable-sync hydration
+    // remains the authority source rather than this compatibility projection.)
     mark_editor_open_docs_closed(file);
-    // #s4b: explicit close drives the reactive editor-attach authority detached, so the
-    // hot-path gate resolves to disk immediately (no lagging live lease override).
+    // Explicit close updates the legacy process-exit watcher projection. The durable
+    // reliable-sync Close fact independently drives the hot-path authority gate.
     mark_editor_attach_closed(file);
     agent_doc_ops_log_io::log_op(
         file,
@@ -1139,7 +1246,7 @@ pub fn relay_replica_update_for_file(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    // `#stale-lease-cpc-authority` / phantom-editor auto-heal: after a
+    // Zero-member relay auto-heal: after a
     // controller/supervisor recycle (`#statedbgc`), the in-process `hub_registry`
     // restarts empty and the hub is rebuilt from the durable `.yrs` projection with
     // ONLY the canonical replica (`live_count() == 0`). The editor is genuinely
@@ -1163,8 +1270,8 @@ pub fn relay_replica_update_for_file(
     // An editor update proves the doc is open → keep the reactive open-docs authority
     // truthful (also re-seeds it after a recycle-driven phantom-heal reattach).
     mark_editor_open_docs_open(file);
-    // #s4b: re-seed the reactive editor-attach authority only if not already attached
-    // (recovers after a recycle/stale-exit; avoids a per-update lease read otherwise).
+    // Re-seed the legacy process-exit watcher only if not already attached
+    // (recovers after a recycle/stale-exit without a per-update durable-state read).
     reseed_editor_attach_if_needed(file);
     if reattached {
         agent_doc_ops_log_io::log_op(
@@ -1296,11 +1403,9 @@ pub fn apply_cpc_write_for_file(
     // is attached but this process has no registered replica (a transient gap after
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
     // is absent and `with_existing_hub` returns `None`.
-    let result = if let Some(result) =
-        with_existing_hub(file, |hub| {
-            apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
-        })?
-    {
+    let result = if let Some(result) = with_existing_hub(file, |hub| {
+        apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
+    })? {
         result
     } else {
         // Recover the hub from the durable `.yrs` projection before failing —
@@ -1929,7 +2034,7 @@ pub fn commit_barrier_for_file(file: &Path) -> bool {
 /// [`commit_barrier_for_file`] with an explicitly-resolved authority — the
 /// deterministically-testable core. Callers that already hold a resolved
 /// [`CrdtAuthority`] (e.g. from a backbone projection) should use this to avoid a
-/// second lease read.
+/// second authority hydration/read.
 pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthority) -> bool {
     if !authority.editor_attached() {
         // Detached / headless: the CRDT is ephemeral, git is the source of truth,
@@ -2101,9 +2206,9 @@ pub fn record_committed_baseline_for_file(file: &Path) {
 /// already authoritative, so this returns `Ok(None)`. When a relay hub exists it
 /// adopts `text` as the canonical and returns `Ok(Some(changed))`.
 ///
-/// The single caller is the authoritative-compaction commit: with a phantom stale
-/// lease (`live_editors == 0` yet the reactive open-docs projection still reports
-/// the editor open) the commit's `try_resolve_current_document_content` keeps
+/// The single caller is the authoritative-compaction commit: with durable Open
+/// authority but zero registered relay members, the commit's
+/// `try_resolve_current_document_content` keeps
 /// editor authority and returns the FROZEN pre-compact canonical, so the commit
 /// lands pre-compact content in HEAD and Compact Exchange leaves the summary
 /// uncommitted. Converging the lazily canonical to the compacted content first
@@ -2177,15 +2282,11 @@ pub fn adopt_editor_full_state_for_file(file: &Path, full_state: &[u8]) -> Resul
 /// text (`O(text)`, not the op-log). Rebuilds the canonical from text with a self-echo guard
 /// (`RelayHub::adopt_editor_text`). Returns `Ok(Some(changed))` when a hub exists.
 pub fn adopt_editor_text_for_file(file: &Path, text: &str) -> Result<Option<bool>> {
-    let Some(changed) = with_existing_hub(file, |hub| {
+    let changed = with_hub(file, |hub| {
         let before = hub.canonical_text();
         hub.adopt_editor_text(text)
             .map(|_| hub.canonical_text() != before)
-    })?
-    else {
-        return Ok(None);
-    };
-    let changed = changed?;
+    })??;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2595,23 +2696,24 @@ mod tests {
         (dir, path)
     }
 
-    fn seed_live_plugin_owner_lease(file: &str) {
+    fn seed_live_reliable_sync_open(file: &str) {
         let pid = std::process::id();
-        assert!(
-            agent_doc_plugin_owner::try_acquire_plugin_owner(
-                file,
-                &format!("test-editor-{pid}"),
-                pid
-            ),
-            "test setup should acquire a live plugin-owner lease"
-        );
+        let document_hash = agent_doc_hash::document_id_for_path(Path::new(file));
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .unwrap()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: pid.into(),
+                tag: format!("test-editor-{pid}:{file}"),
+            }]);
     }
 
     #[test]
     fn register_replica_seeds_fresh_hub_from_current_document_text() {
         let (_dir, doc) = temp_doc("seed-register.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let on_disk = std::fs::read_to_string(&doc).unwrap();
 
         let (client_id, bootstrap) = register_replica_for_file(&doc, "intellij:seed")
@@ -2635,7 +2737,7 @@ mod tests {
     fn cpc_relay_write_requires_current_canonical_baseline() {
         let (_dir, doc) = temp_doc("cpc-baseline.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         register_replica_for_file(&doc, "intellij:cpc-baseline")
             .unwrap()
             .expect("editor replica should attach");
@@ -2669,7 +2771,7 @@ mod tests {
         // liveness. Zero live members must not demote an existing hub to disk.
         let (_dir, doc) = temp_doc("cpc-stale-lease.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         register_replica_for_file(&doc, "intellij:cpc-stale")
             .unwrap()
             .expect("editor replica should attach");
@@ -2677,11 +2779,18 @@ mod tests {
             CurrentText::Current { text, .. } => text,
             other => panic!("expected relay current text, got {other:?}"),
         };
-        // The member goes offline without releasing the authority lease.
+        // The member goes offline while the durable Open fact remains live.
         let client_id = mint_client_id("intellij:cpc-stale");
         with_hub(&doc, |hub| {
-            assert!(hub.disconnect(client_id), "disconnect should mark member offline");
-            assert_eq!(hub.live_count(), 0, "editor disconnected -> zero live editors");
+            assert!(
+                hub.disconnect(client_id),
+                "disconnect should mark member offline"
+            );
+            assert_eq!(
+                hub.live_count(),
+                0,
+                "editor disconnected -> zero live editors"
+            );
         })
         .unwrap();
 
@@ -2698,7 +2807,7 @@ mod tests {
     fn cpc_relay_write_queues_editor_pull_without_file_ipc_sidecar() {
         let (_dir, doc) = temp_doc("cpc-write.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         register_replica_for_file(&doc, "intellij:cpc-write")
             .unwrap()
             .expect("editor replica should attach");
@@ -2735,7 +2844,7 @@ mod tests {
         // from it (symmetric with the read path) and apply, rather than aborting.
         let (_dir, doc) = temp_doc("cpc-missing-replica.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         register_replica_for_file(&doc, "intellij:cpc-recover")
             .unwrap()
             .expect("editor replica should attach");
@@ -2766,7 +2875,7 @@ mod tests {
 
     #[test]
     fn relay_update_reattaches_dropped_replica_after_recycle() {
-        // Phantom-editor heal: a JB editor was open (lease + live replica), then the
+        // Phantom-editor heal: a JB editor was open (durable fact + live replica), then the
         // controller/supervisor recycled (`#statedbgc`). The in-process hub restarts
         // empty and is rebuilt from the durable projection with ONLY the canonical
         // replica (`live_count()==0`) — but the editor is still open and its FFI
@@ -2776,7 +2885,7 @@ mod tests {
         // the editor's next edit with no plugin round-trip.
         let (_dir, doc) = temp_doc("relay-reattach.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let identity = "intellij:reattach";
         let (client_id, bootstrap) = register_replica_for_file(&doc, identity)
             .unwrap()
@@ -2787,7 +2896,11 @@ mod tests {
         let replica =
             agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
         let base_chars = replica.text().chars().count() as u32;
-        replica.apply_local_edit(base_chars, 0, "\n### Re: after recycle — gpt-5\n\nEDITOR EDIT\n");
+        replica.apply_local_edit(
+            base_chars,
+            0,
+            "\n### Re: after recycle — gpt-5\n\nEDITOR EDIT\n",
+        );
         let editor_update = replica.encode_state();
 
         // Model the recycle: persist the durable projection, then evict the live hub
@@ -2824,7 +2937,7 @@ mod tests {
         // rather than fabricating a hub from raw disk.
         let (_dir, doc) = temp_doc("cpc-no-projection.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
             !hub_registry().lock().unwrap().contains_key(&hash),
@@ -2835,8 +2948,9 @@ mod tests {
             "no durable projection should exist"
         );
 
-        let err = apply_cpc_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cpc_relay")
-            .unwrap_err();
+        let err =
+            apply_cpc_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cpc_relay")
+                .unwrap_err();
         assert!(
             format!("{err:#}").contains("no registered replica yet"),
             "must fail closed without a projection to recover from: {err:#}"
@@ -3185,7 +3299,7 @@ mod tests {
         let (dir, doc) = temp_doc("ensure-model-publish-transport-failure.md");
         let canonical = doc.canonicalize().unwrap();
         let file_str = canonical.to_string_lossy().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
         let compacted = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
 ## Exchange\n\n<!-- agent:exchange patch=append -->\n### Session Summary\n\nCompacted exchange body.\n<!-- /agent:exchange -->\n";
@@ -3227,7 +3341,7 @@ mod tests {
     fn ensure_document_model_recovers_after_delayed_replica_registration() {
         let (_dir, doc) = temp_doc("ensure-model-register.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let doc_for_register = doc.clone();
         let register = thread::spawn(move || {
             thread::sleep(Duration::from_millis(50));
@@ -3260,7 +3374,7 @@ mod tests {
         let (dir, doc) = temp_doc("ensure-model-socket-reject.md");
         let canonical = doc.canonicalize().unwrap();
         let file_str = canonical.to_string_lossy().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
 
         let root = dir.path().to_path_buf();
         let root_for_listener = root.clone();
@@ -3336,7 +3450,7 @@ mod tests {
     fn ensure_document_model_retries_transient_observer_timeout_until_ready() {
         let (_dir, doc) = temp_doc("ensure-model-observer-timeout.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let mut attempts = 0usize;
 
         let current = ensure_document_model_with_current_text_observer(
@@ -3386,7 +3500,7 @@ mod tests {
     fn ensure_document_model_failure_is_bounded_and_names_reconciliation() {
         let (_dir, doc) = temp_doc("ensure-model-missing.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
 
         let err = ensure_document_model(&doc, "test_ensure_model_missing")
             .expect_err("no editor consumer registered a model")
@@ -3426,7 +3540,7 @@ mod tests {
     fn ensure_document_model_active_attempt_suppresses_duplicate_probe() {
         let (_dir, doc) = temp_doc("ensure-model-in-progress.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let paths = document_model_ensure_paths(&doc).unwrap();
         std::fs::write(&paths.lock_path, "editor_attached_model_missing").unwrap();
 
@@ -3452,7 +3566,7 @@ mod tests {
     fn durable_checkpoint_defers_missing_model_to_background_repair() {
         let (_dir, doc) = temp_doc("durable-checkpoint-deferred.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let repair_paths = durable_projection_repair_paths(&doc).unwrap();
         std::fs::write(&repair_paths.lock_path, "test-held").unwrap();
 
@@ -3483,7 +3597,7 @@ mod tests {
     fn editor_attached_commit_barrier_defers_when_relay_model_missing() {
         let (_dir, doc) = temp_doc("epoch-defers.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
 
         assert!(!commit_barrier_for_file_with_authority(
             &doc,
@@ -3505,7 +3619,7 @@ mod tests {
         let disk = std::fs::read_to_string(&canonical).unwrap();
         let visible = format!("{disk}\nvisible editor buffer\n");
 
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &file_str,
             &visible,
@@ -3597,7 +3711,7 @@ mod tests {
         let disk = std::fs::read_to_string(&canonical).unwrap();
         let visible = format!("{disk}\nvisible editor buffer\n");
 
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
             &file_str,
             &visible,
@@ -3679,7 +3793,7 @@ mod tests {
     fn editor_attached_durable_checkpoint_writes_recovery_projection() {
         let (_dir, doc) = temp_doc("attached-checkpoint.md");
         let file_str = doc.display().to_string();
-        seed_live_plugin_owner_lease(&file_str);
+        seed_live_reliable_sync_open(&file_str);
         let editor = mint_client_id("intellij:durable-checkpoint");
         with_hub(&doc, |hub| {
             hub.register(editor).unwrap();

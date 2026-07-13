@@ -125,7 +125,12 @@ impl RealtimeSteeringSet {
             bodies.len()
         );
         for (idx, body) in bodies.iter().enumerate() {
-            out.push_str(&format!("\n\n[steering {}/{}] {}", idx + 1, bodies.len(), body));
+            out.push_str(&format!(
+                "\n\n[steering {}/{}] {}",
+                idx + 1,
+                bodies.len(),
+                body
+            ));
         }
         Some(out)
     }
@@ -215,25 +220,26 @@ pub fn realtime_steering_all_between(baseline: &str, current: &str) -> RealtimeS
     let Some(diff_text) = agent_doc_diff::unified_diff_from_contents(&base_norm, &cur_norm) else {
         return RealtimeSteeringSet::default();
     };
-    let directives = agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff(
-        &diff_text, current,
-    )
-    .into_iter()
-    .map(|change| {
-        let preview = prompt_bearing_preview(&change.text);
-        let verbatim = change.text.trim().to_string();
-        match change.kind {
-            agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
-                RealtimeSteering::PromptTarget { preview, verbatim }
-            }
-            agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
-                RealtimeSteering::ContentEdit { preview, verbatim }
-            }
-            agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
-            | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => RealtimeSteering::None,
-        }
-    })
-    .collect();
+    let directives =
+        agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff(&diff_text, current)
+            .into_iter()
+            .map(|change| {
+                let preview = prompt_bearing_preview(&change.text);
+                let verbatim = change.text.trim().to_string();
+                match change.kind {
+                    agent_doc_diff::PromptBearingChangeKind::PromptTarget => {
+                        RealtimeSteering::PromptTarget { preview, verbatim }
+                    }
+                    agent_doc_diff::PromptBearingChangeKind::ContentEdit => {
+                        RealtimeSteering::ContentEdit { preview, verbatim }
+                    }
+                    agent_doc_diff::PromptBearingChangeKind::RecoveryArtifact
+                    | agent_doc_diff::PromptBearingChangeKind::BoundaryArtifact => {
+                        RealtimeSteering::None
+                    }
+                }
+            })
+            .collect();
     RealtimeSteeringSet::new(directives)
 }
 
@@ -508,7 +514,9 @@ mod tests {
         // mid-turn is surfaced in full so the agent can address the whole intent,
         // not just the first line.
         let baseline = doc("");
-        let current = doc("❯ Fix the JB error:\n```\nRead access is allowed from inside read-action only\n```\n");
+        let current = doc(
+            "❯ Fix the JB error:\n```\nRead access is allowed from inside read-action only\n```\n",
+        );
         let steering = BaselineComparison::new(&baseline, &current).realtime_steering();
         assert_eq!(steering.label(), Some("prompt_target"));
         let verbatim = steering.verbatim().unwrap();
@@ -551,7 +559,11 @@ mod tests {
         assert_eq!(set.len(), 1);
         let single = BaselineComparison::new(&baseline, &current).realtime_steering();
         assert_eq!(set.verbatim_aggregate().as_deref(), single.verbatim());
-        assert!(!set.verbatim_aggregate().unwrap().contains("concurrent operator"));
+        assert!(
+            !set.verbatim_aggregate()
+                .unwrap()
+                .contains("concurrent operator")
+        );
     }
 
     #[test]

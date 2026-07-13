@@ -4530,12 +4530,15 @@ fn try_main() -> anyhow::Result<()> {
                     agent_doc_fs::find_project_root(&cwd).unwrap_or(cwd)
                 }
             };
-            let status =
-                agent_doc_controller_io::project_controller::reliable_sync_status(&root)?;
+            let status = agent_doc_controller_io::project_controller::reliable_sync_status(&root)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                let dark = if status.dual_run { "" } else { " (plane dark — AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0)" };
+                let dark = if status.dual_run {
+                    ""
+                } else {
+                    " (plane dark — AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0)"
+                };
                 println!("reliable-sync dual-run: {}{}", status.dual_run, dark);
                 println!(
                     "parity (plane open-set == sidecar open-set): {}",

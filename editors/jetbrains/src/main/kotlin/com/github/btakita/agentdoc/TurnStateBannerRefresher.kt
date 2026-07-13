@@ -17,11 +17,54 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val TURN_STATE_MIN_REFRESH_INTERVAL_MS = 1_500L
 private const val TURN_STATE_SLOW_PROJECTION_MS = 1_000L
 private const val TURN_STATE_MAX_PATHS_PER_DRAIN = 4
 private const val TURN_STATE_DRAIN_YIELD_MS = 50L
+
+internal class TransientDocumentStatus {
+    private data class Entry(
+        val token: Long,
+        val presentation: TurnStateBridge.TurnStatePresentation,
+    )
+
+    private val nextToken = AtomicLong(0)
+    private val entries = ConcurrentHashMap<String, Entry>()
+
+    fun begin(filePath: String, label: String, tooltip: String? = null): Long {
+        val token = nextToken.incrementAndGet()
+        entries[filePath] = Entry(
+            token,
+            TurnStateBridge.TurnStatePresentation(
+                label = label,
+                guardPromptForwarding = false,
+                tooltip = tooltip,
+                showBanner = true,
+            ),
+        )
+        return token
+    }
+
+    fun presentationFor(
+        filePath: String,
+        fallback: TurnStateBridge.TurnStatePresentation,
+    ): TurnStateBridge.TurnStatePresentation = entries[filePath]?.presentation ?: fallback
+
+    fun finish(filePath: String, token: Long): Boolean {
+        val entry = entries[filePath] ?: return false
+        return entry.token == token && entries.remove(filePath, entry)
+    }
+
+    fun clear(filePath: String) {
+        entries.remove(filePath)
+    }
+
+    fun clearAll() {
+        entries.clear()
+    }
+}
 
 /**
  * Per-project event loop that flips [TurnStateBannerProvider] on and off as the
@@ -44,6 +87,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     private val delayedPaths = ConcurrentHashMap.newKeySet<String>()
     private val lastRefreshMs = ConcurrentHashMap<String, Long>()
     private val presentations = ConcurrentHashMap<String, TurnStateBridge.TurnStatePresentation>()
+    private val transientStatuses = TransientDocumentStatus()
     private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun start() {
@@ -64,6 +108,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
                 override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
                     if (!isMarkdown(file)) return
                     presentations.remove(file.path)
+                    transientStatuses.clear(file.path)
                     notifyUi(file.path, "file-closed")
                 }
             },
@@ -77,7 +122,22 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     }
 
     fun cachedPresentationFor(filePath: String): TurnStateBridge.TurnStatePresentation =
-        presentations[filePath] ?: TurnStateBridge.TurnStatePresentation("", false)
+        transientStatuses.presentationFor(
+            filePath,
+            presentations[filePath] ?: TurnStateBridge.TurnStatePresentation("", false),
+        )
+
+    fun showTransientStatus(filePath: String, label: String, tooltip: String? = null): Long {
+        val token = transientStatuses.begin(filePath, label, tooltip)
+        notifyUi(filePath, "transient-status-start")
+        return token
+    }
+
+    fun clearTransientStatus(filePath: String, token: Long) {
+        if (!transientStatuses.finish(filePath, token)) return
+        notifyUi(filePath, "transient-status-finish")
+        requestRefresh(filePath, "transient-status-finish")
+    }
 
     fun requestRefresh(file: VirtualFile, reason: String) {
         if (!isMarkdown(file) || project.isDisposed || !file.isValid) return
@@ -204,6 +264,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         delayedPaths.clear()
         lastRefreshMs.clear()
         presentations.clear()
+        transientStatuses.clearAll()
         listeners.clear()
         executor.shutdownNow()
     }

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-debounce"
-version = "0.34.93"
+version = "0.34.94"
 edition = "2024"
 description = "Editor debounce, live-buffer, and write-provenance sidecars for agent-doc"
 license = "MIT"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_debounce"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.93" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.93" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.94" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.94" }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.94
+
+- **CPC-owned commits read the already-converged CRDT canonical in-process instead of repeatedly requesting it back through the controller socket (`#cpc-commit-local-read`).** The `commit_document` handler crosses the commit barrier before entering commit-io, so each current-document read can safely use the local relay and retain the normal authority resolver only as a degraded-state fallback. This removes the cumulative controller queue/timeout cost that made JetBrains Compact Exchange appear to spend 20–30 seconds in git even though the selective `hash-object`/`update-index` transaction itself was fast.
+- **JetBrains plugin (`0.2.245`) shows `⟳ agent-doc: Compacting Exchange` in the editor-top turn banner for the complete asynchronous action.** A token-guarded transient overlay wins over ordinary CPC turn projection until the command succeeds or fails, stale completion callbacks cannot clear a newer operation, and the banner tooltip explains that compaction and authoritative commit are in progress.
+
 ## 0.34.93
 
 - **The agent-doc Rust workspace is private and releases no longer fan out across crates.io.** Every root and internal Cargo package now declares `publish = false`, and `make version-sync` fails if a new package omits that boundary. The release target publishes only the PyPI distribution; GitHub Releases remain the primary binary channel, while `tmux-router` keeps its independent public release lifecycle. Installation docs no longer advertise `cargo install agent-doc`, and `agent-doc upgrade` discovers versions from the GitHub latest-release API before trying the prebuilt binary and PyPI fallback. Existing crates.io uploads cannot be deleted under the registry's permanent-archive contract and remain historical artifacts rather than receiving new versions.

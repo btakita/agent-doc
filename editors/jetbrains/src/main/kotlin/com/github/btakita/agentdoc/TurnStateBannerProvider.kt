@@ -47,10 +47,11 @@ class TurnStateBannerProvider : EditorNotificationProvider {
                 background = STRIP_BG
                 border = JBUI.Borders.empty(0, 8)
                 add(
-                    JBLabel(label).apply {
-                        font = JBUI.Fonts.smallFont()
-                        foreground = STRIP_FG
-                    },
+            JBLabel(label).apply {
+                font = JBUI.Fonts.smallFont()
+                foreground = STRIP_FG
+                toolTipText = presentation.tooltip
+            },
                     BorderLayout.WEST,
                 )
                 val h = JBUI.scale(STRIP_HEIGHT_DP)

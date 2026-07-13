@@ -702,8 +702,46 @@ fn commit_current_document_content(file: &Path, source: &str) -> Result<String> 
     if force_disk_commit_resolution_enabled() {
         std::fs::read_to_string(file)
             .with_context(|| format!("{source}: failed to read {}", file.display()))
+    } else if controller_commit_in_progress()
+        && let Some(content) = controller_local_relay_content(file, source)?
+    {
+        Ok(content)
     } else {
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+}
+
+/// A CPC-owned commit runs in the same process as the authoritative relay. The
+/// `commit_document` RPC handler has already crossed the commit barrier before
+/// entering this scope, so asking the controller socket for the same canonical
+/// again only queues a request back into ourselves. A normal commit performs
+/// several current-document reads; avoiding those re-entrant RPCs removes their
+/// cumulative timeout/queue latency while preserving the existing resolver as
+/// the fallback when the local relay is unexpectedly unavailable.
+fn controller_local_relay_content(file: &Path, source: &str) -> Result<Option<String>> {
+    match controller_local_relay_text(agent_doc_crdt_relay_io::current_text_for_file(file)?) {
+        Some(text) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "controller_commit_current_text_local file={} source={} len={}",
+                    file.display(),
+                    source,
+                    text.len()
+                ),
+            );
+            Ok(Some(text))
+        }
+        None => Ok(None),
+    }
+}
+
+fn controller_local_relay_text(current: agent_doc_crdt_relay_io::CurrentText) -> Option<String> {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Some(text),
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
     }
 }
 
@@ -1755,5 +1793,21 @@ mod controller_commit_scope_tests {
             slot.set(prev);
         });
         assert!(!controller_commit_in_progress());
+    }
+
+    #[test]
+    fn controller_local_relay_content_projects_current_canonical() {
+        let current = agent_doc_crdt_relay_io::CurrentText::Current {
+            text: "authoritative compacted text".to_string(),
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        let content = controller_local_relay_text(current);
+
+        assert_eq!(content.as_deref(), Some("authoritative compacted text"));
+        assert_eq!(
+            controller_local_relay_text(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending),
+            None
+        );
     }
 }

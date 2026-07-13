@@ -11,9 +11,22 @@ class CompactExchangeAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
+        val refresher = TurnStateBannerRefresher.getInstance(project)
+        val statusToken = refresher.showTransientStatus(
+            file.path,
+            COMPACTING_EXCHANGE_LABEL,
+            "Compacting the exchange and committing the authoritative document state",
+        )
         ApplicationManager.getApplication().invokeLater {
-            FileDocumentManager.getInstance().saveAllDocuments()
-            TerminalUtil.compactExchange(project, file)
+            try {
+                FileDocumentManager.getInstance().saveAllDocuments()
+                TerminalUtil.compactExchange(project, file) {
+                    refresher.clearTransientStatus(file.path, statusToken)
+                }
+            } catch (t: Throwable) {
+                refresher.clearTransientStatus(file.path, statusToken)
+                throw t
+            }
         }
     }
 
@@ -25,5 +38,9 @@ class CompactExchangeAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread {
         return ActionUpdateThread.BGT
+    }
+
+    private companion object {
+        const val COMPACTING_EXCHANGE_LABEL = "⟳ agent-doc: Compacting Exchange"
     }
 }

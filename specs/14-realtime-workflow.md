@@ -361,9 +361,13 @@ differ only in the native surface that renders it:
   (`TurnStateBannerProvider`, an `EditorNotificationProvider`) driven by
   `TurnStateBannerRefresher`, because the IntelliJ 2026.1 status-bar widget API
   instantiates the widget but silently never paints it. The banner is a real
-  editor component that fails loudly instead of silently, so it is both reliable
-  and diagnosable. The status-bar widget (`TurnStateStatusBarWidget`) is retained
-  only for its `idea.log` coordination probes.
+editor component that fails loudly instead of silently, so it is both reliable
+and diagnosable. Local asynchronous document actions may install a token-guarded
+transient presentation over the CPC projection; `Compact Exchange` uses this to
+show `⟳ agent-doc: Compacting Exchange` from action start through completion,
+without allowing a stale callback to clear a newer operation. The status-bar
+widget (`TurnStateStatusBarWidget`) is retained only for its `idea.log`
+coordination probes.
 
 Parity is satisfied by identical projection→presentation logic and equivalent
 in-flight/idle behavior, not by forcing the same non-native widget onto both

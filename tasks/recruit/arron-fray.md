@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 4dd0cfdc-f430-467f-ba22-548021de0004
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -266,7 +266,24 @@ Good pick — and a stronger one than *Out of the Tar Pit* for this form, precis
 > What changed most was how I think about rigor. I used to assume a good process meant following it strictly, and that bending it was cutting corners. Now I read a process as something that has to fit its context. The practices are worth understanding deeply, so you know what each one is actually buying you, and then you adapt them to the circumstances in front of you. Absolute rigidity usually isn't necessary. These days when a team argues about dropping some practice, the first thing I ask is what else that practice was quietly supporting.
 
 All three free-response answers are ready now (Q1 + Q3 voice-rewritten, Q2 above). Say the word and I'll type them into the Lore form fields via chromium-bridge — still leaving submit to you — or tighten anything first.
-<!-- agent:boundary:bc048607 -->
+❯ For the complex problem, please draft my experience with converting agent-doc from turn-based to realtime. Explain the high-level agent-doc architecture, the processes, how I ran into challenges with race conditions + initial sidecar implementations, and how I addressed them by expanding lazily as a strong set of primitives (lazily-spec + lazily-lean + implementations) + reactive data syncing + state machines/state charts. Use my natural voice without AI tells.
+
+### Re: Realtime agent-doc complex problem — gpt-5
+
+Here’s a 288-word version that stays specific without reading like an architecture document:
+
+> Recently I converted agent-doc, my tool for coding-agent sessions in a shared Markdown document, from turn-based to realtime. It has two processes. A terminal controller runs the agent lifecycle from preflight through commit. An IDE plugin owns the editor buffer and applies changes through the editor's document API. A CRDT relay keeps them in sync.
+>
+> The first alerts were preflight failures and times the editor and terminal disagreed. The turn-based version had a clean boundary: read the file, let the agent work, append the answer, commit. Realtime removed it. I can keep typing while an agent finishes. An editor save can land after its IPC acknowledgement, while file watchers, CRDT replicas, snapshots, and recovery sidecars hold different moments.
+>
+> My initial implementation leaned on sidecar files to carry cycle state between steps. That worked until recovery state started acting like current state. A fresh edit could look stale, or an old captured response could win over what was visible in the editor. The failures depended on timing between processes, so reproducing them was difficult.
+>
+> I stopped fixing those cases one at a time and expanded the lazily family underneath agent-doc. I added thread-safe and async reactive families, state machines and Harel-style statecharts, reliable syncing, and snapshot/delta projections. lazily-spec defines behavior and conformance fixtures. The Lean models in lazily-formal check determinism and confluence. Rust, Kotlin, and JavaScript implementations let both run the same state model.
+>
+> Now the visible editor state is authoritative. Snapshots and logs still support recovery, while the live model decides what the current document is. Editor attachment, epochs, in-flight writes, acknowledgements, and conflicts are typed transitions that propagate through the reactive graph. I can test those transitions directly instead of waiting for an unlucky interleaving to expose a race.
+
+I used the current project name `lazily-formal` for the Lean layer; that is the repo/package corresponding to “lazily-lean.”
+<!-- agent:boundary:eeae6e4b -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -55,10 +55,20 @@ feat(admin): align lender document upload rows (#lender-docs-required-ui)
 
 Match the Lender Documents tab to the compact Required Documents row UI with click/drag uploads, inline downloads, counts, and per-file removal. Add the focused product spec and regression coverage without changing the existing persistence or endpoint contracts.
 ```
-<!-- agent:boundary:6de3ec13 -->
+> **Queue prompt:** - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.
+
+### Re: CI/tooling closeout note — gpt-5
+
+This was an assistant-authored closeout note accidentally routed into the queue during editor-IPC recovery, not a new operator request. It is recorded here verbatim and was intentionally removed from the actionable queue; the Lender Documents implementation, verification, push, and deployment are already complete.
+
+<!-- no-free-text-queue-head-guard -->
+<!-- agent:boundary:82463ec2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~do [#e44f]~~
+- ~~⏭️ do [#hmw9]~~
+- ~~📌 - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

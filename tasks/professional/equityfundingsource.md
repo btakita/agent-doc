@@ -37,7 +37,37 @@ complete
 Compacted content:
 - Archived 3 response topic(s): Lender Documents UI parity and release closeout; CI/tooling closeout note; Add a document type in Lender Documents
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): #hmw9; #hmw9 closeout; #hmw9 queue reconciliation
-<!-- agent:boundary:0c15a52f -->
+- **Release:** EFS commit `a5dcbc1`; Worker version `bff854d3-4a7c-410c-bec0-5b915df9f8f9`. Post-deploy checks found no pending D1 migrations, public `/` returned 200, and the protected admin URL returned the expected 303 authentication redirect. The EFS commit is pushed immediately after this binary-owned session closeout.
+- **Verification:** Focused lender-document tests passed; full `make check` passed twice after the final formatting review. This repo has no GitHub Actions workflows configured.
+- **Production data:** Deal `ca0fa649-8782-4af8-aa63-82a6015c2b87` currently has six typed groups and seven uploaded files, so Appraisal Report, Preliminary Title Report, Property Photos (2), Purchase Agreement, Executed Promissory Note, and Deed of Trust now populate the tab. That deal currently has no uploaded custom type; custom types are covered by the same query and regression.
+- **Scope:** An uploaded document type is accepted as a lender-document category only for the same loan.
+- **Ownership:** Existing `loan_documents` are reused, not copied. They remain removable only from their original document workflow; lender-tab uploads retain their existing remove control.
+- **Behavior:** **Add a document type** now includes every type represented by a non-deleted uploaded loan document, including custom `document_types.is_custom=1` entries. Those types become upload rows automatically, with their existing files shown as download links.
+❯ In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=ca0fa649-8782-4af8-aa63-82a6015c2b87&deal_tab=lender-documents > Add a document type, please include all document types from uploaded documents including custom document types.
+
+❯ If documents were uploaded for the document type, please include the uploaded documents as well.
+
+❯ #spec-test-commit-push-deploy
+### Re: Uploaded document types in Lender Documents — gpt-5
+
+Implemented, committed, and deployed the Lender Documents catalogue expansion.
+
+- **Behavior:** **Add a document type** now includes every type represented by a non-deleted uploaded loan document, including custom `document_types.is_custom=1` entries. Those types become upload rows automatically, with their existing files shown as download links.
+- **Ownership:** Existing `loan_documents` are reused, not copied. They remain removable only from their original document workflow; lender-tab uploads retain their existing remove control.
+- **Scope:** An uploaded document type is accepted as a lender-document category only for the same loan.
+- **Production data:** Deal `ca0fa649-8782-4af8-aa63-82a6015c2b87` currently has six typed groups and seven uploaded files, so Appraisal Report, Preliminary Title Report, Property Photos (2), Purchase Agreement, Executed Promissory Note, and Deed of Trust now populate the tab. That deal currently has no uploaded custom type; custom types are covered by the same query and regression.
+- **Verification:** Focused lender-document tests passed; full `make check` passed twice after the final formatting review. This repo has no GitHub Actions workflows configured.
+- **Release:** EFS commit `a5dcbc1`; Worker version `bff854d3-4a7c-410c-bec0-5b915df9f8f9`. Post-deploy checks found no pending D1 migrations, public `/` returned 200, and the protected admin URL returned the expected 303 authentication redirect. The EFS commit is pushed immediately after this binary-owned session closeout.
+
+Suggested commit message (used):
+
+```txt
+feat(admin): reuse uploaded types in lender documents (#lender-doc-types)
+
+Include uploaded loan-document types and their existing files in the Lender
+Documents catalogue while preserving document ownership and loan scoping.
+```
+<!-- agent:boundary:4b9acfd6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

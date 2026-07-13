@@ -516,6 +516,105 @@ pub fn repair_duplicate_exchange_close_scaffold(doc: &str) -> Result<Option<Stri
     Ok(Some(repaired))
 }
 
+/// Remove a second, empty outer document scaffold appended after the real
+/// template document.
+///
+/// This is deliberately narrower than the duplicate exchange-close repairs:
+/// the repeated frontmatter must be byte-identical, it must follow the first
+/// completed icebox component with only whitespace in between, and its body may
+/// contain only the canonical empty component headings/markers. Any user text
+/// makes the suffix ineligible for automatic removal.
+pub fn repair_duplicate_empty_document_scaffold_tail(doc: &str) -> Result<Option<String>> {
+    const ICEBOX_CLOSE: &str = "<!-- /agent:icebox -->";
+
+    let Some(frontmatter_end) = primary_frontmatter_end(doc) else {
+        return Ok(None);
+    };
+    let primary_frontmatter = &doc[..frontmatter_end];
+    let Some(first_icebox_close_end) = doc[frontmatter_end..]
+        .find(ICEBOX_CLOSE)
+        .map(|offset| frontmatter_end + offset + ICEBOX_CLOSE.len())
+    else {
+        return Ok(None);
+    };
+    let Some(duplicate_start) = doc[first_icebox_close_end..]
+        .find(primary_frontmatter)
+        .map(|offset| first_icebox_close_end + offset)
+    else {
+        return Ok(None);
+    };
+
+    if !doc[first_icebox_close_end..duplicate_start]
+        .trim()
+        .is_empty()
+    {
+        return Ok(None);
+    }
+
+    let duplicate_body = &doc[duplicate_start + primary_frontmatter.len()..];
+    if !is_empty_duplicate_document_scaffold(duplicate_body) {
+        return Ok(None);
+    }
+
+    let mut repaired = doc[..first_icebox_close_end].trim_end().to_string();
+    repaired.push('\n');
+    Ok(Some(repaired))
+}
+
+fn primary_frontmatter_end(doc: &str) -> Option<usize> {
+    let body = doc.strip_prefix("---\n")?;
+    let close = body.find("\n---\n")?;
+    Some("---\n".len() + close + "\n---\n".len())
+}
+
+fn is_empty_duplicate_document_scaffold(scaffold: &str) -> bool {
+    const HEADINGS: [&str; 5] = [
+        "## Status",
+        "## Exchange",
+        "## Queue",
+        "## Backlog",
+        "## Icebox",
+    ];
+    const COMPONENTS: [&str; 5] = ["status", "exchange", "queue", "backlog", "icebox"];
+
+    let mut next_heading = 0usize;
+    let mut marker_count = 0usize;
+    for line in scaffold.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if next_heading < HEADINGS.len() && trimmed == HEADINGS[next_heading] {
+            next_heading += 1;
+            continue;
+        }
+        if is_empty_component_marker(trimmed, &COMPONENTS) {
+            marker_count += 1;
+            continue;
+        }
+        return false;
+    }
+
+    next_heading == HEADINGS.len() && marker_count > 0
+}
+
+fn is_empty_component_marker(line: &str, components: &[&str]) -> bool {
+    let Some(inner) = line
+        .strip_prefix("<!-- ")
+        .and_then(|line| line.strip_suffix(" -->"))
+    else {
+        return false;
+    };
+
+    components.iter().any(|component| {
+        inner == format!("/agent:{component}")
+            || inner == format!("agent:{component}")
+            || inner
+                .strip_prefix(&format!("agent:{component} "))
+                .is_some_and(|attrs| !attrs.trim().is_empty())
+    })
+}
+
 /// Repair the malformed-template case where a duplicated scaffold contains
 /// safe live conversation text before the stray second exchange close marker.
 ///
@@ -1010,6 +1109,59 @@ mod tests {
         assert!(
             repaired.is_none(),
             "mixed user text must not be dropped as duplicated scaffold"
+        );
+    }
+    #[test]
+    fn repair_duplicate_empty_document_scaffold_tail_drops_only_empty_shell() {
+        let frontmatter = concat!(
+            "---\n",
+            "agent_doc_session: session-1\n",
+            "agent_doc_format: template\n",
+            "---\n",
+        );
+        let doc = format!(
+            "{frontmatter}\n\
+             ## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ keep this prompt\n<!-- /agent:exchange -->\n\n\
+             ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n\
+             ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n\
+             {frontmatter}\n\
+             ## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n\
+             ## Exchange\n\n\
+             ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n\
+             ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n"
+        );
+
+        let repaired = repair_duplicate_empty_document_scaffold_tail(&doc)
+            .unwrap()
+            .expect("empty duplicate document scaffold should repair");
+
+        assert_eq!(repaired.matches("agent_doc_session: session-1").count(), 1);
+        assert_eq!(repaired.matches("❯ keep this prompt").count(), 1);
+        assert_eq!(repaired.matches("<!-- agent:queue -->").count(), 1);
+    }
+    #[test]
+    fn repair_duplicate_empty_document_scaffold_tail_rejects_user_text() {
+        let frontmatter = "---\nagent_doc_format: template\n---\n";
+        let doc = format!(
+            "{frontmatter}\n\
+             ## Exchange\n\n<!-- agent:exchange patch=append -->\n❯ keep me\n<!-- /agent:exchange -->\n\n\
+             ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n\
+             {frontmatter}\n\
+             ## Status\n\n<!-- agent:status patch=replace -->\nuser content\n<!-- /agent:status -->\n\n\
+             ## Exchange\n\n\
+             ## Queue\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n\
+             ## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n\
+             ## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n"
+        );
+
+        assert!(
+            repair_duplicate_empty_document_scaffold_tail(&doc)
+                .unwrap()
+                .is_none(),
+            "a duplicate scaffold containing user text must fail closed"
         );
     }
     #[test]

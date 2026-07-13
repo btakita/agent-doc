@@ -350,6 +350,9 @@ pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> 
     while let Some(merged) = repair_duplicate_exchange_opener(&normalized)? {
         normalized = merged;
     }
+    if let Some(repaired) = repair_duplicate_empty_document_scaffold_tail(&normalized)? {
+        normalized = repaired;
+    }
     if let Some(cleaned) = remove_duplicate_answered_exchange_prompt_tail(&normalized) {
         normalized = cleaned;
     }

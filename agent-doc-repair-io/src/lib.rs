@@ -799,10 +799,17 @@ pub fn repair_template_doc_if_needed(
         dup_opener_input = merged;
         duplicate_opener_changed = true;
     }
-    let duplicate_scaffold_repaired =
-        agent_doc_template::repair_duplicate_exchange_close_scaffold(&dup_opener_input)?
+    let duplicate_document_scaffold_repaired =
+        agent_doc_template::repair_duplicate_empty_document_scaffold_tail(&dup_opener_input)?
             .unwrap_or_else(|| dup_opener_input.clone());
-    let duplicate_scaffold_changed = duplicate_scaffold_repaired != dup_opener_input;
+    let duplicate_document_scaffold_changed =
+        duplicate_document_scaffold_repaired != dup_opener_input;
+    let duplicate_scaffold_repaired = agent_doc_template::repair_duplicate_exchange_close_scaffold(
+        &duplicate_document_scaffold_repaired,
+    )?
+    .unwrap_or_else(|| duplicate_document_scaffold_repaired.clone());
+    let duplicate_scaffold_changed = duplicate_document_scaffold_changed
+        || duplicate_scaffold_repaired != duplicate_document_scaffold_repaired;
     let duplicate_close_repaired =
         agent_doc_template::repair_duplicate_exchange_close_tail(&duplicate_scaffold_repaired)?
             .unwrap_or_else(|| duplicate_scaffold_repaired.clone());

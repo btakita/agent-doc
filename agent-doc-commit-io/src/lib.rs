@@ -799,7 +799,22 @@ where
         file_content = recovered;
         snapshot_content = agent_doc_snapshot_io::load(file)?;
     }
-    let repaired_committed_historical = if let Some(reason) =
+    // `#jb-compact-commit-left-uncommitted`: under an authoritative-compaction
+    // commit the snapshot loaded above IS the freshly re-asserted compacted
+    // content (`commit_compacted_authoritative` re-saved it inside the commit-lock
+    // window). It legitimately differs from HEAD — dropping the archived `### Re:`
+    // turns is the whole point of the commit — so the committed-historical drift
+    // repair must NOT run here. It would classify the compacted snapshot as stale
+    // exchange drift and revert it back to the pre-compact HEAD (observed live:
+    // `repaired committed historical exchange drift` immediately followed by
+    // `staged snapshot already matches HEAD`), leaving the "Compact Exchange left
+    // uncommitted changes" desync that `verify_compact_head_landed` then reports.
+    // Suppressing the repair here cannot hide a real miss: the compaction closeout
+    // still fails closed via `verify_compact_head_landed` if HEAD does not land the
+    // compacted content.
+    let repaired_committed_historical = if authoritative_compaction_commit_enabled() {
+        false
+    } else if let Some(reason) =
         agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)?
     {
         eprintln!(
@@ -903,7 +918,15 @@ where
         );
     }
 
-    if let Some(ref snapshot) = snapshot_content
+    // `#jb-compact-commit-left-uncommitted`: same authoritative-compaction guard as
+    // the historical-drift repair above. If the reliable-sync plane is still frozen
+    // at the pre-compact canonical (fail-open `adopt_authoritative_text_for_file`
+    // returned `Ok(None)`), `file_content` resolved through realtime authority can
+    // still read pre-compact. Absorbing that into the authoritative compacted
+    // snapshot would revert the commit surface, so skip the out-of-band absorb under
+    // the compaction scope and let `verify_compact_head_landed` fail closed instead.
+    if !authoritative_compaction_commit_enabled()
+        && let Some(ref snapshot) = snapshot_content
         && snapshot != &file_content
         && !(repaired_committed_historical
             && snapshot

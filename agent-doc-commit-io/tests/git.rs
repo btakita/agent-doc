@@ -4482,6 +4482,71 @@ Duplicate replay should stay live.
         );
     }
 
+    // #jb-compact-commit-left-uncommitted: a CLEAN exchange-only compaction (no
+    // non-exchange component divergence) does NOT trip the `typed_component_drift`
+    // patchback guard covered by the test above. Instead
+    // `repair_committed_historical_snapshot_drift` classifies the compacted
+    // snapshot as stale exchange drift and reverts it back to the pre-compact HEAD,
+    // so the commit no-ops ("staged snapshot already matches HEAD") and the
+    // compaction closeout's `verify_compact_head_landed` reports uncommitted
+    // compaction drift — the live `equityfundingsource.md` incident. The
+    // authoritative-compaction scope must suppress that repair so the compacted
+    // snapshot lands in HEAD.
+    #[test]
+    fn authoritative_compaction_commits_past_historical_snapshot_repair() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        // Clean exchange-only compaction: only the Exchange component changes
+        // (the archived `### Re:` turns collapse to a Session Summary). No status
+        // divergence, so this exercises the historical-snapshot REPAIR path, not
+        // the typed-component-drift guard.
+        let post_compact = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Archived 2 response topic(s) to .agent-doc/archives/session-20260712.md\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let pre_compact_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — gpt-5\n\n",
+            "First answer.\n\n",
+            "### Re: second — opus-4-8\n\n",
+            "Second answer.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        commit_file(root, "session.md", pre_compact_head, "pre-compact HEAD");
+        // snapshot = compacted (authoritative, re-asserted by the compaction
+        // closeout inside the commit-lock window); working tree / realtime
+        // resolution = pre-compact (editor-IPC-async lag or a frozen reliable-sync
+        // canonical). This is the split that, without the scope guard, lets the
+        // historical-snapshot repair revert the compacted snapshot to HEAD.
+        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
+        fs::write(&doc, pre_compact_head).unwrap();
+
+        commit_with_authoritative_compaction(&doc)
+            .expect("authoritative compaction must commit the compacted snapshot");
+        let head_doc = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            head_doc.contains("### Session Summary"),
+            "HEAD must hold the compacted document after the compaction commit:\n{head_doc}"
+        );
+        assert!(
+            !head_doc.contains("### Re: first") && !head_doc.contains("### Re: second"),
+            "archived turns must not remain in HEAD after compaction:\n{head_doc}"
+        );
+    }
+
     #[test]
     fn repair_historical_snapshot_drift_accepts_committed_capture_with_queue_mutation() {
         let dir = tempfile::TempDir::new().unwrap();

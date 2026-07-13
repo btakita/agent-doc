@@ -171,15 +171,12 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
     }
 
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
-        // `#jb-compact-commit-historical-patchback-guard`: this port is the
-        // authoritative compaction closeout (`closeout_compact_with_commit`). The
-        // compaction already archived the `### Re:` turns it dropped and
-        // re-asserted the compacted snapshot, so route through the
-        // compaction-aware commit entry — otherwise the committed-historical
-        // response-patchback guard refuses the compacted document because HEAD
-        // still carries those (archived) turns, and Compact Exchange silently
-        // leaves the summary uncommitted. Correctness stays enforced by
-        // `verify_compact_head_landed` after this returns.
+        // MUST match the production CLI impl (`CliCompactRuntimeEffects`): route
+        // through the authoritative-compaction commit so the committed-historical
+        // response-patchback guard stands down for the archived `### Re:` turns.
+        // dd9ca291 fixed this double but NOT the CLI impl, so the test passed while
+        // the real binary failed closed on agent-doc-bugs2.md; they must stay in
+        // lockstep (`#jb-compact-commit-historical-patchback-guard`).
         let outcome = agent_doc_commit_io::commit_with_authoritative_compaction(file)?;
         Ok(CompactCommitOutcome {
             did_commit: outcome.did_commit,
@@ -689,6 +686,14 @@ fn compact_disk_matches_expected(
 }
 
 fn closeout_compact_with_commit(file: &Path) -> Result<()> {
+    // The `commit_with_outcome` port MUST establish the authoritative-compaction
+    // scope (`agent_doc_commit_io::commit_with_authoritative_compaction`) so the
+    // committed-historical response-patchback guard stands down for the archived
+    // `### Re:` turns. compact-io cannot own that scope here — it has no
+    // production dependency on commit-io — so the CLI impl and the test double
+    // must stay in lockstep on that choice, enforced by
+    // `commit_with_authoritative_compaction_used_by_compact_closeout`
+    // (`#jb-compact-commit-historical-patchback-guard`).
     let outcome = runtime_effects()?.commit_with_outcome(file)?;
     if outcome.did_commit && outcome.vcs_refresh_signaled == Some(false) {
         anyhow::bail!(
@@ -3101,13 +3106,43 @@ mod tests {
     }
 
     #[test]
-    fn compact_commit_fails_closed_when_head_cannot_land() {
+    fn verify_compact_head_landed_bails_on_genuine_mismatch() {
         use std::fs;
-        // `#jb-compact-commit-left-uncommitted`, fail-closed path: when the
-        // working-tree file still equals HEAD (a pure editor-IPC lag with no flush),
-        // the selective commit cannot safely stage the compacted content, so the
-        // authoritative-content commit must FAIL CLOSED with a recovery command
-        // rather than silently leaving uncommitted compaction drift.
+        // The fail-closed safety net is preserved: when HEAD genuinely does not
+        // hold the authoritative compacted content (e.g. the commit never landed),
+        // `verify_compact_head_landed` bails with the recovery-command error so the
+        // caller cannot silently report a successful compaction.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_compact_test_repo(root);
+
+        let file = root.join("session.md");
+        fs::write(&file, PRECOMPACT_DOC).unwrap();
+        agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, agent_doc_ops_log_io::log_op).unwrap();
+        git_commit_file(root, "session.md"); // HEAD = pre-compact
+
+        let err = verify_compact_head_landed(&file, COMPACTED_DOC).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("did not land the compacted content"),
+            "expected fail-closed HEAD-mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn compact_commit_lands_head_when_disk_lags_at_precompact() {
+        use std::fs;
+        // `#jb-compact-commit-left-uncommitted`, fail-OPEN path (design intent at
+        // `apply_compacted_document`: "if the editor cannot flush,
+        // `commit_compacted_authoritative` still stage[s] the authoritative
+        // snapshot and verify[ies] HEAD"): even when the working-tree file still
+        // equals HEAD (a pure editor-IPC lag with no flush), the authoritative
+        // compacted content is explicitly known and re-asserted to the snapshot, so
+        // the commit stages that snapshot and lands the compacted content in HEAD
+        // rather than letting the historical-drift repair revert it and leave
+        // uncommitted compaction drift. Landing is strictly better than the former
+        // fail-closed recovery dance; `verify_compact_head_landed` still fails
+        // closed only if HEAD genuinely does not match afterward.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         init_compact_test_repo(root);
@@ -3119,17 +3154,19 @@ mod tests {
         // Disk still lags (editor holds the compacted buffer, no flush yet).
         assert_eq!(fs::read_to_string(&file).unwrap(), PRECOMPACT_DOC);
 
-        let err = commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("did not land the compacted content"),
-            "expected fail-closed HEAD-mismatch error, got: {err}"
-        );
-        // HEAD is unchanged; the operator gets an explicit recovery path.
+        commit_compacted_authoritative(&file, COMPACTED_DOC)
+            .expect("authoritative compaction must land the compacted content in HEAD");
         let committed = agent_doc_git_io::revision::show_head(&file)
             .unwrap()
             .unwrap();
-        assert!(committed.contains("### Re: topic one"));
+        assert!(
+            committed.contains("*Compacted. Content archived.*"),
+            "HEAD must hold the compacted content after --commit, got:\n{committed}"
+        );
+        assert!(
+            !committed.contains("### Re: topic one"),
+            "pre-compact content must not remain in HEAD:\n{committed}"
+        );
     }
 
     #[test]

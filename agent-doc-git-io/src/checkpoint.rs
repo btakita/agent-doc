@@ -154,38 +154,77 @@ pub fn run(file: &Path, restore: Option<&str>, diff: Option<&str>) -> Result<()>
 /// `agent-doc/<doc-name>/<slug>-N` where N is the next unused ordinal.
 pub fn create_pre_mutation_tag(file: &Path, slug: &str, tag_override: Option<&str>) -> Result<()> {
     let git_root = git_root(file)?;
-    let tag_name = match tag_override {
-        Some(name) => name.to_string(),
-        None => {
-            let doc_name = file
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("doc")
-                .to_string();
 
-            let pattern = format!("agent-doc/{doc_name}/{slug}-*");
-            let count = Command::new("git")
-                .current_dir(&git_root)
-                .args(["tag", "-l", &pattern])
-                .output()
-                .map(|o| {
-                    if o.status.success() {
-                        String::from_utf8_lossy(&o.stdout)
-                            .lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .count()
-                    } else {
-                        0
-                    }
-                })
-                .unwrap_or(0);
-            format!("agent-doc/{doc_name}/{slug}-{}", count + 1)
-        }
-    };
+    // Explicit override name: create it verbatim, with no ordinal search or
+    // collision retry (the operator named it, so a clash is a real error).
+    if let Some(name) = tag_override {
+        return create_checkpoint_tag_at_head(&git_root, name, slug);
+    }
 
-    let tag_output = Command::new("git")
+    let doc_name = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("doc")
+        .to_string();
+    let prefix = format!("agent-doc/{doc_name}/{slug}-");
+    let pattern = format!("{prefix}*");
+
+    // Derive the next ordinal from the MAX existing ordinal, not the tag COUNT.
+    // Counting breaks once `prune_recovery_checkpoint_tags` has trimmed older
+    // ordinals: with surviving tags `-2..-24` the count is 23, so `count + 1`
+    // resolves to 24 and collides with the still-present `-24`, and `git tag`
+    // fails with "tag 'agent-doc/<doc>/pre-compact-24' already exists". Max + 1
+    // always advances past every live ordinal regardless of pruning gaps.
+    let max_ordinal = Command::new("git")
         .current_dir(&git_root)
-        .args(["tag", &tag_name])
+        .args(["tag", "-l", &pattern])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix(prefix.as_str()))
+                .filter_map(|ordinal| ordinal.parse::<u64>().ok())
+                .max()
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+
+    // Attempt from max+1, incrementing on the rare residual collision (a
+    // concurrent tagger, or a non-numeric sibling that slipped the max scan) so a
+    // clash never aborts the mutation it is meant to checkpoint.
+    let mut ordinal = max_ordinal + 1;
+    for _ in 0..64 {
+        let tag_name = format!("{prefix}{ordinal}");
+        let tag_output = Command::new("git")
+            .current_dir(&git_root)
+            .args(["tag", &tag_name])
+            .output()
+            .with_context(|| format!("failed to create git tag {tag_name}"))?;
+        if tag_output.status.success() {
+            eprintln!("[agent-doc] Tagged {} state as {}", slug, tag_name);
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&tag_output.stderr);
+        if stderr.contains("already exists") {
+            ordinal += 1;
+            continue;
+        }
+        anyhow::bail!("git tag {} failed: {}", tag_name, stderr.trim());
+    }
+
+    anyhow::bail!(
+        "could not allocate an unused {prefix}N checkpoint tag after 64 attempts (starting at {})",
+        max_ordinal + 1
+    )
+}
+
+/// Create a lightweight checkpoint tag at HEAD verbatim, failing if it exists.
+fn create_checkpoint_tag_at_head(git_root: &Path, tag_name: &str, slug: &str) -> Result<()> {
+    let tag_output = Command::new("git")
+        .current_dir(git_root)
+        .args(["tag", tag_name])
         .output()
         .with_context(|| format!("failed to create git tag {tag_name}"))?;
 
@@ -357,6 +396,50 @@ mod tests {
         )
         .unwrap();
         assert!(tags.contains("my-checkpoint"), "tags: {tags}");
+    }
+
+    #[test]
+    fn create_pre_mutation_tag_skips_pruning_gap_ordinals() {
+        // #jb-compact-commit-left-uncommitted (secondary factor): after
+        // `prune_recovery_checkpoint_tags` trims older ordinals, the surviving
+        // count is lower than the max ordinal. The old `count + 1` derivation then
+        // collided with a still-present tag ("tag 'agent-doc/<doc>/pre-compact-24'
+        // already exists"), aborting the checkpoint. The next ordinal must come
+        // from max+1, not count+1.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        git_in(root, &["init", "-q"]);
+        git_in(root, &["config", "user.email", "t@t.t"]);
+        git_in(root, &["config", "user.name", "t"]);
+        let doc_path = root.join("equityfundingsource.md");
+        std::fs::write(&doc_path, "---\nsession: test\n---\n").unwrap();
+        git_in(root, &["add", "."]);
+        git_in(root, &["commit", "-q", "-m", "init"]);
+
+        // Ordinals 2..=24 survive (ordinal 1 pruned): 23 tags, max ordinal 24.
+        // `count + 1` == 24 would collide; `max + 1` == 25 must win.
+        for n in 2..=24 {
+            git_in(
+                root,
+                &[
+                    "tag",
+                    &format!("agent-doc/equityfundingsource/pre-compact-{n}"),
+                ],
+            );
+        }
+
+        create_pre_mutation_tag(&doc_path, "pre-compact", None).unwrap();
+
+        assert_eq!(
+            tag_count(root, "agent-doc/equityfundingsource/pre-compact-25"),
+            1,
+            "next checkpoint must be pre-compact-25 (max+1), not a collision on -24"
+        );
+        assert_eq!(
+            tag_count(root, "agent-doc/equityfundingsource/pre-compact-*"),
+            24,
+            "the 23 surviving tags plus the newly created -25"
+        );
     }
 
     #[test]

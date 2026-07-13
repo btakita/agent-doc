@@ -301,7 +301,22 @@ Done.
 Verification: `agent-resume validate -d data.toml` passed (14 experiences, 58 skills, 9 career highlights); `make PROFILE=lore` and `make` passed; all 12 pytest checks passed; `pdftotext` inspection confirmed the tailored summary, skills, and Lazily content; PDF metadata is four US-letter pages. The resume repository has no workflow named `CI`, so there was no matching CI run to inspect.
 
 Committed in the `resume` submodule as `85af45a` (`resume: add Lore profile and latest lazily work`). Unrelated in-progress resume changes were preserved and excluded from the commit.
-<!-- agent:boundary:abdf20e1 -->
+❯ Please don't emphasize current client work. Just say client work. I don't want to suggest that my side work is very active.
+### Re: Neutral “Client Work” wording — gpt-5
+
+Done. I removed the emphasis on recency/activity:
+
+- `Current client work` → `Client work`
+- `Current Client Work` → `Client Work`
+- `Focused current client work` → `Client work`
+- The Lore and Arron summaries now say `Client work spans ...`, not `Current work ...`
+
+Updated the resume database, master Markdown, Lore/Arron/Python-realtime/Siemens profiles, and rebuilt the default, Lore, Arron, Python-realtime, and Siemens PDFs. I also repaired the Siemens replacement keys that depended on the old wording. The unrelated in-progress Haiven files were left untouched.
+
+Verification: `agent-resume validate -d data.toml` passed; all 12 tests passed; extracted text from all five rebuilt PDFs contains no `current client`, `current work spans`, or `focused current` phrasing. The Lore PDF now renders the heading as `Client Work`. The resume repository has no workflow named `CI`, so there was no matching CI run to inspect.
+
+Committed in the `resume` submodule as `4ab1595` (`resume: use neutral client work wording`).
+<!-- agent:boundary:ed9f8b8f -->
 <!-- /agent:exchange -->
 
 ## Queue

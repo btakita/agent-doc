@@ -62,12 +62,12 @@ Closed `#hmw9` after re-confirming the production configuration against Cloudfla
 - Verification: production version `62bc5e10-c12c-4fcf-a3ef-45b215646d3a` remains at 100%; message email notifications are enabled; sender/account/admin-recipient bindings are present; fallback Cloudflare credential secrets are present; `bun test tests/borrower-message-notify.test.ts` passed.
 - Confidence: high. This verifies configuration and code behavior without sending a synthetic production email.
 - Escalation: none. `gh run list --workflow CI --limit 1` reports that this repository has no workflow named `CI`.
-<!-- agent:boundary:6ee0a3d6 -->
+<!-- agent:boundary:909c1e60 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#e44f]~~
-- ⏭️ do [#hmw9]
+- ~~⏭️ do [#hmw9]~~
 <!-- /agent:queue -->
 
 ## Notes

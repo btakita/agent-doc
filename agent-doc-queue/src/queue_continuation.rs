@@ -1240,6 +1240,30 @@ mod tests {
     }
 
     #[test]
+    fn drainable_head_count_excludes_id_head_absent_from_open_backlog() {
+        // `#orphanqhead` stall-stop (equityfundingsource `#sy71` repro): an
+        // id-backed head whose id is NOT an open backlog item is not drainable, so
+        // the in-session auto-loop AND the supervisor idle-watch (which share this
+        // `drainable_head_count` / `has_drainable_head` signal) STOP instead of
+        // re-dispatching a dangling ref forever. Halt-safety is preserved — the
+        // head stays queued for the operator to resolve; it is simply not
+        // auto-re-dispatched, and it is never auto-marked-done.
+        let mixed = doc_with_backlog(
+            &[":round_pushpin: [#sy71]", "do [#hmw9]"],
+            &["- [ ] [#hmw9] a real open task"],
+        );
+        // Only the tracked #hmw9 head is drainable; the dangling #sy71 is excluded.
+        assert_eq!(drainable_head_count(&mixed), 1);
+
+        // When the dangling head is the sole live prompt, the queue is fully
+        // undrainable, so `queue_continuation_required` (active && count > 0) is
+        // false and the loop stops.
+        let only_dangling =
+            doc_with_backlog(&[":round_pushpin: [#sy71]"], &["- [ ] [#hmw9] a real open task"]);
+        assert_eq!(drainable_head_count(&only_dangling), 0);
+    }
+
+    #[test]
     fn drainability_classifies_directive_vs_noise() {
         assert!(is_drainable_queue_head(":round_pushpin: do [#fcc0]"));
         assert!(is_drainable_queue_head("- :pushpin: Fix the submit bug"));

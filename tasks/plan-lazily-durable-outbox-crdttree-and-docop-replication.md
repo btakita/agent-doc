@@ -461,15 +461,39 @@ implementation:
 | C++ | 0.16.1 | file | tagged and pushed |
 
 `lazily-spec` 0.32.1 is the canonical contract and fixture release. `lazily-formal` 0.32.1
-contains the explicit stale-save theorem. All eight implementations pass their full local
-repository gate (or the repository-equivalent Dart analyze/test gate), and all canonical
-fixture mirrors contain the four durable-store scenarios.
+contains the explicit stale-save theorem. A final clean-checkout parity pass reran every
+maintained repository's native full gate on 2026-07-13:
 
-The agent-doc integration landed in commits `0ea39300` and `8b34046b` at version 0.34.87:
-document replication is durable and feedback-safe, the lazily-backed SQLite outbox is wired
-through the dependency graph, and the publication dependency cycle is broken. The guarded
-live-editor authority flip remains intentionally disabled; the plan's safety gate forbids
-enabling it until its redesign and watched live-session proof are complete.
+- spec: `make check` (120 schema/conformance tests, the 9-job Lean model, and sibling
+  coverage synchronization); formal: `make check` (38 Lean jobs);
+- Rust: `make check`, including every feature/conformance/formal/network/benchmark target,
+  plus `cargo publish --dry-run --locked`;
+- Python: `make check` plus `uv build`; Kotlin: `make check` plus `./gradlew assemble`;
+- JavaScript: `make check` plus `npm pack --dry-run`; Dart: `dart analyze && dart test`
+  (364 tests) plus `dart pub publish --dry-run`;
+- Zig: `make check`; Go: `make check && make race`; C++: `make check` (20 CTest targets).
+
+Every gate and package dry-run passed. The canonical outbox-store fixture has an identical
+SHA-256 (`23f7080e...02d61e1`) in all eight mirrored bindings; Rust consumes the canonical
+spec fixture directly. All ten repositories (spec, formal, and eight bindings) finish clean
+and synchronized with `origin/main`. Latest configured CI is green for spec, Rust, Kotlin,
+Dart, Go, and C++; formal and Zig have no workflow. Python's repository workflow is manual
+and its last run is green. JavaScript's tagged Release built and signed provenance, then npm
+returned the known scope authorization 404; the local full gate and tarball dry-run are green.
+
+The agent-doc integration landed initially in commits `0ea39300` and `8b34046b` at version
+0.34.87: document replication is durable and feedback-safe, the lazily-backed SQLite outbox
+is wired through the dependency graph, and the publication dependency cycle is broken.
+The P3 authority flip is enabled by default, and the 0.34.88 P4 closeout adds a
+commit-before-ACK receiver journal, monotone receive cursors, controller-start/cold-reader
+rehydration, and plugin startup enumeration. Default authority and write-convergence reads
+no longer consult plugin-owner leases or demote a durably open editor merely because relay
+membership is zero; the explicit authority-off environment switch remains as rollback.
+
+The named stale `.yrs` cleanup is also complete in the intended lazily-backed
+`crdt_relay.rs` / `crdt_sync.rs` files. Remaining `.yrs` references belong to separate
+legacy/overlay state formats with an explicit `.seqcrdt` migration plan and are not renamed
+without that compatibility migration.
 
 Remaining release operations are external credential/rate gates, not parity gaps: PyPI needs
 an upload token, npm needs the package's trusted-publisher/passkey configuration corrected,

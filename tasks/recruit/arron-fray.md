@@ -13,6 +13,8 @@ agent_doc_lint_dialect: off
 ## Status
 
 <!-- agent:status patch=replace -->
+
+🔴 (restart/recycle your supervisor)
 <!-- /agent:status -->
 
 ## Exchange
@@ -335,7 +337,7 @@ The enforced invariant is now: while an editor is attached, unproven disk or sna
 The live recovery also exposed a duplicate empty document-scaffold case. Its new repair is fail-closed: it removes a repeated outer scaffold only when the frontmatter is byte-identical and every repeated component is empty; any user text prevents automatic removal. I restored this document from preflight’s exact baseline, then verified one copy of your protected wording and one copy of the Signals Patchboard prompt before reapplying this response.
 
 The focused authority, closeout-model, template, and repair suites pass, and the full repository `make check` passes. The fixes are pushed as `8a3f33c4` and `8104031d` on `fix/editor-authority-no-disk-repair`. The tested binary and native library are installed locally, with controller recycle queued for the next idle boundary. I left a separate uncommitted 0.34.91 bundle in the shared checkout untouched, so upstream main/version integration remains isolated from that work.
-<!-- agent:boundary:fbfd96fd -->
+<!-- agent:boundary:6b490cf9 -->
 <!-- /agent:exchange -->
 
 ## Queue

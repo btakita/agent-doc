@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: go
 ---
 
 ## Status
@@ -36,12 +36,13 @@ complete
 
 Compacted content:
 - Archived 3 response topic(s): #hmw9; #hmw9 closeout; #hmw9 queue reconciliation
-<!-- agent:boundary:5e725803 -->
+<!-- agent:boundary:2c83ca49 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#e44f]~~
 - ~~⏭️ do [#hmw9]~~
+- 📌 - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.
 <!-- /agent:queue -->
 
 ## Notes

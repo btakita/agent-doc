@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -47,6 +47,11 @@ The interrupted cycle is fully reconciled: the recovered request was to make **L
 - **Spec/tests:** Added `prds/deal-lender-documents.md` and expanded `tests/deal-lender-documents.test.ts`. Focused suite: 17 passed. Full `make check`: 1,585 tests passed, application build passed, and Worker bundle passed.
 - **Release:** Commit `ab9365f` was pushed to `origin/main`. Worker version `549d4ad0-731d-46a9-9d11-7cdec0060be8` was deployed. Post-deploy checks found no pending D1 migrations; the public root returned HTTP 200 and the protected admin route returned HTTP 303 as expected.
 - **CI/tooling:** The repo has no GitHub Actions workflow named `CI`, so the complete local suite served as the release gate. Existing untracked `.agent-doc/` and `.claude/` metadata were intentionally left untouched.
+- **CI/tooling:** This repo has no GitHub Actions workflow named `CI`, so the complete local suite served as the release gate. Existing untracked `.agent-doc/` and `.claude/` metadata were left untouched. The stale local agent-doc install was rebuilt during closeout and its controller was recycled.
+- **Release:** Commit `a161453` was pushed to `origin/main`. Production migration 0135 applied successfully and Worker version `8ca2c380-49eb-44d2-93f4-65a12500a941` is active. No remote migrations remain; the public root returns HTTP 200 and the protected admin pipeline returns HTTP 303 as expected.
+- **Spec/tests:** Updated `prds/deal-lender-documents.md` and expanded `tests/deal-lender-documents.test.ts`. Focused suite: 20 passed. Full `make check`: 1,588 tests passed, application build passed, and Worker bundle passed. Migration 0135 also applied successfully to local D1.
+- **Persistence/API:** Migration `0135_deal_lender_document_types.sql` adds a durable per-loan type catalogue. The admin-only create endpoint validates the loan, and upload categories accept a custom type only for its owning loan, so unrelated deals are not cluttered. Legacy/unknown records remain accessible under **Other**.
+- **UI:** Lender Documents now has an **Add a document type** search/add combobox. Existing rows show **Already added**; a new name creates a visible **Custom** upload row immediately, before any file is uploaded.
 
 Commit message used:
 
@@ -62,13 +67,29 @@ Match the Lender Documents tab to the compact Required Documents row UI with cli
 This was an assistant-authored closeout note accidentally routed into the queue during editor-IPC recovery, not a new operator request. It is recorded here verbatim and was intentionally removed from the actionable queue; the Lender Documents implementation, verification, push, and deployment are already complete.
 
 <!-- no-free-text-queue-head-guard -->
-<!-- agent:boundary:82463ec2 -->
+❯ Include "Add a document type" to Lender Documents which mimics "Add or require a document type" in Required Documents.
+❯ #spec-test-commit-push-deploy
+### Re: Add a document type in Lender Documents — gpt-5
+
+Implemented and deployed the requested Required Documents-style add-type flow.
+
+- **UI:** Lender Documents now has an **Add a document type** search/add combobox. Existing rows show **Already added**; a new name creates a visible **Custom** upload row immediately, before any file is uploaded.
+- **Persistence/API:** Migration `0135_deal_lender_document_types.sql` adds a durable per-loan type catalogue. The admin-only create endpoint validates the loan, and upload categories accept a custom type only for its owning loan, so unrelated deals are not cluttered. Legacy/unknown records remain accessible under **Other**.
+- **Spec/tests:** Updated `prds/deal-lender-documents.md` and expanded `tests/deal-lender-documents.test.ts`. Focused suite: 20 passed. Full `make check`: 1,588 tests passed, application build passed, and Worker bundle passed. Migration 0135 also applied successfully to local D1.
+- **Release:** Commit `a161453` was pushed to `origin/main`. Production migration 0135 applied successfully and Worker version `8ca2c380-49eb-44d2-93f4-65a12500a941` is active. No remote migrations remain; the public root returns HTTP 200 and the protected admin pipeline returns HTTP 303 as expected.
+- **CI/tooling:** This repo has no GitHub Actions workflow named `CI`, so the complete local suite served as the release gate. Existing untracked `.agent-doc/` and `.claude/` metadata were left untouched. The stale local agent-doc install was rebuilt during closeout and its controller was recycled.
+
+Commit message:
+
+```txt
+feat(admin): add lender document types (#lender-doc-types)
+
+Let admins add durable per-loan custom rows from the Lender Documents tab with server-side category validation. Add migration 0135, update the PRD, and cover the repository, routes, and Required Documents-style UI flow.
+```
+<!-- agent:boundary:af699518 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#e44f]~~
-- ~~⏭️ do [#hmw9]~~
-- ~~📌 - **CI/tooling notes:** This repo has no GitHub Actions workflow named `CI`, so the required local full suite was the release gate. Existing untracked `.agent-doc/` and `.claude/` tool metadata were left untouched. Preflight also warned that the installed `agent-doc` binary predates a local same-version source edit; it did not block this EFS cycle.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

@@ -30,6 +30,14 @@ use agent_doc_crdt_relay_io::commit_barrier_for_file as test_support_commit_barr
 
 thread_local! {
     static FORCE_DISK_COMMIT_RESOLUTION: Cell<bool> = const { Cell::new(false) };
+    /// Set while an authoritative compaction (`agent-doc compact --commit`) is
+    /// closing out. The compaction has already archived the exchange turns it is
+    /// dropping and re-asserted the compacted snapshot as authoritative, so the
+    /// commit must NOT refuse the compacted state as "committed historical
+    /// response patchback drift" just because HEAD still carries the (archived)
+    /// `### Re:` turns. Correctness is guaranteed by the compaction's own
+    /// `verify_compact_head_landed` post-commit check, not by this guard.
+    static AUTHORITATIVE_COMPACTION_COMMIT: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -595,6 +603,25 @@ fn force_disk_commit_resolution_enabled() -> bool {
     FORCE_DISK_COMMIT_RESOLUTION.with(Cell::get)
 }
 
+/// Commit the closeout of an authoritative compaction. Same as
+/// [`commit_with_outcome`], but marks the commit so the committed-historical
+/// response-patchback guard does not refuse the compacted document when HEAD
+/// still carries the `### Re:` turns the compaction just archived. Use ONLY from
+/// the compaction closeout, which archives the dropped turns first and verifies
+/// HEAD landed the compacted content afterward.
+pub fn commit_with_authoritative_compaction(file: &Path) -> Result<CommitOutcome> {
+    AUTHORITATIVE_COMPACTION_COMMIT.with(|slot| {
+        let previous = slot.replace(true);
+        let result = commit_with_outcome(file);
+        slot.set(previous);
+        result
+    })
+}
+
+fn authoritative_compaction_commit_enabled() -> bool {
+    AUTHORITATIVE_COMPACTION_COMMIT.with(Cell::get)
+}
+
 fn commit_current_document_content(file: &Path, source: &str) -> Result<String> {
     if force_disk_commit_resolution_enabled() {
         std::fs::read_to_string(file)
@@ -856,6 +883,7 @@ where
 
     if !repaired_committed_historical
         && !snapshot_matches_current_file
+        && !authoritative_compaction_commit_enabled()
         && let Some((Some(kind), Some(marker))) = committed_historical_patchback.as_ref()
     {
         agent_doc_ops_log_io::log_op(

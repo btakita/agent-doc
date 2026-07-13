@@ -171,7 +171,16 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
     }
 
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
-        let outcome = agent_doc_commit_io::commit_with_outcome(file)?;
+        // `#jb-compact-commit-historical-patchback-guard`: this port is the
+        // authoritative compaction closeout (`closeout_compact_with_commit`). The
+        // compaction already archived the `### Re:` turns it dropped and
+        // re-asserted the compacted snapshot, so route through the
+        // compaction-aware commit entry — otherwise the committed-historical
+        // response-patchback guard refuses the compacted document because HEAD
+        // still carries those (archived) turns, and Compact Exchange silently
+        // leaves the summary uncommitted. Correctness stays enforced by
+        // `verify_compact_head_landed` after this returns.
+        let outcome = agent_doc_commit_io::commit_with_authoritative_compaction(file)?;
         Ok(CompactCommitOutcome {
             did_commit: outcome.did_commit,
             vcs_refresh_signaled: outcome.vcs_refresh_signaled,

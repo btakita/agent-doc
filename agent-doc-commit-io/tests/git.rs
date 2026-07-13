@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use agent_doc_commit_io::commit;
+use agent_doc_commit_io::{commit, commit_with_authoritative_compaction};
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 use agent_doc_queue_io::queue_consume;
 
@@ -4392,6 +4392,93 @@ Duplicate replay should stay live.
         assert!(
             !head_doc.contains("### Re: do [#rtwbcast]"),
             "the archived response must not remain in HEAD after compaction:\n{head_doc}"
+        );
+    }
+
+    // `#jb-compact-commit-historical-patchback-guard`: the live "Compact Exchange
+    // left the summary uncommitted" defect. When a compaction's authoritative
+    // (post-compact) snapshot diverges from a pre-compact HEAD in a NON-exchange
+    // component too (e.g. a concurrent queue/status reconciliation), the commit
+    // classifies HEAD's `### Re:` turns as `typed_component_drift` committed
+    // historical patchback and fails closed — so `agent-doc compact --commit`
+    // silently leaves HEAD pre-compact. The compaction-aware commit entry
+    // (`commit_with_authoritative_compaction`) must adopt the compacted document:
+    // the dropped turns were archived first and the caller verifies HEAD landed.
+    // Plain `commit` must STILL block (the guard is intact for non-compaction).
+    #[test]
+    fn authoritative_compaction_commits_past_historical_patchback_guard() {
+        use std::fs;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        init_repo(root);
+
+        let doc = root.join("session.md");
+        // Post-compact authoritative state: exchange archived to a Session Summary
+        // AND a non-exchange status change (the divergence that trips
+        // `typed_component_drift`). Snapshot + working tree both hold it.
+        let post_compact = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "compacted.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Session Summary\n\n",
+            "Archived 2 response topic(s) to .agent-doc/archives/session-20260712.md\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        // Pre-compact HEAD: the two `### Re:` turns still present, and a DIFFERENT
+        // status (non-exchange drift) so the committed-historical guard classifies
+        // this as `typed_component_drift`, not a clean exchange-only compaction.
+        let pre_compact_head = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "before compaction.\n",
+            "<!-- /agent:status -->\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: first — gpt-5\n\n",
+            "First answer.\n\n",
+            "### Re: second — opus-4-8\n\n",
+            "Second answer.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        commit_file(root, "session.md", pre_compact_head, "pre-compact HEAD");
+        // `commit_compacted_authoritative` re-asserts the authoritative compacted
+        // SNAPSHOT before committing, while the working-tree file still lags
+        // pre-compact (the editor-IPC-async window `#jb-compact-commit-editor-ipc-async`):
+        // snapshot = compacted, disk = pre-compact. This is the split that makes
+        // `snapshot_matches_current_file` false and trips the historical-patchback
+        // guard.
+        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
+        fs::write(&doc, pre_compact_head).unwrap();
+
+        // Plain commit must still fail closed — the guard is intact for
+        // non-compaction callers.
+        let err = commit(&doc)
+            .expect_err("plain commit must still block the historical patchback drift");
+        assert!(
+            err.to_string()
+                .contains("committed historical response patchback"),
+            "plain commit should block with the historical patchback error:\n{err}"
+        );
+
+        // The compaction-aware entry adopts the compacted document.
+        commit_with_authoritative_compaction(&doc)
+            .expect("authoritative compaction must commit past the guard");
+        let head_doc = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            head_doc.contains("### Session Summary"),
+            "HEAD must hold the compacted document after the compaction commit:\n{head_doc}"
+        );
+        assert!(
+            !head_doc.contains("### Re: first") && !head_doc.contains("### Re: second"),
+            "the archived turns must not remain in HEAD after compaction:\n{head_doc}"
         );
     }
 

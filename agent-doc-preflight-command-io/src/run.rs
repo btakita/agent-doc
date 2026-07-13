@@ -26,6 +26,23 @@ use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
 
+/// Injects the lazily reactive CRDT model as the diff's `current` source
+/// (#preflight-lazily-diff-feed). Lives here (not in `agent-doc-diff-io`)
+/// because the diff crate is a leaf beneath the relay crate and cannot depend
+/// on the reactive model without a dependency cycle.
+struct ReactiveLiveCurrentSource;
+
+impl agent_doc_diff_io::LiveCurrentSource for ReactiveLiveCurrentSource {
+    fn live_current(&self, doc: &Path, disk: &str) -> Option<String> {
+        // `durable_buffer_state` returns `Some` only when a live editor buffer
+        // (CRDT relay / controller model) has diverged from disk — i.e. the
+        // operator's edits are in the reactive model but disk lags. Otherwise
+        // `None`, so the diff keeps its disk-sourced content.
+        agent_doc_document_realtime_io::durable_buffer_state(doc, disk)
+            .map(|state| state.content)
+    }
+}
+
 /// Options controlling a `preflight` invocation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreflightOptions {
@@ -590,9 +607,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 4: Compute diff between snapshot and current document.
     eprintln!("[preflight] step 4: diff");
+    // Lazily reactive state-diff feed (#preflight-lazily-diff-feed): after the
+    // diff settles on the disk buffer for prompt-completeness, source the
+    // coherent `current` from the reactive CRDT model when the operator's live
+    // edits have not yet reached disk. `durable_buffer_state` returns `Some`
+    // only when a live editor buffer has diverged from disk; otherwise the diff
+    // keeps its disk-sourced content. This is the seam that lets the realtime
+    // document model — not a disk read race — own concurrent typing.
+    let live_current_source = ReactiveLiveCurrentSource;
     let diff_result_with_current = agent_doc_diff_io::compute_with_current(
         &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
         file,
+        Some(&live_current_source),
     )?;
     // Save the response baseline from the exact stable document projection used
     // for the diff. This keeps the merge baseline, visible file, and prompt

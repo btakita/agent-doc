@@ -26,6 +26,22 @@ pub trait SnapshotStore {
     fn save(&self, doc: &Path, content: &str) -> Result<()>;
 }
 
+/// Source of the realtime-coherent "current" document content, injected by a
+/// higher layer that can read the lazily reactive CRDT model.
+///
+/// `agent-doc-diff-io` is a leaf beneath the relay crate
+/// (`crdt-relay-io → snapshot-io → diff-io`), so it cannot depend on the
+/// reactive model directly. This trait is the seam: the diff still settles on
+/// the disk buffer for prompt-completeness (so a half-typed prompt line is not
+/// diffed), then asks the live source for the coherent current state. When the
+/// operator's edits live in the CRDT buffer but disk lags behind, this returns
+/// the reactive canonical text so the realtime model — not a disk read race —
+/// owns the typing. Returning `None` means "no live divergence, or the reactive
+/// model is unavailable/detached": fall back to the disk-sourced content.
+pub trait LiveCurrentSource {
+    fn live_current(&self, doc: &Path, disk: &str) -> Option<String>;
+}
+
 /// Compute a unified diff between the snapshot and the current document, and
 /// return the exact snapshot/current content used to compute it.
 ///
@@ -33,6 +49,7 @@ pub trait SnapshotStore {
 pub fn compute_with_current<S: SnapshotStore + ?Sized>(
     snapshots: &S,
     doc: &Path,
+    live: Option<&dyn LiveCurrentSource>,
 ) -> Result<ComputeResult> {
     let t_total = std::time::Instant::now();
 
@@ -44,8 +61,10 @@ pub fn compute_with_current<S: SnapshotStore + ?Sized>(
     // Fixes #wcf5: IDE watchers and git hooks bypass advisory flock.
     let snap_mtime_at_read = snap_path.metadata().and_then(|m| m.modified()).ok();
 
-    // Wait for user to finish typing (truncation detection with delayed rechecks)
-    let current = wait_for_stable_content(doc, &previous)?;
+    // Settle on the disk buffer for prompt-completeness, then source the
+    // coherent current state from the lazily reactive model when a live source
+    // is injected (#preflight-lazily-diff-feed).
+    let current = wait_for_stable_content(doc, &previous, live)?;
 
     eprintln!(
         "[diff] doc={} snapshot={} doc_len={} snap_len={}",
@@ -133,7 +152,7 @@ pub fn compute_with_current<S: SnapshotStore + ?Sized>(
 ///
 /// Both snapshot and current content are comment-stripped before comparison.
 pub fn compute<S: SnapshotStore + ?Sized>(snapshots: &S, doc: &Path) -> Result<Option<String>> {
-    Ok(compute_with_current(snapshots, doc)?.diff)
+    Ok(compute_with_current(snapshots, doc, None)?.diff)
 }
 
 /// Wait for stable content using editor-authoritative buffer state when
@@ -152,7 +171,33 @@ pub fn compute<S: SnapshotStore + ?Sized>(snapshots: &S, doc: &Path) -> Result<O
 /// complete or content stabilises across consecutive reads.
 ///
 /// Returns the stable file content.
-pub fn wait_for_stable_content(doc: &Path, previous: &str) -> Result<String> {
+pub fn wait_for_stable_content(
+    doc: &Path,
+    previous: &str,
+    live: Option<&dyn LiveCurrentSource>,
+) -> Result<String> {
+    // Settle on the disk buffer first (typing debounce / truncation heuristic)
+    // so a half-typed prompt line is never fed to the agent.
+    let disk_stable = wait_for_stable_content_disk(doc, previous)?;
+
+    // ── Lazily reactive state-diff feed (#preflight-lazily-diff-feed) ──
+    // Once the buffer has settled, source the coherent current content from the
+    // reactive CRDT model when the operator's edits live in the buffer but disk
+    // lags behind. The realtime model absorbs the typing; disk is only the
+    // fallback when there is no live divergence or the model is unavailable.
+    if let Some(live) = live
+        && let Some(live_text) = live.live_current(doc, &disk_stable)
+    {
+        eprintln!("[diff] current sourced from lazily reactive model (disk lagged buffer)");
+        return Ok(live_text);
+    }
+
+    Ok(disk_stable)
+}
+
+/// Disk-authoritative stability: editor-buffer debounce when a plugin is
+/// attached, truncation heuristic otherwise. Returns the settled disk content.
+fn wait_for_stable_content_disk(doc: &Path, previous: &str) -> Result<String> {
     let doc_str = doc.to_string_lossy().to_string();
 
     // ── Editor-authoritative path ──
@@ -291,7 +336,7 @@ pub fn run<S: SnapshotStore + ?Sized>(snapshots: &S, file: &Path, wait: bool) ->
     }
     if wait {
         let previous = snapshots.resolve(file)?.unwrap_or_default();
-        let _stable = wait_for_stable_content(file, &previous)?;
+        let _stable = wait_for_stable_content(file, &previous, None)?;
         eprintln!("[diff --wait] content is stable");
     }
     match compute(snapshots, file)? {
@@ -540,7 +585,7 @@ mod tests {
         let previous = "";
 
         let start = std::time::Instant::now();
-        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let result = wait_for_stable_content(&doc, previous, None).unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result, content);
@@ -580,7 +625,7 @@ mod tests {
 
         let previous = "";
         let start = std::time::Instant::now();
-        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let result = wait_for_stable_content(&doc, previous, None).unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(result, content);
@@ -601,7 +646,90 @@ mod tests {
         std::fs::write(&doc, content).unwrap();
 
         let previous = "";
-        let result = wait_for_stable_content(&doc, previous).unwrap();
+        let result = wait_for_stable_content(&doc, previous, None).unwrap();
         assert_eq!(result, content);
+    }
+
+    /// Live source that returns a fixed reactive-buffer text when the disk it is
+    /// handed matches an expected value — models "the CRDT buffer has edits disk
+    /// has not yet flushed".
+    struct FixedLiveSource {
+        reactive: Option<String>,
+        seen_disk: std::cell::RefCell<Option<String>>,
+    }
+
+    impl LiveCurrentSource for FixedLiveSource {
+        fn live_current(&self, _doc: &Path, disk: &str) -> Option<String> {
+            *self.seen_disk.borrow_mut() = Some(disk.to_string());
+            self.reactive.clone()
+        }
+    }
+
+    // #preflight-lazily-diff-feed: when the reactive model reports live content
+    // that has diverged from disk, the settled diff `current` is sourced from the
+    // reactive model, not the disk read.
+    #[test]
+    fn wait_for_stable_content_prefers_live_reactive_over_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("live.md");
+        let disk = "Prompt on disk.\n";
+        std::fs::write(&doc, disk).unwrap();
+
+        let live = FixedLiveSource {
+            reactive: Some("Prompt in reactive buffer, not yet on disk.\n".to_string()),
+            seen_disk: std::cell::RefCell::new(None),
+        };
+        let result = wait_for_stable_content(&doc, "", Some(&live)).unwrap();
+
+        assert_eq!(result, "Prompt in reactive buffer, not yet on disk.\n");
+        // The live source is consulted AFTER the disk buffer settles, so it must
+        // be handed the settled disk content (prompt-completeness gate first).
+        assert_eq!(live.seen_disk.borrow().as_deref(), Some(disk));
+    }
+
+    // At rest (no live divergence → live source returns None), the result is
+    // byte-identical to the disk-only path, so the feed is a pure superset.
+    #[test]
+    fn wait_for_stable_content_none_live_matches_disk_byte_for_byte() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("rest.md");
+        let disk = "Settled content.\n";
+        std::fs::write(&doc, disk).unwrap();
+
+        let live = FixedLiveSource {
+            reactive: None,
+            seen_disk: std::cell::RefCell::new(None),
+        };
+        let with_live = wait_for_stable_content(&doc, "", Some(&live)).unwrap();
+        let without_live = wait_for_stable_content(&doc, "", None).unwrap();
+
+        assert_eq!(with_live, disk);
+        assert_eq!(with_live, without_live);
+    }
+
+    #[test]
+    fn compute_with_current_uses_live_reactive_content_for_diff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+
+        let doc = dir.path().join("compute-live.md");
+        let disk = "baseline line\n";
+        std::fs::write(&doc, disk).unwrap();
+        save_test_snapshot(&doc, disk).unwrap();
+
+        let live = FixedLiveSource {
+            reactive: Some("baseline line\nreactive addition\n".to_string()),
+            seen_disk: std::cell::RefCell::new(None),
+        };
+        let result =
+            compute_with_current(&TestSnapshotStore, &doc, Some(&live)).unwrap();
+
+        assert_eq!(result.current, "baseline line\nreactive addition\n");
+        let diff = result.diff.expect("reactive addition should surface as a diff");
+        assert!(
+            diff.contains("reactive addition"),
+            "diff must reflect the reactive-sourced current, got: {diff}"
+        );
     }
 }

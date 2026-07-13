@@ -36,7 +36,23 @@ complete
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 19 response topic(s): Transcribe + diarize the 2026-07-10 call; Analyze the transcr...
-<!-- agent:boundary:e3b3a84c -->
+
+### Re: #hmw9 — gpt-5
+
+Verified the EFS production Cloudflare email sender gate and admin-recipient configuration for borrower message notifications.
+
+Production evidence:
+- Cloudflare auth works for account `1e7e194ff8da4ad9e40ce041aea84f76` via `bun run cf:whoami`.
+- `bun run cf:secrets:list` shows the production Worker has `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. The code accepts these as the fallback sender credentials when `CLOUDFLARE_EMAIL_API_TOKEN` / `CLOUDFLARE_EMAIL_ACCOUNT_ID` are not separately set.
+- Latest 100% deployment is version `62bc5e10-c12c-4fcf-a3ef-45b215646d3a` from 2026-07-12 17:50:52 UTC.
+- That deployed version has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED="true"`, `CLOUDFLARE_EMAIL_ACCOUNT_ID="1e7e194ff8da4ad9e40ce041aea84f76"`, `MESSAGE_NOTIFICATION_FROM="Equity Funding Source <efs@briantakita.me>"`, and `MESSAGE_ADMIN_NOTIFICATION_TO="btak.dev+efs@gmail.com"`.
+
+Verification run:
+- `bun test tests/borrower-message-notify.test.ts` passed.
+- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this EFS repo, so there was no CI run to inspect.
+
+No EFS source changes were needed for this queue item, so there was no code commit or push to make beyond this agent-doc closeout.
+<!-- agent:boundary:bc455ad2 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

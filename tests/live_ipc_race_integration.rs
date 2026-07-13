@@ -1,10 +1,12 @@
 use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -33,7 +35,12 @@ fn record_operator_buffer(file: &Path, content: &str) {
     .unwrap();
 }
 
-fn record_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
+fn record_visible_write_receipt(
+    file: &Path,
+    replica: &ProjectControllerReplica,
+    patch_id: &str,
+    content: &str,
+) {
     let file_key = file.to_string_lossy();
     let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
         file_key.as_ref(),
@@ -46,6 +53,7 @@ fn record_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
             agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
         ],
     );
+    publish_editor_text_via_project_controller(file, replica, content);
     let _ =
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file,
@@ -72,6 +80,139 @@ fn seed_reliable_sync_open(doc: &Path, tag: &str) {
         Some(&serde_json::to_string(&ops).unwrap()),
     )
     .expect("seed durable reliable-sync Open fact");
+}
+
+fn seed_legacy_editor_endpoint(doc: &Path, editor_id: &str) {
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(
+            doc.to_str().unwrap(),
+            editor_id,
+            std::process::id(),
+        ),
+        "test setup should acquire a live targeted editor endpoint"
+    );
+}
+
+fn start_project_controller(root: &Path) -> Child {
+    let mut controller = ProcessCommand::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .args([
+            "controller",
+            "serve",
+            "--project-root",
+            root.to_str().unwrap(),
+            "--launch-mode",
+            "managed",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start project controller subprocess");
+    for _ in 0..100 {
+        if agent_doc_controller_io::project_controller::status(root)
+            .is_ok_and(|status| status.active)
+        {
+            return controller;
+        }
+        if controller.try_wait().ok().flatten().is_some() {
+            panic!("project controller exited before becoming active");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = controller.kill();
+    let _ = controller.wait();
+    panic!("project controller did not start");
+}
+
+fn stop_project_controller(root: &Path, controller: &mut Child) {
+    let shutdown = agent_doc_controller_io::project_controller::run_shutdown(Some(root));
+    for _ in 0..100 {
+        if controller.try_wait().ok().flatten().is_some() {
+            assert!(
+                shutdown.is_ok(),
+                "project controller shutdown failed: {shutdown:?}"
+            );
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = controller.kill();
+    let _ = controller.wait();
+    assert!(
+        shutdown.is_ok(),
+        "project controller shutdown failed: {shutdown:?}"
+    );
+}
+
+struct ProjectControllerReplica {
+    project_root: PathBuf,
+    identity: String,
+    client_id: u64,
+    bootstrap: Vec<u8>,
+}
+
+fn register_editor_replica_via_project_controller(doc: &Path) -> ProjectControllerReplica {
+    let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
+    let identity = format!("{TEST_EDITOR_ID}:{}", doc.display());
+    let registered = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        &project_root,
+        doc,
+        serde_json::json!({
+            "method": "replica_register",
+            "identity": identity,
+            "source": "live_ipc_race_integration_test"
+        }),
+    )
+    .expect("register test editor through project controller");
+    let client_id = registered
+        .get("client_id")
+        .and_then(Value::as_u64)
+        .expect("project controller replica registration should return client_id");
+    let bootstrap = BASE64_STANDARD
+        .decode(
+            registered
+                .get("bootstrap_b64")
+                .and_then(Value::as_str)
+                .expect("project controller replica registration should return bootstrap_b64"),
+        )
+        .expect("decode project controller replica bootstrap");
+    ProjectControllerReplica {
+        project_root,
+        identity,
+        client_id,
+        bootstrap,
+    }
+}
+
+fn publish_editor_text_via_project_controller(
+    doc: &Path,
+    registered: &ProjectControllerReplica,
+    content: &str,
+) {
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+        registered.client_id,
+        &registered.bootstrap,
+    )
+    .expect("decode test editor relay bootstrap");
+    let replica_text = replica.text();
+    replica.apply_local_edit(0, replica_text.len() as u32, content);
+    let updated = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        &registered.project_root,
+        doc,
+        serde_json::json!({
+            "method": "replica_update",
+            "identity": registered.identity,
+            "source": "live_ipc_race_integration_test",
+            "update_b64": BASE64_STANDARD.encode(replica.encode_state())
+        }),
+    )
+    .expect("publish test editor update through project controller");
+    assert!(
+        updated
+            .get("canonical_len")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "project controller should accept test editor update: {updated}"
+    );
 }
 
 fn apply_first_component_patch(current: &str, payload: &Value) -> Option<String> {
@@ -185,7 +326,10 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
     );
     fs::write(&doc, &current_with_queue).unwrap();
     seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
+    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
     record_operator_buffer(&doc, &current_with_queue);
+    let mut controller = start_project_controller(tmp.path());
+    let controller_replica = register_editor_replica_via_project_controller(&doc);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
@@ -232,7 +376,12 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
                     continue;
                 };
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
-                record_visible_write_receipt(&doc_for_watcher, &patch_id, &after_plugin_apply);
+                record_visible_write_receipt(
+                    &doc_for_watcher,
+                    &controller_replica,
+                    &patch_id,
+                    &after_plugin_apply,
+                );
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();
                 return true;
@@ -246,7 +395,7 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
 
     let output = agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "20000")
         .args([
             "finalize",
             doc.to_str().unwrap(),
@@ -257,6 +406,7 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
         .write_stdin(response)
         .output()
         .unwrap();
+    stop_project_controller(tmp.path(), &mut controller);
     assert!(output.status.success(), "finalize failed: {output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -378,7 +528,10 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
         .replace("<!--\n-->", &scratch_comment);
     fs::write(&doc, &current_with_scratch).unwrap();
     seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
+    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
     record_operator_buffer(&doc, &current_with_scratch);
+    let mut controller = start_project_controller(tmp.path());
+    let controller_replica = register_editor_replica_via_project_controller(&doc);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let patches_dir = agent_doc_dir.join("patches");
@@ -425,7 +578,12 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
                     continue;
                 };
                 fs::write(&doc_for_watcher, &after_plugin_apply).unwrap();
-                record_visible_write_receipt(&doc_for_watcher, &patch_id, &after_plugin_apply);
+                record_visible_write_receipt(
+                    &doc_for_watcher,
+                    &controller_replica,
+                    &patch_id,
+                    &after_plugin_apply,
+                );
                 *seen_for_watcher.lock().unwrap() = Some(payload);
                 fs::remove_file(path).unwrap();
                 return true;
@@ -439,7 +597,7 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
 
     let output = agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "20000")
         .args([
             "finalize",
             doc.to_str().unwrap(),
@@ -450,6 +608,7 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
         .write_stdin(response)
         .output()
         .unwrap();
+    stop_project_controller(tmp.path(), &mut controller);
     assert!(output.status.success(), "finalize failed: {output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

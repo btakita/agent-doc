@@ -266,6 +266,13 @@ boundary through a **file marker polled by the supervisor idle loop** (the same
 robust cross-process signal as recycle-request), never a socket the change
 depends on.
 
+Legacy socket/file-signal component patches are admitted only when two
+independent facts agree: the reliable document-open set reports this file live,
+and a captured targeted legacy endpoint is live for the same file. When both are
+absent the document is detached and disk authority handles the write. A one-sided
+result is an authority mismatch and must fail closed before a patch payload is
+materialized or sent; recovery content remains retryable for the owning turn.
+
 Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
 
 1. **Detect + gate (daemon).** On a settled watch `Change`, the daemon runs

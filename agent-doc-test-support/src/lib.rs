@@ -451,13 +451,22 @@ pub fn wait_for_process_pid(pattern: &str, timeout: Duration) -> u32 {
 }
 
 pub fn seed_live_plugin_owner_lease(file: &str) {
+    let pid = std::process::id();
+    seed_live_plugin_owner_lease_for_editor(file, &format!("test-editor-{pid}"));
+}
+
+pub fn seed_live_plugin_owner_lease_for_editor(file: &str, editor_id: &str) {
+    seed_live_plugin_owner_lease_without_reliable_sync(file, editor_id);
+    seed_reliable_sync_open(Path::new(file), editor_id);
+}
+
+pub fn seed_live_plugin_owner_lease_without_reliable_sync(file: &str, editor_id: &str) {
     mark_test_local_crdt_relay(Path::new(file));
     let pid = std::process::id();
     assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(file, &format!("test-editor-{pid}"), pid),
+        agent_doc_plugin_owner::try_acquire_plugin_owner(file, editor_id, pid),
         "test setup should acquire a live plugin-owner lease"
     );
-    seed_reliable_sync_open(Path::new(file), &format!("test-editor-{pid}"));
 }
 
 /// Model the "phantom editor" state a controller/supervisor recycle leaves

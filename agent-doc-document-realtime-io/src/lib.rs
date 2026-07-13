@@ -1770,6 +1770,20 @@ mod tests {
             }]);
     }
 
+    fn wait_for_active_typing_indicator(file: &str) {
+        for _ in 0..100 {
+            if agent_doc_debounce::typing_indicator_status(
+                file,
+                CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS,
+            ) == agent_doc_debounce::TypingIndicatorStatus::Active
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("typing indicator did not become active for {file}");
+    }
+
     fn seed_visible_write_commit_candidate_proof(
         file: &std::path::Path,
         patch_id: &str,
@@ -2016,6 +2030,7 @@ mod tests {
         let file_str = file.display().to_string();
         seed_reliable_sync_open(&file, "test-editor-authority-suppression");
         agent_doc_debounce::document_changed(&file_str);
+        wait_for_active_typing_indicator(&file_str);
 
         let first = try_resolve_current_doc_from_file(&file)
             .expect_err("active typing should block disk fallback")
@@ -2038,6 +2053,7 @@ mod tests {
         );
 
         agent_doc_debounce::document_changed(&file_str);
+        wait_for_active_typing_indicator(&file_str);
         let second = try_resolve_current_doc_from_file(&file)
             .expect_err("active typing should continue to block disk fallback")
             .to_string();

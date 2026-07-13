@@ -47,6 +47,33 @@ pub enum VisibleWriteDecision {
     DeferActiveTyping,
 }
 
+/// Admission policy for legacy editor patch transports under reliable document
+/// liveness. Payload delivery is allowed only when both authorities agree that
+/// an editor is live. A disagreement is fail-closed; an agreed detached state
+/// lets the caller use its normal disk-authority path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorDeliveryAdmission {
+    DeliverToLiveEditor,
+    Detached,
+    RefuseAuthorityMismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorDeliveryAdmissionFacts {
+    pub reliable_editor_live: bool,
+    pub legacy_endpoint_live: bool,
+}
+
+pub const fn decide_editor_delivery_admission(
+    facts: EditorDeliveryAdmissionFacts,
+) -> EditorDeliveryAdmission {
+    match (facts.reliable_editor_live, facts.legacy_endpoint_live) {
+        (true, true) => EditorDeliveryAdmission::DeliverToLiveEditor,
+        (false, false) => EditorDeliveryAdmission::Detached,
+        _ => EditorDeliveryAdmission::RefuseAuthorityMismatch,
+    }
+}
+
 impl VisibleWriteDecision {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -4445,4 +4472,30 @@ Working.
             |_, _, _| Some("<<<<<<< conflict\n>>>>>>>".to_string())
         ));
     }
+}
+
+#[test]
+fn editor_delivery_admission_fails_closed_on_authority_mismatch() {
+    assert_eq!(
+        decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
+            reliable_editor_live: true,
+            legacy_endpoint_live: true,
+        }),
+        EditorDeliveryAdmission::DeliverToLiveEditor,
+    );
+    assert_eq!(
+        decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
+            reliable_editor_live: false,
+            legacy_endpoint_live: false,
+        }),
+        EditorDeliveryAdmission::Detached,
+    );
+    assert_eq!(
+        decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
+            reliable_editor_live: false,
+            legacy_endpoint_live: true,
+        }),
+        EditorDeliveryAdmission::RefuseAuthorityMismatch,
+        "a process-live legacy endpoint must not receive recovery payloads after the reliable open-set reports zero live editors",
+    );
 }

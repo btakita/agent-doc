@@ -5,12 +5,15 @@ use crate::{
     patch_response_headings_already_in_head, projected_or_sidecar_cycle_id,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
+use agent_doc_document_realtime::write_policy::{
+    EditorDeliveryAdmission, EditorDeliveryAdmissionFacts, decide_editor_delivery_admission,
+};
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
 };
 use agent_doc_flow::types::{FlowOutcome, FlowStage};
 use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
-use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
+use agent_doc_ipc_io::editor_target::{live_editor_delivery_target, target_payload_to_editor};
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcSnapshotSource,
     build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
@@ -337,6 +340,48 @@ fn try_ipc_inner(
     // Clean up any legacy degraded marker from older versions
     cleanup_legacy_ipc_degraded(&project_root);
 
+    let editor_delivery_target = live_editor_delivery_target(file);
+    let reliable_editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    match decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
+        reliable_editor_live,
+        legacy_endpoint_live: editor_delivery_target.is_some(),
+    }) {
+        EditorDeliveryAdmission::DeliverToLiveEditor => {}
+        EditorDeliveryAdmission::Detached => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_editor_delivery_skipped file={} reliable_editor_live=false legacy_endpoint_live=false action=detached_fallback",
+                    file.display()
+                ),
+            );
+            return Ok(IpcResult {
+                success: false,
+                patch_id,
+                skipped_committed_cycle: false,
+            });
+        }
+        EditorDeliveryAdmission::RefuseAuthorityMismatch => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_editor_delivery_refused file={} reliable_editor_live={} legacy_endpoint_live={} action=fail_closed_before_payload",
+                    file.display(),
+                    reliable_editor_live,
+                    editor_delivery_target.is_some(),
+                ),
+            );
+            anyhow::bail!(
+                "refused editor IPC for {} because reliable document liveness and the legacy endpoint disagree (reliable_editor_live={}, legacy_endpoint_live={}); refresh or update the editor integration before retrying closeout",
+                file.display(),
+                reliable_editor_live,
+                editor_delivery_target.is_some(),
+            );
+        }
+    }
+    let editor_delivery_target =
+        editor_delivery_target.expect("delivery admission proves a live targeted editor endpoint");
+
     // `#ipc-degraded-prefers-file-ipc`: when the socket listener is latched
     // degraded, do NOT jump straight to a raw disk write. Skip only the (wedged)
     // socket attempt and let the write fall through to the file-IPC patch queue
@@ -439,8 +484,13 @@ fn try_ipc_inner(
                 );
             }
         }
-        let socket_editor_id =
-            target_payload_to_live_editor(file, &mut socket_payload, "socket_patch");
+        target_payload_to_editor(
+            file,
+            &mut socket_payload,
+            "socket_patch",
+            &editor_delivery_target,
+        );
+        let socket_editor_id = Some(editor_delivery_target.clone());
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -987,7 +1037,12 @@ fn try_ipc_inner(
             );
         }
     }
-    target_payload_to_live_editor(file, &mut ipc_payload, "file_patch");
+    target_payload_to_editor(
+        file,
+        &mut ipc_payload,
+        "file_patch",
+        &editor_delivery_target,
+    );
 
     // Log IPC write details for debugging cross-contamination
     agent_doc_ops_log_io::log_op(

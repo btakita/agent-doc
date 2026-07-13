@@ -157,6 +157,33 @@ pub(crate) fn request_controller<T: DeserializeOwned>(
     request_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
 }
 
+#[cfg(any(test, feature = "test-support"))]
+pub fn request_crdt_replica_for_test(
+    project_root: &Path,
+    file: &Path,
+    diagnostic_payload: serde_json::Value,
+) -> Result<serde_json::Value> {
+    request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_replica".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(diagnostic_payload.to_string()),
+        },
+        CONTROLLER_RPC_TIMEOUT,
+    )
+}
+
 fn request_controller_with_timeout<T: DeserializeOwned>(
     project_root: &Path,
     request: ControllerRequest,

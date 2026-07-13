@@ -2515,7 +2515,10 @@ pub(crate) fn test_bootstrap(dir: &tempfile::TempDir) -> ControllerBootstrap {
 pub(crate) fn wait_for_test_controller(project_root: &Path) {
     let started = Instant::now();
     loop {
-        if connect(project_root).is_ok() {
+        if status(project_root)
+            .map(|controller| controller.active)
+            .unwrap_or(false)
+        {
             return;
         }
         assert!(

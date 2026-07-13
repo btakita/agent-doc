@@ -350,6 +350,13 @@ mod submodule_patch_routing_tests {
         panic!("fake socket listener did not start within 1s");
     }
 
+    fn seed_live_editor(doc: &Path) {
+        agent_doc_test_support::seed_live_plugin_owner_lease_for_editor(
+            doc.to_str().unwrap(),
+            "visible-write-test-editor",
+        );
+    }
+
     #[test]
     fn try_ipc_routes_to_submodule_root_not_superproject() {
         // Verify that try_ipc routes patches to the SUBMODULE's own .agent-doc/
@@ -398,6 +405,7 @@ mod submodule_patch_routing_tests {
             "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
         )
         .unwrap();
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new("exchange", "test response");
 
@@ -446,6 +454,7 @@ mod submodule_patch_routing_tests {
             "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
         )
         .unwrap();
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new("exchange", "response");
 
@@ -511,6 +520,7 @@ mod submodule_patch_routing_tests {
 
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new(
             "exchange",
@@ -651,6 +661,7 @@ mod submodule_patch_routing_tests {
 
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new(
             "exchange",
@@ -953,6 +964,7 @@ mod submodule_patch_routing_tests {
         let _listener =
             start_visible_write_only_listener(&root, editor_visible_write_content.to_string());
         wait_for_listener(&root);
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new(
             "exchange",
@@ -981,16 +993,17 @@ mod submodule_patch_routing_tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            baseline,
-            "socket visible-write receipt proves editor-visible content; disk remains a non-authoritative projection until a later flush"
+            editor_visible_write_content,
+            "proven editor-visible content should write through so stale disk cannot overwrite the live buffer"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("ipc_socket_visible_write")
                 && log.contains("snap_source=lazily_visible_write_event")
-                && log.contains("visible_write_disk_write_through_blocked"),
-            "socket visible-write CRDT adoption should not require disk write-through:\n{log}"
+                && log.contains("visible_write_disk_write_through file=")
+                && !log.contains("visible_write_disk_write_through_blocked"),
+            "socket visible-write CRDT adoption should prove its disk projection:\n{log}"
         );
     }
 
@@ -1050,6 +1063,7 @@ mod submodule_patch_routing_tests {
 
         let _listener = start_already_applied_listener(&root);
         wait_for_listener(&root);
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new(
             "exchange",
@@ -1399,6 +1413,7 @@ mod submodule_patch_routing_tests {
         let _listener =
             start_fixed_visible_write_listener(&root, duplicated_visible_write_content.to_string());
         wait_for_listener(&root);
+        seed_live_editor(&doc);
 
         let patch = agent_doc_template::PatchBlock::new(
             "exchange",

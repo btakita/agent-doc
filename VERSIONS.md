@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.91
+
+- **Direct-pane routing injects each full trigger at most once.** A successful tmux transport is now an irreversible injection boundary: an empty capture or missing dispatch-start proof can no longer be misclassified as proof that the payload had no effect. Recovery is limited to bounded bare-`Enter` retries while the exact routed draft remains visible, preventing fast harness consumption from amplifying one editor action into repeated prompts.
+- **Recovery writes fail closed when editor-liveness authorities disagree.** Component patch delivery now requires the reliable document-open set and the captured legacy endpoint to agree that the editor is live; both absent selects disk authority, while either one-sided result blocks before payload materialization. A captured prior response therefore remains retryable instead of being partially inserted during a later preflight. JetBrains plugin `0.2.244` packages the updated native library and restored-tab liveness behavior.
+
 ## 0.34.90
 
 - **Idle supervisors no longer amplify document-authority history into sustained CPU load.** Current-document polling now persists only the final selected authority, coalesces consecutive identical observations, and keeps disk/editor transitions durable. Cycle closeout replay excludes authority-only facts through a dedicated partial SQLite index, so its cost stays proportional to lifecycle events instead of total authority history.

@@ -1265,6 +1265,7 @@ mod visible_write_content_snapshot_tests {
                 }
             }
         });
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let result = try_ipc(
             &doc,
@@ -1393,6 +1394,7 @@ agent response
 ";
         let normalize_prefix_lines =
             vec!["do #bppfxstrip. spec-test-build-install-commit-push".to_string()];
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let patches_dir = agent_doc_dir.join("patches");
         let doc_for_watcher = doc.clone();
@@ -1505,6 +1507,7 @@ Covered.
 <!-- /agent:exchange -->
 ";
         let normalize_prefix_lines = vec!["do [#normfallback]".to_string()];
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let patches_dir = agent_doc_dir.join("patches");
         let doc_for_watcher = doc.clone();
@@ -2275,6 +2278,7 @@ agent response
 <!-- /agent:backlog -->
 ";
         let normalize_prefix_lines = vec!["do #splpend".to_string()];
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let patches_dir = agent_doc_dir.join("patches");
         let _watcher = std::thread::spawn(move || {
@@ -2361,6 +2365,7 @@ The tmux focus should be snappy.
 -->
 ";
         let normalize_prefix_lines = vec!["do #commentdel".to_string()];
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let patches_dir = agent_doc_dir.join("patches");
         let doc_for_watcher = doc.clone();
@@ -3137,6 +3142,7 @@ mod core_tests {
         .unwrap();
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
@@ -3194,6 +3200,7 @@ mod core_tests {
             ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
             "two timeouts with no live listener should latch degraded"
         );
+        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
 
         // Simulate the plugin file watcher applying then deleting the patch.
         let watcher_dir = agent_doc_dir.join("patches");

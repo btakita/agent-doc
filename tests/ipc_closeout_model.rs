@@ -5,11 +5,13 @@ use agent_doc_turn::closeout_recovery::{
 };
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use proptest::prelude::*;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -215,7 +217,7 @@ fn setup_project(with_patches_dir: bool) -> (TempDir, PathBuf, PathBuf, String) 
     (tmp, doc, baseline, original)
 }
 
-fn seed_durable_reliable_sync_open(root: &Path, doc: &Path) {
+fn seed_durable_editor_delivery_open(root: &Path, doc: &Path) {
     let document_hash = agent_doc_hash::document_id_for_path(doc);
     let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
         document_hash: document_hash.clone(),
@@ -229,20 +231,87 @@ fn seed_durable_reliable_sync_open(root: &Path, doc: &Path) {
         Some(&serde_json::to_string(&ops).unwrap()),
     )
     .expect("seed durable reliable-sync Open fact for IPC test");
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(
+            doc.to_str().unwrap(),
+            TEST_EDITOR_ID,
+            std::process::id(),
+        ),
+        "seed live targeted editor endpoint for IPC test"
+    );
 }
 
-fn publish_editor_text_via_crdt_relay(doc: &Path, content: &str) {
+struct ProjectControllerReplica {
+    identity: String,
+    client_id: u64,
+    bootstrap: Vec<u8>,
+}
+
+fn register_editor_replica_via_project_controller(
+    root: &Path,
+    doc: &Path,
+) -> ProjectControllerReplica {
     let identity = format!("{TEST_EDITOR_ID}:{}", doc.display());
-    let (client_id, bootstrap) = agent_doc_crdt_relay_io::register_replica_for_file(doc, &identity)
-        .expect("register test editor through CRDT relay")
-        .expect("durable reliable-sync Open should attach the test editor");
-    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
-        .expect("decode test editor relay bootstrap");
+    let registered = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        root,
+        doc,
+        serde_json::json!({
+            "method": "replica_register",
+            "identity": identity,
+            "source": "ipc_closeout_model_test"
+        }),
+    )
+    .expect("register test editor through project controller");
+    let client_id = registered
+        .get("client_id")
+        .and_then(Value::as_u64)
+        .expect("project controller replica registration should return client_id");
+    let bootstrap = BASE64_STANDARD
+        .decode(
+            registered
+                .get("bootstrap_b64")
+                .and_then(Value::as_str)
+                .expect("project controller replica registration should return bootstrap_b64"),
+        )
+        .expect("decode project controller replica bootstrap");
+    ProjectControllerReplica {
+        identity,
+        client_id,
+        bootstrap,
+    }
+}
+
+fn publish_editor_text_via_project_controller(
+    root: &Path,
+    doc: &Path,
+    registered: &ProjectControllerReplica,
+    content: &str,
+) {
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+        registered.client_id,
+        &registered.bootstrap,
+    )
+    .expect("decode test editor relay bootstrap");
     let replica_text = replica.text();
     replica.apply_local_edit(0, replica_text.len() as u32, content);
-    agent_doc_crdt_relay_io::relay_replica_update_for_file(doc, &identity, &replica.encode_state())
-        .expect("publish test editor relay update")
-        .expect("test editor relay update should be accepted");
+    let updated = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        root,
+        doc,
+        serde_json::json!({
+            "method": "replica_update",
+            "identity": registered.identity,
+            "source": "ipc_closeout_model_test",
+            "update_b64": BASE64_STANDARD.encode(replica.encode_state())
+        }),
+    )
+    .expect("publish test editor update through project controller");
+    assert!(
+        updated
+            .get("canonical_len")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "project controller should accept test editor update: {updated}"
+    );
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -544,7 +613,7 @@ proptest! {
 fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
     let (tmp, doc, baseline, original) = setup_project(true);
     let root = tmp.path();
-    seed_durable_reliable_sync_open(root, &doc);
+    seed_durable_editor_delivery_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
     let ack_dir = agent_doc_dir.join("ack-content");
@@ -626,7 +695,7 @@ fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
 fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
-    seed_durable_reliable_sync_open(root, &doc);
+    seed_durable_editor_delivery_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
     let patches_dir = agent_doc_dir.join("patches");
     let response = response_text("partial response");
@@ -716,7 +785,32 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
 fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
     let (tmp, doc, baseline, _original) = setup_project(true);
     let root = tmp.path();
-    seed_durable_reliable_sync_open(root, &doc);
+    seed_durable_editor_delivery_open(root, &doc);
+    let mut controller = ProcessCommand::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .args([
+            "controller",
+            "serve",
+            "--project-root",
+            root.to_str().unwrap(),
+            "--launch-mode",
+            "managed",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start project controller subprocess");
+    for _ in 0..100 {
+        if agent_doc_controller_io::project_controller::status(root)
+            .is_ok_and(|status| status.active)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        agent_doc_controller_io::project_controller::status(root).is_ok_and(|status| status.active),
+        "project controller did not start"
+    );
     let agent_doc_dir = root.join(".agent-doc");
     let live_note = "Typing below exchange during closeout. #next-steps";
     let current_with_note = fs::read_to_string(&doc)
@@ -724,11 +818,13 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
         .replace("<!--\n-->", &format!("<!--\n{live_note}\n-->"));
     fs::write(&doc, &current_with_note).unwrap();
     record_operator_buffer(&doc, &current_with_note);
+    let controller_replica = register_editor_replica_via_project_controller(root, &doc);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let seen_for_listener = seen_payload.clone();
     let doc_for_listener = doc.clone();
     let listener_root = root.to_path_buf();
+    let controller_root_for_listener = root.to_path_buf();
     let server = std::thread::spawn(move || {
         agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
             let payload: Value = serde_json::from_str(msg).ok()?;
@@ -748,7 +844,12 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
                 Some(after)
             })?;
             record_operator_buffer(&doc_for_listener, &after_apply);
-            publish_editor_text_via_crdt_relay(&doc_for_listener, &after_apply);
+            publish_editor_text_via_project_controller(
+                &controller_root_for_listener,
+                &doc_for_listener,
+                &controller_replica,
+                &after_apply,
+            );
             agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                 &doc_for_listener,
                 &id,
@@ -784,6 +885,26 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
         .write_stdin(response_text("socket prompt drift"))
         .output()
         .unwrap();
+    let shutdown = agent_doc_controller_io::project_controller::run_shutdown(Some(root));
+    let mut controller_exited = false;
+    for _ in 0..100 {
+        match controller.try_wait() {
+            Ok(Some(_status)) => {
+                controller_exited = true;
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(err) => panic!("wait for project controller failed: {err}"),
+        }
+    }
+    if !controller_exited {
+        let _ = controller.kill();
+        let _ = controller.wait();
+    }
+    assert!(
+        shutdown.is_ok(),
+        "project controller shutdown failed: {shutdown:?}"
+    );
     assert!(
         output.status.success(),
         "socket finalize failed:\n{}\nops log:\n{}",

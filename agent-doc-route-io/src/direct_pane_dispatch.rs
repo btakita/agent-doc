@@ -7,22 +7,20 @@ pub use agent_doc_controller::dispatch::DirectPaneSubmitStatus as CommandDispatc
 use agent_doc_controller::dispatch::{
     DeadHarnessShellDispatchFacts, DirectPaneAcceptancePollState,
     DirectPaneEnterResubmitAttemptFacts, DirectPaneExistingDraftSubmitFacts,
-    DirectPaneFullResendFacts, DirectPaneNotDispatchedFacts, DirectPaneResubmitProofFacts,
-    DispatchInjectLogFacts, RouteLatencyFacts, RouteLatencyStatus, RouteSubmitObservation,
-    RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts, RoutedDispatchStartProof,
-    RoutedTriggerPayloadFacts, classify_dead_harness_shell_dispatch_block,
-    direct_pane_acceptance_poll_status, direct_pane_can_continue_enter_resubmit,
-    direct_pane_can_enter_existing_draft, direct_pane_can_full_resend_not_landed,
+    DirectPaneResubmitProofFacts, DispatchInjectLogFacts, RouteLatencyFacts, RouteLatencyStatus,
+    RouteSubmitObservation, RouteSubmitObservationFacts as ControllerRouteSubmitObservationFacts,
+    RoutedDispatchStartProof, RoutedTriggerPayloadFacts,
+    classify_dead_harness_shell_dispatch_block, direct_pane_acceptance_poll_status,
+    direct_pane_can_continue_enter_resubmit, direct_pane_can_enter_existing_draft,
     direct_pane_fast_accept_on_processing, direct_pane_max_enter_resubmits,
-    direct_pane_not_dispatched, direct_pane_resubmit_proof_line,
-    direct_pane_submit_acceptance_budget, direct_pane_submit_acceptance_timeout,
-    direct_pane_submit_outcome, dispatch_inject_log_line, recent_lines_contain_trigger,
-    route_latency_message, route_latency_status, route_submit_issue_message,
-    route_submit_observation_message, route_trigger_visible_in_current_draft,
-    routed_trigger_payload_rejection,
+    direct_pane_resubmit_proof_line, direct_pane_submit_acceptance_budget,
+    direct_pane_submit_acceptance_timeout, direct_pane_submit_outcome, dispatch_inject_log_line,
+    recent_lines_contain_trigger, route_latency_message, route_latency_status,
+    route_submit_issue_message, route_submit_observation_message,
+    route_trigger_visible_in_current_draft, routed_trigger_payload_rejection,
 };
 use agent_doc_controller_io::route_snapshot::RoutePaneSnapshot;
-use agent_doc_harness::{HarnessConfig, pane_idle_dispatch_ready, protected_prompt_draft_preview};
+use agent_doc_harness::{HarnessConfig, protected_prompt_draft_preview};
 use agent_doc_hash::short_content_hash;
 use agent_doc_supervisor::lifecycle::recycle_interrupted_resubmit_should_wait;
 use agent_doc_tmux::pane_current_command_is_bare_shell;
@@ -45,9 +43,6 @@ pub struct DirectPaneAcceptance {
     /// Whether the trigger text was still visible in the pane when the window
     /// closed (only meaningful when `status == TimedOut`).
     pub trigger_visible: bool,
-    /// The trigger never landed in the composer; callers should resend the full
-    /// trigger instead of a bare Enter.
-    pub not_dispatched: bool,
     pub diagnostic_path: Option<PathBuf>,
 }
 
@@ -235,19 +230,10 @@ pub fn poll_direct_pane_acceptance(
                         capture_hash,
                         proof: None,
                     });
-                    let pane_idle_dispatch_ready = last_capture
-                        .as_ref()
-                        .map(|(_, _, _, content)| pane_idle_dispatch_ready(content, harness))
-                        .unwrap_or(false);
-                    let not_dispatched = direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
-                        saw_trigger_visible: poll_state.saw_trigger_visible(),
-                        pane_idle_dispatch_ready,
-                    });
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
                         trigger_visible: false,
-                        not_dispatched,
                         diagnostic_path: None,
                     };
                 }
@@ -278,7 +264,6 @@ pub fn poll_direct_pane_acceptance(
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
                         trigger_visible: false,
-                        not_dispatched: false,
                         diagnostic_path: None,
                     };
                 }
@@ -334,7 +319,6 @@ pub fn poll_direct_pane_acceptance(
         status: CommandDispatchStatus::TimedOut,
         elapsed,
         trigger_visible,
-        not_dispatched: false,
         diagnostic_path,
     }
 }
@@ -438,7 +422,6 @@ pub fn send_direct_pane_enter_resubmit_until_stable(
         status,
         elapsed,
         trigger_visible,
-        not_dispatched: false,
         diagnostic_path,
     }
 }
@@ -585,7 +568,6 @@ pub fn send_command_unchecked(
                 status: CommandDispatchStatus::TimedOut,
                 elapsed: Duration::ZERO,
                 trigger_visible: true,
-                not_dispatched: false,
                 diagnostic_path: existing_draft_diagnostic_path,
             },
         );
@@ -639,42 +621,10 @@ pub fn send_command_unchecked(
         );
     }
 
-    let mut full_resends = 0usize;
-    let max_full_resends = direct_pane_max_enter_resubmits();
-    while direct_pane_can_full_resend_not_landed(DirectPaneFullResendFacts {
-        not_dispatched: acceptance.not_dispatched,
-        attempts_sent: full_resends,
-        max_attempts: max_full_resends,
-    }) {
-        full_resends += 1;
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "route_redispatch_not_landed file={} pane={} attempt={} harness={}",
-                file.display(),
-                pane,
-                full_resends,
-                harness.binary
-            ),
-        );
-        let resent = send_command_once_unchecked(tmux, pane, file_path, harness)?;
-        acceptance = poll_direct_pane_acceptance(
-            tmux,
-            pane,
-            file,
-            harness,
-            &resent,
-            "direct_pane_redispatch_acceptance",
-        );
-    }
-
-    if acceptance.not_dispatched {
-        return Ok(CommandDispatchResult {
-            status: CommandDispatchStatus::TimedOut,
-            elapsed: acceptance.elapsed,
-            diagnostic_path: acceptance.diagnostic_path,
-        });
-    }
+    // The full trigger has crossed the tmux transport exactly once. If a fast
+    // harness consumes it between captures, absence is ambiguous and the outer
+    // dispatch-start proof owns the decision. Only an exact visible draft may
+    // receive bounded bare-Enter recovery below.
     if acceptance.status == CommandDispatchStatus::Accepted {
         return Ok(CommandDispatchResult {
             status: acceptance.status,

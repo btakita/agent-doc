@@ -177,7 +177,11 @@ visible in the composer before route sends anything, or if the visible
 absolute-path trigger, route takes the same bounded submit-key path first instead
 of appending another trigger; a later idle prompt below the trigger classifies it
 as stale scrollback, not active draft input. This recovery never sends Enter
-after the trigger disappears and remains capped on a genuinely stuck pane.
+after the trigger disappears and remains capped on a genuinely stuck pane. A
+successful full-trigger transport is an irreversible injection boundary: neither
+an empty capture nor missing dispatch-start proof establishes that it had no side
+effect, so route never sends the full payload again. Only the exact visible draft
+can authorize the bounded bare-`Enter` recovery described above.
 - Repeated dispatches are queue-first once a document actor is already busy.
   Route must first try to drain an open binary-owned closeout (`repair` /
   strict commit / `session-check`) so an idle console can accept the reroute

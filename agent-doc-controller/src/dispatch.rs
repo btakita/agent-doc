@@ -2540,16 +2540,6 @@ pub fn direct_pane_fast_accept_on_processing(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DirectPaneNotDispatchedFacts {
-    pub saw_trigger_visible: bool,
-    pub pane_idle_dispatch_ready: bool,
-}
-
-pub const fn direct_pane_not_dispatched(facts: DirectPaneNotDispatchedFacts) -> bool {
-    !facts.saw_trigger_visible && facts.pane_idle_dispatch_ready
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectPaneEnterResubmitFacts {
     pub profile_allows_pending_draft_enter_resubmit: bool,
     pub status: DirectPaneSubmitStatus,
@@ -2557,9 +2547,44 @@ pub struct DirectPaneEnterResubmitFacts {
 }
 
 pub fn direct_pane_needs_enter_resubmit(facts: DirectPaneEnterResubmitFacts) -> bool {
-    facts.profile_allows_pending_draft_enter_resubmit
-        && facts.status == DirectPaneSubmitStatus::TimedOut
+    direct_pane_post_send_action(DirectPanePostSendFacts {
+        profile_allows_pending_draft_enter_resubmit: facts
+            .profile_allows_pending_draft_enter_resubmit,
+        status: facts.status,
+        trigger_visible: facts.trigger_visible,
+    }) == DirectPanePostSendAction::SubmitVisibleDraft
+}
+
+/// Exhaustive post-send recovery vocabulary for direct-pane dispatch.
+///
+/// There is deliberately no full-payload resend action. Once the tmux transport
+/// accepts a full trigger, absence-only pane polling is ambiguous: a fast harness
+/// may consume the draft between captures. Recovery may submit a positively
+/// observed exact draft with bare Enter, or await the outer dispatch-start proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectPanePostSendAction {
+    AwaitDispatchProof,
+    SubmitVisibleDraft,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectPanePostSendFacts {
+    pub profile_allows_pending_draft_enter_resubmit: bool,
+    pub status: DirectPaneSubmitStatus,
+    pub trigger_visible: bool,
+}
+
+pub const fn direct_pane_post_send_action(
+    facts: DirectPanePostSendFacts,
+) -> DirectPanePostSendAction {
+    if facts.profile_allows_pending_draft_enter_resubmit
+        && matches!(facts.status, DirectPaneSubmitStatus::TimedOut)
         && facts.trigger_visible
+    {
+        DirectPanePostSendAction::SubmitVisibleDraft
+    } else {
+        DirectPanePostSendAction::AwaitDispatchProof
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2579,17 +2604,6 @@ pub fn direct_pane_can_continue_enter_resubmit(facts: DirectPaneEnterResubmitAtt
             status: facts.status,
             trigger_visible: facts.trigger_visible,
         })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DirectPaneFullResendFacts {
-    pub not_dispatched: bool,
-    pub attempts_sent: usize,
-    pub max_attempts: usize,
-}
-
-pub const fn direct_pane_can_full_resend_not_landed(facts: DirectPaneFullResendFacts) -> bool {
-    facts.not_dispatched && facts.attempts_sent < facts.max_attempts
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5088,22 +5102,6 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn direct_pane_not_dispatched_requires_empty_idle_never_seen_trigger() {
-        assert!(direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
-            saw_trigger_visible: false,
-            pane_idle_dispatch_ready: true,
-        }));
-        assert!(!direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
-            saw_trigger_visible: true,
-            pane_idle_dispatch_ready: true,
-        }));
-        assert!(!direct_pane_not_dispatched(DirectPaneNotDispatchedFacts {
-            saw_trigger_visible: false,
-            pane_idle_dispatch_ready: false,
-        }));
-    }
-
-    #[test]
     fn direct_pane_fast_accept_only_when_empty_unseen_and_busy() {
         // #run-agent-doc-latency: fast submit (never saw the trigger) landing on a
         // pane that is now running a turn is a proven dispatch — accept without the
@@ -5114,8 +5112,8 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         // We DID see the trigger drafted: the fast visible->gone transition path
         // already accepts it; this fast path only covers the never-seen case.
         assert!(!direct_pane_fast_accept_on_processing(false, true, true));
-        // Empty + idle (no busy cue): a possible no-op send — must NOT fast-accept;
-        // it still owes the empty-stable + non-dispatch detection.
+        // Empty + idle (no busy cue): a possible fast-consume or no-op send — it
+        // still owes the stable acceptance window and outer dispatch-start proof.
         assert!(!direct_pane_fast_accept_on_processing(false, false, false));
     }
 
@@ -5177,28 +5175,29 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     }
 
     #[test]
-    fn direct_pane_full_resend_not_landed_is_bounded() {
-        assert!(direct_pane_can_full_resend_not_landed(
-            DirectPaneFullResendFacts {
-                not_dispatched: true,
-                attempts_sent: 0,
-                max_attempts: 1,
-            }
-        ));
-        assert!(!direct_pane_can_full_resend_not_landed(
-            DirectPaneFullResendFacts {
-                not_dispatched: true,
-                attempts_sent: 1,
-                max_attempts: 1,
-            }
-        ));
-        assert!(!direct_pane_can_full_resend_not_landed(
-            DirectPaneFullResendFacts {
-                not_dispatched: false,
-                attempts_sent: 0,
-                max_attempts: 1,
-            }
-        ));
+    fn direct_pane_post_send_recovery_never_resends_the_full_payload() {
+        assert_eq!(
+            direct_pane_post_send_action(DirectPanePostSendFacts {
+                profile_allows_pending_draft_enter_resubmit: true,
+                status: DirectPaneSubmitStatus::TimedOut,
+                trigger_visible: true,
+            }),
+            DirectPanePostSendAction::SubmitVisibleDraft,
+        );
+        for (status, trigger_visible) in [
+            (DirectPaneSubmitStatus::Accepted, false),
+            (DirectPaneSubmitStatus::TimedOut, false),
+        ] {
+            assert_eq!(
+                direct_pane_post_send_action(DirectPanePostSendFacts {
+                    profile_allows_pending_draft_enter_resubmit: true,
+                    status,
+                    trigger_visible,
+                }),
+                DirectPanePostSendAction::AwaitDispatchProof,
+                "absence-only pane polling must never authorize another full trigger injection",
+            );
+        }
     }
 
     #[test]

@@ -16687,7 +16687,6 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "classify_dead_harness_shell_dispatch_block(",
         "RoutedTriggerPayloadFacts",
         "routed_trigger_payload_rejection(",
-        "direct_pane_can_full_resend_not_landed(",
         "agent_doc_controller_io::route_snapshot::preserve_route_pane_snapshot(",
         "agent_doc_tmux_io::send_submitted_text_for_harness_logged(",
         "agent_doc_controller_io::project_controller::supervisor_recycle_pending_for_file(",
@@ -16723,6 +16722,25 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             && route_dispatch_source.contains("log_route_submit_observation(")
             && route_dispatch_source.contains("log_route_latency("),
         "agent-doc-route-io dispatch should call focused direct-pane route IO directly"
+    );
+    let unchecked_start = route_direct_pane_dispatch_source
+        .find("pub fn send_command_unchecked(")
+        .expect("direct-pane unchecked dispatch boundary should exist");
+    let unchecked_end = route_direct_pane_dispatch_source[unchecked_start..]
+        .find("pub fn send_command_once_unchecked(")
+        .map(|offset| unchecked_start + offset)
+        .expect("single-attempt direct-pane boundary should follow unchecked dispatch");
+    let unchecked_body = &route_direct_pane_dispatch_source[unchecked_start..unchecked_end];
+    assert_eq!(
+        unchecked_body
+            .matches("send_command_once_unchecked(")
+            .count(),
+        1,
+        "one accepted direct-pane route may inject the full payload at most once"
+    );
+    assert!(
+        !unchecked_body.contains("route_redispatch_not_landed"),
+        "post-send absence must not authorize full-payload redispatch"
     );
     for required_snippet in [
         "pub enum DispatchActorState",
@@ -16822,6 +16840,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "pub fn direct_pane_max_enter_resubmits(",
         "pub struct DirectPaneEnterResubmitFacts",
         "pub fn direct_pane_needs_enter_resubmit(",
+        "pub enum DirectPanePostSendAction",
+        "pub struct DirectPanePostSendFacts",
+        "pub const fn direct_pane_post_send_action(",
         "pub struct DirectPaneEnterResubmitAttemptFacts",
         "pub fn direct_pane_can_continue_enter_resubmit(",
         "pub struct DirectPaneExistingDraftSubmitFacts",
@@ -24699,12 +24720,13 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && ipc_io_editor_target_source
                 .contains("pub fn live_editor_delivery_has_operator_authority(")
             && ipc_io_editor_target_source.contains("pub fn target_payload_to_live_editor(")
+            && ipc_io_editor_target_source.contains("pub fn target_payload_to_editor(")
             && ipc_io_editor_target_source.contains("agent_doc_plugin_owner::")
             && !ipc_io_editor_target_source.contains("agent_doc_debounce::live_buffer_snapshots(")
             && !ipc_io_editor_target_source
                 .contains("agent_doc_document_realtime::select_live_editor_delivery_target(")
             && ipc_io_editor_target_source.contains("agent_doc_ops_log_io::log_op("),
-        "agent-doc-ipc-io editor_target should target the live plugin-owner lease, not live-buffer sidecars"
+        "agent-doc-ipc-io editor_target should expose one captured legacy endpoint without treating live-buffer sidecars as endpoint authority"
     );
 
     let ipc_forensics_manifest =
@@ -24898,12 +24920,27 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-write-ipc-io/Cargo.toml")).unwrap();
     assert!(
         write_ipc_transport_source.contains("use agent_doc_ipc_protocol::{")
-            && write_ipc_transport_source
-                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor")
+            && write_ipc_transport_source.contains("target_payload_to_editor")
+            && write_ipc_transport_source.contains("decide_editor_delivery_admission")
+            && write_ipc_transport_source.contains("reliable_sync_editor_live_for_file")
             && write_ipc_transport_source.contains("FullContentIpcMode")
             && write_ipc_transport_source.contains("is_already_applied_receipt_error_message")
             && write_ipc_transport_source.contains("is_socket_receipt_timeout_error"),
         "write IPC transport should import remaining IPC protocol vocabulary from the focused protocol crate"
+    );
+    let admission_index = write_ipc_transport_source
+        .find("decide_editor_delivery_admission(EditorDeliveryAdmissionFacts")
+        .expect("write IPC must decide editor-delivery admission");
+    let socket_send_index = write_ipc_transport_source
+        .find("agent_doc_ipc_io::send_message(")
+        .expect("write IPC socket send should exist");
+    assert!(
+        admission_index < socket_send_index
+            && write_ipc_transport_source.contains("EditorDeliveryAdmission::Detached")
+            && write_ipc_transport_source
+                .contains("EditorDeliveryAdmission::RefuseAuthorityMismatch")
+            && write_ipc_transport_source.contains("ipc_editor_delivery_refused"),
+        "write IPC must fail closed on reliable-open-set versus legacy-endpoint disagreement before payload delivery"
     );
     assert!(
         write_source.contains("#[cfg(test)]\nmod ipc;")

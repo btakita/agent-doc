@@ -1,10 +1,12 @@
 use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -104,6 +106,139 @@ fn seed_reliable_sync_open(doc: &Path, tag: &str) {
         Some(&serde_json::to_string(&ops).unwrap()),
     )
     .expect("seed durable reliable-sync Open fact");
+}
+
+fn seed_legacy_editor_endpoint(doc: &Path, editor_id: &str) {
+    assert!(
+        agent_doc_plugin_owner::try_acquire_plugin_owner(
+            doc.to_str().unwrap(),
+            editor_id,
+            std::process::id(),
+        ),
+        "test setup should acquire a live file-IPC endpoint"
+    );
+}
+
+fn start_project_controller(root: &Path) -> Child {
+    let mut controller = ProcessCommand::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .args([
+            "controller",
+            "serve",
+            "--project-root",
+            root.to_str().unwrap(),
+            "--launch-mode",
+            "managed",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start project controller subprocess");
+    for _ in 0..100 {
+        if agent_doc_controller_io::project_controller::status(root)
+            .is_ok_and(|status| status.active)
+        {
+            return controller;
+        }
+        if controller.try_wait().ok().flatten().is_some() {
+            panic!("project controller exited before becoming active");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = controller.kill();
+    let _ = controller.wait();
+    panic!("project controller did not start");
+}
+
+fn stop_project_controller(root: &Path, controller: &mut Child) {
+    let shutdown = agent_doc_controller_io::project_controller::run_shutdown(Some(root));
+    for _ in 0..100 {
+        if controller.try_wait().ok().flatten().is_some() {
+            assert!(
+                shutdown.is_ok(),
+                "project controller shutdown failed: {shutdown:?}"
+            );
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let _ = controller.kill();
+    let _ = controller.wait();
+    assert!(
+        shutdown.is_ok(),
+        "project controller shutdown failed: {shutdown:?}"
+    );
+}
+
+struct ProjectControllerReplica {
+    project_root: PathBuf,
+    identity: String,
+    client_id: u64,
+    bootstrap: Vec<u8>,
+}
+
+fn register_editor_replica_via_project_controller(doc: &Path) -> ProjectControllerReplica {
+    let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
+    let identity = format!("{TEST_EDITOR_ID}:{}", doc.display());
+    let registered = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        &project_root,
+        doc,
+        serde_json::json!({
+            "method": "replica_register",
+            "identity": identity,
+            "source": "live_typing_ipc_replay_test"
+        }),
+    )
+    .expect("register test editor through project controller");
+    let client_id = registered
+        .get("client_id")
+        .and_then(Value::as_u64)
+        .expect("project controller replica registration should return client_id");
+    let bootstrap = BASE64_STANDARD
+        .decode(
+            registered
+                .get("bootstrap_b64")
+                .and_then(Value::as_str)
+                .expect("project controller replica registration should return bootstrap_b64"),
+        )
+        .expect("decode project controller replica bootstrap");
+    ProjectControllerReplica {
+        project_root,
+        identity,
+        client_id,
+        bootstrap,
+    }
+}
+
+fn publish_editor_text_via_project_controller(
+    doc: &Path,
+    registered: &ProjectControllerReplica,
+    content: &str,
+) {
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
+        registered.client_id,
+        &registered.bootstrap,
+    )
+    .expect("decode test editor relay bootstrap");
+    let replica_text = replica.text();
+    replica.apply_local_edit(0, replica_text.len() as u32, content);
+    let updated = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+        &registered.project_root,
+        doc,
+        serde_json::json!({
+            "method": "replica_update",
+            "identity": registered.identity,
+            "source": "live_typing_ipc_replay_test",
+            "update_b64": BASE64_STANDARD.encode(replica.encode_state())
+        }),
+    )
+    .expect("publish test editor update through project controller");
+    assert!(
+        updated
+            .get("canonical_len")
+            .and_then(Value::as_u64)
+            .is_some(),
+        "project controller should accept test editor update: {updated}"
+    );
 }
 
 fn init_git_repo(root: &Path, tracked: &Path) {
@@ -390,8 +525,11 @@ fn patch_jsons(project: &ReplayProject) -> Vec<PathBuf> {
 #[test]
 fn socket_ipc_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
+    seed_legacy_editor_endpoint(&project.doc, TEST_EDITOR_ID);
     seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
+    let mut controller = start_project_controller(project.root());
+    let controller_replica = register_editor_replica_via_project_controller(&project.doc);
 
     let seen_payload = Arc::new(Mutex::new(None::<Value>));
     let listener_root = project.root().to_path_buf();
@@ -405,6 +543,11 @@ fn socket_ipc_replays_live_typing_during_finalize() {
             };
             let after_apply = apply_payload_to_file(&payload, &doc_for_listener)?;
             record_operator_buffer(&doc_for_listener, &after_apply);
+            publish_editor_text_via_project_controller(
+                &doc_for_listener,
+                &controller_replica,
+                &after_apply,
+            );
             agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                 &doc_for_listener,
                 &id,
@@ -428,10 +571,24 @@ fn socket_ipc_replays_live_typing_during_finalize() {
         "fake socket listener did not start"
     );
 
-    run_finalize(&project, "socket live typing replay", 0, &[]);
+    let output = agent_doc()
+        .current_dir(project.root())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
+        .args([
+            "finalize",
+            project.doc.to_str().unwrap(),
+            "--baseline-file",
+            project.baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(response_text("socket live typing replay"))
+        .output()
+        .unwrap();
 
     let _ = fs::remove_file(agent_doc_ipc_io::socket_path(project.root()));
     drop(server);
+    stop_project_controller(project.root(), &mut controller);
+    assert!(output.status.success(), "finalize failed: {output:?}");
 
     let payload = seen_payload
         .lock()
@@ -449,8 +606,11 @@ fn socket_ipc_replays_live_typing_during_finalize() {
 #[test]
 fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
+    seed_legacy_editor_endpoint(&project.doc, TEST_EDITOR_ID);
     seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
+    let mut controller = start_project_controller(project.root());
+    let controller_replica = register_editor_replica_via_project_controller(&project.doc);
 
     let patches_dir = project.patches_dir();
     let doc_for_watcher = project.doc.clone();
@@ -475,6 +635,11 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
                 };
                 let after_apply = apply_payload_to_file(&payload, &doc_for_watcher).unwrap();
                 record_operator_buffer(&doc_for_watcher, &after_apply);
+                publish_editor_text_via_project_controller(
+                    &doc_for_watcher,
+                    &controller_replica,
+                    &after_apply,
+                );
                 agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                     &doc_for_watcher,
                     &id,
@@ -491,7 +656,21 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
         false
     });
 
-    run_finalize(&project, "file IPC live typing replay", 0, &[]);
+    let output = agent_doc()
+        .current_dir(project.root())
+        .env("AGENT_DOC_FILE_IPC_TIMEOUT_MS", "8000")
+        .args([
+            "finalize",
+            project.doc.to_str().unwrap(),
+            "--baseline-file",
+            project.baseline.to_str().unwrap(),
+            "--stream",
+        ])
+        .write_stdin(response_text("file IPC live typing replay"))
+        .output()
+        .unwrap();
+    stop_project_controller(project.root(), &mut controller);
+    assert!(output.status.success(), "finalize failed: {output:?}");
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
     let receipt_content = seen_receipt

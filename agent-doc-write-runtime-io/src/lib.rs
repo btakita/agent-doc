@@ -2171,6 +2171,7 @@ pub(crate) use run_entry::*;
 
 #[cfg(test)]
 mod ipc;
+#[allow(unused_imports)]
 #[cfg(test)]
 pub(crate) use ipc::*;
 // ---------------------------------------------------------------------------
@@ -2316,6 +2317,33 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_ipc(
+        file: &Path,
+        patches: &[agent_doc_template::PatchBlock],
+        unmatched: &str,
+        frontmatter_yaml: Option<&str>,
+        baseline: Option<&str>,
+        content_ours: Option<&str>,
+        normalize_prefix_lines: Option<&[String]>,
+        reuse_patch_id: Option<&str>,
+    ) -> Result<agent_doc_write_ipc_io::IpcResult> {
+        agent_doc_test_support::seed_live_plugin_owner_lease_for_editor(
+            file.to_str().unwrap(),
+            "visible-write-test-editor",
+        );
+        crate::ipc::try_ipc(
+            file,
+            patches,
+            unmatched,
+            frontmatter_yaml,
+            baseline,
+            content_ours,
+            normalize_prefix_lines,
+            reuse_patch_id,
+        )
+    }
 
     struct NoopRepairReplayWriteEffects;
 
@@ -2549,7 +2577,7 @@ mod tests {
     }
 
     #[test]
-    fn best_effort_session_commit_fails_closed_when_live_buffer_is_ahead_of_disk() {
+    fn best_effort_session_commit_ignores_unproven_live_buffer_ahead_of_disk() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -2599,22 +2627,17 @@ mod tests {
             &editor_visible,
             Some("jetbrains:test"),
         );
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
-
-        let err = finalize_commit(&doc, CommitMode::BestEffort, false)
-            .expect_err("session best-effort commit must fail closed on active editor authority");
-        let error = format!("{err:#}");
-        assert!(
-            error.contains("resolve current document")
-                || (error.contains("editor is the current authority")
-                    && error.contains("disk is a non-authoritative replica")),
-            "error should identify the unavailable canonical editor projection:\n{error}"
+        agent_doc_test_support::seed_live_plugin_owner_lease_without_reliable_sync(
+            doc.to_str().unwrap(),
+            "jetbrains:test",
         );
 
-        // The lifecycle sidecar can independently reconcile the already-committed
-        // pre-test exchange to `Committed`; the authority invariant is that the
-        // editor-only mutation never reaches disk or Git when canonical relay
-        // convergence is unavailable.
+        finalize_commit(&doc, CommitMode::BestEffort, false)
+            .expect("an unproven legacy-only buffer must not override committed disk state");
+
+        // The legacy-only endpoint intentionally disagrees with durable reliable-sync
+        // liveness, so its buffer is not canonical. The authority invariant is that
+        // the unproven editor-only mutation never reaches disk or Git.
         assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
         let git_content = std::process::Command::new("git")
             .current_dir(root)
@@ -2623,15 +2646,6 @@ mod tests {
             .unwrap();
         assert!(git_content.status.success());
         assert_eq!(String::from_utf8(git_content.stdout).unwrap(), committed);
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            (log.contains("commit_editor_authority_unavailable file=")
-                && log.contains("reason=relay_convergence_pending"))
-                || (log.contains("crdt_current_text_unavailable file=")
-                    && log.contains("reason=missing_replica")),
-            "blocked editor-authority commit should be logged:\n{log}"
-        );
     }
 
     /// `#codefence-strip`: detection-log regression — a write that drops a
@@ -3808,8 +3822,8 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            before,
-            "relay-backed visible-write content may remain ahead of the non-authoritative disk projection"
+            visible_write_content,
+            "proven relay-backed visible-write content should replace the stale disk projection"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -3817,9 +3831,9 @@ mod tests {
             "visible-write proof must bypass the unacknowledged live-edit fallback:\n{log}"
         );
         assert!(
-            log.contains("visible_write_disk_write_through_blocked")
-                && log.contains("reason=stale_source_buffer"),
-            "visible-write disk projection deferral should be auditable:\n{log}"
+            log.contains("visible_write_disk_write_through file=")
+                && !log.contains("visible_write_disk_write_through_blocked"),
+            "visible-write disk projection should be auditable:\n{log}"
         );
     }
     #[test]

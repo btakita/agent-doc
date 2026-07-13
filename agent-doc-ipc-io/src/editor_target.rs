@@ -36,7 +36,17 @@ pub fn target_payload_to_live_editor(
     transport: &str,
 ) -> Option<String> {
     let editor_id = live_editor_delivery_target(file)?;
-    payload["editor_id"] = serde_json::Value::String(editor_id.clone());
+    target_payload_to_editor(file, payload, transport, &editor_id);
+    Some(editor_id)
+}
+
+pub fn target_payload_to_editor(
+    file: &Path,
+    payload: &mut serde_json::Value,
+    transport: &str,
+    editor_id: &str,
+) {
+    payload["editor_id"] = serde_json::Value::String(editor_id.to_string());
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -46,7 +56,6 @@ pub fn target_payload_to_live_editor(
             editor_id
         ),
     );
-    Some(editor_id)
 }
 
 #[cfg(test)]

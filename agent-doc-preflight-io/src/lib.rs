@@ -1339,6 +1339,27 @@ fn run_pending_maintenance_with_options(
             let deferable_status_error = err_message.contains("failed to resolve editor authority")
                 || err_message.contains("editor authority unavailable")
                 || err_message.contains("editor convergence did not complete");
+            // #realtime-maintenance-defer: pending maintenance (mirror reap,
+            // dedupe, backfill, status-marker reconcile) is idempotent
+            // bookkeeping — it is re-derived from scratch every preflight. When
+            // the visible write cannot land because the realtime editor buffer
+            // was resolved but is mid-reconcile (the typing debounce has not
+            // settled, or the last committed response is still being reconciled
+            // back into the live buffer), that drift belongs to the realtime
+            // document model, NOT to preflight. Failing the whole preflight here
+            // strands the operator even though they are not typing. Defer the
+            // maintenance write to a later cycle and continue so the diff /
+            // realtime-steering feed still reaches the agent this cycle; the reap
+            // re-applies once the buffer is idle.
+            //
+            // This is deliberately NARROWER than `deferable_status_error`: an
+            // *unresolvable* editor authority (unreachable relay/listener) must
+            // still fail closed so a closeout never writes behind an active
+            // listener (see `force_disk_closeout_pending_maintenance_bypasses_active_listener`).
+            // Realtime drift means the editor WAS resolved and is simply busy.
+            let deferable_realtime_drift = err_message
+                .contains("document changed after the response merge was computed")
+                || err_message.contains("editor typing did not settle");
             if stale_supervisor_marker_mutated && !stale_marker_before.2 && deferable_status_error {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1357,6 +1378,27 @@ fn run_pending_maintenance_with_options(
                 snapshot_content = stale_marker_before.1;
                 mutated = stale_marker_before.2;
                 snapshot_mutated = stale_marker_before.3;
+            } else if deferable_realtime_drift {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "pending_maintenance_deferred_realtime_buffer_busy file={} source=pending_maintenance error={}",
+                        file.display(),
+                        err_message.replace('\n', " ")
+                    ),
+                );
+                eprintln!(
+                    "[preflight] pending: deferred maintenance write for {} (realtime buffer busy; not aborting preflight): {}",
+                    file.display(),
+                    err
+                );
+                // Revert to the pre-maintenance baseline so nothing is
+                // half-persisted: the visible write failed before touching the
+                // file, and skipping the snapshot save keeps the two in sync.
+                current_content = content.clone();
+                snapshot_content = snapshot_at_start.clone();
+                mutated = false;
+                snapshot_mutated = false;
             } else {
                 return Err(err);
             }
@@ -4523,10 +4565,29 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
     struct GuardFailingPreflightMaintenanceWriteEffects {
         authority_checks: std::cell::Cell<usize>,
         converge_calls: std::cell::Cell<usize>,
+        visible_write_error: String,
+    }
+
+    impl Default for GuardFailingPreflightMaintenanceWriteEffects {
+        fn default() -> Self {
+            Self {
+                authority_checks: std::cell::Cell::new(0),
+                converge_calls: std::cell::Cell::new(0),
+                visible_write_error: "failed to resolve editor authority for test document".to_string(),
+            }
+        }
+    }
+
+    impl GuardFailingPreflightMaintenanceWriteEffects {
+        fn with_error(message: &str) -> Self {
+            Self {
+                visible_write_error: message.to_string(),
+                ..Self::default()
+            }
+        }
     }
 
     impl PreflightMaintenanceWriteEffects for GuardFailingPreflightMaintenanceWriteEffects {
@@ -4539,7 +4600,7 @@ mod tests {
             _expected_current: &str,
         ) -> Result<()> {
             self.authority_checks.set(self.authority_checks.get() + 1);
-            anyhow::bail!("failed to resolve editor authority for test document")
+            anyhow::bail!("{}", self.visible_write_error)
         }
 
         fn converge_or_disk_write(
@@ -7823,6 +7884,58 @@ mod tests {
         assert_eq!(
             snapshot_after, content,
             "deferred status clear must not desync the snapshot from the file"
+        );
+    }
+
+    // #realtime-maintenance-defer: when the visible maintenance write cannot land
+    // because the realtime editor buffer is mid-reconcile (the operator is NOT
+    // typing — the last committed response is still being reconciled back into the
+    // live buffer), preflight must defer the idempotent maintenance write to a
+    // later cycle instead of aborting the whole preflight. Mirrors the
+    // stale-supervisor defer above but exercises the broader realtime-drift error
+    // family and a mirror-reap mutation.
+    #[test]
+    fn pending_maintenance_defers_mirror_reap_when_realtime_buffer_drifted() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#reap1] Already-done mirror\n",
+            "- [ ] [#keep1] Keep me\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## Done\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#reap1] Already-done mirror\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        let effects = GuardFailingPreflightMaintenanceWriteEffects::with_error(
+            "visible document write for session.md deferred: document changed after the response merge was computed; retry after typing stops",
+        );
+
+        // Must NOT return Err — the realtime model owns the buffer drift, so
+        // preflight continues and the reap re-applies once the buffer is idle.
+        run_pending_maintenance(&doc, &effects)
+            .expect("realtime buffer drift must defer maintenance, not abort preflight");
+
+        assert!(effects.authority_checks.get() >= 1);
+        assert_eq!(
+            effects.converge_calls.get(),
+            0,
+            "deferred guard failure must not fall through to an unproven write"
+        );
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            file_after, content,
+            "deferred mirror reap must leave the working-tree file untouched"
+        );
+        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            snapshot_after, content,
+            "deferred mirror reap must not desync the snapshot from the file"
         );
     }
 

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.96
+
+- **The printed preserve-session baseline recovery now actually unblocks retained-response replay.** `reset --from-current --preserve-session` continues to preserve the response payload, capture state, cycle, and visible document, but explicitly rebases the active capture's file/snapshot hashes to the operator-approved current markdown. A following `write --commit` no longer loops forever on the same stale-baseline refusal.
+
 ## 0.34.95
 
 - **Assistant responses finalize as idempotent semantic CRDT cells instead of fragile whole-buffer/visible-receipt writes.** The controller applies the body-aware cell to the apply-time canonical, durably checkpoints its CRDT projection, and records `ResponseCellAdded` as the realtime backbone's `WriteApplied` receipt. Closeout keeps the inbound live-editor consistent cut while allowing the proven cell to commit before asynchronous outbound editor acknowledgement.

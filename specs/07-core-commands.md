@@ -104,7 +104,7 @@ Two modes:
 
 `agent-doc reset <FILE>` clears the saved session id and deletes the snapshot plus CRDT state for the document, including both `.yrs` and `.overlay.yrs` sidecars. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds snapshot, legacy CRDT, and overlay CRDT sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
 
-`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, legacy CRDT state, overlay CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and capture history untouched.
+`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, legacy CRDT state, overlay CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and captured response payload/state intact. When a response capture is active, the explicit reset rebases only its replay file/snapshot hashes to the operator-approved current markdown so the retained response can be replayed instead of repeating the same baseline refusal.
 
 ## clean
 

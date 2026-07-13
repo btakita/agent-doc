@@ -7,8 +7,10 @@
 //!   2. Deletes the snapshot file via `agent_doc_snapshot_io::delete`, or with `--from-current` saves the current markdown as the snapshot.
 //!   3. Deletes the CRDT state file via `agent_doc_snapshot_io::delete_crdt`, or with `--from-current` rebuilds it from the current markdown.
 //! - `--from-current --preserve-session` is non-destructive: it leaves the
-//!   markdown, resume pointer, cycle state, and capture chain untouched while
-//!   refreshing snapshot/CRDT/baseline sidecars from the visible file.
+//!   markdown, resume pointer, cycle state, and captured response payload/state
+//!   untouched while refreshing snapshot/CRDT/baseline sidecars from the visible
+//!   file. If a response capture is active, its replay baseline hashes are
+//!   explicitly rebased to that operator-approved visible state.
 //! - The `session` frontmatter field (routing key) is intentionally preserved; only `resume` (conversation continuity pointer) is cleared.
 //! - After reset, the next `agent-doc submit` or `agent-doc stream` starts a fresh agent conversation.
 //!
@@ -85,6 +87,7 @@ pub fn run(
             }
         }
         rebuild_sidecars_from_current(file, &content, true)?;
+        rebase_active_capture_after_preserve_session_reset(file, &content)?;
         if force_disk
             && let Some(outcome) =
                 agent_doc_crdt_relay_io::apply_disk_change_for_file(file, &content)?
@@ -182,6 +185,23 @@ fn save_baseline_from_current(file: &Path, content: &str) -> Result<()> {
         tempfile::NamedTempFile::new_in(baseline_path.parent().unwrap_or_else(|| Path::new(".")))?;
     tmp.write_all(content.as_bytes())?;
     tmp.persist(&baseline_path).map_err(|e| e.error)?;
+    Ok(())
+}
+
+fn rebase_active_capture_after_preserve_session_reset(file: &Path, content: &str) -> Result<()> {
+    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
+        return Ok(());
+    };
+    let file_hash = agent_doc_capture_io::replay_file_hash(content);
+    let snapshot_hash = agent_doc_hash::content_hash(content);
+    agent_doc_capture_io::refresh_replay_baseline_for_recovery(
+        file,
+        &capture,
+        &file_hash,
+        Some(&snapshot_hash),
+        "capture_replay_baseline_rebased_after_preserve_session_reset",
+        "explicit preserve-session reset accepted the current visible document",
+    )?;
     Ok(())
 }
 
@@ -314,6 +334,52 @@ mod tests {
             std::fs::read_to_string(&capture_path).unwrap(),
             capture_state
         );
+    }
+
+    #[test]
+    fn preserve_session_from_current_rebases_active_capture_for_replay() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/crdt")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/baselines")).unwrap();
+        let doc = dir.path().join("session.md");
+        let captured_baseline = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n❯ original prompt\n<!-- /agent:exchange -->\n";
+        let accepted_current = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n<!-- agent:exchange patch=append -->\n❯ original prompt\n\n❯ later operator prompt\n<!-- /agent:exchange -->\n";
+        let response = "### Re: original prompt — gpt-5\n\nRetained response.";
+        std::fs::write(&doc, captured_baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, captured_baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(captured_baseline),
+            Some(captured_baseline),
+        )
+        .unwrap();
+        let captured = agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            response,
+            captured_baseline,
+        )
+        .unwrap();
+
+        std::fs::write(&doc, accepted_current).unwrap();
+        run(&doc, true, true, false).unwrap();
+
+        let rebased = agent_doc_capture_io::load_active(&doc)
+            .unwrap()
+            .expect("active capture remains available");
+        assert_eq!(rebased.capture_id, captured.capture_id);
+        assert_eq!(rebased.response_body, captured.response_body);
+        assert_eq!(rebased.state, captured.state);
+        assert_eq!(
+            rebased.file_hash.as_deref(),
+            Some(agent_doc_capture_io::replay_file_hash(accepted_current).as_str())
+        );
+        assert_eq!(
+            rebased.snapshot_hash.as_deref(),
+            Some(agent_doc_hash::content_hash(accepted_current).as_str())
+        );
+        agent_doc_capture_io::validate_replay(&doc, &rebased)
+            .expect("the printed preserve-session recovery must make replay admissible");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -38,7 +38,26 @@ done
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): gracefully handle mid-turn steering + fix the JB read-access c...
-<!-- agent:boundary:7e003f95 -->
+- Plan **Phase 6** + AGENTS.md `#realtime-steering-verbatim` rewritten: steering is a concurrent observable set; the durable graph target is a lazily **reactive observable set**, explicitly **not** a `QueueCell`.
+- `session-check`'s `detect_unstarted_prompt_bearing_diff` now surfaces that aggregate (`realtime_steering_set_since_turn_baseline`), falling back to the single verbatim when only one directive is present.
+- `baseline_comparison::RealtimeSteeringSet` + `realtime_steering_all[_between]` — aggregate all concurrent directives; `verbatim_aggregate()` concatenates them verbatim with a count header (`"N concurrent operator steering directives … look for patterns across them"`).
+- `agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff` — returns *every* still-unstarted directive (oldest-first). `first_*` is now defined as its head, so the single/multi paths never disagree on answered-prompt suppression.
+❯ /goal Fix all contributing factors to JB `Run Agent Doc` on arron-fray.md submitted a flood of `agent-doc tasks/recruit/arron-fray.md` prompts.
+
+Also the first JB `Run Agent Doc` stalls...but the 2nd completes...with the flood. 
+❯ #spec-test-build-install-commit-push
+### Re: JetBrains Run Agent Doc prompt flood and previous-response replay — gpt-5
+
+Fixed all reproduced contributing factors and released the implementation as agent-doc 0.34.91 / JetBrains plugin 0.2.244.
+
+- **Prompt flood:** direct-pane routing had treated a vanished prompt as a failed acceptance signal, so it resent the entire `agent-doc tasks/recruit/arron-fray.md` payload on retry attempts. A successful tmux send is now an irreversible injection: the full payload is sent once, and the bounded acceptance fallback may send only a bare Enter when the exact draft is still visibly present.
+- **Previous response inserted during preflight:** repair could target a stale JetBrains editor endpoint even after reliable editor state reported it absent. Legacy socket/file delivery now requires reliable liveness and the captured legacy endpoint to agree before materializing a payload. Both absent selects detached/disk authority; disagreement refuses delivery and keeps the captured response retryable.
+- **Coverage and contracts:** added controller, route, IPC admission, live socket/file replay, async typing, and architecture regressions; updated the actor/realtime specifications and release ledger.
+- **Verification:** the full `make check` passed with 7,527 tests (artifact `tart-a78df67bec`). Focused prompt-routing, endpoint-admission, live IPC, typing, and architecture suites also passed.
+- **Build/install:** installed CLI/native library 0.34.91 and JetBrains plugin 0.2.244. IntelliJ IDEA must be restarted to activate the new plugin; the required one-click operator verification is tracked in the backlog.
+- **Commits:** agent-doc `d488d1ec7edddf6e8daea6e6581056add2af29c3`; superproject pointer `b17652fc0`.
+- **Release:** pushed agent-doc `main` and tag `v0.34.91`. The tag-triggered Release workflow is running. Manual crates.io publication advanced through the ordered workspace until crates.io's one-existing-crate-update-per-minute limit made the remaining serial publication unsuitable for this interactive closeout.
+<!-- agent:boundary:6a813c01 -->
 <!-- /agent:exchange -->
 ## Queue
 

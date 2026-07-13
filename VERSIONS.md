@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.95
+
+- **Assistant responses finalize as idempotent semantic CRDT cells instead of fragile whole-buffer/visible-receipt writes.** The controller applies the body-aware cell to the apply-time canonical, durably checkpoints its CRDT projection, and records `ResponseCellAdded` as the realtime backbone's `WriteApplied` receipt. Closeout keeps the inbound live-editor consistent cut while allowing the proven cell to commit before asynchronous outbound editor acknowledgement.
+- **JetBrains plugin (`0.2.246`) coalesces repeated `Run Agent Doc` clicks and recovers stale boot-state routing.** A timed-out startup classification receives one bounded retry, while an authoritative `Ready` actor with a real busy blocker falls through to normal queue handling instead of remaining falsely “still booting.”
+- **Delayed direct-pane resubmission no longer injects into an exited harness.** Bare-shell panes and panes without a recognizable Codex/Claude surface preserve the drafted trigger and refuse the late `Enter`, preventing reopen thrash and accidental shell execution.
+
 ## 0.34.94
 
 - **CPC-owned commits read the already-converged CRDT canonical in-process instead of repeatedly requesting it back through the controller socket (`#cpc-commit-local-read`).** The `commit_document` handler crosses the commit barrier before entering commit-io, so each current-document read can safely use the local relay and retain the normal authority resolver only as a degraded-state fallback. This removes the cumulative controller queue/timeout cost that made JetBrains Compact Exchange appear to spend 20–30 seconds in git even though the selective `hash-object`/`update-index` transaction itself was fast.

@@ -1067,6 +1067,21 @@ pub struct CpcRelayWrite {
     pub delivery_converged: bool,
 }
 
+/// Result of one body-aware assistant response cell added to the canonical
+/// realtime document. `content` is the exact post-operation canonical projection
+/// used by snapshot/commit materialization; it is not a second write request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseCellRelayWrite {
+    pub applied: bool,
+    pub cell_id: String,
+    pub content: String,
+    pub content_hash: String,
+    pub update_bytes: usize,
+    pub targets: usize,
+    pub live_editors: usize,
+    pub delivery_converged: bool,
+}
+
 /// Pending updates plus delivery state for one editor replica.
 #[derive(Debug, Clone)]
 pub struct ReplicaPull {
@@ -1383,6 +1398,109 @@ fn apply_cpc_write_on_hub(
         live_editors: hub.live_count(),
         delivery_converged: hub.delivery_converged(),
     })
+}
+
+fn apply_response_cell_on_hub(
+    hub: &mut RelayHub,
+    file: &Path,
+    authority: CrdtAuthority,
+    response: &str,
+) -> Result<ResponseCellRelayWrite> {
+    let ready = hub.commit_barrier_under_authority(authority)?;
+    if !ready {
+        anyhow::bail!(
+            "response cell add refused for {}: editor_sync_pending",
+            file.display()
+        );
+    }
+    let canonical = hub.canonical_text();
+    let outcome = agent_doc_merge::response_cell::add_response_cell(&canonical, response)?;
+    let (update_bytes, targets) = if outcome.applied {
+        let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
+        (packet.update.len(), packet.targets.len())
+    } else {
+        (0, 0)
+    };
+    // The state-backbone fact is appended only after this operation returns, so
+    // make the CRDT mutation restart-durable first.  Persisting while the hub is
+    // locked also prevents two concurrent response cells from writing recovery
+    // projections out of canonical order.
+    agent_doc_snapshot_io::save_crdt(file, &hub.projection_bytes())?;
+    Ok(ResponseCellRelayWrite {
+        applied: outcome.applied,
+        cell_id: outcome.cell_id,
+        content_hash: agent_doc_hash::content_hash(&outcome.content),
+        content: outcome.content,
+        update_bytes,
+        targets,
+        live_editors: hub.live_count(),
+        delivery_converged: hub.delivery_converged(),
+    })
+}
+
+/// Apply one idempotent assistant-response cell directly to the controller's
+/// canonical CRDT document. The semantic operation is evaluated while the hub is
+/// locked and after its inbound barrier, so concurrent operator text is part of
+/// the apply-time canonical instead of a stale caller-provided baseline.
+pub fn add_response_cell_for_file(
+    file: &Path,
+    response: &str,
+    source: &str,
+) -> Result<Option<ResponseCellRelayWrite>> {
+    let authority = authority_for_file(&file.display().to_string());
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+
+    let Some(result) = with_existing_hub(file, |hub| {
+        apply_response_cell_on_hub(hub, file, authority, response)
+    })?
+    else {
+        // A durable projection can lag an attached editor that has not yet
+        // re-registered after controller restart. Reconstructing the response
+        // operation from that projection could drop live typing or document
+        // components. Defer to the existing IPC retry path until the live
+        // canonical relay model is present.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_response_cell_add_deferred file={} source={} reason=missing_live_canonical_model recovery=wait_for_editor_replica",
+                file.display(),
+                source,
+            ),
+        );
+        return Ok(None);
+    };
+    let result = result?;
+
+    if result.targets > 0
+        && result.update_bytes > 0
+        && let Err(err) = signal_crdt_replica_event(file, "response_cell_add", result.targets)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_event_signal_failed file={} reason=response_cell_add error={err}",
+                file.display()
+            ),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_response_cell_add file={} source={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            file.display(),
+            source,
+            result.cell_id,
+            result.applied,
+            result.content_hash,
+            result.update_bytes,
+            result.targets,
+            result.live_editors,
+            result.delivery_converged,
+        ),
+    );
+    Ok(Some(result))
 }
 
 pub fn apply_cpc_write_for_file(
@@ -2036,6 +2154,27 @@ pub fn commit_barrier_for_file(file: &Path) -> bool {
 /// [`CrdtAuthority`] (e.g. from a backbone projection) should use this to avoid a
 /// second authority hydration/read.
 pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthority) -> bool {
+    commit_barrier_for_file_with_authority_and_delivery(file, authority, true)
+}
+
+/// Commit barrier for a semantic response cell whose CRDT projection and
+/// `ResponseCellAdded` fact are already durable in the realtime backbone.
+///
+/// The canonical replica must still cover every live editor operation before
+/// this returns `true`. Outbound canonical-to-editor acknowledgement is not part
+/// of this barrier: the durable response cell can be materialized and committed
+/// while its already-queued editor delivery completes asynchronously.
+pub fn commit_barrier_for_durable_response_cell(file: &Path) -> bool {
+    let file_str = file.display().to_string();
+    let authority = authority_for_file(&file_str);
+    commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
+}
+
+fn commit_barrier_for_file_with_authority_and_delivery(
+    file: &Path,
+    authority: CrdtAuthority,
+    require_delivery_convergence: bool,
+) -> bool {
     if !authority.editor_attached() {
         // Detached / headless: the CRDT is ephemeral, git is the source of truth,
         // and there are no live editor replicas to flush. The barrier is trivially
@@ -2076,14 +2215,15 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_converged={} live_editors={}",
+                    "crdt_commit_barrier file={} authority=multi_replica ready={} delivery_required={} delivery_converged={} live_editors={}",
                     file.display(),
                     ready,
+                    require_delivery_convergence,
                     delivery_converged,
                     live_editors,
                 ),
             );
-            ready && delivery_converged
+            ready && (!require_delivery_convergence || delivery_converged)
         }
         Ok(Some(Err(e))) => {
             agent_doc_ops_log_io::log_op(
@@ -2707,6 +2847,54 @@ mod tests {
                 pid: pid.into(),
                 tag: format!("test-editor-{pid}:{file}"),
             }]);
+    }
+
+    #[test]
+    fn durable_response_cell_can_commit_before_outbound_editor_ack() {
+        let (_dir, doc) = temp_doc("durable-response-cell.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n❯ operator prompt\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n",
+        )
+        .unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&doc, "intellij:durable-response-cell")
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        let response = "### Re: operator prompt — gpt-5\n\nDone.";
+        let first = add_response_cell_for_file(&doc, response, "test")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+        assert!(first.applied);
+        assert_eq!(first.live_editors, 1);
+        assert_eq!(first.targets, 1);
+        assert!(!first.delivery_converged);
+        assert!(first.content.contains(response));
+
+        assert!(
+            !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "generic writes still require outbound editor acknowledgement"
+        );
+        assert!(
+            commit_barrier_for_durable_response_cell(&doc),
+            "a state-backbone-proven response cell only requires the inbound consistent cut"
+        );
+
+        let projection = agent_doc_snapshot_io::load_crdt(&doc)
+            .unwrap()
+            .expect("response add should durably checkpoint the canonical projection");
+        let recovered =
+            RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &projection).unwrap();
+        assert!(recovered.canonical_text().contains(response));
+
+        let replay = add_response_cell_for_file(&doc, response, "test-replay")
+            .unwrap()
+            .expect("replay should still use the relay");
+        assert!(!replay.applied);
+        assert_eq!(replay.cell_id, first.cell_id);
+        assert_eq!(replay.content, first.content);
     }
 
     #[test]

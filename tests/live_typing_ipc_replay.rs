@@ -63,6 +63,13 @@ fn response_text(topic: &str) -> String {
     )
 }
 
+fn legacy_ipc_response_text(topic: &str) -> String {
+    format!(
+        "{}<!-- patch:queue -->\n<!-- /patch:queue -->\n",
+        response_text(topic)
+    )
+}
+
 fn response_heading(topic: &str) -> String {
     format!("### Re: {topic} - gpt-5")
 }
@@ -581,7 +588,7 @@ fn socket_ipc_replays_live_typing_during_finalize() {
             project.baseline.to_str().unwrap(),
             "--stream",
         ])
-        .write_stdin(response_text("socket live typing replay"))
+        .write_stdin(legacy_ipc_response_text("socket live typing replay"))
         .output()
         .unwrap();
 
@@ -666,7 +673,7 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
             project.baseline.to_str().unwrap(),
             "--stream",
         ])
-        .write_stdin(response_text("file IPC live typing replay"))
+        .write_stdin(legacy_ipc_response_text("file IPC live typing replay"))
         .output()
         .unwrap();
     stop_project_controller(project.root(), &mut controller);

@@ -394,11 +394,21 @@ pub struct ProjectedCloseoutState {
     pub response_sha256: Option<String>,
     pub captured_response: Option<ProjectedCapturedResponse>,
     pub patch_id: Option<String>,
+    pub response_cell: Option<ProjectedResponseCell>,
     pub commit: Option<String>,
     pub session_check_passed: bool,
     pub tracked_work_maintenance_required: Option<bool>,
     pub abandoned_reason: Option<String>,
     pub pending_semantic_merge_acks: Vec<PendingSemanticMergeAck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedResponseCell {
+    pub operation_id: String,
+    pub cell_id: String,
+    pub response_sha256: String,
+    pub content_hash: String,
+    pub applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -468,6 +478,13 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
                 }
             }),
             patch_id: projection.patch_id,
+            response_cell: projection.response_cell.map(|cell| ProjectedResponseCell {
+                operation_id: cell.operation_id,
+                cell_id: cell.cell_id,
+                response_sha256: cell.response_sha256,
+                content_hash: cell.content_hash,
+                applied: cell.applied,
+            }),
             commit: projection.commit,
             session_check_passed: projection.session_check_passed,
             tracked_work_maintenance_required: projection.tracked_work_maintenance_required,
@@ -1877,6 +1894,37 @@ pub fn append_response_captured_body(
             response_body: Some(response_body.to_string()),
             file_hash: file_hash.map(str::to_string),
             snapshot_hash: snapshot_hash.map(str::to_string),
+        },
+    )
+}
+
+/// Persist the atomic assistant-response CRDT operation and advance closeout to
+/// `write_applied` in one idempotent backbone fact.
+pub fn append_response_cell_added(
+    file: &Path,
+    cycle_id: &str,
+    operation_id: &str,
+    cell_id: &str,
+    response_sha256: &str,
+    content_hash: &str,
+    applied: bool,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id =
+        format!("response-cell-added:{document_hash}:{cycle_id}:{operation_id}:{cell_id}");
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::ResponseCellAdded {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            operation_id: operation_id.to_string(),
+            cell_id: cell_id.to_string(),
+            response_sha256: response_sha256.to_string(),
+            content_hash: content_hash.to_string(),
+            applied,
         },
     )
 }

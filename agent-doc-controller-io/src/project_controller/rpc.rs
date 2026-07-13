@@ -3726,6 +3726,67 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
     Ok(result.write)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControllerResponseCellAddResult {
+    pub write: Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ControllerResponseCellAddPayload {
+    cycle_id: String,
+    operation_id: String,
+    response_sha256: String,
+    response: String,
+    source: Option<String>,
+}
+
+/// Add one assistant response cell through the controller-owned canonical CRDT
+/// model. The caller supplies no whole-document baseline or replacement.
+pub fn add_response_cell_via_controller_model_for_doc(
+    doc: &Path,
+    cycle_id: &str,
+    operation_id: &str,
+    response_sha256: &str,
+    response: &str,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    if !crdt_authority_for_file(&file_arg).editor_attached() {
+        return Ok(None);
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return Ok(None);
+    };
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    let payload = ControllerResponseCellAddPayload {
+        cycle_id: cycle_id.to_string(),
+        operation_id: operation_id.to_string(),
+        response_sha256: response_sha256.to_string(),
+        response: response.to_string(),
+        source: Some(source.to_string()),
+    };
+    let result: ControllerResponseCellAddResult = request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "response_cell_add".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("response_cell_add".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&payload)?),
+        },
+    )?;
+    Ok(result.write)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerCrdtTextAdoptResult {
     pub changed: Option<bool>,
@@ -4138,7 +4199,27 @@ fn handle_crdt_commit_barrier_rpc(
 ) -> Result<bool> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
-    Ok(agent_doc_crdt_relay_io::commit_barrier_for_file(&canonical))
+    commit_barrier_for_closeout(&canonical)
+}
+
+fn commit_barrier_for_closeout(canonical: &Path) -> Result<bool> {
+    let durable_response_cell = agent_doc_cycle_state_io::load_closeout_projection(canonical)?
+        .is_some_and(|projection| projection.response_cell.is_some());
+    let ready = if durable_response_cell {
+        agent_doc_crdt_relay_io::commit_barrier_for_durable_response_cell(canonical)
+    } else {
+        agent_doc_crdt_relay_io::commit_barrier_for_file(canonical)
+    };
+    agent_doc_ops_log_io::log_op(
+        canonical,
+        &format!(
+            "controller_crdt_commit_barrier file={} durable_response_cell={} ready={}",
+            canonical.display(),
+            durable_response_cell,
+            ready,
+        ),
+    );
+    Ok(ready)
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -4176,7 +4257,7 @@ fn handle_commit_document_rpc(
     // editor-behind readiness bit — this is an explicit authority commit, the
     // canonical is authority, and editors reconcile via the replace-capable replica
     // delivery.
-    let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(&canonical);
+    let barrier_ready = commit_barrier_for_closeout(&canonical)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -4498,6 +4579,37 @@ fn handle_crdt_cpc_write_rpc(
         source,
     )?;
     Ok(ControllerCrdtCpcWriteResult { write })
+}
+
+fn handle_response_cell_add_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerResponseCellAddResult> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: ControllerResponseCellAddPayload =
+        serde_json::from_str(&payload_json).context("failed to parse response cell add payload")?;
+    let source = payload
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("controller_response_cell_add");
+    let write =
+        agent_doc_crdt_relay_io::add_response_cell_for_file(&canonical, &payload.response, source)?;
+    if let Some(write) = &write {
+        agent_doc_cycle_state_io::append_response_cell_added(
+            &canonical,
+            &payload.cycle_id,
+            &payload.operation_id,
+            &write.cell_id,
+            &payload.response_sha256,
+            &write.content_hash,
+            write.applied,
+        )?;
+    }
+    Ok(ControllerResponseCellAddResult { write })
 }
 
 fn handle_crdt_text_adopt_rpc(
@@ -7125,6 +7237,9 @@ pub(crate) fn handle_request_locked(
         }
         "crdt_cpc_write" => {
             controller_envelope(handle_crdt_cpc_write_rpc(&bootstrap_snapshot, request))
+        }
+        "response_cell_add" => {
+            controller_envelope(handle_response_cell_add_rpc(&bootstrap_snapshot, request))
         }
         "crdt_text_adopt" => {
             controller_envelope(handle_crdt_text_adopt_rpc(&bootstrap_snapshot, request))

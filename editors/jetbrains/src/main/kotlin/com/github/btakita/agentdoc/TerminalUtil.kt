@@ -360,14 +360,18 @@ object TerminalUtil {
         LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath transport=cpc")
         attempt?.recordIfCurrent("route_prepare")
 
-        var replaceActiveRun = false
         if (!commandPreAcquired) {
             when (editorCommandRegistry.request(routeKey, EditorCommandKind.RUN_AGENT_DOC)) {
                 EditorCommandDecision.START_NOW -> Unit
-                EditorCommandDecision.SUPERSEDE_ACTIVE_RUN -> {
-                    replaceActiveRun = true
-                    LOG.warn("[state] Run Agent Doc superseding older editor_route request for $relativePath")
-                    attempt?.recordIfCurrent("route_supersede_active_run")
+                EditorCommandDecision.DEDUPE_ACTIVE_RUN -> {
+                    LOG.warn("[state] Run Agent Doc already dispatching for $relativePath; coalescing duplicate click")
+                    attempt?.finishIfCurrent(
+                        "route_deduped_active_run",
+                        error = "existing editor_route request is still in flight",
+                    )
+                    showHint(project, "Run Agent Doc is already dispatching for $relativePath")
+                    onComplete?.invoke()
+                    return
                 }
                 EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR -> {
                     val replaced = rememberRunAfterClear(
@@ -434,12 +438,7 @@ object TerminalUtil {
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
-            val routeSlotAcquired = if (replaceActiveRun) {
-                inFlightRouteRegistry.replace(routeKey, handle)
-                true
-            } else {
-                inFlightRouteRegistry.startIfIdle(routeKey, handle)
-            }
+            val routeSlotAcquired = inFlightRouteRegistry.startIfIdle(routeKey, handle)
             if (!routeSlotAcquired) {
                 LOG.warn("[state] editor_route request already alive for $relativePath; suppressing duplicate Run Agent Doc")
                 attempt?.finishIfCurrent(
@@ -1149,7 +1148,7 @@ object TerminalUtil {
                         "routeCanceled=$canceled"
                 )
             }
-            EditorCommandDecision.SUPERSEDE_ACTIVE_RUN,
+            EditorCommandDecision.DEDUPE_ACTIVE_RUN,
             EditorCommandDecision.QUEUE_RUN_AFTER_CLEAR,
             EditorCommandDecision.IGNORED -> {
                 onComplete?.invoke()
@@ -1656,9 +1655,9 @@ object TerminalUtil {
     }
 
     private fun isRetryableRunAgentDocRouteFailure(kind: RunAgentDocRouteFailureKind): Boolean {
-        // Only the actor-startup guard gets a short plugin retry. A dispatch-only
-        // latest-run timeout has already spent the route ready-wait window, so
-        // retrying it silently can leave Run Agent Doc looking unresponsive.
+        // Startup-only failures get one bounded retry. In particular, a
+        // `latest run is still booting (timed_out)` result means the binary's
+        // first ready window expired; it does not prove a persistent blocker.
         return kind == RunAgentDocRouteFailureKind.RETRYABLE_STARTING
     }
 
@@ -1672,6 +1671,8 @@ object TerminalUtil {
             isLatestRunStillBootingBusy(output) -> RunAgentDocRouteFailureKind.BUSY_RUNNING
             isDispatchStartUnproven(output) -> RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN
             isProtectedPromptInputRouteFailure(output) -> RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT
+            isLatestRunStillBootingTimedOut(output) ->
+                RunAgentDocRouteFailureKind.RETRYABLE_STARTING
             isStartingActorRouteFailure(output) ->
                 RunAgentDocRouteFailureKind.RETRYABLE_STARTING
             else -> RunAgentDocRouteFailureKind.PERSISTENT
@@ -1698,6 +1699,11 @@ object TerminalUtil {
     private fun isLatestRunStillBootingBusy(output: String): Boolean {
         val lower = output.lowercase()
         return isLatestRunStillBootingShape(lower) && lower.contains("(active codex turn)")
+    }
+
+    private fun isLatestRunStillBootingTimedOut(output: String): Boolean {
+        val lower = output.lowercase()
+        return isLatestRunStillBootingShape(lower) && lower.contains("(timed_out)")
     }
 
 private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {

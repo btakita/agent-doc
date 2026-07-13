@@ -14,6 +14,7 @@ pub mod document_cell_merge;
 pub mod exchange_node_merge;
 pub mod exchange_seqcrdt;
 pub mod frontmatter_crdt;
+pub mod response_cell;
 
 pub use document_cell::{
     CellConflict, CellMergeOutcome, ConflictKind, ConflictPolicy, component_conflict_policy,

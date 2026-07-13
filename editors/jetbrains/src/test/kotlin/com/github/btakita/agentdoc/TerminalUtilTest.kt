@@ -35,8 +35,8 @@ class TerminalUtilTest {
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_prepare\")"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_command_built\", command = cmd)"))
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
-        assertTrue(source.contains("route_supersede_active_run"))
-        assertTrue(source.contains("inFlightRouteRegistry.replace(routeKey, handle)"))
+        assertTrue(source.contains("route_deduped_active_run"))
+        assertFalse(source.contains("inFlightRouteRegistry.replace(routeKey, handle)"))
         assertTrue(source.contains("CpcRouteClient.runEditorRoute("))
         assertTrue(source.contains("attemptId = attempt?.id"))
         assertTrue(source.contains("routeKey = attempt?.routeKey"))
@@ -263,7 +263,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `latest-run boot timeout is reported immediately while active-turn busy is not retried`() {
+    fun `latest-run timed out boot gets one retry while real busy and interactive blockers do not`() {
         val activeTurn = """
             Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again
         """.trimIndent()
@@ -275,13 +275,13 @@ class TerminalUtilTest {
         """.trimIndent()
 
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.BUSY_RUNNING, TerminalUtil.classifyRunAgentDocRouteFailure(activeTurn))
-        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.RETRYABLE_STARTING, TerminalUtil.classifyRunAgentDocRouteFailure(timedOut))
         assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.PERSISTENT, TerminalUtil.classifyRunAgentDocRouteFailure(shellSearch))
-        // These latest-run failures already spent the route ready wait. Active turns
-        // get a still-running notice; prompt-less timed_out panes get the persisted
-        // route diagnostic instead of another silent retry window.
+        // A prompt-less timeout is still a startup-only condition and receives the
+        // plugin's single bounded retry. Real active turns and interactive shell
+        // blockers remain immediate typed outcomes.
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(activeTurn))
-        assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
+        assertTrue(TerminalUtil.isRetryableRunAgentDocRouteFailure(timedOut))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure(shellSearch))
         assertFalse(TerminalUtil.isRetryableRunAgentDocRouteFailure("[agent-doc] proof-timeout: accepted but unproven"))
     }

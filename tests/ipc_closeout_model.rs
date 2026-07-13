@@ -873,6 +873,12 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
         "fake socket listener did not start"
     );
 
+    // Keep this socket-specific regression on the composite legacy path. A
+    // response-only patchback now bypasses socket IPC as one semantic CRDT cell.
+    let response = format!(
+        "{}<!-- patch:queue -->\n<!-- /patch:queue -->\n",
+        response_text("socket prompt drift")
+    );
     let output = agent_doc()
         .current_dir(root)
         .args([
@@ -882,7 +888,7 @@ fn socket_ipc_post_block_prompt_drift_commits_visible_write_receipt_snapshot() {
             baseline.to_str().unwrap(),
             "--stream",
         ])
-        .write_stdin(response_text("socket prompt drift"))
+        .write_stdin(response)
         .output()
         .unwrap();
     let shutdown = agent_doc_controller_io::project_controller::run_shutdown(Some(root));

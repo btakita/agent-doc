@@ -18,7 +18,7 @@ class EditorCommandStateMachineTest {
     }
 
     @Test
-    fun `duplicate run supersedes active route`() {
+    fun `duplicate run coalesces with active route`() {
         val state = EditorCommandState(active = EditorCommandKind.RUN_AGENT_DOC)
 
         val (next, decision) = EditorCommandStateMachine.onRequest(
@@ -26,7 +26,7 @@ class EditorCommandStateMachineTest {
             EditorCommandKind.RUN_AGENT_DOC,
         )
 
-        assertEquals(EditorCommandDecision.SUPERSEDE_ACTIVE_RUN, decision)
+        assertEquals(EditorCommandDecision.DEDUPE_ACTIVE_RUN, decision)
         assertEquals(state, next)
     }
 
@@ -150,8 +150,8 @@ class EditorCommandStateMachineTest {
     }
 
     @Test
-    fun `duplicate run supersede holds while the reactive mirror advances underneath`() {
-        val path = "/tmp/agent-doc-6n5j-cmd-supersede-${System.nanoTime()}.md"
+    fun `duplicate run dedupe holds while the reactive mirror advances underneath`() {
+        val path = "/tmp/agent-doc-6n5j-cmd-dedupe-${System.nanoTime()}.md"
         try {
             StateProjectionBridge.seedMirrorMessageForTest(path, routeSnapshot(1, "dispatch_proven", "%2"))
 
@@ -159,7 +159,7 @@ class EditorCommandStateMachineTest {
             val active = EditorCommandState(active = EditorCommandKind.RUN_AGENT_DOC)
 
             // The mirror reacts to a transport delta while the run is active —
-            // the command machine must still supersede a duplicate run request
+            // the command machine must still coalesce a duplicate run request
             // regardless of the reactive state churn.
             StateProjectionBridge.seedMirrorMessageForTest(
                 path,
@@ -173,7 +173,7 @@ class EditorCommandStateMachineTest {
                 active,
                 EditorCommandKind.RUN_AGENT_DOC,
             )
-            assertEquals(EditorCommandDecision.SUPERSEDE_ACTIVE_RUN, decision)
+            assertEquals(EditorCommandDecision.DEDUPE_ACTIVE_RUN, decision)
             assertEquals(active, next)
         } finally {
             StateProjectionBridge.evictForFile(path)

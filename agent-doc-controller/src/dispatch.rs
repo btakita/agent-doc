@@ -877,6 +877,22 @@ pub fn starting_actor_not_ready_log_line(facts: StartingActorLogFacts<'_>) -> St
     )
 }
 
+/// A startup record is also settled when the authoritative actor has reached
+/// `Ready` on the requested pane but the pane is now in a recognized busy or
+/// interactive substate.  That state is not safe for direct injection, but it
+/// must leave the startup wait so the normal blocker path can queue behind an
+/// active turn or return its precise interactive-state recovery instruction.
+pub fn dispatch_only_starting_pane_actor_settled(
+    facts: DispatchOnlyStartingPaneActorReadyFacts<'_>,
+    recognized_pane_blocker: bool,
+) -> bool {
+    dispatch_only_starting_pane_actor_ready(facts)
+        || (facts.ready_facts.pane_id == facts.requested_pane
+            && facts.ready_facts.actor_state == ActorDispatchState::Ready
+            && facts.dispatch_eligible
+            && recognized_pane_blocker)
+}
+
 pub fn starting_actor_ready_log_line(
     file_display: &str,
     harness_binary: &str,
@@ -4676,6 +4692,22 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 ready_facts: &missing_prompt,
                 dispatch_eligible: true,
             }
+        ));
+        assert!(dispatch_only_starting_pane_actor_settled(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &missing_prompt,
+                dispatch_eligible: true,
+            },
+            true,
+        ));
+        assert!(!dispatch_only_starting_pane_actor_settled(
+            DispatchOnlyStartingPaneActorReadyFacts {
+                requested_pane: "%42",
+                ready_facts: &missing_prompt,
+                dispatch_eligible: true,
+            },
+            false,
         ));
 
         let mut busy = ready_facts.clone();

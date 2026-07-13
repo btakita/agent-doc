@@ -391,7 +391,12 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue_drift.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    // Keep this file-IPC queue-race regression on the composite legacy path. A
+    // response-only patchback now bypasses file IPC as one semantic CRDT cell.
+    let response = concat!(
+        "<!-- patch:exchange -->\n### Re: live queue IPC race — gpt-5\nChanged paths: src/agent-doc/specs/07-closeout-commands.md, src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue_drift.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:queue -->\n<!-- /patch:queue -->\n",
+    );
 
     let output = agent_doc()
         .current_dir(tmp.path())
@@ -593,7 +598,12 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
         false
     });
 
-    let response = "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n";
+    // Keep this file-IPC race regression on the composite legacy path. A
+    // response-only patchback now bypasses file IPC as one semantic CRDT cell.
+    let response = concat!(
+        "<!-- patch:exchange -->\n### Re: cycle 1779845677327 IPC race — gpt-5\nChanged paths: src/agent-doc/tests/live_ipc_race_integration.rs.\nCommands: cargo test finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_directives.\nVerification: passed.\nCommit: deferred to the test harness.\nPush: deferred to the test harness.\nConfidence: high.\n<!-- /patch:exchange -->\n",
+        "<!-- patch:queue -->\n<!-- /patch:queue -->\n",
+    );
 
     let output = agent_doc()
         .current_dir(tmp.path())

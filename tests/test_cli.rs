@@ -17277,7 +17277,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     }
     assert!(
         route_dispatch_only_source.contains("DispatchOnlyStartingPaneActorReadyFacts")
-            && route_dispatch_only_source.contains("dispatch_only_starting_pane_actor_ready(")
+            && route_dispatch_only_source.contains("dispatch_only_starting_pane_actor_settled(")
             && route_dispatch_only_source.contains("DispatchOnlyStartingPaneNotReadyMessageFacts")
             && route_dispatch_only_source
                 .contains("dispatch_only_starting_pane_not_ready_message(")

@@ -341,6 +341,19 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         patch_id: Option<String>,
     },
+    /// One body-aware assistant response cell was applied to the canonical
+    /// realtime document. This is both the durable CRDT operation receipt and
+    /// the closeout `write_applied` transition; no editor-visible patch receipt
+    /// is required to rediscover it after a restart.
+    ResponseCellAdded {
+        document_hash: String,
+        cycle_id: String,
+        operation_id: String,
+        cell_id: String,
+        response_sha256: String,
+        content_hash: String,
+        applied: bool,
+    },
     CommitObserved {
         document_hash: String,
         cycle_id: String,
@@ -536,6 +549,7 @@ impl StateFact {
             | Self::QueueDrainStallContinuationCleared { document_hash, .. }
             | Self::ResponseCaptured { document_hash, .. }
             | Self::WriteApplied { document_hash, .. }
+            | Self::ResponseCellAdded { document_hash, .. }
             | Self::CommitObserved { document_hash, .. }
             | Self::SessionCheckPassed { document_hash, .. }
             | Self::CycleAbandoned { document_hash, .. }
@@ -579,6 +593,7 @@ impl StateFact {
             | Self::PendingResponseCaptured { .. }
             | Self::PendingResponseCleared { .. }
             | Self::WriteApplied { .. }
+            | Self::ResponseCellAdded { .. }
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. }
@@ -649,6 +664,7 @@ impl StateFact {
             Self::PendingResponseCaptured { .. } => "pending_response_captured",
             Self::PendingResponseCleared { .. } => "pending_response_cleared",
             Self::WriteApplied { .. } => "write_applied",
+            Self::ResponseCellAdded { .. } => "response_cell_added",
             Self::CommitObserved { .. } => "commit_observed",
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
@@ -1232,6 +1248,28 @@ impl DocumentStateProjection {
                 self.closeout.patch_id = patch_id.clone();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "write_applied");
+            }
+            StateFact::ResponseCellAdded {
+                cycle_id,
+                operation_id,
+                cell_id,
+                response_sha256,
+                content_hash,
+                applied,
+                ..
+            } => {
+                self.closeout
+                    .apply_cycle_event(cycle_id, CycleEvent::WriteApplied);
+                self.closeout.patch_id = Some(operation_id.clone());
+                self.closeout.response_cell = Some(ResponseCellProjection {
+                    operation_id: operation_id.clone(),
+                    cell_id: cell_id.clone(),
+                    response_sha256: response_sha256.clone(),
+                    content_hash: content_hash.clone(),
+                    applied: *applied,
+                });
+                self.closeout
+                    .clear_pending_response_for_cycle(cycle_id, "response_cell_added");
             }
             StateFact::CommitObserved {
                 cycle_id, commit, ..
@@ -2325,6 +2363,8 @@ pub struct CloseoutProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_cell: Option<ResponseCellProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     #[serde(default)]
     pub session_check_passed: bool,
@@ -2354,6 +2394,7 @@ impl CloseoutProjection {
             self.response_file_hash = None;
             self.response_snapshot_hash = None;
             self.captured_response = None;
+            self.response_cell = None;
             self.pending_semantic_merge_acks.clear();
         }
         let current = self.phase.unwrap_or(CyclePhase::PreflightStarted);
@@ -2405,6 +2446,15 @@ impl CloseoutProjection {
                 surfaced,
             });
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponseCellProjection {
+    pub operation_id: String,
+    pub cell_id: String,
+    pub response_sha256: String,
+    pub content_hash: String,
+    pub applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4081,6 +4131,64 @@ mod tests {
             projected.closeout.pending_response_clear_reason.as_deref(),
             Some("write_applied")
         );
+    }
+
+    #[test]
+    fn response_cell_receipt_is_the_write_applied_transition_and_is_replay_safe() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "cell-preflight",
+            StateFact::PreflightStarted {
+                document_hash: "doc-cell".into(),
+                cycle_id: "cycle-cell".into(),
+                session_id: Some("session-cell".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+        ledger.append(state_event(
+            "cell-pending",
+            StateFact::PendingResponseCaptured {
+                document_hash: "doc-cell".into(),
+                cycle_id: "cycle-cell".into(),
+                capture_id: "capture-cell".into(),
+                response_sha256: "response-sha".into(),
+                response_body: "### Re: cell — gpt-5\n\nDone.\n".into(),
+            },
+        ));
+        let receipt = state_event(
+            "cell-receipt",
+            StateFact::ResponseCellAdded {
+                document_hash: "doc-cell".into(),
+                cycle_id: "cycle-cell".into(),
+                operation_id: "response-cell:cycle-cell:response-sha".into(),
+                cell_id: "cell-id".into(),
+                response_sha256: "response-sha".into(),
+                content_hash: "content-sha".into(),
+                applied: true,
+            },
+        );
+        ledger.append(receipt.clone());
+        ledger.append(receipt);
+        assert_eq!(
+            ledger.document_epoch("doc-cell"),
+            3,
+            "duplicate operation fact must not advance the accepted epoch"
+        );
+
+        let projected = ledger.project_document("doc-cell").unwrap();
+        assert_eq!(projected.closeout.phase, Some(CyclePhase::WriteApplied));
+        assert_eq!(projected.closeout.pending_response, None);
+        assert_eq!(
+            projected.closeout.pending_response_clear_reason.as_deref(),
+            Some("response_cell_added")
+        );
+        let cell = projected
+            .closeout
+            .response_cell
+            .expect("response cell receipt");
+        assert_eq!(cell.cell_id, "cell-id");
+        assert_eq!(cell.operation_id, "response-cell:cycle-cell:response-sha");
+        assert!(cell.applied);
     }
 
     #[test]

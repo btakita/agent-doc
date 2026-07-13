@@ -78,6 +78,94 @@ fn projected_cycle_id_for_ipc_payload(file: &Path) -> Option<String> {
         })
 }
 
+fn response_cell_from_patchback(
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+) -> Option<String> {
+    if !unmatched.trim().is_empty() || patches.len() != 1 || patches[0].name != "exchange" {
+        return None;
+    }
+    let response = patches[0].content.trim_matches(['\n', '\r']);
+    (!response.is_empty()).then(|| response.to_string())
+}
+
+/// Apply the response-only part of finalize as one idempotent semantic CRDT op.
+///
+/// The operation carries no caller baseline or whole-document candidate.  The
+/// controller evaluates it against the apply-time canonical, persists the CRDT
+/// projection, and records `ResponseCellAdded` in the state backbone.  Composite
+/// patchbacks continue through the legacy write path until their individual
+/// semantic operations are decomposed as well.
+fn try_add_response_cell_via_realtime_backbone(
+    file: &Path,
+    patches: &[template::PatchBlock],
+    unmatched: &str,
+    force_disk: bool,
+    source: &str,
+) -> Result<bool> {
+    if force_disk {
+        return Ok(false);
+    }
+    let Some(response_cell) = response_cell_from_patchback(patches, unmatched) else {
+        return Ok(false);
+    };
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(false);
+    };
+    let response_sha256 = state
+        .response_sha256
+        .unwrap_or_else(|| agent_doc_hash::content_hash(&response_cell));
+    let operation_id = format!("response-cell:{}:{response_sha256}", state.cycle_id);
+    let Some(write) = agent_doc_controller_io::project_controller::
+        add_response_cell_via_controller_model_for_doc(
+            file,
+            &state.cycle_id,
+            &operation_id,
+            &response_sha256,
+            &response_cell,
+            source,
+        )?
+    else {
+        return Ok(false);
+    };
+
+    agent_doc_snapshot_io::save(file, &write.content, agent_doc_ops_log_io::log_op)?;
+    agent_doc_repair_io::pending::clear_pending(file)?;
+    agent_doc_ops_log_io::log_cycle(
+        file,
+        "write_response_cell",
+        Some(&response_cell),
+        Some(&write.content),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "response_cell_write_done file={} source={} cycle_id={} operation_id={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            file.display(),
+            source,
+            state.cycle_id,
+            operation_id,
+            write.cell_id,
+            write.applied,
+            write.content_hash,
+            write.update_bytes,
+            write.targets,
+            write.live_editors,
+            write.delivery_converged,
+        ),
+    );
+    eprintln!(
+        "[write] response cell {} via realtime backbone ({})",
+        if write.applied {
+            "added"
+        } else {
+            "already present"
+        },
+        write.cell_id,
+    );
+    Ok(true)
+}
+
 /// Run the write command: append assistant response to document.
 ///
 /// `baseline` is the document content at the time the response was generated.
@@ -841,6 +929,16 @@ pub(crate) fn run_stream(
         &response,
         &current_content,
     )?;
+
+    if try_add_response_cell_via_realtime_backbone(
+        file,
+        &patches,
+        &unmatched,
+        force_disk,
+        "run_stream",
+    )? {
+        return Ok(());
+    }
 
     // Warn when patches target a file with no template components
     if patches.is_empty() && !unmatched.trim().is_empty() {
@@ -1704,6 +1802,10 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     {
         retain_ipc_patch_for_retry_error(file, baseline, &response, &err, "pending_done")?;
         return Err(err);
+    }
+
+    if try_add_response_cell_via_realtime_backbone(file, &patches, &unmatched, false, "run_ipc")? {
+        return Ok(());
     }
 
     let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
@@ -2645,6 +2747,25 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn response_cell_fast_path_accepts_only_one_exchange_operation() {
+        let response =
+            template::PatchBlock::new("exchange", "\n### Re: response cell — gpt-5\n\nApplied.\n");
+        assert_eq!(
+            response_cell_from_patchback(&[response.clone()], "").as_deref(),
+            Some("### Re: response cell — gpt-5\n\nApplied.")
+        );
+        assert!(response_cell_from_patchback(&[response.clone()], "extra").is_none());
+        assert!(
+            response_cell_from_patchback(
+                &[response, template::PatchBlock::new("status", "done")],
+                "",
+            )
+            .is_none()
+        );
+        assert!(response_cell_from_patchback(&[], "").is_none());
+    }
 
     #[test]
     fn ipc_payload_cycle_id_uses_lazily_projection_when_cycle_sidecar_missing() {

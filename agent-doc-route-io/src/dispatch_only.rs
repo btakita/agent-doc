@@ -38,7 +38,7 @@ use agent_doc_controller::dispatch::{
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneNotReadyMessageFacts,
     RoutedReopenGuardReason, dispatch_only_blocked_guard_reason,
     dispatch_only_blocker_recovery_hint, dispatch_only_should_print_unproven_progress,
-    dispatch_only_starting_pane_actor_ready, dispatch_only_starting_pane_not_ready_message,
+    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_not_ready_message,
     prompt_ready_barrier_failed_event,
 };
 use agent_doc_harness::HarnessConfig;
@@ -92,26 +92,35 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
         }
     };
     let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
+    let recognized_blocker = agent_doc_tmux_io::capture_pane(tmux, dispatch_pane)
+        .ok()
+        .and_then(|content| agent_doc_harness::dispatch_only_blocker_reason(harness, &content));
     let ready_facts = authoritative_actor_ready_facts_from_target(&actor, prompt_ready);
-    if !dispatch_only_starting_pane_actor_ready(DispatchOnlyStartingPaneActorReadyFacts {
-        requested_pane: dispatch_pane,
-        ready_facts: &ready_facts,
-        dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime),
-    }) {
+    if !dispatch_only_starting_pane_actor_settled(
+        DispatchOnlyStartingPaneActorReadyFacts {
+            requested_pane: dispatch_pane,
+            ready_facts: &ready_facts,
+            dispatch_eligible: supervisor_authoritative_actor_dispatch_target_eligible(
+                &actor.runtime,
+            ),
+        },
+        recognized_blocker.is_some(),
+    ) {
         return false;
     }
 
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_dispatch_only_starting_pane_ready_via_actor_state file={} pane={} harness={} generation={} runtime_state={} transition={} prompt_ready={}",
+            "route_dispatch_only_starting_pane_settled_via_actor_state file={} pane={} harness={} generation={} runtime_state={} transition={} prompt_ready={} recognized_blocker={}",
             file.display(),
             dispatch_pane,
             harness.binary,
             actor.record.generation,
             actor.runtime.actor_state_label(),
             actor.record.last_transition.reason,
-            prompt_ready
+            prompt_ready,
+            recognized_blocker.as_deref().unwrap_or("none"),
         ),
     );
     true

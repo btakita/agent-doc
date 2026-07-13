@@ -714,11 +714,37 @@ pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
     mut wait_for_dispatch_start: impl FnMut() -> Result<Option<RoutedDispatchStartProof>>,
 ) -> Result<Option<RoutedDispatchStartProof>> {
     let trigger = harness.trigger_command(file_path);
+    if let Some(shell) = agent_doc_tmux_io::target_current_command(tmux, pane)
+        .map(|command| command.trim().to_string())
+        .filter(|command| pane_current_command_is_bare_shell(command))
+    {
+        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, pane) {
+            preserve_route_pane_snapshot(
+                file,
+                pane,
+                harness,
+                "dispatch_start_unproven_late_resubmit_refused_bare_shell",
+                &content,
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_submit_late_resubmit_refused file={} pane={} harness={} pane_current_command={} reason=harness_exited_to_bare_shell",
+                file.display(),
+                pane,
+                harness.binary,
+                shell,
+            ),
+        );
+        return Ok(None);
+    }
     let visible = match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
             });
+            let harness_surface_visible = late_resubmit_harness_surface_visible(&content, harness);
             if visible {
                 preserve_route_pane_snapshot(
                     file,
@@ -728,7 +754,20 @@ pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
                     &content,
                 );
             }
-            visible
+            if visible && !harness_surface_visible {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_submit_late_resubmit_refused file={} pane={} harness={} reason=harness_surface_not_visible",
+                        file.display(),
+                        pane,
+                        harness.binary,
+                    ),
+                );
+                false
+            } else {
+                visible
+            }
         }
         Err(err) => {
             eprintln!(
@@ -832,6 +871,23 @@ pub fn try_late_direct_pane_enter_resubmit_after_unproven_dispatch(
     Ok(None)
 }
 
+fn late_resubmit_harness_surface_visible(content: &str, harness: &HarnessConfig) -> bool {
+    let recent: Vec<&str> = content
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+        .collect();
+    harness.has_busy_cue(content)
+        || harness.output_prompt_visible(content)
+        || recent.iter().any(|line| harness.is_idle_status_line(line))
+        || (harness.binary == "codex"
+            && recent.iter().any(|line| {
+                let line = line.trim();
+                line.starts_with("gpt-") && line.contains('·')
+            }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,5 +928,27 @@ OPENAI_API_KEY=sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa
         assert!(ops.contains("phase=direct_pane_acceptance"), "{ops}");
         assert!(ops.contains("capture_hash="), "{ops}");
         assert!(ops.contains("snapshot_path="), "{ops}");
+    }
+
+    #[test]
+    fn late_resubmit_requires_current_codex_surface() {
+        let harness = HarnessConfig::codex();
+        let tui = "\
+› agent-doc /tmp/session.md
+
+  gpt-5.6-sol xhigh · ~/work · Context 42% used
+";
+        assert!(late_resubmit_harness_surface_visible(tui, &harness));
+
+        let exited_shell = "\
+To continue this session, run codex resume --last
+brian@host repo% agent-doc /tmp/session.md
+Error: bare agent-doc must run from a supported harness
+brian@host repo%
+";
+        assert!(!late_resubmit_harness_surface_visible(
+            exited_shell,
+            &harness
+        ));
     }
 }

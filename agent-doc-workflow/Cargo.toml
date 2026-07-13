@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-workflow"
-version = "0.34.84"
+version = "0.34.85"
 edition = "2024"
 description = "Pure workflow evidence-to-decision kernel for agent-doc"
 license = "MIT"
@@ -10,14 +10,14 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_workflow"
 
 [dependencies]
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.84" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.84" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.84" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.84" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.84" }
-agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.84" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.84" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.84" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.85" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.85" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.85" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.85" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.85" }
+agent-doc-prompt-contract = { path = "../agent-doc-prompt-contract", version = "0.34.85" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.85" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.85" }
 anyhow = "1"
 htmd = "0.5.3"
 indexmap = "2"

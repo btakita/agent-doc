@@ -522,6 +522,25 @@ fn commit_compacted_authoritative(file: &Path, authoritative_snapshot: &str) -> 
     // `apply_compacted_document` and here cannot leave a pre-compact snapshot for
     // the selective commit to stage.
     agent_doc_snapshot_io::save(file, authoritative_snapshot, agent_doc_ops_log_io::log_op)?;
+    // `#jb-compact-commit-stale-relay-canonical`: the third desync mechanism.
+    // When the compaction wrote through the stale-lease disk-authority path
+    // (`crdt_cpc_write_disk_authority_stale_lease`, `live_editors == 0` under a
+    // phantom editor lease — e.g. an older plugin whose CRDT replica register
+    // failed), only disk + snapshot hold the compacted content; the lazily relay
+    // canonical stays FROZEN at the pre-compact text. `closeout_compact_with_commit`
+    // then resolves the commit's document content through the realtime authority
+    // (`try_resolve_current_document_content`), which — seeing the reactive
+    // open-docs projection still report the editor open — keeps editor authority
+    // and returns that frozen pre-compact canonical, so the commit lands
+    // pre-compact content in HEAD (`compact_commit_head_mismatch`, observed live on
+    // agent-doc-bugs2.md). Converge the lazily canonical to the authoritative
+    // compacted content BEFORE the commit reads it. Reliable-sync plane is
+    // authority; disk/snapshot are durability sidecars, so the authoritative
+    // content must reach the plane, not only disk. Authority-gated + fail-open:
+    // `Ok(None)` (headless / missing relay model) leaves the disk+snapshot write
+    // authoritative, and `verify_compact_head_landed` still fails closed if HEAD
+    // does not land the compacted content.
+    agent_doc_crdt_relay_io::adopt_authoritative_text_for_file(file, authoritative_snapshot)?;
     closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)
 }

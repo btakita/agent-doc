@@ -2103,6 +2103,50 @@ pub fn record_committed_baseline_for_file(file: &Path) {
 /// discards a stale `.yrs` whose markdown projection does not match the cycle
 /// baseline) is left to run unchanged. Returns `None` (no live reconcile
 /// performed).
+/// Force the live canonical replica for `file` to `text`, unconditionally
+/// (`#jb-compact-commit-stale-relay-canonical`). Authority-gated like
+/// [`reconcile_disk_projection_for_file`]: when no editor is attached (headless)
+/// there is no live canonical to converge and the caller's disk/snapshot write is
+/// already authoritative, so this returns `Ok(None)`. When a relay hub exists it
+/// adopts `text` as the canonical and returns `Ok(Some(changed))`.
+///
+/// The single caller is the authoritative-compaction commit: with a phantom stale
+/// lease (`live_editors == 0` yet the reactive open-docs projection still reports
+/// the editor open) the commit's `try_resolve_current_document_content` keeps
+/// editor authority and returns the FROZEN pre-compact canonical, so the commit
+/// lands pre-compact content in HEAD and Compact Exchange leaves the summary
+/// uncommitted. Converging the lazily canonical to the compacted content first
+/// makes that read resolve the compacted document.
+pub fn adopt_authoritative_text_for_file(file: &Path, text: &str) -> Result<Option<bool>> {
+    let file_str = file.display().to_string();
+    let authority = authority_for_file(&file_str);
+    if !authority.editor_attached() {
+        return Ok(None);
+    }
+    let Some(changed) = with_existing_hub(file, |hub| hub.adopt_authoritative_text(text))? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_adopt_authoritative_text_deferred file={} authority=multi_replica reason=missing_relay_model",
+                file.display(),
+            ),
+        );
+        return Ok(None);
+    };
+    let changed = changed?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "crdt_adopt_authoritative_text file={} authority=multi_replica changed={} content_len={} content_hash={}",
+            file.display(),
+            changed,
+            text.len(),
+            agent_doc_hash::content_hash(text),
+        ),
+    );
+    Ok(Some(changed))
+}
+
 pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Result<Option<bool>> {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
@@ -3813,6 +3857,60 @@ mod tests {
         let file = dir.path().join("headless-rebootstrap.md");
         std::fs::write(&file, "# doc\n").unwrap();
         assert_eq!(pull_rebootstrap_for_file(&file, "editor:x").unwrap(), None);
+    }
+
+    /// Test-only authority-explicit variant of [`adopt_authoritative_text_for_file`]
+    /// so the compaction convergence seam is deterministically exercisable without a
+    /// live lease.
+    fn adopt_authoritative_text_for_file_with_authority(
+        file: &Path,
+        text: &str,
+        authority: CrdtAuthority,
+    ) -> Result<Option<bool>> {
+        if !authority.editor_attached() {
+            return Ok(None);
+        }
+        let changed = with_hub_seeded_from_file(file, |hub| hub.adopt_authoritative_text(text))??;
+        Ok(Some(changed))
+    }
+
+    #[test]
+    fn adopt_authoritative_text_is_none_when_headless() {
+        // GitAuthoritative (no live editor) → no live canonical; the caller's
+        // disk+snapshot write is already authoritative.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("headless-adopt.md");
+        std::fs::write(&file, "# doc\n\nbody\n").unwrap();
+        assert_eq!(
+            adopt_authoritative_text_for_file_with_authority(
+                &file,
+                "# doc\n\ncompacted\n",
+                CrdtAuthority::GitAuthoritative,
+            )
+            .unwrap(),
+            None,
+        );
+    }
+
+    #[test]
+    fn adopt_authoritative_text_converges_a_stale_canonical_for_the_commit_read() {
+        // `#jb-compact-commit-stale-relay-canonical`: seed the hub from the
+        // PRE-COMPACT text (the frozen phantom-lease canonical), then adopt the
+        // COMPACTED content the compaction already wrote to disk+snapshot. The hub
+        // canonical must converge so the authoritative-compaction commit's
+        // `try_resolve_current_document_content` reads the compacted document.
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("attached-adopt.md");
+        let pre_compact = "# doc\n\nturn 1\nturn 2\nturn 3\nturn 4 (kept)\n";
+        std::fs::write(&file, pre_compact).unwrap();
+        let compacted = "# doc\n\n*Compacted. 3 turns archived.*\nturn 4 (kept)\n";
+        let changed = adopt_authoritative_text_for_file_with_authority(
+            &file,
+            compacted,
+            CrdtAuthority::MultiReplica,
+        )
+        .unwrap();
+        assert_eq!(changed, Some(true), "the stale canonical is converged");
     }
 
     #[test]

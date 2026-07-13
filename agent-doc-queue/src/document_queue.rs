@@ -2250,8 +2250,14 @@ fn strongest_pin_text<'a>(texts: &[&'a str]) -> &'a str {
 ///   sees the same slots. This convergence is purely subtractive (plus the
 ///   pin-text rewrite on the survivor); it is the `Authored` state's
 ///   position property carried across the dedup.
-/// - **Intentional duplicates** (`#queue-dedup-destroys-intentional-duplicates`):
-///   identical `do [#id]` directive twins survive; only re-emit artifacts collapse.
+/// - **Intentional duplicates** (`#queue-dedup-destroys-intentional-duplicates`
+///   / `#qdedup-directive-twin`): identical `do [#id]` directive twins survive
+///   **only up to their snapshot-authored multiplicity** — the same rule as
+///   free-text and bare-reference heads. A twin beyond the committed count is a
+///   re-emit artifact (CRDT live-edit duplication) and collapses. An unbounded
+///   directive allowance previously let a byte-identical CRDT re-emit twin
+///   masquerade as intentional and survive forever ("you restored the queue
+///   items I deleted").
 /// - **Live vs struck**: a genuine live + struck pair can survive when the
 ///   current queue authored both, but terminal evidence from the snapshot/current
 ///   queue is monotonic (`Live < Struck`). A stale live re-emit of an already
@@ -2407,11 +2413,19 @@ pub fn converge_queue_via_lifecycle(
         // Lawful multiplicity for this key (how many copies survive):
         // - A pin-variant `do [#id]` group collapses to exactly one survivor
         //   regardless of snapshot count (`#qdedupsync` / `#pushpinaccum`).
-        // - Otherwise a `do [#id]` **directive** identity is unbounded: identical
-        //   directive twins are intentional "run it twice"
-        //   (`#queue-dedup-destroys-intentional-duplicates`).
-        // - Bare references and free-text lines collapse to the snapshot-authored
-        //   multiplicity (min 1) — `#qdup-bare-id` / `#qauthorder` / `#rt83qflood`.
+        // - EVERY live identity — free-text, bare reference, AND `do [#id]`
+        //   directive — is capped at its snapshot-authored multiplicity (min 1)
+        //   — `#qdup-bare-id` / `#qauthorder` / `#rt83qflood`. A `do [#id]`
+        //   directive twin counts as intentional "run it twice"
+        //   (`#queue-dedup-destroys-intentional-duplicates`) ONLY when the
+        //   operator committed that multiplicity in the snapshot. The directive
+        //   shape used to get an UNBOUNDED allowance (`usize::MAX`), which let a
+        //   CRDT live-edit re-emit inject a byte-identical twin that masqueraded
+        //   as intentional and was never collapsed — the `#qcellmerge`
+        //   duplication the operator hit as "you restored the queue items I
+        //   deleted." Capping at the authored count keeps a genuinely
+        //   double-authored id while collapsing a re-emit twin, exactly as
+        //   free-text/bare-reference already converge (`#qdedup-directive-twin`).
         // A bare `[#id]` reference subsumed by a live directive of the same id is
         // never kept — its lawful multiplicity is zero (`#brtc` cross-shape
         // subsumption above).
@@ -2431,9 +2445,11 @@ pub fn converge_queue_via_lifecycle(
             0
         } else if pin_collapsing {
             1
-        } else if shape == HeadShape::Directive && lifecycle == QueueItemLifecycle::Live {
-            usize::MAX // intentional run-twice: never drop identical directive twins
         } else {
+            // Snapshot-authored multiplicity (min 1) for every shape, including a
+            // live `do [#id]` directive twin: intentional "run it twice" must be
+            // operator-committed, not conjured by a CRDT re-emit
+            // (`#qdedup-directive-twin`).
             authored.get(&key).copied().unwrap_or(0).max(1)
         };
         let seen = kept_count.entry(key.clone()).or_insert(0);
@@ -4997,14 +5013,32 @@ mod tests {
         assert_eq!(out, vec![p(":pushpin: do [#6b5hwire]")]);
     }
 
-    /// `#queue-dedup-destroys-intentional-duplicates`: textually-identical
-    /// `do [#id]` directive twins are intentional "run it twice" and survive.
+    /// `#qdedup-directive-twin`: textually-identical `do [#id]` directive twins
+    /// that the operator did NOT author in the snapshot are a CRDT re-emit
+    /// artifact — the byte-identical twin that used to slip through the unbounded
+    /// directive allowance ("you restored the queue items I deleted"). They must
+    /// collapse to one, exactly as free-text/bare-reference re-emits do.
     #[test]
-    fn converge_preserves_identical_directive_twins() {
+    fn converge_collapses_unauthored_identical_directive_twins() {
+        let entries = vec![p("do [#deploy]"), p("do [#deploy]")];
+        let out = converge(&entries, &[]);
+        assert_eq!(
+            out,
+            vec![p("do [#deploy]")],
+            "an unauthored identical directive twin is a re-emit artifact and collapses: {out:?}"
+        );
+    }
+
+    /// `#queue-dedup-destroys-intentional-duplicates`: a genuinely twice-authored
+    /// `do [#id]` directive (the snapshot committed both copies) is intentional
+    /// "run it twice" and keeps its count — same rule as double-authored free text.
+    #[test]
+    fn converge_preserves_double_authored_directive_twins() {
+        let snapshot = vec![p("do [#deploy]"), p("do [#deploy]")];
         let entries = vec![p("do [#deploy]"), p("do [#deploy]")];
         assert!(
-            converge_queue_via_lifecycle(&entries, &[]).is_none(),
-            "identical directive twins must be left untouched"
+            converge_queue_via_lifecycle(&entries, &snapshot).is_none(),
+            "operator-authored (snapshot count 2) directive twins must be left untouched"
         );
     }
 

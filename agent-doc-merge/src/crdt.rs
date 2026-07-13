@@ -1008,9 +1008,15 @@ fn normalize_item_text(item: &str) -> String {
             break;
         }
     }
-    s.replace("~~", "")
-        .replace(":pushpin:", "")
-        .replace('📌', "")
+    // Drop strike wrappers, then strip the FULL leading lifecycle/pin marker set
+    // (`:pushpin:`/`📌`/`📍`/`🚧`/`⏭️` + word forms) via the single shared
+    // stripper. Keying only on `:pushpin:`/`📌` used to leave the new emoji
+    // markers on the identity line, so an agent's `🚧 <free text>` copy and the
+    // operator's bare `<free text>` line got DIFFERENT keys — the base-delete
+    // guard never matched them and a plainly-deleted free-text queue line was
+    // resurrected (`#qdedup-directive-twin` free-text variant).
+    let unstruck = s.replace("~~", "");
+    agent_doc_element_queue::strip_priority_markers(&unstruck)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -4135,6 +4141,24 @@ Second answer line three.
             list_item_key("- :pushpin: hello world"),
             list_item_key("- ~~hello world~~")
         );
+        // The NEW emoji markers (📌/📍/🚧/⏭️) must normalize too, or an agent's
+        // marker-decorated free-text copy keys differently than the operator's
+        // bare line and the base-delete guard resurrects a plainly-deleted line
+        // (#qdedup-directive-twin free-text variant).
+        let bare = list_item_key("- hello world");
+        for decorated in [
+            "- 🚧 hello world",
+            "- 📌 hello world",
+            "- 📍 hello world",
+            "- ⏭\u{fe0f} hello world",
+            "- **pin** hello world",
+        ] {
+            assert_eq!(
+                list_item_key(decorated),
+                bare,
+                "new-marker free text must key identically to the bare line: {decorated:?}"
+            );
+        }
     }
 
     #[test]

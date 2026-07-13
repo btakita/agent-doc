@@ -87,7 +87,17 @@ impl QueueItemIdentity {
     pub fn from_prompt(prompt: &str) -> Self {
         match extract_head_id(prompt) {
             Some(id) => QueueItemIdentity::Id(id),
-            None => QueueItemIdentity::FreeText(normalize_multiline_dedup_text(prompt)),
+            // Strip lifecycle/pin markers before keying free text so a
+            // marker-decorated re-emit (`🚧 <text>`, `📌 <text>`) keys to the
+            // same identity as the operator's bare `<text>` line. Without this
+            // the convergence pass treats them as distinct free-text heads and
+            // cannot collapse a resurrected copy against the bare original
+            // (`#qdedup-directive-twin` free-text variant).
+            None => {
+                QueueItemIdentity::FreeText(normalize_multiline_dedup_text(&strip_priority_markers(
+                    prompt,
+                )))
+            }
         }
     }
 
@@ -241,7 +251,12 @@ fn id_prefix(text: &str) -> &str {
         .unwrap_or("")
 }
 
-fn strip_priority_markers(text: &str) -> String {
+/// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🚧`/`⏭️`
+/// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
+/// marker-decorated line keys to the same durable identity as the bare line.
+/// Shared with the CRDT cell-merge free-text keyer so merge, convergence, and
+/// dedup all normalize the same marker set.
+pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     loop {
         let trimmed = t.trim_start();
@@ -302,6 +317,33 @@ mod tests {
     fn rank_orders_live_before_struck() {
         assert!(QueueItemLifecycle::Live.rank() < QueueItemLifecycle::Struck.rank());
         assert!(QueueItemLifecycle::Live < QueueItemLifecycle::Struck);
+    }
+
+    #[test]
+    fn free_text_identity_is_marker_invariant() {
+        // A marker-decorated free-text re-emit must key to the SAME identity as
+        // the operator's bare line so convergence can collapse the resurrected
+        // copy (#qdedup-directive-twin free-text variant). Covers the new emoji
+        // set (📌/📍/🚧/⏭️) plus shortcodes and word forms.
+        let bare = QueueItemIdentity::from_prompt("fix the flaky test");
+        for decorated in [
+            "🚧 fix the flaky test",
+            "📌 fix the flaky test",
+            "📍 fix the flaky test",
+            "⏭\u{fe0f} fix the flaky test",
+            ":pushpin: fix the flaky test",
+            "**pin** fix the flaky test",
+        ] {
+            assert_eq!(
+                QueueItemIdentity::from_prompt(decorated),
+                bare,
+                "marker-decorated free text must share the bare line's identity: {decorated:?}"
+            );
+        }
+        assert_eq!(
+            bare,
+            QueueItemIdentity::FreeText("fix the flaky test".to_string())
+        );
     }
 
     #[test]

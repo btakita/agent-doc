@@ -64,12 +64,24 @@ class CrdtReplicaForwarder(
             val registerStarted = System.nanoTime()
             val ack = transport.register(filePath, identity).also {
                 logSlow("transport.register", registerStarted, details = "ok=${it != null}")
-            } ?: return false
+            }
+            if (ack == null) {
+                // NEVER swallow the register cause: without this the failure lands as a
+                // bare `[crdt-replica] register failed` WARN with no reason, so a live
+                // wedge (controller.sock down / protocol mismatch / oversized bootstrap
+                // round-trip) is undiagnosable from idea.log. The transport already
+                // recorded the specific `send` failure via `lastError`.
+                log.warn("[crdt-replica] transport.register returned null for ${File(filePath).name}; reason=${transport.lastRegisterError() ?: "unknown"}")
+                return false
+            }
             clientId = ack.clientId
             val openStarted = System.nanoTime()
             val opened = node.open(ack.clientId, ack.bootstrap)
             logSlow("native.open", openStarted, details = "bootstrap_bytes=${ack.bootstrap?.size ?: 0} ok=$opened")
-            if (!opened) return false
+            if (!opened) {
+                log.warn("[crdt-replica] native.open rejected the bootstrap for ${File(filePath).name}; bootstrap_bytes=${ack.bootstrap?.size ?: 0} (see prior [native] replica_open WARN for the cause)")
+                return false
+            }
             attached = true
             return true
         } finally {
@@ -249,6 +261,13 @@ interface ReplicaTransport {
     /** `replica_register`; null when the CPC refuses (Detached document). */
     fun register(filePath: String, identity: String): ReplicaRegisterAck?
 
+    /**
+     * Human-readable reason the most recent [register] returned null (socket
+     * unavailable, `ok=false`, missing `client_id`, …), or null if unknown. Lets the
+     * caller log WHY register failed instead of a bare "register failed" WARN.
+     */
+    fun lastRegisterError(): String? = null
+
     /** `replica_update`: ship a local yrs update to the document model for fan-out. */
     fun broadcastUpdate(filePath: String, identity: String, update: ByteArray)
 
@@ -277,14 +296,35 @@ interface ReplicaTransport {
 class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CpcSocketReplicaTransport::class.java)
 
+    @Volatile
+    private var lastRegisterError: String? = null
+
+    override fun lastRegisterError(): String? = lastRegisterError
+
     override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
         val response = send(
             controllerRequest("replica_register", filePath, identity),
-        ) ?: return null
-        if (!response.ok) return null
-        val data = response.data ?: return null
-        val clientId = data.get("client_id")?.asLong ?: return null
+        )
+        if (response == null) {
+            lastRegisterError = "socket_unavailable: $lastSendError"
+            return null
+        }
+        if (!response.ok) {
+            lastRegisterError = "controller_error: ${response.error ?: "ok=false"}"
+            return null
+        }
+        val data = response.data
+        if (data == null) {
+            lastRegisterError = "missing_data"
+            return null
+        }
+        val clientId = data.get("client_id")?.asLong
+        if (clientId == null) {
+            lastRegisterError = "missing_client_id"
+            return null
+        }
         val bootstrap = data.get("bootstrap_b64")?.asString?.let { decodeBase64(it) }
+        lastRegisterError = null
         return ReplicaRegisterAck(clientId, bootstrap)
     }
 
@@ -368,11 +408,17 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
         return obj
     }
 
+    @Volatile
+    private var lastSendError: String? = null
+
     private fun send(request: JsonObject): CpcResponse? {
         val socket = cpcSocket()
         return try {
-            sendToSocket(socket, request)
+            val response = sendToSocket(socket, request)
+            lastSendError = null
+            response
         } catch (e: Exception) {
+            lastSendError = "${socket.path}: ${e.javaClass.simpleName}: ${e.message}"
             log.debug("[crdt-replica] CPC socket ${socket.path} unavailable: ${e.message}")
             null
         }
@@ -438,7 +484,9 @@ class NativeReplicaNode : ReplicaNode {
             if (ok) clientIdForEncode = clientId
             ok
         } catch (e: Throwable) {
-            log.debug("[native] replica_open unavailable: ${e.message}")
+            // Register hinges on this native open; a swallowed DEBUG line makes a
+            // real ABI/bootstrap failure invisible in idea.log. Surface it.
+            log.warn("[native] replica_open failed clientId=$clientId bootstrap_bytes=${initState?.size ?: 0}: ${e.javaClass.simpleName}: ${e.message}")
             false
         }
     }

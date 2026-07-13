@@ -824,6 +824,52 @@ impl RelayHub {
         Ok(true)
     }
 
+    /// Force the canonical (and every member replica) to `text`, unconditionally,
+    /// and record it as the committed baseline.
+    ///
+    /// Unlike [`Self::reconcile_canonical_against_baseline`] this does NOT depend on
+    /// a prior `last_committed_text` baseline and never defers: the caller asserts
+    /// `text` is the authoritative document content. The single caller is the
+    /// authoritative-compaction commit (`#jb-compact-commit-stale-relay-canonical`),
+    /// which already archived the `### Re:` turns the compaction dropped. Adopting
+    /// the compacted content into the lazily canonical is what makes a subsequent
+    /// same-process read (`try_resolve_current_document_content` during the commit)
+    /// resolve the compacted content instead of the frozen pre-compact canonical a
+    /// phantom stale lease (`live_editors == 0` yet the reactive open-docs
+    /// projection still reports the editor open) would otherwise keep serving.
+    ///
+    /// Returns whether the canonical changed. Live members are flagged for a
+    /// replace-capable re-bootstrap because a compaction deletion cannot be
+    /// expressed as an additive delta.
+    pub fn adopt_authoritative_text(&mut self, text: &str) -> Result<bool> {
+        if self.canonical.text() == text {
+            self.last_committed_text = Some(text.to_string());
+            return Ok(false);
+        }
+        let fresh = ReplicaState::new(self.canonical_id);
+        if !text.is_empty() {
+            fresh.apply_local_edit(0, 0, text);
+        }
+        let bootstrap = fresh.encode_state();
+        self.canonical = fresh;
+        let ids: Vec<u64> = self.members.keys().copied().collect();
+        for id in ids {
+            let replica = ReplicaState::from_encoded(id, &bootstrap)?;
+            if let Some(member) = self.members.get_mut(&id) {
+                member.replica = replica;
+            }
+        }
+        let live: Vec<u64> = self
+            .members
+            .keys()
+            .copied()
+            .filter(|id| self.is_live(*id))
+            .collect();
+        self.pending_rebootstrap.extend(live);
+        self.last_committed_text = Some(text.to_string());
+        Ok(true)
+    }
+
     /// Route a settled out-of-band disk change into the hub — the CPC-replica
     /// entry point the controller watcher calls when the document file changed on
     /// disk (a `git` operation, an external editor, another process). Composes the
@@ -1487,6 +1533,54 @@ mod tests {
             hub.member_text(editor).as_deref(),
             Some(compacted),
             "the editor mirror was reseeded to the compacted text"
+        );
+    }
+
+    #[test]
+    fn adopt_authoritative_text_converges_canonical_without_a_baseline() {
+        // `#jb-compact-commit-stale-relay-canonical`: the phantom stale-lease
+        // Compact Exchange defect. The compaction wrote the compacted content to
+        // disk+snapshot through the disk-authority path, but the relay canonical is
+        // FROZEN at the pre-compact text and — the crucial difference from
+        // `reconcile_canonical_against_baseline` — this hub has NO recorded
+        // `last_committed_text` baseline (allocated mid-session before any commit),
+        // so the baseline reconcile would DEFER and leave the canonical stale. The
+        // authoritative-compaction commit then reads that frozen canonical and lands
+        // pre-compact content in HEAD. `adopt_authoritative_text` must converge
+        // unconditionally.
+        let mut hub = RelayHub::new(1);
+        let editor = mint_client_id("intellij:phantom-lease");
+        hub.register(editor).unwrap();
+        let pre_compact = "# doc\n\nturn 1\nturn 2\nturn 3\nturn 4 (kept)\n";
+        hub.apply_local(editor, 0, 0, pre_compact).unwrap();
+        // Deliberately NO `record_committed_baseline` — this is the deferring case.
+        assert_eq!(hub.last_committed_text_for_test(), None);
+
+        let compacted = "# doc\n\n*Compacted. 3 turns archived.*\nturn 4 (kept)\n";
+        assert!(
+            hub.adopt_authoritative_text(compacted).unwrap(),
+            "the compacted content is adopted even with no prior baseline"
+        );
+        assert_eq!(
+            hub.canonical_text(),
+            compacted,
+            "the lazily canonical is the compacted content the commit will read"
+        );
+        assert!(!hub.canonical_text().contains("turn 1"));
+        assert_eq!(
+            hub.member_text(editor).as_deref(),
+            Some(compacted),
+            "the editor mirror was reseeded to the compacted text"
+        );
+        assert_eq!(
+            hub.last_committed_text_for_test(),
+            Some(compacted),
+            "the baseline advances so a later reconcile does not re-detect it"
+        );
+        // Idempotent: re-adopting the same text reports no change.
+        assert!(
+            !hub.adopt_authoritative_text(compacted).unwrap(),
+            "re-adopting the same text is a no-op"
         );
     }
 

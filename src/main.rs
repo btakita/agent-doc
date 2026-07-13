@@ -280,6 +280,26 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             },
         )
     }
+
+    fn commit_document(
+        &self,
+        file: &Path,
+        authoritative_compaction: bool,
+    ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerCommitDocumentOutcome>
+    {
+        // Runs INSIDE the controller process (invoked by `handle_commit_document_rpc`).
+        // `commit_document_in_controller` marks the commit as controller-owned so it
+        // does not re-delegate over the socket and treats the relay barrier the
+        // handler already flushed as pre-converged (`#cpc-commit`).
+        let outcome =
+            agent_doc_commit_io::commit_document_in_controller(file, authoritative_compaction)?;
+        Ok(
+            agent_doc_controller_io::project_controller::ControllerCommitDocumentOutcome {
+                did_commit: outcome.did_commit,
+                vcs_refresh_signaled: outcome.vcs_refresh_signaled,
+            },
+        )
+    }
 }
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =

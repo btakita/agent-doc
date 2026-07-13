@@ -38,6 +38,15 @@ thread_local! {
     /// `### Re:` turns. Correctness is guaranteed by the compaction's own
     /// `verify_compact_head_landed` post-commit check, not by this guard.
     static AUTHORITATIVE_COMPACTION_COMMIT: Cell<bool> = const { Cell::new(false) };
+    /// Set while a commit is executing INSIDE the CPC controller process (the
+    /// `commit_document` runtime effect). Two jobs:
+    ///  1. suppress re-delegation — `commit_with_outcome` must not round-trip back
+    ///     to the controller socket (it is already running there); and
+    ///  2. mark the commit barrier as pre-converged — the controller's
+    ///     `handle_commit_document_rpc` already flushed live editor ops into the
+    ///     canonical before invoking the effect, so `commit_barrier_ready` is
+    ///     satisfied and the in-process resolve reads that authoritative canonical.
+    static CONTROLLER_COMMIT_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +263,13 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
 impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLiveBufferGuardEffects {
     fn commit_barrier_ready(&self, file: &Path) -> bool {
         if force_disk_commit_resolution_enabled() {
+            return true;
+        }
+        if controller_commit_in_progress() {
+            // The controller's `handle_commit_document_rpc` already flushed live
+            // editor ops into the canonical before invoking this in-process commit,
+            // so the barrier is satisfied — and re-asking the controller here would
+            // deadlock (we ARE the controller, single request-locked).
             return true;
         }
         #[cfg(any(test, feature = "test-support"))]
@@ -561,6 +577,40 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
 }
 
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
+    // `#cpc-commit`: when a live editor owns the document, delegate the git commit
+    // to the CPC controller — the authoritative owner of the converged relay
+    // canonical — so it commits IN-PROCESS where its canonical is authority,
+    // instead of the CLI failing closed as a non-authoritative replica
+    // (`editor is the current authority ... was not used as commit authority`).
+    // Skipped when already executing inside the controller (avoids socket
+    // re-entry/deadlock) or under a `--force-disk` operator override. The client
+    // returns `Ok(None)` for a headless document (no editor authority to defer to),
+    // and any delegation error falls through to the local path, which keeps the
+    // existing fail-closed safety.
+    if !controller_commit_in_progress() && !force_disk_commit_resolution_enabled() {
+        match agent_doc_controller_io::project_controller::commit_document_via_controller(
+            file,
+            authoritative_compaction_commit_enabled(),
+        ) {
+            Ok(Some(outcome)) => {
+                return Ok(CommitOutcome {
+                    did_commit: outcome.did_commit,
+                    vcs_refresh_signaled: outcome.vcs_refresh_signaled,
+                });
+            }
+            Ok(None) => {}
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "commit_document_via_controller_error file={} error={} recovery=local_commit",
+                        file.display(),
+                        format!("{err:#}").replace('\n', "\\n")
+                    ),
+                );
+            }
+        }
+    }
     commit_with_ports_outcome(
         CommitCoordinatorPorts {
             pre_stage_repair: &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
@@ -620,6 +670,32 @@ pub fn commit_with_authoritative_compaction(file: &Path) -> Result<CommitOutcome
 
 fn authoritative_compaction_commit_enabled() -> bool {
     AUTHORITATIVE_COMPACTION_COMMIT.with(Cell::get)
+}
+
+/// Run `f` (the actual git commit) marked as executing inside the CPC controller,
+/// so the commit does not re-delegate to the controller socket and treats the
+/// relay barrier as pre-converged. The binary wires this around the
+/// `commit_document` runtime effect (`agent-doc-commit-io` cannot be called from
+/// `agent-doc-controller-io` directly — it depends on it). Restores `AUTHORITATIVE_COMPACTION_COMMIT`
+/// too when `authoritative_compaction` is requested.
+pub fn commit_document_in_controller(
+    file: &Path,
+    authoritative_compaction: bool,
+) -> Result<CommitOutcome> {
+    CONTROLLER_COMMIT_IN_PROGRESS.with(|slot| {
+        let previous = slot.replace(true);
+        let result = if authoritative_compaction {
+            commit_with_authoritative_compaction(file)
+        } else {
+            commit_with_outcome(file)
+        };
+        slot.set(previous);
+        result
+    })
+}
+
+fn controller_commit_in_progress() -> bool {
+    CONTROLLER_COMMIT_IN_PROGRESS.with(Cell::get)
 }
 
 fn commit_current_document_content(file: &Path, source: &str) -> Result<String> {
@@ -1651,5 +1727,34 @@ fn chrono_timestamp() -> String {
     match output {
         Some(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         None => "unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod controller_commit_scope_tests {
+    use super::*;
+    use agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects;
+    use std::path::Path;
+
+    #[test]
+    fn controller_commit_scope_preconverges_barrier_and_suppresses_reentry() {
+        // `#cpc-commit`: inside the controller-owned commit scope the relay barrier
+        // is treated as pre-converged (the `commit_document` RPC handler already
+        // flushed live editor ops into the canonical), so the in-process commit
+        // neither re-asks the controller over the socket (which would deadlock — the
+        // controller is single request-locked) nor fails closed. Outside the scope
+        // the flag stays clear.
+        assert!(!controller_commit_in_progress());
+        CONTROLLER_COMMIT_IN_PROGRESS.with(|slot| {
+            let prev = slot.replace(true);
+            assert!(controller_commit_in_progress());
+            assert!(
+                RuntimeLiveBufferGuardEffects
+                    .commit_barrier_ready(Path::new("/does/not/exist.md")),
+                "barrier must be pre-converged inside the controller commit scope"
+            );
+            slot.set(prev);
+        });
+        assert!(!controller_commit_in_progress());
     }
 }

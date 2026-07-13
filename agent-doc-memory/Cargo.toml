@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-memory"
-version = "0.34.85"
+version = "0.34.86"
 edition = "2024"
 description = "Pure semantic memory ranking and event-shaping helpers for agent-doc"
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_memory"
 
 [dependencies]
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.85" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.85" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.86" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.86" }
 serde = { version = "1", features = ["derive"] }
 tsift-memory = "0.1.70"

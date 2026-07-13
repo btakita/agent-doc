@@ -22,6 +22,10 @@ use std::collections::BTreeSet;
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
 const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
+/// A CPC-owned git commit (barrier + stage + commit + boundary reposition) can run
+/// several seconds — well past the 5s default RPC timeout — so `commit_document`
+/// gets a generous ceiling.
+const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
@@ -3797,6 +3801,74 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     )
 }
 
+/// Delegate the git commit for `doc` to the CPC controller — the authoritative
+/// owner of the converged relay canonical — instead of committing as a
+/// non-authoritative CLI replica. Returns:
+/// - `Ok(Some(outcome))` when the controller performed the commit;
+/// - `Ok(None)` when there is no live editor authority to defer to (headless), so
+///   the caller's local disk/snapshot commit is already authoritative.
+///
+/// This is what lets `Compact Exchange` / `write --commit` / `finalize` land on a
+/// document with a live editor: the controller commits in-process where its
+/// canonical is authority, instead of the CLI failing closed with
+/// `editor is the current authority ... was not used as commit authority`.
+pub fn commit_document_via_controller(
+    doc: &Path,
+    authoritative_compaction: bool,
+) -> Result<Option<ControllerCommitDocumentOutcome>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        // Headless: no live editor to defer to; the caller's local commit is
+        // already authoritative.
+        return Ok(None);
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return Ok(None);
+    };
+    // Delegate ONLY to an already-running controller. A live editor implies a
+    // running controller (the plugin talks to it); if none is reachable, fall back
+    // to the caller's local commit rather than launching a controller mid-commit.
+    let controller_socket = socket_path(&project_root);
+    if let Err(err) = connect_path(&controller_socket) {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_commit_document_unavailable file={} socket={} error={} recovery=local_commit",
+                canonical.display(),
+                controller_socket.display(),
+                format!("{err:#}").replace('\n', "\\n")
+            ),
+        );
+        return Ok(None);
+    }
+    let payload = serde_json::to_string(&ControllerCommitDocumentPayload {
+        authoritative_compaction,
+    })
+    .context("failed to serialize commit_document payload")?;
+    let outcome: ControllerCommitDocumentOutcome = request_existing_controller_with_timeout(
+        &project_root,
+        ControllerRequest {
+            command: "commit_document".to_string(),
+            file: Some(canonical),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(payload),
+        },
+        CONTROLLER_COMMIT_DOCUMENT_TIMEOUT,
+    )?;
+    Ok(Some(outcome))
+}
+
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
@@ -3980,6 +4052,54 @@ fn handle_crdt_commit_barrier_rpc(
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
     Ok(agent_doc_crdt_relay_io::commit_barrier_for_file(&canonical))
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ControllerCommitDocumentPayload {
+    #[serde(default)]
+    authoritative_compaction: bool,
+}
+
+/// Perform the git commit for a document from inside the controller process. This
+/// is the CPC-owned commit: the controller hosts the converged relay canonical, so
+/// running the commit here — rather than the CLI asking over the socket and then
+/// committing as a non-authoritative replica — lets a document with a live editor
+/// commit authoritatively instead of failing closed
+/// (`editor is the current authority ... was not used as commit authority`).
+///
+/// Flow: converge live editor ops into the canonical (`commit_barrier_for_file`
+/// flushes editor→canonical), then delegate the actual commit to the binary-wired
+/// runtime effect (`agent-doc-commit-io`, which depends on this crate). The effect
+/// sets the preconverged flag so the in-process commit reads the just-converged
+/// canonical as authority and does not round-trip back to this controller.
+fn handle_commit_document_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<ControllerCommitDocumentOutcome> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload: ControllerCommitDocumentPayload = match request.diagnostic_payload.as_deref() {
+        Some(json) => {
+            serde_json::from_str(json).context("failed to parse commit_document payload")?
+        }
+        None => ControllerCommitDocumentPayload::default(),
+    };
+    // Converge: flush live editor ops into the canonical so the in-process commit
+    // reads the authoritative merged content. We proceed regardless of the
+    // editor-behind readiness bit — this is an explicit authority commit, the
+    // canonical is authority, and editors reconcile via the replace-capable replica
+    // delivery.
+    let barrier_ready = agent_doc_crdt_relay_io::commit_barrier_for_file(&canonical);
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_commit_document file={} authoritative_compaction={} barrier_ready={}",
+            canonical.display(),
+            payload.authoritative_compaction,
+            barrier_ready
+        ),
+    );
+    runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
 }
 
 fn handle_crdt_record_committed_baseline_rpc(
@@ -6886,6 +7006,9 @@ pub(crate) fn handle_request_locked(
         )),
         "crdt_commit_barrier" => {
             controller_envelope(handle_crdt_commit_barrier_rpc(&bootstrap_snapshot, request))
+        }
+        "commit_document" => {
+            controller_envelope(handle_commit_document_rpc(&bootstrap_snapshot, request))
         }
         "crdt_record_committed_baseline" => controller_envelope(
             handle_crdt_record_committed_baseline_rpc(&bootstrap_snapshot, request),
@@ -14634,6 +14757,44 @@ mod tests {
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
         }
+    }
+
+    #[test]
+    fn commit_document_via_controller_is_none_for_headless_document() {
+        use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
+        // `#cpc-commit`: a headless document has no live editor authority to defer
+        // to, so the CLI commits locally — `commit_document_via_controller` must
+        // short-circuit to `Ok(None)` WITHOUT touching a controller socket or
+        // launching one. Disable the reliable-sync plane so a never-tracked path
+        // deterministically resolves as GitAuthoritative.
+        unsafe {
+            std::env::set_var(agent_doc_reliable_sync_io::AUTHORITY_ENV, "0");
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("headless.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        assert_eq!(
+            crdt_authority_for_file(&doc.to_string_lossy()),
+            CrdtAuthority::GitAuthoritative
+        );
+        assert_eq!(commit_document_via_controller(&doc, false).unwrap(), None);
+        assert_eq!(commit_document_via_controller(&doc, true).unwrap(), None);
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
+        }
+    }
+
+    #[test]
+    fn commit_document_payload_round_trips_and_defaults_false() {
+        let json = serde_json::to_string(&ControllerCommitDocumentPayload {
+            authoritative_compaction: true,
+        })
+        .unwrap();
+        let back: ControllerCommitDocumentPayload = serde_json::from_str(&json).unwrap();
+        assert!(back.authoritative_compaction);
+        // An absent field defaults to false so an older client's payload stays valid.
+        let legacy: ControllerCommitDocumentPayload = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.authoritative_compaction);
     }
 
     #[test]

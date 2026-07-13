@@ -118,6 +118,17 @@ pub struct ControllerEditorRouteRuntimeResult {
     pub output: String,
 }
 
+/// Outcome of an in-controller git commit (`commit_document`). The commit runs
+/// inside the controller process, where its own converged relay canonical IS the
+/// authority — so a document with a live editor commits authoritatively instead
+/// of the CLI failing closed as a non-authoritative replica.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerCommitDocumentOutcome {
+    pub did_commit: bool,
+    #[serde(default)]
+    pub vcs_refresh_signaled: Option<bool>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTmuxLayoutSyncInvocation {
     pub columns: Vec<String>,
@@ -195,6 +206,17 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
     ) -> Result<ControllerTmuxLayoutSyncReceipt>;
+
+    /// Perform the git commit for `file` from inside the controller process, where
+    /// the converged relay canonical IS the authority. `authoritative_compaction`
+    /// selects the compaction-aware commit entry (guard stand-down). The binary
+    /// wires this to `agent-doc-commit-io` (which depends on this crate, so the
+    /// controller cannot call it directly — hence the effects port).
+    fn commit_document(
+        &self,
+        file: &Path,
+        authoritative_compaction: bool,
+    ) -> Result<ControllerCommitDocumentOutcome>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -282,6 +304,14 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
                 invocation.relative_path
             ),
         })
+    }
+
+    fn commit_document(
+        &self,
+        _file: &Path,
+        _authoritative_compaction: bool,
+    ) -> Result<ControllerCommitDocumentOutcome> {
+        anyhow::bail!("project controller test runtime does not commit documents")
     }
 
     fn sync_tmux_layout(

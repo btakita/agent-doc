@@ -18,7 +18,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -37,12 +37,12 @@ complete
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 19 response topic(s): Transcribe + diarize the 2026-07-10 call; Analyze the transcr...
-<!-- agent:boundary:a55de004 -->
+<!-- agent:boundary:69193263 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#e44f]
-- do [#hmw9]
+- ~~do [#e44f]~~
+- 🚧 do [#hmw9]
 <!-- /agent:queue -->
 
 ## Notes
@@ -66,7 +66,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
+- [ ] 🚧 [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 <!-- /agent:backlog -->
 
 ## Review

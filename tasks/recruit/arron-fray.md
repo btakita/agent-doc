@@ -288,7 +288,20 @@ I used the current project name `lazily-formal` for the Lean layer; that is the 
 > **Queue prompt:** [x] ~~In resumes, rename "INDEPENDENT SOFTWARE CONSULTANT — CURRENT CLIENT WORK", to "INDEPENDENT SOFTWARE CONSULTANT — CLIENT WORK"~~ — done (data.toml + BrianTakita.md)
 
 This item was completed in an earlier cycle and is retained only as checked queue history. No additional work is pending for it.
-<!-- agent:boundary:7760c939 -->
+❯ Please include the latest work on lazily in my resume db. Then create a resume for https://careers.lore.co/roles/3/.
+### Re: Latest Lazily work + Lore Staff Software Engineer resume — gpt-5
+
+Done.
+
+- Updated the resume database and master Markdown with the latest Lazily family work: C++ is now the eighth binding; the new accomplishment covers TopicCell broadcast/replay, CrdtTree replicated state with platform-native durable outboxes, RelayCell merge synchronization, shared lazily-spec fixtures, and lazily-formal Lean proofs for convergence/replay/stale-cursor safety.
+- Created `resume/profiles/lore.toml` from Lore's live [Staff Software Engineer role](https://careers.lore.co/roles/3/), emphasizing Python-heavy production backends, REST/GraphQL, distributed and high-concurrency systems, GCP, testing/reliability, ambiguity, cross-boundary staff work, and durable technical leverage.
+- Built `resume/BrianTakita-lore.pdf`. The tailored summary leads with 20+ years of production-system work, Presence AI's Python/real-time pipeline, current cross-boundary client work, Lazily's distributed primitives, API design, Google Cloud, and BDD/spec-driven reliability.
+- Rebuilt the default `resume/BrianTakita.pdf` so the main artifact carries the Lazily update too.
+
+Verification: `agent-resume validate -d data.toml` passed (14 experiences, 58 skills, 9 career highlights); `make PROFILE=lore` and `make` passed; all 12 pytest checks passed; `pdftotext` inspection confirmed the tailored summary, skills, and Lazily content; PDF metadata is four US-letter pages. The resume repository has no workflow named `CI`, so there was no matching CI run to inspect.
+
+Committed in the `resume` submodule as `85af45a` (`resume: add Lore profile and latest lazily work`). Unrelated in-progress resume changes were preserved and excluded from the commit.
+<!-- agent:boundary:abdf20e1 -->
 <!-- /agent:exchange -->
 
 ## Queue

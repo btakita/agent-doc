@@ -37,7 +37,7 @@ complete
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 19 response topic(s): Transcribe + diarize the 2026-07-10 call; Analyze the transcr...
-<!-- agent:boundary:473799a6 -->
+<!-- agent:boundary:a55de004 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -66,7 +66,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#e44f] [recommended] Deploy #lender-docs-sections to EFS prod: apply migration 0134 (adds deal_lender_documents.category) to prod D1, then deploy the worker via the clobber-immune clean-worktree recipe, and verify the deal-dialog Lender Documents tab renders the 5 sections. Outward-facing — confirm before deploying.
 - [ ] [#hmw9] [recommended] Verify EFS prod Cloudflare email SENDER (#nga4/#hmw9, needs prod access): MESSAGE_EMAIL_NOTIFICATIONS_ENABLED now defaults ON in code (a7b2d34) — remaining check is that a Cloudflare email sender (CLOUDFLARE_EMAIL_API_TOKEN/ACCOUNT_ID) + MESSAGE_ADMIN_NOTIFICATION_TO are set in prod; the '[message-notify] ... email not sent (skipped): ...' warn names the exact reason in wrangler tail.
 <!-- /agent:backlog -->
 

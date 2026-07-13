@@ -2180,6 +2180,32 @@ mod tests {
         assert_eq!(flipped, legacy, "guarded flip must be byte-transparent");
     }
 
+    /// Keep the cross-crate parity check on the dependency-owning side. Putting this
+    /// test in `agent-doc-markdown-lossless` created a dev-dependency cycle that made
+    /// the two crates impossible to publish in either order.
+    #[test]
+    fn lossless_tree_matches_merge_by_component_on_clean_cases() {
+        const BASE: &str = "---\ntitle: t\n---\n\n<!-- agent:status -->\nbase status\n<!-- /agent:status -->\n\n<!-- agent:log -->\nbase log\n<!-- /agent:log -->\n";
+        let base_state = CrdtDoc::from_text(BASE).encode_state();
+        let cases = [
+            (
+                BASE.replace("base status", "our status"),
+                BASE.replace("base log", "their log"),
+            ),
+            (BASE.replace("base status", "our status"), BASE.to_string()),
+            (BASE.to_string(), BASE.replace("base log", "their log")),
+        ];
+        for (ours, theirs) in cases {
+            let legacy = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            let tree = agent_doc_markdown_lossless::merge_via_lossless_tree(BASE, &ours, &theirs)
+                .expect("clean case should merge");
+            assert_eq!(
+                tree, legacy,
+                "lossless-tree merge diverged from merge_by_component\nours={ours:?}\ntheirs={theirs:?}"
+            );
+        }
+    }
+
     // ---- #qnodemerge4: op-capture / evented reflection ----
 
     #[test]

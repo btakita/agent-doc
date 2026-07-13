@@ -750,40 +750,6 @@ mod tests {
         );
     }
 
-    /// Byte-parity cross-check against the real yrs-backed `merge_by_component`:
-    /// where the lossless-tree merge returns `Some`, it must equal the authoritative
-    /// result for these clean, non-conflicting cases. This is the evidence the
-    /// merge-layer shadow needs before any authority flip (#lzlosstree).
-    #[test]
-    fn merge_via_lossless_tree_matches_merge_by_component_on_clean_cases() {
-        use agent_doc_merge::crdt::{CrdtDoc, merge_by_component};
-        let base_state = CrdtDoc::from_text(MERGE_BASE).encode_state();
-        let cases = [
-            // (ours, theirs)
-            (
-                MERGE_BASE.replace("base status", "our status"),
-                MERGE_BASE.replace("base log", "their log"),
-            ),
-            (
-                MERGE_BASE.replace("base status", "our status"),
-                MERGE_BASE.to_string(),
-            ),
-            (
-                MERGE_BASE.to_string(),
-                MERGE_BASE.replace("base log", "their log"),
-            ),
-        ];
-        for (ours, theirs) in cases {
-            let legacy = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
-            let tree = merge_via_lossless_tree(MERGE_BASE, &ours, &theirs)
-                .expect("clean case should merge");
-            assert_eq!(
-                tree, legacy,
-                "lossless-tree merge diverged from merge_by_component\nours={ours:?}\ntheirs={theirs:?}"
-            );
-        }
-    }
-
     #[test]
     fn projection_round_trips_the_corpus_and_survives_serialization() {
         for (name, doc) in corpus() {

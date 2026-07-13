@@ -1109,7 +1109,6 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
- "agent-doc-merge",
  "lazily 0.38.0",
  "serde",
  "serde_json",

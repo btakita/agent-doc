@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux-io"
-version = "0.34.91"
+version = "0.34.92"
 edition = "2024"
 description = "Effectful tmux command execution adapter for agent-doc"
 license = "MIT"
@@ -10,8 +10,8 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_tmux_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.91" }
-agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.91" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.91" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.92" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.34.92" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.92" }
 anyhow = "1"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

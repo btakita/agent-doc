@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.92
+
+- **Codex skill-version mismatches now self-heal through the project controller (`#codex-skill-reload-cpc-restart`).** After a real `agent-doc skill install --harness codex --reload restart` update, the installed Codex instructions immediately request `agent-doc session restart-supervisor <FILE>` and stop. CPC accepts the busy owner-pane handoff, restarts the child in continue mode (`codex resume --last`), and automatically re-submits the document trigger with the updated skill. A successful managed-session handoff no longer asks the operator to restart manually; manual guidance remains only for an unmanaged session that CPC cannot restart. The generic skill source, Codex-rendered instruction surface, harness invocation runbook, README, functional spec, and generated-content tests carry the same contract.
+
 ## 0.34.91
 
 - **Direct-pane routing injects each full trigger at most once.** A successful tmux transport is now an irreversible injection boundary: an empty capture or missing dispatch-start proof can no longer be misclassified as proof that the payload had no effect. Recovery is limited to bounded bare-`Enter` retries while the exact routed draft remains visible, preventing fast harness consumption from amplifying one editor action into repeated prompts.

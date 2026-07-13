@@ -106,11 +106,11 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 **Note:** Codex does not support project-defined slash commands. If this root file disagrees with the installed harness-specific instructions, treat the installed harness file as authoritative for the current turn.
 "#;
 
-const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`; Codex `agent-doc skill install --harness codex --reload restart`; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run the active-harness install: Claude Code `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`; Codex `agent-doc skill install --harness codex --reload restart`, then after a real update immediately run `agent-doc session restart-supervisor <FILE>` so the CPC restarts Codex in continue mode and re-submits the document trigger; OpenCode `agent-doc skill install --harness opencode`; other harnesses `agent-doc skill install`. If install says already up to date, treat this file as stale duplicate instructions, use installed harness instructions, and continue with the task. Stop only on a real `SKILL_RELOAD=...`; see [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 const CLAUDE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness claude --reload restart` unless `agent_doc_auto_compact` is explicitly set in frontmatter or `.agent-doc/config.toml`. On `SKILL_RELOAD=restart`, ask the user to restart Claude Code and re-invoke `/agent-doc <FILE>`, then stop. Use `--reload compact` and ask for `/compact` only when that explicit opt-in exists. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Claude skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
-const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex --reload restart`; on `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
+const CODEX_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex --reload restart`. After a real update, immediately run `agent-doc session restart-supervisor <FILE>` and stop: the CPC restarts Codex in continue mode (`codex resume --last`) and automatically re-submits `agent-doc <FILE>` with the updated instructions. Do not ask the user to restart when that CPC handoff succeeds; only fall back to manual restart guidance when the controller reports that no managed session can be restarted. If install says already up to date, treat it as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
 const OPENCODE_AUTO_UPDATE_LINE: &str = "**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness opencode`; if it says already up to date, treat as stale instruction drift, continue this turn, and use the installed OpenCode skill. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).";
 
@@ -2019,7 +2019,9 @@ mod tests {
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
-        assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains("agent-doc session restart-supervisor <FILE>"));
+        assert!(content.contains("codex resume --last"));
+        assert!(content.contains("Do not ask the user to restart"));
         assert!(content.contains("stale instruction drift"));
         assert!(content.contains("continue this turn"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
@@ -2520,7 +2522,9 @@ mod tests {
         assert!(content.contains("agent-doc <FILE>"));
         assert!(content.contains("Codex CLI will reject it"));
         assert!(content.contains("agent-doc skill install --harness codex --reload restart"));
-        assert!(content.contains("SKILL_RELOAD=restart"));
+        assert!(content.contains("agent-doc session restart-supervisor <FILE>"));
+        assert!(content.contains("codex resume --last"));
+        assert!(content.contains("Do not ask the user to restart"));
         assert!(content.contains("stale instruction drift"));
         assert!(content.contains("continue this turn"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));

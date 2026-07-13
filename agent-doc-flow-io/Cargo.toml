@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-flow-io"
-version = "0.34.91"
+version = "0.34.92"
 edition = "2024"
 description = "Flow event logging adapters for agent-doc"
 license = "MIT"
@@ -10,39 +10,39 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_flow_io"
 
 [dependencies]
-agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.91" }
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.91" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.91" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.91" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.91" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.91" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.91" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.91" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.91" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.91" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.91" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.91" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.91" }
-agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.91" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.91" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.91" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.91" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.91" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.91" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.91" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.91" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.91" }
-agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.91" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.91" }
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.92" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.92" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.92" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.92" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.92" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.92" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.92" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.92" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.92" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.92" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.92" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.92" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.92" }
+agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.92" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.92" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.34.92" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.92" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.34.92" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.92" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.92" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.92" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.92" }
+agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.34.92" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.92" }
 anyhow = "1"
 serde_json = "1"
 
 [dev-dependencies]
-agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.91", features = ["test-support"] }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.91" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.91" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.91" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.91" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.91" }
-agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.91" }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.34.92", features = ["test-support"] }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.92" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.92" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.92" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.92" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.92" }
+agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.34.92" }
 tempfile = "3"

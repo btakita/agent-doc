@@ -32910,6 +32910,9 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     assert_operator_authority_instructions(&skill, "Codex SKILL.md");
     assert!(skill.contains("Interactive markdown session for Codex"));
     assert!(skill.contains("agent-doc skill install --harness codex --reload restart"));
+    assert!(skill.contains("agent-doc session restart-supervisor <FILE>"));
+    assert!(skill.contains("codex resume --last"));
+    assert!(skill.contains("Do not ask the user to restart"));
 
     let hooks: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&hooks_path).unwrap()).unwrap();

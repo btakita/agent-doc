@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sqlite"
-version = "0.34.91"
+version = "0.34.92"
 edition = "2024"
 description = "SQLite-backed persistence layer for agent-doc (archive index, controller state store) — isolates the bundled-SQLite C build from agent-doc-orchestration recompiles"
 license = "MIT"
@@ -10,11 +10,11 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_sqlite"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.91" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.91" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.91" }
-agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.91" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.91" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.92" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.92" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.92" }
+agent-doc-topic = { path = "../agent-doc-topic", version = "0.34.92" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.92" }
 anyhow = "1"
 lazily = { version = "0.38.1", features = ["ipc", "durable-sqlite"] }
 rusqlite = { version = "0.40", features = ["bundled"] }

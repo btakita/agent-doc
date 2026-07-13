@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-done"
-version = "0.34.91"
+version = "0.34.92"
 edition = "2024"
 description = "Done/archive element descriptor for agent-doc"
 license = "MIT"
@@ -10,5 +10,5 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_done"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.91" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.91" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.92" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.34.92" }

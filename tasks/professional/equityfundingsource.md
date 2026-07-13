@@ -32,41 +32,11 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260713-052512.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260713-082849.md`*
 
 Compacted content:
-- Prior summary/context: prior compacted content: Archived 19 response topic(s): Transcribe + diarize the 2026-07-10 call; Analyze the transcr...
-
-### Re: #hmw9 — gpt-5
-
-Verified the EFS production Cloudflare email sender gate and admin-recipient configuration for borrower message notifications.
-
-Production evidence:
-- Cloudflare auth works for account `1e7e194ff8da4ad9e40ce041aea84f76` via `bun run cf:whoami`.
-- `bun run cf:secrets:list` shows the production Worker has `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. The code accepts these as the fallback sender credentials when `CLOUDFLARE_EMAIL_API_TOKEN` / `CLOUDFLARE_EMAIL_ACCOUNT_ID` are not separately set.
-- Latest 100% deployment is version `62bc5e10-c12c-4fcf-a3ef-45b215646d3a` from 2026-07-12 17:50:52 UTC.
-- That deployed version has `MESSAGE_EMAIL_NOTIFICATIONS_ENABLED="true"`, `CLOUDFLARE_EMAIL_ACCOUNT_ID="1e7e194ff8da4ad9e40ce041aea84f76"`, `MESSAGE_NOTIFICATION_FROM="Equity Funding Source <efs@briantakita.me>"`, and `MESSAGE_ADMIN_NOTIFICATION_TO="btak.dev+efs@gmail.com"`.
-
-Verification run:
-- `bun test tests/borrower-message-notify.test.ts` passed.
-- `gh run list --workflow CI --limit 1` could not find a workflow named `CI` in this EFS repo, so there was no CI run to inspect.
-
-No EFS source changes were needed for this queue item, so there was no code commit or push to make beyond this agent-doc closeout.
-
-### Re: #hmw9 closeout — gpt-5
-
-Closed `#hmw9` after re-confirming the production configuration against Cloudflare.
-
-- Changed paths: no EFS source files; only this agent-doc session document is updated by closeout.
-- Commands: `bun run cf:whoami`, `bun run cf:secrets:list`, Wrangler deployment/version inspection, the focused borrower-message notification test, and the required CI lookup.
-- Verification: production version `62bc5e10-c12c-4fcf-a3ef-45b215646d3a` remains at 100%; message email notifications are enabled; sender/account/admin-recipient bindings are present; fallback Cloudflare credential secrets are present; `bun test tests/borrower-message-notify.test.ts` passed.
-- Confidence: high. This verifies configuration and code behavior without sending a synthetic production email.
-- Escalation: none. `gh run list --workflow CI --limit 1` reports that this repository has no workflow named `CI`.
-
-### Re: #hmw9 queue reconciliation — gpt-5
-
-The production email-sender verification remains complete. Reconciled the stale live-editor queue copy of `do [#hmw9]` after confirming its backing backlog item was already archived; no additional EFS source or production changes were required.
-<!-- agent:boundary:01f5254e -->
+- Archived 3 response topic(s): #hmw9; #hmw9 closeout; #hmw9 queue reconciliation
+<!-- agent:boundary:5e725803 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

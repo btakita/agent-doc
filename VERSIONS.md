@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.90
+
+- **Idle supervisors no longer amplify document-authority history into sustained CPU load.** Current-document polling now persists only the final selected authority, coalesces consecutive identical observations, and keeps disk/editor transitions durable. Cycle closeout replay excludes authority-only facts through a dedicated partial SQLite index, so its cost stays proportional to lifecycle events instead of total authority history.
+- **Large editor deltas use linear batch CRDT edits.** Agent-doc consumes lazily Rust `0.38.2`, whose `TextCrdt::insert_str` projects visible order once and whose new `delete_range` tombstones a precomputed range. The native editor replica no longer rebuilds the full origin tree for every inserted or deleted character; JetBrains plugin `0.2.243` carries the updated native library.
+
 ## 0.34.89
 
 - **Compact Exchange ignores quarantined stale live-buffer sidecars (`#compact-stale-sidecar-quarantine`).** Files already renamed to `{stem}.stale-*` were re-enumerated as current editor buffers, so an old providerless snapshot could make compaction fail with `live editor buffer unknown lacks required capability operator_text_authority_v1`. Live-buffer enumeration now excludes quarantine files while preserving fail-closed handling for active legacy and named editor snapshots. Coverage spans debounce enumeration and the shared compact/write converger.

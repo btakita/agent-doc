@@ -485,8 +485,15 @@ PRAGMA busy_timeout = 30000;
             timestamp INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS state_events_document_hash_id
-            ON state_events(document_hash, id);
+CREATE INDEX IF NOT EXISTS state_events_document_hash_id
+ON state_events(document_hash, id);
+
+-- Closeout/cycle projections never consume document-authority observations.
+-- Keep their hot replay index bounded to the durable facts they do consume;
+-- authority observations are intentionally excluded from this partial index.
+CREATE INDEX IF NOT EXISTS state_events_cycle_projection_document_hash_id
+ON state_events(document_hash, id)
+WHERE fact_type <> 'document_authority_observed';
 
         CREATE TABLE IF NOT EXISTS dispatch_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1415,6 +1422,33 @@ pub fn load_state_events_from_db(
         for row in stmt.query_map([], state_event_status_from_row)? {
             events.push(row?);
         }
+    }
+    Ok(events)
+}
+
+/// Load the durable facts consumed by cycle closeout and proof projections.
+///
+/// `document_authority_observed` is high-frequency current-document telemetry;
+/// it only updates `DocumentProjection::latest_authority` and cannot affect the
+/// closeout/proof fields read by `agent-doc-cycle-state-io`. Excluding it keeps
+/// idle supervisor polls proportional to lifecycle facts instead of the age of
+/// the authority-observation ledger.
+pub fn load_state_events_for_cycle_projection_from_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<Vec<StateEventStatus>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+        FROM state_events
+        WHERE document_hash = ?1
+          AND fact_type <> 'document_authority_observed'
+        ORDER BY id
+        "#,
+    )?;
+    let mut events = Vec::new();
+    for row in stmt.query_map(params![document_hash], state_event_status_from_row)? {
+        events.push(row?);
     }
     Ok(events)
 }
@@ -2692,6 +2726,39 @@ mod tests {
             "controller status should use the marker high-water mark instead of an exact full-table scan"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn cycle_projection_event_load_excludes_authority_observations() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        initialize_state_db(&conn)?;
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "authority-1",
+                document_hash: "doc-hash",
+                domain: "document",
+                fact_type: "document_authority_observed",
+                payload_json: r#"{"event_id":"authority-1","fact":{"type":"document_authority_observed"}}"#,
+            },
+        )?;
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "closeout-1",
+                document_hash: "doc-hash",
+                domain: "closeout",
+                fact_type: "commit_observed",
+                payload_json: r#"{"event_id":"closeout-1","fact":{"type":"commit_observed"}}"#,
+            },
+        )?;
+
+        let all = load_state_events_from_db(&conn, Some("doc-hash"))?;
+        assert_eq!(all.len(), 2);
+        let projected = load_state_events_for_cycle_projection_from_db(&conn, "doc-hash")?;
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].event_id, "closeout-1");
         Ok(())
     }
 }

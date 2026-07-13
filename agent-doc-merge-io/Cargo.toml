@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-merge-io"
-version = "0.34.89"
+version = "0.34.90"
 edition = "2024"
 description = "Git merge-file adapter for agent-doc merge policy"
 license = "MIT"
@@ -10,11 +10,11 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_merge_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.89" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.89" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.89" }
-agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.34.89" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.89" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.90" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.90" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.90" }
+agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.34.90" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.90" }
 anyhow = "1"
 tempfile = "3"
 

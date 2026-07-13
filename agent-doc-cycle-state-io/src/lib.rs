@@ -514,8 +514,10 @@ fn load_document_projection(
         return Ok(None);
     }
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let rows =
-        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(&document_hash))?;
+    let rows = agent_doc_sqlite::state_store::load_state_events_for_cycle_projection_from_db(
+        &conn,
+        &document_hash,
+    )?;
     if rows.is_empty() {
         return Ok(None);
     }

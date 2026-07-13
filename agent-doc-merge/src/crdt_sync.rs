@@ -97,9 +97,7 @@ impl ReplicaState {
         let start_char = (offset as usize).min(total_chars);
         if delete_len > 0 {
             let end_char = (start_char + delete_len as usize).min(total_chars);
-            for _ in start_char..end_char {
-                t.delete(start_char);
-            }
+            t.delete_range(start_char, end_char - start_char);
         }
         if !insert.is_empty() {
             t.insert_str(start_char, insert);

@@ -20,11 +20,13 @@
 //! - `durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk`
 //! - `durable_buffer_state_none_when_no_editor_feed`
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use agent_doc_document_realtime::{
     BufferState, Reconciliation, reconcile_current_doc,
@@ -70,7 +72,19 @@ use agent_doc_crdt_relay_io::ensure_document_model as test_support_ensure_docume
 use agent_doc_crdt_relay_io::register_replica_for_file as test_support_register_replica_for_file;
 
 static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
+static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
+    Mutex<HashMap<PathBuf, DocumentAuthorityObservation>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 const CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS: u64 = 500;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentAuthorityObservation {
+    source: String,
+    authority: agent_doc_state_backbone::DocumentAuthority,
+    reason: String,
+    content_hash: Option<String>,
+    editor_id: Option<String>,
+}
 
 pub struct SessionActorWriteQueueSubmitter;
 
@@ -504,6 +518,19 @@ fn record_document_authority(
         );
         return;
     };
+    let observation = DocumentAuthorityObservation {
+        source: source.to_string(),
+        authority,
+        reason: reason.to_string(),
+        content_hash: content_hash.clone(),
+        editor_id: editor_id.clone(),
+    };
+    let mut observations = DOCUMENT_AUTHORITY_OBSERVATIONS
+        .lock()
+        .expect("document authority observation cache poisoned");
+    if observations.get(&canonical) == Some(&observation) {
+        return;
+    }
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let authority_epoch = next_document_authority_epoch();
     let event = agent_doc_state_backbone::StateEvent::new(
@@ -518,18 +545,21 @@ fn record_document_authority(
             editor_id,
         },
     );
-    if let Err(e) =
-        agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "document_authority_state_event_error file={} source={} error={}",
-                file.display(),
-                source,
-                e,
-            ),
-        );
+    match agent_doc_controller_io::project_controller::append_state_event(&project_root, &event) {
+        Ok(_) => {
+            observations.insert(canonical, observation);
+        }
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_authority_state_event_error file={} source={} error={}",
+                    file.display(),
+                    source,
+                    e,
+                ),
+            );
+        }
     }
 }
 
@@ -553,23 +583,27 @@ pub fn observe_live_editor_authority(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
-    if let Some(current) = observe_test_local_crdt_relay(file, source)? {
+    let current = query_live_editor_authority(file, source)?;
+    record_current_text_authority(file, source, &current);
+    Ok(current)
+}
+
+fn query_live_editor_authority(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    if let Some(current) = query_test_local_crdt_relay(file, source)? {
         return Ok(current);
     }
     #[cfg(test)]
     {
-        let current = agent_doc_crdt_relay_io::current_text_for_file(file)?;
-        record_current_text_authority(file, source, &current);
-        return Ok(current);
+        return agent_doc_crdt_relay_io::current_text_for_file(file);
     }
     #[cfg(not(test))]
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
         file, source,
     ) {
-        Ok(Some(current)) => {
-            record_current_text_authority(file, source, &current);
-            Ok(current)
-        }
+        Ok(Some(current)) => Ok(current),
         Ok(None) => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -579,9 +613,7 @@ pub fn observe_live_editor_authority(
                     source,
                 ),
             );
-            let current = agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica;
-            record_current_text_authority(file, source, &current);
-            Ok(current)
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
         }
         Err(e) => {
             // Record controller degradation so hot polling paths (idle-queue
@@ -604,7 +636,7 @@ pub fn observe_live_editor_authority(
     }
 }
 
-fn observe_test_local_crdt_relay(
+fn query_test_local_crdt_relay(
     file: &std::path::Path,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
@@ -621,7 +653,6 @@ fn observe_test_local_crdt_relay(
             current_text_status(&current)
         ),
     );
-    record_current_text_authority(file, source, &current);
     Ok(Some(current))
 }
 
@@ -720,8 +751,17 @@ pub fn observe_live_editor_authority_after_model_ensure(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let current = query_live_editor_authority_after_model_ensure(file, source)?;
+    record_current_text_authority(file, source, &current);
+    Ok(current)
+}
+
+fn query_live_editor_authority_after_model_ensure(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     agent_doc_crdt_relay_io::defer_if_document_model_ensure_suppressed(file, source)?;
-    let current = observe_live_editor_authority(file, source)?;
+    let current = query_live_editor_authority(file, source)?;
     match current {
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
         | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
@@ -738,7 +778,6 @@ pub fn observe_live_editor_authority_after_model_ensure(
                 return Ok(current);
             }
             let ensured = ensure_document_model_through_authority(file, source)?;
-            record_current_text_authority(file, source, &ensured);
             Ok(ensured)
         }
         agent_doc_crdt_relay_io::CurrentText::Detached
@@ -815,16 +854,20 @@ fn record_current_text_authority(
             );
         }
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
-            record_document_authority(
-                file,
-                source,
-                agent_doc_state_backbone::DocumentAuthority::EditorRelay,
-                "crdt_relay_current",
-                Some(agent_doc_hash::content_hash(text)),
-                None,
-            );
+            record_editor_relay_authority(file, source, text);
         }
     }
+}
+
+fn record_editor_relay_authority(file: &std::path::Path, source: &str, text: &str) {
+    record_document_authority(
+        file,
+        source,
+        agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+        "crdt_relay_current",
+        Some(agent_doc_hash::content_hash(text)),
+        None,
+    );
 }
 
 /// Canonical path string used to key the editor-buffer sidecar lookup. Mirrors
@@ -1420,9 +1463,9 @@ fn try_resolve_current_doc_with_disk_inner(
     require_model_ensure: bool,
 ) -> Result<Reconciliation> {
     let current = match if require_model_ensure {
-        observe_live_editor_authority_after_model_ensure(file, source)
+        query_live_editor_authority_after_model_ensure(file, source)
     } else {
-        observe_live_editor_authority(file, source)
+        query_live_editor_authority(file, source)
     } {
         Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
             return resolve_idle_disk_fallback_current_doc(
@@ -1493,6 +1536,7 @@ fn try_resolve_current_doc_with_disk_inner(
                 if resolve_zero_live_editors(observe_editor_open(file))
                     == ZeroLiveResolution::KeepEditorAuthority
                 {
+                    record_editor_relay_authority(file, source, &text);
                     let reconciliation = Reconciliation {
                         authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
                         content: text,
@@ -1544,6 +1588,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     "crdt_relay_no_live_editors",
                 ));
             }
+            record_editor_relay_authority(file, source, &text);
             let reconciliation = Reconciliation {
                 authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
                 content: text,
@@ -1831,17 +1876,100 @@ mod tests {
 
         let resolved = try_resolve_current_doc_from_file(&file)
             .expect("idle missing editor model should use the disk session document");
+        let repeated = try_resolve_current_doc_from_file(&file)
+            .expect("unchanged idle missing editor model should remain disk-authoritative");
         assert_eq!(
             resolved.authority,
             agent_doc_document_realtime::DocAuthority::Disk
         );
         assert_eq!(resolved.content, disk);
+        assert_eq!(repeated, resolved);
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let authority_events =
+            agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(&document_hash))
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.fact_type == "document_authority_observed")
+                .collect::<Vec<_>>();
+        assert_eq!(
+            authority_events.len(),
+            1,
+            "unchanged idle authority observations must be coalesced"
+        );
+        assert!(
+            authority_events[0]
+                .payload_json
+                .contains("\"authority\":\"disk_replica\"")
+        );
+        assert!(
+            !authority_events[0]
+                .payload_json
+                .contains("editor_attached_missing_replica"),
+            "the durable event must record the final disk fallback, not the transient missing model"
+        );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("realtime_doc_resolve_disk_fallback")
                 && log.contains("reason=missing_replica"),
             "idle missing-model resolve should log the disk fallback:\n{log}"
         );
+    }
+
+    #[test]
+    fn authority_observations_coalesce_only_consecutive_duplicates() {
+        use agent_doc_state_backbone::DocumentAuthority::{DiskReplica, EditorRelay};
+
+        let (dir, file, _canonical) = temp_doc("authority transition\n");
+        record_document_authority(
+            &file,
+            "disk_probe",
+            DiskReplica,
+            "headless",
+            Some("disk-hash".to_string()),
+            None,
+        );
+        record_document_authority(
+            &file,
+            "disk_probe",
+            DiskReplica,
+            "headless",
+            Some("disk-hash".to_string()),
+            None,
+        );
+        record_document_authority(
+            &file,
+            "editor_probe",
+            EditorRelay,
+            "attached",
+            Some("editor-hash".to_string()),
+            Some("editor-1".to_string()),
+        );
+        record_document_authority(
+            &file,
+            "disk_probe",
+            DiskReplica,
+            "headless",
+            Some("disk-hash".to_string()),
+            None,
+        );
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let authority_events =
+            agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(&document_hash))
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.fact_type == "document_authority_observed")
+                .collect::<Vec<_>>();
+        assert_eq!(
+            authority_events.len(),
+            3,
+            "one duplicate should coalesce while disk/editor/disk transitions remain durable"
+        );
+        assert!(authority_events[0].payload_json.contains("disk_probe"));
+        assert!(authority_events[1].payload_json.contains("editor_probe"));
+        assert!(authority_events[2].payload_json.contains("disk_probe"));
     }
 
     #[test]

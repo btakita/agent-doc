@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-exchange"
-version = "0.34.89"
+version = "0.34.90"
 edition = "2024"
 description = "Exchange element descriptor for agent-doc"
 license = "MIT"
@@ -10,12 +10,12 @@ repository = "https://github.com/btakita/agent-doc"
 name = "agent_doc_element_exchange"
 
 [dependencies]
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.89" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.89" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.89" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.89" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.90" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.90" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.90" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.90" }
 anyhow = "1"
 similar = "3"
 
 [dev-dependencies]
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.89" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.90" }

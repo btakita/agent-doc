@@ -34,71 +34,11 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260711-054344.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260713-052443.md`*
 
 Compacted content:
-- Archived 5 response topic(s): zero-live relay document authority; harness switch + stale red status; IDEA crash root cause + finalize write-path fix + JB drain backoff; 2 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): JB Run Agent Doc protected draft input
-/goal Please fix "● My response body was dropped (a cell-merge chose the existing content). Let me re-run the cycle cleanly — fresh preflight for a current baseline, then finalize with the response piped in:" that occurred in a equityfundingsource.md turn.
-
-Fix `agent-doc tasks/equityfundingsource.md` is periodically added while the turn is running.
-
-#spec-test-build-install-commit-push
-
-### Re: gracefully handle mid-turn steering + fix the JB read-access crash — opus-4-8
-
-Shipped the binary + plugin changes for your goal and fixed the JB read-access crash. All committed and pushed to git (durable regardless of this doc's concurrent-edit churn); full suite green (7471 tests).
-
-**Graceful mid-turn steering + clear anti-thrash instructions (the goal) — SHIPPED** (`agent-doc` `61fa13d5`)
-- `RealtimeSteering` now carries your added prompt **verbatim** (full text), not a first-line preview.
-- `session-check` appends `realtime_steering_closeout_guidance` when a committed cycle carries a fresh operator prompt: prior response is already in HEAD; address the new prompt in the current turn via `agent-doc <FILE>`; do NOT re-run finalize on the prior response, do NOT `--force-disk` (clobbers live edits), do NOT re-answer a prompt already in HEAD. That is the exact anti-thrash instruction.
-- `AGENTS.md` + `runbooks/respond.md`: every operator-added prompt (incl. realtime steering) is addressed in-turn, never committed-and-ignored.
-
-**JB read-access crash (`Fix the JB error:`) — FIXED** (plugin `0.2.239`): `PatchWatcher.currentContentForProjection` read the document model off the watcher thread with no read action; now wrapped in `runReadAction` (VFS refresh kept outside). `[operator-verify]` install `agent-doc-jetbrains-0.2.239.zip`.
-
-**Lazily-graph migration (QueueCell + SeqCrdt) — PLANNED**: extended `plan-exchange-tree-seqcrdt-and-ipc-unify.md` with Phase 3.1 (body-aware node identity → `SeqCrdt` element id) and Phase 6 (realtime steering via `lazily::QueueCell`, so steering reconciles as CRDT ops and `session-check` reads queue-emptiness instead of re-diffing HEAD↔buffer — removing the false-"unresolved" thrash class). Primitives already in lazily-rs; no lazily change.
-
-**Note:** this very closeout hit the concurrent-edit race live — my response was dropped by the merge against your rapidly-changing buffer, and the binary correctly **fail-closed** (clear "replay with `write --commit`" instruction, no silent loss) rather than thrash. That fail-closed clarity is the shipped behavior. New items you added (`#jbcompactexchange`, `/goal #1d0k`) are queued for the drain.
-/goal Implement plan-exchange-tree-seqcrdt-and-ipc-unify.md #spec-test-build-install-commit-push
-
-The QueueCell may not be the correct choice. All real-time steering should be added to the agent asap. So the agent can process multiple real-time steering directives at the same time and find patterns in the steering.
-
-Fix the JB error:
-```
-com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments: Read access is allowed from inside read-action only (see Application.runReadAction()); If you access or modify model on EDT consider wrapping your code in WriteIntentReadAction  or ReadAction; see https://jb.gg/ij-platform-threading for details
-Current thread: Thread[#219,agent-doc-patch-watcher-agent-loop,6,main] 1963109464 (EventQueue.isDispatchThread()=false)
-SystemEventQueueThread: Thread[#147,AWT-EventQueue-0,6,main] 1683864329
-	at com.intellij.util.concurrency.ThreadingAssertions.createThreadAccessException(ThreadingAssertions.java:270)
-	at com.intellij.util.concurrency.ThreadingAssertions.softAssertReadAccess(ThreadingAssertions.java:159)
-	at com.intellij.openapi.fileEditor.impl.FileDocumentManagerBase.getDocument(FileDocumentManagerBase.java:51)
-	at com.github.btakita.agentdoc.PatchWatcher.currentContentForProjection(PatchWatcher.kt:136)
-	at com.github.btakita.agentdoc.PatchWatcher.writeAlreadyAppliedContentProjection(PatchWatcher.kt:149)
-	at com.github.btakita.agentdoc.PatchWatcher.processPatchFile(PatchWatcher.kt:896)
-	at com.github.btakita.agentdoc.PatchWatcher.watchLoop(PatchWatcher.kt:368)
-	at com.github.btakita.agentdoc.PatchWatcher.registerRoot$lambda$2(PatchWatcher.kt:216)
-	at java.base/java.lang.Thread.run(Thread.java:1474)
-```
-
-Fix JB `Compact Exchange` error
-```
-agent-doc command failed (exit 1): [agent-doc] Tagged pre-compact state as agent-doc/equityfundingsource/pre-compact-21 [crdt] projection saved file=tasks/professional/equityfundingsource.md elapsed_ms=10 legacy_changed=true overlay_changed=true nodes_changed=true legacy_len=21664 overlay_len=21671 nodes_len=21856 [compact] CRDT state refreshed from post-compact content [compact] discarded 14 stale capture sidecar(s) for archived response(s) in tasks/professional/equityfundingsource.md [compact] Archived 287 lines from component 'exchange' to /home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260712-181754.md [commit] repaired committed historical committed_capture drift into snapshot for tasks/professional/equityfundingsource.md [commit] detected post-commit local drift for tasks/professional/equityfundingsource.md - HEAD already contains the committed response; leaving later local working-tree edits uncommitted [commit] staged snapshot already matches HEAD for tasks/professional/equityfundingsource.md - closing cycle as already committed [perf] commit total: 8311ms [compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange` Error: compact --commit did not land the compacted content in HEAD for tasks/professional/equityfundingsource.md (a stale-supervisor CRDT replay or an unflushed editor buffer desynced the commit surface). The document is left with uncommitted compaction drift. Recover with `agent-doc reset --from-current tasks/professional/equityfundingsource.md` then `agent-doc compact tasks/professional/equityfundingsource.md --component exchange --commit` (#jb-compact-commit-left-uncommitted).
-```
-
-### Re: Implement plan-exchange-tree-seqcrdt-and-ipc-unify.md + steering shouldn't be a QueueCell — opus-4-8
-
-Shipped the next actionable slice of the plan — **Phase 6 realtime-steering delivery** — and folded in your mid-turn correction. agent-doc `da445378`, full suite green (7475 tests, +4), built + installed locally, committed + pushed.
-
-**Your correction is the design now (QueueCell was wrong):** steering is **not** a FIFO `QueueCell` drained one head at a time. When you add several prompts while a turn is active, all of them reach the agent **at once, verbatim**, so the agent processes the concurrent directives together and can find patterns across them.
-
-- `agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff` — returns *every* still-unstarted directive (oldest-first). `first_*` is now defined as its head, so the single/multi paths never disagree on answered-prompt suppression.
-- `baseline_comparison::RealtimeSteeringSet` + `realtime_steering_all[_between]` — aggregate all concurrent directives; `verbatim_aggregate()` concatenates them verbatim with a count header (`"N concurrent operator steering directives … look for patterns across them"`).
-- `session-check`'s `detect_unstarted_prompt_bearing_diff` now surfaces that aggregate (`realtime_steering_set_since_turn_baseline`), falling back to the single verbatim when only one directive is present.
-- Plan **Phase 6** + AGENTS.md `#realtime-steering-verbatim` rewritten: steering is a concurrent observable set; the durable graph target is a lazily **reactive observable set**, explicitly **not** a `QueueCell`.
-
-**Scope note:** Phases 1–4 + 3.1 were already landed (exchange tree, structural `agent-doc exchange` API, body-aware node identity; yrs already removed in Phase 3c). This turn advanced Phase 6 delivery. Remaining: Phase 5 (IPC-action unification, gated on the concurrent guard-extraction) and the Phase 6 durable graph adoption — queued as `#steeringobservableset`.
-
-`[operator-verify]`: with a live editor attached, add two prompts mid-turn and confirm the next `agent-doc` cycle surfaces both verbatim under one count header (not just the first, not one-at-a-time). Note: the running supervisor still serves the prior binary until its idle-boundary recycle (install ran with `AGENT_DOC_RECYCLE_ON_INSTALL=0` to protect your live JB session).
-<!-- agent:boundary:c7812756 -->
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): gracefully handle mid-turn steering + fix the JB read-access c...
+<!-- agent:boundary:7e003f95 -->
 <!-- /agent:exchange -->
 ## Queue
 

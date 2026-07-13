@@ -35,11 +35,16 @@ struct ReactiveLiveCurrentSource;
 impl agent_doc_diff_io::LiveCurrentSource for ReactiveLiveCurrentSource {
     fn live_current(&self, doc: &Path, disk: &str) -> Option<String> {
         // `durable_buffer_state` returns `Some` only when a live editor buffer
-        // (CRDT relay / controller model) has diverged from disk — i.e. the
-        // operator's edits are in the reactive model but disk lags. Otherwise
-        // `None`, so the diff keeps its disk-sourced content.
-        agent_doc_document_realtime_io::durable_buffer_state(doc, disk)
-            .map(|state| state.content)
+        // (CRDT relay / controller model) has diverged from disk. That read is
+        // already quiescence-gated by the commit barrier (#preflight-lazily-diff-feed
+        // Phase 3): the relay surfaces `CurrentText::Current` only once the
+        // canonical replica *covers every live editor's ops*, so the returned
+        // text is prompt-complete by construction — not a mid-typing partial.
+        // (`delivery_converged` is a downstream-ACK signal, a different
+        // direction, and is intentionally NOT gated on: it would reject complete
+        // canonical text over a pending fan-out ACK.) Otherwise `None`, so the
+        // diff keeps its disk-sourced content.
+        agent_doc_document_realtime_io::durable_buffer_state(doc, disk).map(|state| state.content)
     }
 }
 

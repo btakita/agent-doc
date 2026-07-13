@@ -81,15 +81,31 @@ unavailable (`Detached`, `EditorAttachedMissingReplica`, `EditorSyncPending`).
    `wait_for_stable_content_prefers_live_reactive_over_disk`,
    `wait_for_stable_content_none_live_matches_disk_byte_for_byte`,
    `compute_with_current_uses_live_reactive_content_for_diff`.
-2. **Baseline alignment.** `save_baseline_content(file, &result.current)` and the
-   `#qconvbaseline` realignment must consume the relay-sourced `current` so the
-   finalize merge baseline matches the buffer the operator sees. Verify no
-   double-realign.
-3. **Quiescence settle.** Replace the disk-mtime debounce with the reactive
-   model's idle signal for prompt-completeness; keep the 6s cap.
-4. **Retire disk race.** Once phases 1–3 are green across SimWorld + live
-   dogfooding, make relay-sourced `current` the default and demote disk reads to
-   the detached-editor fallback only.
+2. **Baseline alignment. — DONE.** The response baseline is saved from
+   `diff_result_with_current.current` (`run.rs`), which is now the
+   reactive-sourced `current`, so the finalize merge baseline matches the buffer
+   the operator sees. The `#qconvbaseline` realign is a single guarded step that
+   is a no-op when queue maintenance converged nothing; reactive sourcing makes
+   the baseline already match the buffer, shrinking (not duplicating) its work.
+   No double-realign — there is exactly one `realign_baseline_to_converged_queue`
+   call.
+3. **Quiescence settle. — DONE.** The reactive read is its OWN quiescence gate:
+   `crdt-relay-io` surfaces `CurrentText::Current` only once the commit barrier
+   holds — the canonical replica *covers every live editor's op*
+   (`commit_barrier_ready` in `agent-doc-merge/src/crdt_sync.rs`) — so the
+   returned text is prompt-complete by construction, not a mid-typing partial.
+   `delivery_converged` (a downstream fan-out ACK signal) is deliberately NOT
+   gated on: it is a different direction and would reject complete canonical text
+   over a pending ACK. `wait_for_stable_content` is now **reactive-first** — it
+   reads disk once (no debounce) only to detect divergence, then returns the
+   commit-barrier-gated reactive text, skipping the disk-settle debounce entirely
+   (test `wait_for_stable_content_reactive_first_skips_dirty_disk_debounce`).
+4. **Retire disk race. — DONE.** Reactive-sourced `current` is the default in
+   preflight (unconditional live source), and the disk-settle debounce is demoted
+   to the fallback taken only when the reactive read yields nothing (no
+   divergence: reactive == disk; or the model is unavailable/detached; or no live
+   source). At rest the feed is byte-identical to the old disk path
+   (`wait_for_stable_content_none_live_matches_disk_byte_for_byte`).
 
 ### Risks / guardrails
 

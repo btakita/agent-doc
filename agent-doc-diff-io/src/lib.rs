@@ -176,23 +176,28 @@ pub fn wait_for_stable_content(
     previous: &str,
     live: Option<&dyn LiveCurrentSource>,
 ) -> Result<String> {
-    // Settle on the disk buffer first (typing debounce / truncation heuristic)
-    // so a half-typed prompt line is never fed to the agent.
-    let disk_stable = wait_for_stable_content_disk(doc, previous)?;
-
-    // ── Lazily reactive state-diff feed (#preflight-lazily-diff-feed) ──
-    // Once the buffer has settled, source the coherent current content from the
-    // reactive CRDT model when the operator's edits live in the buffer but disk
-    // lags behind. The realtime model absorbs the typing; disk is only the
-    // fallback when there is no live divergence or the model is unavailable.
+    // ── Lazily reactive state-diff feed, reactive-first (#preflight-lazily-diff-feed) ──
+    // When a live source is present, read disk ONCE (no debounce) purely to
+    // detect buffer divergence, then ask the reactive model for the coherent
+    // current content. The reactive read is its own quiescence gate: the relay
+    // only surfaces content once the canonical replica covers every live
+    // editor's ops (the commit barrier), so it is prompt-complete by
+    // construction — the realtime model, not a disk-mtime debounce, owns the
+    // typing. The disk-settle path below is the fallback for when there is no
+    // live divergence (reactive == disk), the model is unavailable/detached, or
+    // no live source was injected at all.
     if let Some(live) = live
-        && let Some(live_text) = live.live_current(doc, &disk_stable)
+        && let Ok(disk_now) = std::fs::read_to_string(doc)
+        && let Some(live_text) = live.live_current(doc, &disk_now)
     {
-        eprintln!("[diff] current sourced from lazily reactive model (disk lagged buffer)");
+        eprintln!("[diff] current sourced from lazily reactive model (commit-barrier gated)");
         return Ok(live_text);
     }
 
-    Ok(disk_stable)
+    // Fallback: settle on the disk buffer (editor-buffer debounce when a plugin
+    // is attached, truncation heuristic otherwise) so a half-typed prompt line
+    // is never fed to the agent when no reactive divergence is available.
+    wait_for_stable_content_disk(doc, previous)
 }
 
 /// Disk-authoritative stability: editor-buffer debounce when a plugin is
@@ -685,6 +690,51 @@ mod tests {
         // The live source is consulted AFTER the disk buffer settles, so it must
         // be handed the settled disk content (prompt-completeness gate first).
         assert_eq!(live.seen_disk.borrow().as_deref(), Some(disk));
+    }
+
+    // Reactive-first (#preflight-lazily-diff-feed Phase 3): the commit-barrier-
+    // gated reactive read is the quiescence signal, so a live divergence bypasses
+    // the disk-settle debounce entirely — even when the editor buffer is DIRTY
+    // (which would otherwise make the disk path wait for stability).
+    #[test]
+    fn wait_for_stable_content_reactive_first_skips_dirty_disk_debounce() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("dirty.md");
+        let disk = "On disk.\n";
+        std::fs::write(&doc, disk).unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+
+        // Mark the editor buffer dirty with a fresh edit so the disk-settle path
+        // would block on `await_editor_buffer_stable`.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        agent_doc_debounce::record_editor_buffer_state(&agent_doc_debounce::EditorBufferState {
+            path: doc_str,
+            version: 7,
+            dirty: true,
+            last_edit_timestamp_ms: now,
+            save_timestamp_ms: None,
+            hash: None,
+            content_len: Some(disk.len()),
+            session_id: None,
+        });
+
+        let live = FixedLiveSource {
+            reactive: Some("Reactive canonical (commit-barrier complete).\n".to_string()),
+            seen_disk: std::cell::RefCell::new(None),
+        };
+        let start = std::time::Instant::now();
+        let result = wait_for_stable_content(&doc, "", Some(&live)).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, "Reactive canonical (commit-barrier complete).\n");
+        assert!(
+            elapsed.as_millis() < 500,
+            "reactive-first must not wait on the dirty-buffer disk debounce, took {}ms",
+            elapsed.as_millis()
+        );
     }
 
     // At rest (no live divergence → live source returns None), the result is

@@ -24,7 +24,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -84,7 +83,7 @@ Deployed and verified live. Ran the full `deploy:worker` from the clean `main` c
 - **Live bundle carries the new code** — the served HTML references `index.browser-5NDSCDAE.js` (byte-match to this deploy), and that bundle contains the new `lender-notification-emails` and `lender-documents-email` endpoints.
 
 So the admin Deal modal now has the working "Notify lender to upload documents" (Lender Documents tab) and "Notify lender funding package is ready" (Funding Package tab) buttons with "Last sent …" lines, the auto-send-on-lender-select, and the Wire tab removed — all live.
-<!-- agent:boundary:27cd3618 -->
+<!-- agent:boundary:d9043054 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

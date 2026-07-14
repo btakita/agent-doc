@@ -37,7 +37,29 @@ complete
 Compacted content:
 - Archived 2 response topic(s): Revert uploaded documents from Lender Documents; Funding Package document destination
 - Prior summary/context: ❯ Please revert the last change. The Lender Documents are incoming from the lender. Uploaded documents should not be ...
-<!-- agent:boundary:653c0fea -->
+In the Admin Deal Pipeline > Deal modal > Loan Package + Lender Documents + Funding Package tabs, please include the number of uploaded documents / categories with at least 1 document / total document categories.
+
+Funding Package tab should include a slot for the wire instructions, which are required for the lender to wire funds to escrow. Please include an appropriate indicator.
+
+#spec-test-commit-push-deploy
+
+### Re: Document counts on the Loan Package / Lender Documents / Funding Package tabs — opus-4-8
+
+Each of the three deal-modal document tabs now shows an at-a-glance completeness indicator:
+
+- **Tab-bar badge** — compact `<uploaded> · <with>/<total>` (e.g. `4 · 2/5`): uploaded documents · categories with ≥1 document / total categories. Hidden while counts load.
+- **In-tab summary line** — readable `"N documents uploaded across X of Y categories"`.
+
+Category definitions per tab: **Loan Package** = the per-deal required-document checklist rows; **Lender Documents** = the fixed sections + custom types (+ an "Other" bucket); **Funding Package** = the document types on the loan, with `uploaded` counting only funding-package-flagged docs. Badges stay live — children fire `on_change`/`on_docs_changed` on upload/delete/type-change/funding-package-toggle so the parent refetches. Pure count logic lives in `deal_document_counts.ts` (12 unit tests).
+
+### Re: Funding Package wire-instructions slot — opus-4-8
+
+The Funding Package tab now renders a distinct **Wire instructions** slot indicator above the documents grid, reusing the deal wire status: ○ Not filled (red — required before the lender can wire to escrow), ● Filled — not sent (amber), ✓ Sent to lender (green). The existing `LoanWiringSection` stays below as the place to fill numbers and issue the secure link.
+
+### Shipped
+
+`make check` green (1606 pass, build + worker build ok). Committed `7eb8787`, pushed EFS `main`, deployed frontend-only (`deploy:worker:no-migrate`, version `df4e7f16`). Verified live: served bundle hash `index.browser-D4NRJJ4Q.js` is byte-identical to the local build of this commit, and it carries every new string (`uploaded across`, the `·` badge separator, the wire-slot labels). No DB migration in this change. Spec: `prds/deal-tab-document-counts.md`.
+<!-- agent:boundary:a8717bce -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

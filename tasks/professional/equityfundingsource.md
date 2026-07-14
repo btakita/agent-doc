@@ -96,10 +96,29 @@ Fixed, deployed, and verified live.
 The initial-mount load still shows the skeleton (correct); only the post-mutation flash is gone. The row now updates in place with no remount. The lender tab passes no `on_change`, so there's no parent-side reload either.
 
 **Verification.** `bun run check` green — 1621 pass / 0 fail, typecheck+build exit 0 (added a source-assertion test that neither `upload_` nor `remove_` calls `load_()`). Committed `9b1e397`, pushed to `origin/main`, deployed worker `08545067`. Live served bundle `index.browser-X5TUB275.js` md5 matches the locally-built asset exactly, so the fix is live.
-<!-- agent:boundary:fede9e8f -->
+
+In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/070770ae-0e0e-4962-9c63-1e08dfc8b0b4?tab=lender-documents, provide a 1 sentence description of each upload item for the lender.
+#spec-test-commit-push-deploy
+
+### Re: 1-sentence description of each lender Lender Documents upload item — opus-4-8
+
+Done, deployed, and verified live.
+
+The five built-in Lender Documents rows already carried a `hint`, but it was worded from EFS's internal perspective and only rendered while a row was empty. Rewrote each into a clear one-sentence description addressed to the lender, and made it stay visible whether or not a file is uploaded (`#lender-docs-item-descriptions`):
+
+- **Term sheet / commitment letter** — "Your signed term sheet or commitment letter stating the rate, amount, and terms you are offering for this deal."
+- **Deal-specific proof of funds** — "Recent evidence — such as a bank or brokerage statement — that the capital to fund this specific deal is available."
+- **Underwriting conditions** — "The conditions your underwriting requires to be satisfied before or at closing."
+- **Counter-signed items** — "Any deal documents you have signed and are returning, such as a counter-signed agreement or addendum."
+- **Funding authorization** — "Your written authorization to release and wire the funds for this deal."
+
+The shared `DealLenderDocuments` core also backs the admin "on behalf" view, so the clearer descriptions show there too.
+
+**`#spec-test-commit-push-deploy`.** `bun run check` green — 1622 pass / 0 fail, typecheck+build exit 0 (added a source-assertion test pinning the five sentences and the always-visible render). Committed `60555ce`, pushed to `origin/main`, deployed worker `35bbfeda`. Live asset `index.browser-2XLDMV6S.js` md5 matches the locally-built bundle and contains the descriptions.
+<!-- agent:boundary:149afd67 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Notes

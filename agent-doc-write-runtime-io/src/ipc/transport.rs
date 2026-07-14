@@ -3773,6 +3773,8 @@ Implemented.
             editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state.to_string())),
             normalize_prefix_lines: Vec::new(),
             redeliver_editor: true,
+            live_prompt_drift_state:
+                agent_doc_ipc_protocol::IpcLivePromptDriftState::SnapshotReconciled,
         };
 
         agent_doc_write_converge_io::repair_ipc_decision_visible_state(
@@ -3842,6 +3844,8 @@ Implemented.
             editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state.to_string())),
             normalize_prefix_lines: Vec::new(),
             redeliver_editor: true,
+            live_prompt_drift_state:
+                agent_doc_ipc_protocol::IpcLivePromptDriftState::SnapshotReconciled,
         };
 
         let err = agent_doc_write_converge_io::repair_ipc_decision_visible_state(

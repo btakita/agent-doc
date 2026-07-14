@@ -212,6 +212,18 @@ pub enum IpcDiskRepairReason {
     LivePromptDrift,
 }
 
+/// Typed state for the live-prompt drift guard. This replaces the ambiguous
+/// boolean/free-text combination that could report "response present" and then
+/// run missing-response materialization in the same decision.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum IpcLivePromptDriftState {
+    #[default]
+    NotDetected,
+    Detected,
+    VisibleResponsePreserved,
+    SnapshotReconciled,
+}
+
 impl IpcDiskRepairReason {
     pub const fn label(self) -> &'static str {
         match self {
@@ -267,6 +279,7 @@ pub struct IpcRepairDecision {
     pub editor_bad_state: Option<EditorBadStateFingerprint>,
     pub normalize_prefix_lines: Vec<String>,
     pub redeliver_editor: bool,
+    pub live_prompt_drift_state: IpcLivePromptDriftState,
 }
 
 impl IpcRepairDecision {
@@ -278,6 +291,7 @@ impl IpcRepairDecision {
             editor_bad_state: None,
             normalize_prefix_lines: Vec::new(),
             redeliver_editor: false,
+            live_prompt_drift_state: IpcLivePromptDriftState::NotDetected,
         }
     }
 
@@ -289,6 +303,7 @@ impl IpcRepairDecision {
             editor_bad_state: None,
             normalize_prefix_lines: Vec::new(),
             redeliver_editor: false,
+            live_prompt_drift_state: IpcLivePromptDriftState::NotDetected,
         }
     }
 
@@ -305,6 +320,7 @@ impl IpcRepairDecision {
             editor_bad_state: Some(EditorBadStateFingerprint::new(bad_state)),
             normalize_prefix_lines: normalize_prefix_lines.to_vec(),
             redeliver_editor: true,
+            live_prompt_drift_state: IpcLivePromptDriftState::NotDetected,
         }
     }
 
@@ -342,6 +358,7 @@ impl IpcRepairDecision {
             editor_bad_state: None,
             normalize_prefix_lines: Vec::new(),
             redeliver_editor: false,
+            live_prompt_drift_state: IpcLivePromptDriftState::NotDetected,
         }
     }
 
@@ -374,6 +391,7 @@ impl IpcRepairDecision {
         let bad_state = self.snapshot_content.clone();
         self.snapshot_content = content_ours.to_string();
         self.snap_source = IpcSnapshotSource::ContentOurs;
+        self.live_prompt_drift_state = IpcLivePromptDriftState::SnapshotReconciled;
         self.normalize_prefix_lines.clear();
         if visible_repair_required {
             self.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);

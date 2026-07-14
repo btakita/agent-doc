@@ -28878,16 +28878,31 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "crdt_relay_host should call the focused realtime relay directly"
     );
     for required_snippet in [
-        "forwarders.remove(filePath, forwarder)",
-        "forwarder.deregister()",
+        "val cached = forwarders[filePath]",
+        "if (!forwarder.register())",
+        "forwarders.replace(filePath, cached, forwarder)",
+        "cached.deregister()",
         "canonical,\n                    bypassRegisterBackoff = true,",
         "queueCanonicalProjection(filePath, editorText, canonical)",
     ] {
         assert!(
             jetbrains_crdt_replica_manager.contains(required_snippet),
-            "JetBrains CRDT replace recovery must discard the divergent replica and rebootstrap from canonical state: {required_snippet}"
+            "JetBrains CRDT replace recovery must register, swap, and retire around a canonical rebootstrap: {required_snippet}"
         );
     }
+    let replacement_register = jetbrains_crdt_replica_manager
+        .find("if (!forwarder.register())")
+        .unwrap();
+    let replacement_swap = jetbrains_crdt_replica_manager
+        .find("forwarders.replace(filePath, cached, forwarder)")
+        .unwrap();
+    let cached_retire = jetbrains_crdt_replica_manager
+        .find("cached.deregister()")
+        .unwrap();
+    assert!(
+        replacement_register < replacement_swap && replacement_swap < cached_retire,
+        "JetBrains CRDT replace recovery must keep the cached member authoritative until its replacement is registered and installed"
+    );
     assert!(
         !jetbrains_crdt_replica_manager.contains("forwarder.ensureEditorText(canonical)"),
         "JetBrains CRDT replace recovery must not mint corrective ops on a divergent lineage"

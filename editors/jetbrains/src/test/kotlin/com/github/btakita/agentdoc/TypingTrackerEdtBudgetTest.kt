@@ -307,11 +307,12 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("stale-operator-event-fenced"),
         )
         assertTrue(
-            "forced refresh must retire a cached client and issue REGISTER again after a controller recycle",
+            "forced refresh must register and atomically swap before retiring the cached client",
             source.contains("if (bypassRegisterBackoff)") &&
-                source.contains("forwarders.remove(filePath)?.let { stale ->") &&
-                source.contains("stale.deregister()") &&
-                source.contains("retired cached forwarder before forced re-register"),
+                source.contains("forwarders.replace(filePath, cached, forwarder)") &&
+                source.contains("cached.deregister()") &&
+                source.contains("replacement register failed") &&
+                source.contains("retained cached forwarder"),
         )
         assertTrue(
             "visible editor applies must retain failed delivery ACKs and replay them from the current buffer",

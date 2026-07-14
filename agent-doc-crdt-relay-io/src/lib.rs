@@ -1160,15 +1160,6 @@ fn mark_editor_open_docs_open(file: &Path) {
         .mark_open(&file.display().to_string(), true);
 }
 
-/// #live-editor-reactive: mark this document closed in the reactive authority. Called on
-/// an explicit editor `replica_deregister` (the editor detached / closed the buffer). A
-/// controller recycle sends no deregister, so it leaves this compatibility projection
-/// untracked; the resolver restores authority from durable reliable-sync state.
-fn mark_editor_open_docs_closed(file: &Path) {
-    agent_doc_document_realtime::editor_open_docs::editor_open_docs()
-        .mark_closed(&file.display().to_string());
-}
-
 /// Seed the legacy process-exit watcher projection from the reliable-sync open pids.
 /// Durable hydration runs first, so a controller recycle does not need a lease read.
 /// The plugin-owner pid is consulted only in the explicit authority rollback mode.
@@ -1211,13 +1202,6 @@ fn reseed_editor_attach_if_needed(file: &Path) {
     }
 }
 
-/// #s4b: mark this document detached in the reactive editor-attach authority on an
-/// explicit editor `replica_deregister` (mirrors [`mark_editor_open_docs_closed`]). A
-/// controller recycle sends no deregister, so durable reliable-sync hydration restores it.
-fn mark_editor_attach_closed(file: &Path) {
-    agent_doc_document_realtime::editor_attach::editor_attach().detach(&file.display().to_string());
-}
-
 pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
@@ -1252,8 +1236,10 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
     Ok(Some((client_id, bootstrap)))
 }
 
-/// Deregister an editor replica from the document's hub on the live IPC path
-/// (editor/IDE closed the document). Authority-gated like
+/// Deregister one editor replica from the document's hub on the live IPC path.
+/// Document-open authority is owned independently by reliable-sync liveness;
+/// membership replacement and connection churn are not document-close events.
+/// Authority-gated like
 /// [`register_replica_for_file`]: `Ok(false)` (no hub touched) under Detached;
 /// `Ok(true)` when a live-attached hub dropped the mirror.
 pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> {
@@ -1263,13 +1249,6 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     }
     let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
-    // Editor detach is an explicit event → mark the reactive open-docs authority closed.
-    // (A controller recycle sends no deregister; durable reliable-sync hydration
-    // remains the authority source rather than this compatibility projection.)
-    mark_editor_open_docs_closed(file);
-    // Explicit close updates the legacy process-exit watcher projection. The durable
-    // reliable-sync Close fact independently drives the hot-path authority gate.
-    mark_editor_attach_closed(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -3018,6 +2997,39 @@ mod tests {
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
         })
         .unwrap();
+    }
+
+    #[test]
+    fn replica_membership_replacement_does_not_close_document_authority() {
+        let (_dir, doc) = temp_doc("membership-replacement.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+
+        register_replica_for_file(&doc, "intellij:old")
+            .unwrap()
+            .expect("old member should attach");
+        register_replica_for_file(&doc, "intellij:replacement")
+            .unwrap()
+            .expect("replacement should attach before retirement");
+        with_hub(&doc, |hub| assert_eq!(hub.live_count(), 2)).unwrap();
+
+        assert!(deregister_replica_for_file(&doc, "intellij:old").unwrap());
+        assert_eq!(crdt_authority_for_file(&doc), CrdtAuthority::MultiReplica);
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.live_count(), 1);
+            assert!(hub.is_registered(mint_client_id("intellij:replacement")));
+        })
+        .unwrap();
+
+        assert!(deregister_replica_for_file(&doc, "intellij:replacement").unwrap());
+        assert_eq!(
+            crdt_authority_for_file(&doc),
+            CrdtAuthority::MultiReplica,
+            "replica membership is not the durable editor-open authority"
+        );
+        register_replica_for_file(&doc, "intellij:retry")
+            .unwrap()
+            .expect("a refresh retry must not be refused as detached authority");
     }
 
     #[test]

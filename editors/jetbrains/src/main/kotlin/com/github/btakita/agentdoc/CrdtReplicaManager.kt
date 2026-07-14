@@ -110,6 +110,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // permanently orphaned delivery frontier.
     private val pendingRemoteAckReplays =
         ConcurrentHashMap<String, ConcurrentHashMap<String, ReplicaRemoteUpdate>>()
+    private val refreshConnectionEpoch = AtomicLong(0)
     private val disposed = AtomicBoolean(false)
 
     fun start() {
@@ -337,8 +338,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val forwarder = forwarders[filePath] ?: return@execute
             val editorText = shadows[filePath] ?: return@execute
             if (!forwarder.pushTextAdopt(editorText)) return@execute
-            if (forwarders.remove(filePath, forwarder)) {
-                forwarder.deregister()
+            if (forwarders[filePath] === forwarder) {
                 val reattached = forwarderFor(
                     filePath,
                     editorText,
@@ -579,12 +579,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // them back into a canonical that already contains the response,
             // potentially duplicating content. A true rebootstrap discards the
             // divergent lineage and also retires its stale pending delivery.
-            if (forwarders.remove(filePath, forwarder)) {
+            if (forwarders[filePath] === forwarder) {
                 // Re-bootstrap replaces the old member lineage. Its pending ACKs
                 // were retired with that member and must not leak onto the newly
                 // registered replica identity.
                 clearPendingRemoteAcks(filePath)
-                forwarder.deregister()
                 val reattached = forwarderFor(
                     filePath,
                     canonical,
@@ -833,21 +832,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         initialEditorText: String? = null,
         bypassRegisterBackoff: Boolean = false,
     ): CrdtReplicaForwarder? {
+        val cached = forwarders[filePath]
         if (bypassRegisterBackoff) {
-            // A controller recycle invalidates server-side membership while the
-            // plugin can still hold a healthy-looking cached forwarder. A true
-            // force refresh must retire that client and issue REGISTER again.
-            forwarders.remove(filePath)?.let { stale ->
-                stale.deregister()
-                log.info("[crdt-replica] retired cached forwarder before forced re-register for ${File(filePath).name}")
-            }
+            // A refresh is register -> swap -> retire. Never create an authority
+            // gap by deregistering the working member before its replacement has
+            // accepted the canonical bootstrap.
             clearRegisterFailure(filePath)
         } else {
-            forwarders[filePath]?.let { return it }
+            cached?.let { return it }
         }
         if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return null
         val root = resolveProjectRoot(filePath) ?: return null
-        val identity = "${EditorIdentity.id}:$filePath"
+        val baseIdentity = "${EditorIdentity.id}:$filePath"
+        val identity = if (bypassRegisterBackoff && cached != null) {
+            "$baseIdentity:refresh-${refreshConnectionEpoch.incrementAndGet()}"
+        } else {
+            baseIdentity
+        }
         val forwarder = CrdtReplicaForwarder(
             filePath = filePath,
             identity = identity,
@@ -856,16 +857,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         )
         if (!forwarder.register()) {
             recordRegisterFailure(filePath)
+            if (cached != null) {
+                log.warn("[crdt-replica] replacement register failed for ${File(filePath).name}; retained cached forwarder")
+            }
             return null
         }
         clearRegisterFailure(filePath)
+        if (initialEditorText != null) {
+            forwarder.ensureEditorText(initialEditorText)
+        }
+        if (bypassRegisterBackoff && cached != null) {
+            if (forwarders.replace(filePath, cached, forwarder)) {
+                cached.deregister()
+                log.info("[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}")
+                return forwarder
+            }
+            // The manager worker is serialized, but preserve a concurrently
+            // installed winner without sending a false document-close event.
+            forwarder.deregister()
+            return forwarders[filePath]
+        }
         val existing = forwarders.putIfAbsent(filePath, forwarder)
         if (existing != null) {
             forwarder.deregister()
             return existing
-        }
-        if (initialEditorText != null) {
-            forwarder.ensureEditorText(initialEditorText)
         }
         log.info("[crdt-replica] attached ${File(filePath).name} as $identity")
         return forwarder

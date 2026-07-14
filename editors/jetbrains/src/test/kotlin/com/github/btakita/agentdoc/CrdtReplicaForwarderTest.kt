@@ -25,7 +25,7 @@ class CrdtReplicaForwarderTest {
      * full text bytes; "applyUpdate" appends the bytes as text (enough to assert
      * a remote op landed).
      */
-    private class FakeNode : ReplicaNode {
+    private class FakeNode(private val openSucceeds: Boolean = true) : ReplicaNode {
         var opened = false
         var openedWith: ByteArray? = null
         val buffer = StringBuilder()
@@ -35,7 +35,7 @@ class CrdtReplicaForwarderTest {
             opened = true
             openedWith = initState
             if (initState != null) buffer.append(String(initState))
-            return true
+            return openSucceeds
         }
 
         override fun applyLocal(clientId: Long, offset: Int, deleteLen: Int, insert: String): Boolean {
@@ -113,6 +113,34 @@ class CrdtReplicaForwarderTest {
         assertTrue(transport.registered)
         assertTrue(node.opened)
         assertEquals("BASE", String(node.openedWith!!))
+    }
+
+    @Test
+    fun `local retirement closes native node without deregistering editor authority`() {
+        val node = FakeNode()
+        val transport = CapturingTransport()
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:refresh-1", node, transport)
+
+        assertTrue(fwd.register())
+        fwd.retireLocal()
+
+        assertTrue(node.closed)
+        assertFalse(fwd.attached)
+        assertFalse(transport.deregistered)
+    }
+
+    @Test
+    fun `failed native bootstrap rolls back only the new hub membership`() {
+        val node = FakeNode(openSucceeds = false)
+        val transport = CapturingTransport(bootstrap = "CANONICAL".toByteArray())
+        val fwd = CrdtReplicaForwarder("plan.md", "intellij:refresh-2", node, transport)
+
+        assertFalse(fwd.register())
+
+        assertFalse(fwd.attached)
+        assertTrue(transport.registered)
+        assertTrue(transport.deregistered)
+        assertFalse(node.closed)
     }
 
     @Test

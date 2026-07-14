@@ -83,6 +83,7 @@ class CrdtReplicaForwarder(
             logSlow("native.open", openStarted, details = "bootstrap_bytes=${ack.bootstrap?.size ?: 0} ok=$opened")
             if (!opened) {
                 log.warn("[crdt-replica] native.open rejected the bootstrap for ${File(filePath).name}; bootstrap_bytes=${ack.bootstrap?.size ?: 0} (see prior [native] replica_open WARN for the cause)")
+                transport.deregister(filePath, identity)
                 return false
             }
             attached = true
@@ -233,6 +234,16 @@ class CrdtReplicaForwarder(
         val deregisterStarted = System.nanoTime()
         transport.deregister(filePath, identity)
         logSlow("transport.deregister", deregisterStarted)
+        retireLocal()
+    }
+
+    /**
+     * Close only this process's native node. Used after an atomic register/swap:
+     * the replacement is already a live hub member, so retiring the previous
+     * connection must not emit another document-close signal.
+     */
+    fun retireLocal() {
+        if (!attached) return
         val closeStarted = System.nanoTime()
         node.close(clientId)
         pushedVersion = null
@@ -370,7 +381,8 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
         }
         val clientId = data.get("client_id")?.asLong
         if (clientId == null) {
-            lastRegisterError = "missing_client_id"
+            val refusalReason = data.get("reason")?.asString
+            lastRegisterError = refusalReason?.let { "controller_refused: $it" } ?: "missing_client_id"
             return null
         }
         val bootstrap = data.get("bootstrap_b64")?.asString?.let { decodeBase64(it) }

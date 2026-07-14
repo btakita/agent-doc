@@ -628,6 +628,61 @@ mod visible_write_content_snapshot_tests {
     }
 
     #[test]
+    fn socket_visible_write_drift_recovers_invalid_candidate_without_double_materialization() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("doc.md");
+        let invalid_visible_write = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let response = "### Re: queued prompt — gpt-5\n\nAnswered once.\n";
+        let content_ours = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ queued prompt\n",
+            "### Re: queued prompt — gpt-5\n\n",
+            "Answered once.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert!(
+            agent_doc_template::normalize_editor_visible_template_structure(invalid_visible_write)
+                .is_err(),
+            "fixture must reproduce the mixed component marker corruption"
+        );
+        let mut decision =
+            IpcRepairDecision::lazily_visible_write(invalid_visible_write.to_string());
+
+        let repaired = materialize_missing_response_for_socket_visible_write_drift(
+            &file,
+            Some("p-invalid-structure"),
+            Some(content_ours),
+            response,
+            true,
+            &mut decision,
+        );
+
+        assert!(repaired);
+        assert_eq!(decision.snapshot_content, content_ours);
+        assert_eq!(
+            decision.live_prompt_drift_state,
+            agent_doc_ipc_protocol::IpcLivePromptDriftState::SnapshotReconciled
+        );
+        assert_eq!(
+            decision.snapshot_content.matches("Answered once.").count(),
+            1
+        );
+        assert!(
+            agent_doc_template::normalize_editor_visible_template_structure(
+                &decision.snapshot_content
+            )
+            .is_ok(),
+            "the recovered full-document target must pass the same guard as the editor"
+        );
+    }
+
+    #[test]
     fn socket_visible_write_drift_missing_response_materializes_over_prefix_repair() {
         // #ackdriftprefixmaterialize regression: a stale lazily visible-write event that went
         // through a prefix-divergence repair (`disk_repair_reason =

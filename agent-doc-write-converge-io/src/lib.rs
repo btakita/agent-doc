@@ -31,8 +31,8 @@ use agent_doc_ipc_io::editor_target::{
 };
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
-    FullContentRepairRedelivery, IpcDiskRepairReason, IpcRepairDecision, IpcSnapshotSource,
-    is_socket_receipt_timeout_error, is_socket_status_error,
+    FullContentRepairRedelivery, IpcDiskRepairReason, IpcLivePromptDriftState, IpcRepairDecision,
+    IpcSnapshotSource, is_socket_receipt_timeout_error, is_socket_status_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
@@ -855,6 +855,59 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
     }
 
     let candidate = decision.snapshot_content.clone();
+    decision.live_prompt_drift_state = IpcLivePromptDriftState::Detected;
+    let candidate_structure =
+        agent_doc_template::normalize_editor_visible_template_structure(&candidate);
+    if let Ok(normalized) = &candidate_structure
+        && normalized != &candidate
+    {
+        decision.snapshot_content = normalized.clone();
+        decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+        decision.editor_bad_state = Some(EditorBadStateFingerprint::new(candidate.clone()));
+        decision.redeliver_editor = true;
+        decision.live_prompt_drift_state = IpcLivePromptDriftState::SnapshotReconciled;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_visible_candidate_structure_normalized file={} source={} patch_id={} candidate_hash={} repaired_hash={}",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                agent_doc_hash::content_hash(&candidate),
+                agent_doc_hash::content_hash(normalized),
+            ),
+        );
+        return true;
+    }
+    if candidate_structure.is_err() {
+        let ours_structure = agent_doc_template::normalize_editor_visible_template_structure(ours);
+        if let Ok(normalized_ours) = ours_structure {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_invalid_visible_candidate_recovered file={} source={} patch_id={} candidate_hash={} recovery=content_ours_full_document",
+                    file.display(),
+                    source,
+                    patch_id.unwrap_or("-"),
+                    agent_doc_hash::content_hash(&candidate),
+                ),
+            );
+            decision
+                .replace_snapshot_with_content_ours_for_live_prompt_drift(&normalized_ours, true);
+            return true;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_invalid_visible_candidate_deferred file={} source={} patch_id={} candidate_hash={} reason=no_structurally_valid_full_document_target",
+                file.display(),
+                source,
+                patch_id.unwrap_or("-"),
+                agent_doc_hash::content_hash(&candidate),
+            ),
+        );
+        return true;
+    }
     let (queue_reconciled_ours, ignored_queue_deletions) =
         preserve_content_ours_over_live_queue_deletions(base, &candidate, ours);
     let prior_source = decision.snap_source.label();
@@ -943,6 +996,7 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
                 decision.normalize_prefix_lines.clear();
                 decision.redeliver_editor = false;
             }
+            decision.live_prompt_drift_state = IpcLivePromptDriftState::VisibleResponsePreserved;
             return true;
         }
         if decision.snap_source.is_visible_write_proven() {
@@ -963,6 +1017,7 @@ pub fn guard_ipc_snapshot_adoption_against_live_prompt_drift(
             decision.editor_bad_state = None;
             decision.normalize_prefix_lines.clear();
             decision.redeliver_editor = false;
+            decision.live_prompt_drift_state = IpcLivePromptDriftState::VisibleResponsePreserved;
             return true;
         }
         let dropped_visible_prompts =
@@ -1352,6 +1407,41 @@ pub fn materialize_missing_response_for_socket_visible_write_drift(
     if !response_materialized_in_content(&response, ours) {
         return false;
     }
+    match agent_doc_template::normalize_editor_visible_template_structure(
+        &decision.snapshot_content,
+    ) {
+        Err(_) => {
+            let Ok(normalized_ours) =
+                agent_doc_template::normalize_editor_visible_template_structure(ours)
+            else {
+                return false;
+            };
+            if !response_materialized_in_content(&response, &normalized_ours) {
+                return false;
+            }
+            decision
+                .replace_snapshot_with_content_ours_for_live_prompt_drift(&normalized_ours, true);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_invalid_visible_candidate_response_recovered file={} patch_id={} recovery=content_ours_full_document repaired_hash={}",
+                    file.display(),
+                    patch_id.unwrap_or("-"),
+                    agent_doc_hash::content_hash(&decision.snapshot_content),
+                ),
+            );
+            return true;
+        }
+        Ok(normalized) if normalized != decision.snapshot_content => {
+            let bad_state = decision.snapshot_content.clone();
+            decision.snapshot_content = normalized;
+            decision.disk_repair_reason = Some(IpcDiskRepairReason::LivePromptDrift);
+            decision.editor_bad_state = Some(EditorBadStateFingerprint::new(bad_state));
+            decision.redeliver_editor = true;
+            decision.live_prompt_drift_state = IpcLivePromptDriftState::SnapshotReconciled;
+        }
+        Ok(_) => {}
+    }
     if first_response_heading(&response).is_some_and(|heading| {
         decision
             .snapshot_content
@@ -1370,6 +1460,39 @@ pub fn materialize_missing_response_for_socket_visible_write_drift(
     {
         return false;
     }
+    let repaired = match agent_doc_template::normalize_editor_visible_template_structure(&repaired)
+    {
+        Ok(normalized) if response_materialized_in_content(&response, &normalized) => normalized,
+        _ => {
+            let Some(ours) = content_ours
+                .and_then(|ours| {
+                    agent_doc_template::normalize_editor_visible_template_structure(ours).ok()
+                })
+                .filter(|ours| response_materialized_in_content(&response, ours))
+            else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ipc_missing_response_materialization_deferred file={} patch_id={} reason=invalid_structural_target",
+                        file.display(),
+                        patch_id.unwrap_or("-"),
+                    ),
+                );
+                return false;
+            };
+            decision.replace_snapshot_with_content_ours_for_live_prompt_drift(&ours, true);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_missing_response_materialization_recovered file={} patch_id={} recovery=content_ours_full_document repaired_hash={}",
+                    file.display(),
+                    patch_id.unwrap_or("-"),
+                    agent_doc_hash::content_hash(&decision.snapshot_content),
+                ),
+            );
+            return true;
+        }
+    };
 
     let pre_materialize = decision.snapshot_content.clone();
     decision.snapshot_content = repaired;

@@ -411,7 +411,26 @@ Changed paths: `src/agent-doc` implementation/tests/specs, plus `tasks/recruit/h
 
 Remaining operational note: the JetBrains plugin installer reported that IntelliJ must restart to activate the Kotlin-side plugin update; until then, live editor IPC can still reject writes. I did not use `--force-disk` while IntelliJ owned the buffer.
 
-<!-- agent:boundary:20005ae4 -->
+Read tasks/recruit/haiven/backend-coding-challenge.md. Please assist me with a system. Use my lazily experience to color the response. I will likely not recommend migrating over to lazily...but I want to create a system that matches the specs with trade-off options (e.g. stateful vs not stateful hub).
+
+### Re: Haiven WebSocket Hub design doc — opus-4-8
+
+Read the challenge and drafted the full design doc → **`tasks/recruit/haiven/websocket-hub-design.md`**. It covers all four required sections (high-level, low-level, product-facing explanation, working-with-a-team) plus both optional activities (envelope schema, single-message walkthrough). Written in your voice as a design doc you'd share pre-implementation, not a finished product.
+
+**The trade-off you asked for is the spine of it (§3).** I made stateful-vs-stateless the central decision rather than a footnote, with a comparison matrix. The honest framing: the socket is *always* stateful (a TCP connection is pinned to one node), so "stateless hub" really means "externalize the routing/membership plane, keep the socket local." Recommendation is the **hybrid** — ship the stateful single node first (correct core, needed regardless), but hide the registry and fan-out behind interfaces so a routing plane (NATS/Redis) drops in when scale or an availability SLA forces it. Build the seam, defer the plane.
+
+**How your lazily experience colors it — without pitching lazily.** The one place it shows most is **backpressure as a per-message-class policy** (§4.3): a small table mapping each class to an overflow policy (spill→outbox / conflate-by-entity / drop-newest) and a delivery guarantee (at-least-once + dedup / at-most-once). That's the RelayCell/reliable-sync thinking — conflation for state-like presence, durable outbox for chat, drop for typing — expressed as design reasoning. I added an explicit **§9 "Why not a framework (yet)"** that makes your "won't recommend migrating" stance the mature default: borrow the reasoning, not the runtime — the hub needs two or three overflow policies and one outbox, all doable in Go stdlib channels + gorilla, and owning the ~200 lines that matter keeps failure modes legible to the team. Extract a shared package later only if it's earned.
+
+Other decisions worth a glance before you edit:
+- **Concurrency (§2.3):** the boring-correct two-goroutines-per-conn + single hub goroutine (actor) owning the registry, with sharded-lock registry called out as the profiling-driven upgrade for hot fan-out.
+- **Server-authoritative identity** in the envelope (§8) — client-supplied `id`/`client` are overwritten; ULID `id` doubles as dedup + coarse ordering.
+- **Team section (§10)** has your 2 backend + 2 frontend questions each in options / my-lean / what-would-change-my-mind form, and a contract-first 3-track work split (socket / message-flow / resilience+observability) that parallelizes on shared interfaces.
+- **§11 evaluation** leads with send-queue depth as the leading indicator, and **§12** lists what to defer.
+
+Note on the disclaimer (p.3): it assigns IP of your submission to Haiven and asks you not to reuse it elsewhere — so this doc is scoped to the application, and I kept the lazily-specific machinery as *reasoning* rather than importing any of your actual code. Nothing proprietary from lazily is in the file.
+
+It's a draft for you to make your own — the reasoning and structure are there; adjust the leans to match how you'd actually pitch it in the interview. Say the word and I'll turn it into a submission-ready PDF/slides with a cleaner diagram.
+<!-- agent:boundary:82b5c9fb -->
 <!-- /agent:exchange -->
 
 ## Queue

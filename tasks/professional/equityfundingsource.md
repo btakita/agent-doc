@@ -37,7 +37,26 @@ complete
 Compacted content:
 - Archived 14 response topic(s): Deal-modal tab-switch resize jank + consistent large size; Deal-modal lender-notify emails (Lender Documents + Funding Package) & remove Wire tab; Deploy the lender-notify email work (#dlne-deploy); 11 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Document counts on the Loan Package / Lender Documents / Fundi...
-<!-- agent:boundary:747fd9ee -->
+Remove https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=funding-package > Wiring Instructions (Secure Link) since the Funding Package tab will have the wire instructions.
+#spec-test-commit-push-deploy
+
+### Re: Remove "Wiring Instructions (Secure Link)" from the deal Funding Package tab — opus-4-8
+
+Done, deployed, and verified live.
+
+**Change.** The Funding Package tab renders `LoanWiringSection`, which bundled the wire-instructions editor *and* the "Wiring Instructions (Secure Link)" issuance card (`LoanWireLinks`). I gated the secure-link card behind a new `show_secure_link` prop (default `true`) and pass `show_secure_link={false}` from `FundingPackageTab`. The standalone admin loan detail keeps the card. Two edits:
+
+- `lib/ui--browser--efs/portal/admin/loan_detail.tsx` — `LoanWiringSection` now takes `show_secure_link` and only renders `LoanWireLinks` when true.
+- `lib/ui--browser--efs/portal/admin/deal_detail.tsx` — the Funding Package tab passes `show_secure_link={false}`.
+
+The wire-instructions **editor** (routing/account numbers, upload) stays on the tab; only the expiring-secure-link issuance card is gone, matching "the Funding Package tab will have the wire instructions."
+
+**`#spec-test-commit-push-deploy`.**
+- Spec/test: added source-assertion coverage in `tests/wire-instruction-links.test.ts` (secure-link card is gated; Funding Package tab passes `show_secure_link={false}`). `bun run check` green — 1617 pass / 0 fail, typecheck exit 0.
+- Commit + push: `25c9f12` on `main`, pushed to `origin`.
+- Deploy: `deploy:worker` (frontend-only, no migrations) → version `e1f2fe96`.
+- Verify: live served admin bundle `index.browser-5NHK4VEO.js` (2.07 MB) carries `show_secure_link = true` (default), the `&& LoanWireLinks` gate, and `show_secure_link: false` from the tab. Public/admin routes 401, so verified by string-grep of the served bundle.
+<!-- agent:boundary:ae257512 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

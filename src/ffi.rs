@@ -391,6 +391,19 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
     agent_doc_debounce::document_changed(path);
 }
 
+/// Whether a durable live-buffer sidecar should be written for `path`.
+///
+/// Sidecar-retirement (`#sidecar-retirement`): scope live-buffer writes to agent-doc
+/// session documents, exactly as the reliable-sync liveness plane already gates its
+/// pushes (`agent_doc_is_session_document`). Without this, an IDE writes a sidecar for
+/// every open tab — plain specs, `node_modules/**/README.md`, source files — which the
+/// plane correctly ignores; those non-session sidecars only inflate the `.agent-doc/
+/// live-buffer/` scans this retirement is removing. Classification reads the editor's
+/// in-memory `content` (no extra disk read on the per-keystroke hot path).
+fn live_buffer_sidecar_in_scope(path: &str, content: &str) -> bool {
+    agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(content, Path::new(path))
+}
+
 /// Record a document change plus full visible buffer content for one editor
 /// instance, including frontend metadata/capabilities.
 ///
@@ -441,14 +454,16 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
         .map(str::trim)
         .filter(|capability| !capability.is_empty())
         .collect();
-    let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-        path,
-        text,
-        editor,
-        kind,
-        version,
-        &capabilities,
-    );
+    if live_buffer_sidecar_in_scope(path, text) {
+        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
+            path,
+            text,
+            editor,
+            kind,
+            version,
+            &capabilities,
+        );
+    }
     agent_doc_debounce::document_changed(path);
 }
 
@@ -507,15 +522,18 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
         .map(str::trim)
         .filter(|capability| !capability.is_empty())
         .collect();
-    let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
-        path,
-        text,
-        editor,
-        kind,
-        version,
-        &capabilities,
-        no_unsaved_operator_edits != 0,
-    );
+    if live_buffer_sidecar_in_scope(path, text) {
+        let _ =
+            agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+                path,
+                text,
+                editor,
+                kind,
+                version,
+                &capabilities,
+                no_unsaved_operator_edits != 0,
+            );
+    }
     agent_doc_debounce::document_changed(path);
 }
 
@@ -3299,6 +3317,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn live_buffer_sidecar_scoped_to_session_documents() {
+        // An agent-doc session document (frontmatter opt-in) writes a sidecar.
+        let session_doc = "---\nagent: claude\nagent_doc_format: template\n---\n\n## Exchange\n";
+        assert!(live_buffer_sidecar_in_scope("/tmp/plan.md", session_doc));
+        // A plain markdown tab (no agent-doc frontmatter) does not — the plane
+        // ignores it too, so no sidecar should accrue for it (#sidecar-retirement).
+        assert!(!live_buffer_sidecar_in_scope(
+            "/tmp/node_modules/foo/README.md",
+            "# Some library\n\nDocs.\n"
+        ));
+        // A source file is never a session document.
+        assert!(!live_buffer_sidecar_in_scope("/tmp/src/main.rs", "fn main() {}\n"));
+    }
+
+    #[test]
     fn resolve_turn_phase_makes_document_model_authoritative() {
         use agent_doc_sqlite::state_store::ActorState;
         use agent_doc_turn::CyclePhase;
@@ -4655,9 +4688,12 @@ mod ack_content_tests {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
-        std::fs::write(&doc, "before\n").unwrap();
+        // A session document (frontmatter opt-in): live-buffer writes are scoped to
+        // session docs (#sidecar-retirement), so the digest content must be one.
+        let doc_content = "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: remote\n";
+        std::fs::write(&doc, doc_content).unwrap();
         let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
-        let content = CString::new("before\n### Re: remote\n").unwrap();
+        let content = CString::new(doc_content).unwrap();
         let editor_id = CString::new("jetbrains:test").unwrap();
         let editor_kind = CString::new("jetbrains").unwrap();
         let editor_version = CString::new("test").unwrap();
@@ -4682,10 +4718,7 @@ mod ack_content_tests {
 
         let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
             .expect("v3 full-content report should persist live-buffer sidecar");
-        assert_eq!(
-            snapshot.content.as_deref(),
-            Some("before\n### Re: remote\n")
-        );
+        assert_eq!(snapshot.content.as_deref(), Some(doc_content));
         assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
         assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
         assert!(snapshot.has_capability(agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY));
@@ -4700,9 +4733,13 @@ mod ack_content_tests {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
-        std::fs::write(&doc, "before\n").unwrap();
+        // A session document (frontmatter opt-in): live-buffer writes are scoped to
+        // session docs (#sidecar-retirement), so the digest content must be one.
+        let doc_content =
+            "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: fallback\n";
+        std::fs::write(&doc, doc_content).unwrap();
         let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
-        let content = CString::new("before\n### Re: fallback\n").unwrap();
+        let content = CString::new(doc_content).unwrap();
         let editor_id = CString::new("jetbrains:test").unwrap();
         let editor_kind = CString::new("jetbrains").unwrap();
         let editor_version = CString::new("test").unwrap();
@@ -4726,10 +4763,7 @@ mod ack_content_tests {
 
         let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
             .expect("v2 full-content report should persist live-buffer sidecar");
-        assert_eq!(
-            snapshot.content.as_deref(),
-            Some("before\n### Re: fallback\n")
-        );
+        assert_eq!(snapshot.content.as_deref(), Some(doc_content));
         assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
         assert!(!snapshot.no_unsaved_operator_edits);
     }

@@ -5,8 +5,8 @@
 //! - `install(editor)` — fetches the latest GitHub Release for `btakita/agent-doc`, selects the appropriate asset (signed variant preferred), downloads it, and installs it.
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin.xml version matches the latest release tag; for VS Code, always reinstalls (handled idempotently by the CLI).
-//! - `list()` — scans JetBrains plugin directories for `agent-doc-jetbrains/META-INF/plugin.xml` and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
-//! - JetBrains plugin directories are discovered from OS-specific paths (`~/.local/share/JetBrains/*/plugins/` on Linux, `~/Library/Application Support/JetBrains/*/plugins/` on macOS). When multiple IDEs are found, the user is prompted interactively on stderr.
+//! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
+//! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. When multiple IDEs are found, the user is prompted interactively on stderr.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`).
 //! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
 //!
@@ -26,6 +26,7 @@
 //! - find_asset_prefers_signed: release with both signed and unsigned zip → signed asset selected
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
 //! - find_local_vscode_vsix_requires_manifest_version: stale VSIX files are ignored and a missing current build fails closed
+//! - jetbrains_discovery_excludes_config_and_service_roots: only versioned IDE data roots are candidates
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -166,24 +167,32 @@ fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
         vec![home.join("Library/Application Support/JetBrains")]
     } else {
         vec![
-            home.join(".local/share/JetBrains"),
-            home.join(".config/JetBrains"),
+            std::env::var_os("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".local/share"))
+                .join("JetBrains"),
         ]
     };
 
+    jetbrains_plugin_dirs_in_roots(&search_roots)
+}
+
+fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    for root in &search_roots {
+    for root in search_roots {
         if let Ok(entries) = fs::read_dir(root) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_dir() {
+                let name = entry.file_name();
+                if !path.is_dir() || !is_jetbrains_ide_data_dir(&name.to_string_lossy()) {
                     continue;
                 }
                 let plugins = path.join("plugins");
                 if plugins.is_dir() {
                     dirs.push(plugins);
-                } else if root.ends_with("JetBrains") && path.is_dir() {
-                    // Some layouts put plugins directly in IDE dir
+                } else {
+                    // Modern IDEs commonly expose the product-version data root itself as
+                    // `idea.plugins.path`.
                     dirs.push(path);
                 }
             }
@@ -194,13 +203,32 @@ fn jetbrains_plugin_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+fn is_jetbrains_ide_data_dir(name: &str) -> bool {
+    const PRODUCTS: &[&str] = &[
+        "Aqua",
+        "CLion",
+        "DataGrip",
+        "GoLand",
+        "IdeaIC",
+        "IntelliJIdea",
+        "PhpStorm",
+        "PyCharm",
+        "Rider",
+        "RubyMine",
+        "RustRover",
+        "WebStorm",
+    ];
+    name.chars().any(|ch| ch.is_ascii_digit())
+        && PRODUCTS.iter().any(|product| name.starts_with(product))
+}
+
 fn choose_plugins_dir(dirs: &[PathBuf]) -> Result<&PathBuf> {
     if dirs.is_empty() {
         bail!(
             "No JetBrains IDE plugins directory found.\n\
-             Expected locations:\n  \
-             Linux: ~/.local/share/JetBrains/*/plugins/ or ~/.config/JetBrains/*/plugins/\n  \
-             macOS: ~/Library/Application Support/JetBrains/*/plugins/"
+             Expected versioned IDE data roots under:\n  \
+             Linux: ${{XDG_DATA_HOME:-~/.local/share}}/JetBrains/\n  \
+             macOS: ~/Library/Application Support/JetBrains/"
         );
     }
     if dirs.len() == 1 {
@@ -436,6 +464,27 @@ fn find_local_vscode_vsix(dist_dir: &std::path::Path) -> Result<PathBuf> {
     Ok(vsix)
 }
 
+fn installed_jetbrains_plugin_version(target_dir: &std::path::Path) -> Option<String> {
+    let lib_dir = target_dir.join("agent-doc-jetbrains/lib");
+    fs::read_dir(lib_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let version = name
+                .strip_prefix("agent-doc-jetbrains-")?
+                .strip_suffix(".jar")?;
+            let key: Vec<u32> = version
+                .split('.')
+                .map(str::parse::<u32>)
+                .collect::<std::result::Result<_, _>>()
+                .ok()?;
+            Some((key, version.to_owned()))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0))
+        .map(|(_, version)| version)
+}
+
 fn parse_local_jetbrains_zip_version(name: &str) -> Option<Vec<u32>> {
     let base = name.strip_prefix("agent-doc-jetbrains-")?;
     let version = base
@@ -498,16 +547,11 @@ pub fn update(editor: &str) -> Result<()> {
         "jetbrains" | "jb" | "idea" => {
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
             let version = release_version(&release);
-            // Check if already installed at this version
+            // Check if already installed at this version.
             let dirs = jetbrains_plugin_dirs();
             for d in &dirs {
-                let manifest = d.join("agent-doc-jetbrains/META-INF/plugin.xml");
-                if manifest.exists()
-                    && let Ok(content) = fs::read_to_string(&manifest)
-                    && content.contains(&format!(
-                        "<version>{}</version>",
-                        version.trim_start_matches('v')
-                    ))
+                if installed_jetbrains_plugin_version(d).as_deref()
+                    == Some(version.trim_start_matches('v'))
                 {
                     eprintln!("JetBrains plugin is already at {version}.");
                     return Ok(());
@@ -529,7 +573,8 @@ pub fn update(editor: &str) -> Result<()> {
 mod tests {
     use super::{
         find_asset, find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
-        release_version,
+        installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
+        jetbrains_plugin_dirs_in_roots, release_version,
     };
     use serde_json::json;
     use std::fs;
@@ -650,6 +695,36 @@ mod tests {
         fs::write(&current, b"current").unwrap();
         assert_eq!(find_local_vscode_vsix(dist).unwrap(), current);
     }
+
+    #[test]
+    fn jetbrains_discovery_excludes_config_and_service_roots() {
+        let tmp = TempDir::new().unwrap();
+        let data_root = tmp.path().join("share/JetBrains");
+        fs::create_dir_all(data_root.join("IntelliJIdea2026.1")).unwrap();
+        fs::create_dir_all(data_root.join("PrivacyPolicy")).unwrap();
+        fs::create_dir_all(data_root.join("Daemon")).unwrap();
+        fs::create_dir_all(data_root.join("Idea")).unwrap();
+
+        let dirs = jetbrains_plugin_dirs_in_roots(&[data_root]);
+        assert_eq!(dirs.len(), 1);
+        assert!(dirs[0].ends_with("IntelliJIdea2026.1"));
+        assert!(is_jetbrains_ide_data_dir("PyCharm2025.3"));
+        assert!(!is_jetbrains_ide_data_dir("PrivacyPolicy"));
+    }
+
+    #[test]
+    fn installed_jetbrains_version_comes_from_current_plugin_jar() {
+        let tmp = TempDir::new().unwrap();
+        let lib = tmp.path().join("agent-doc-jetbrains/lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("lazily-kt-0.29.0.jar"), b"dependency").unwrap();
+        fs::write(lib.join("agent-doc-jetbrains-0.2.252.jar"), b"plugin").unwrap();
+
+        assert_eq!(
+            installed_jetbrains_plugin_version(tmp.path()).as_deref(),
+            Some("0.2.252")
+        );
+    }
 }
 
 pub fn list() -> Result<()> {
@@ -658,17 +733,7 @@ pub fn list() -> Result<()> {
     // JetBrains
     let dirs = jetbrains_plugin_dirs();
     for d in &dirs {
-        let manifest = d.join("agent-doc-jetbrains/META-INF/plugin.xml");
-        if manifest.exists() {
-            let version = fs::read_to_string(&manifest)
-                .ok()
-                .and_then(|c| {
-                    // Extract <version>...</version>
-                    let start = c.find("<version>")? + 9;
-                    let end = c[start..].find("</version>")? + start;
-                    Some(c[start..end].to_string())
-                })
-                .unwrap_or_else(|| "unknown".into());
+        if let Some(version) = installed_jetbrains_plugin_version(d) {
             println!("jetbrains  v{}  {}", version, d.display());
             found = true;
         }

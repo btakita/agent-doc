@@ -13,6 +13,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 - **Compact Exchange is one CPC-owned transaction.** CLI, JetBrains, and VS Code submit the operation but never mutate the document. The CPC computes the archive and replacement, applies the CRDT projection, waits for the visible hash, and commits inside an in-process document-mutation scope, so relay reads/writes and commit cannot recursively time out on the controller socket. Stale client binaries are rejected before mutation and receive one promotion retry.
 - **Editor-origin admission is strict and cross-editor.** JetBrains and VS Code forward only genuine user deltas into canonical CRDT state. Clean file-cache reloads, whole-buffer refreshes, and CPC-applied projections fence queued deltas and drive canonical state back into the editor without setting typing or unsynced-user flags. This prevents File Cache Conflict from mistaking an agent response projection for operator typing.
 - **Local VS Code installs fail closed on stale packages.** `plugin install --local vscode` now requires the VSIX version to exactly match `editors/vscode/package.json` instead of choosing whichever old artifact has the newest filesystem timestamp.
+- **JetBrains local installs target real IDE data roots.** Discovery excludes config and service directories, recognizes only versioned product roots, and reads the installed version from the plugin JAR so install/list/update agree with `idea.plugins.path`.
 
 ## 0.34.103
 

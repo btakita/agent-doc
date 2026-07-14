@@ -81,7 +81,22 @@ Fixed, deployed, and verified live.
 **Verification.** `bun run check` green — 1620 pass / 0 fail, typecheck+build exit 0 (added `#deal-tab-complete-ratio` pure-helper + UI-wiring tests). Committed `2dfa985`, pushed to `origin/main`, deployed worker version `0eed9586`. Live bundle `index.browser-6TJ3TG6I.js` carries `satisfied_categories`, the ratio badge, and the green/red pill colors (verified by string-grep; admin routes 401).
 
 One interpretation note: I took "13/13" literally — the denominator stays the full 13-type catalogue and non-required types count as satisfied. If you'd rather the ratio only count *required* types (so it'd read 6/6), say the word and I'll switch it.
-<!-- agent:boundary:9147f348 -->
+In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/070770ae-0e0e-4962-9c63-1e08dfc8b0b4?tab=lender-documents, please remove the re-render jank after a file is uploaded.
+
+### Re: Remove re-render jank after uploading a file on the lender Lender Documents tab — opus-4-8
+
+Fixed, deployed, and verified live.
+
+**Root cause.** The shared `DealLenderDocuments` component (used by both the admin and the lender-facing `/lenders/deals/:id?tab=lender-documents` tab) had `upload_` and `remove_` call `load_()` on success. `load_()` sets `loading = true`, which swaps the entire tab body for a "Loading lender documents…" skeleton and **remounts every section row** — so each upload flashed the whole list. That refetch was unnecessary: the upload endpoint already returns the created document.
+
+**Fix (`#lender-docs-upload-jank`).** Update the list in place instead of a full reload:
+- Upload → `set_docs(prev => [...prev.filter(d => d.id !== uploaded.id), uploaded])` using the returned row.
+- Delete → `set_docs(prev => prev.filter(d => d.id !== id))`.
+
+The initial-mount load still shows the skeleton (correct); only the post-mutation flash is gone. The row now updates in place with no remount. The lender tab passes no `on_change`, so there's no parent-side reload either.
+
+**Verification.** `bun run check` green — 1621 pass / 0 fail, typecheck+build exit 0 (added a source-assertion test that neither `upload_` nor `remove_` calls `load_()`). Committed `9b1e397`, pushed to `origin/main`, deployed worker `08545067`. Live served bundle `index.browser-X5TUB275.js` md5 matches the locally-built asset exactly, so the fix is live.
+<!-- agent:boundary:bda0a578 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

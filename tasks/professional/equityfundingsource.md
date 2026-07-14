@@ -115,7 +115,27 @@ The five built-in Lender Documents rows already carried a `hint`, but it was wor
 The shared `DealLenderDocuments` core also backs the admin "on behalf" view, so the clearer descriptions show there too.
 
 **`#spec-test-commit-push-deploy`.** `bun run check` green — 1622 pass / 0 fail, typecheck+build exit 0 (added a source-assertion test pinning the five sentences and the always-visible render). Committed `60555ce`, pushed to `origin/main`, deployed worker `35bbfeda`. Live asset `index.browser-2XLDMV6S.js` md5 matches the locally-built bundle and contains the descriptions.
-<!-- agent:boundary:149afd67 -->
+In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=lender-documents, the UI should update via when the lender uploads documents. There should also be alerts. Please ensure reliable realtime behavior with lender uploads + state changes so the admin can see the changes without having to reload the page. Do we need extra infrastructure or architecture to ensure reliable delivery?
+
+### Re: Reliable realtime for lender uploads + state changes on the admin deal modal — opus-4-8
+
+**Do we need extra infrastructure? No.** EFS already has the full reliable-realtime stack; the gap was just that lender document uploads weren't wired into it and the deal modal wasn't subscribed. Both are now fixed, deployed, and live.
+
+**The existing stack (reused, `#7djh` / `#admin-alerts`):**
+- `AdminEventsRoom` — a Cloudflare **Durable Object** that holds admin WebSocket connections and fans out events. This is the coordination layer a stateless Worker needs to push cross-session (a lender in one session → an admin in another).
+- `use_admin_events_` — the client hook: WebSocket push for immediacy, **auto-reconnect**, and a **polling heartbeat as the reliable-delivery fallback** (60s while the socket is live, 20s when it's down) so a missed push still reconciles.
+- `#admin-alerts` feed — persists a counted alert row + pushes a desktop notification.
+
+**What I wired in (`#lender-docs-realtime`):**
+- Lender upload → `admin_alert_emit_('lender_documents_uploaded', deal_id, actor)` — persists a counted alert deep-linked to the deal's Lender Documents tab, and pushes it. Lender delete → a refresh-only event.
+- `AdminDealDetail` now subscribes via `use_admin_events_` and **quietly re-lists** the Lender Documents tab (+ refreshes the doc badges) via a `reload_signal` — no page reload, no loading-skeleton flash.
+
+**Reliability model.** Push = instant; if a push is dropped (socket blip, DO restart), the 20–60s polling heartbeat reconciles, and the persisted alert row survives regardless. Worst case the admin sees the change within ~60s; normally it's immediate. That's sufficient for "admin sees lender uploads without reloading."
+
+**If you ever need stronger (zero-miss, ordered) guarantees** — e.g. an audit-grade activity stream — the one addition would be per-connection sequence numbers + replay-on-reconnect inside the DO (it's currently a stateless in-memory fan-out). Not needed for this use case, and I did not add it. The single shared DO instance is also fine at EFS's admin headcount; it'd only need sharding at much larger scale.
+
+**Shipped.** `bun run check` green — 1624 pass / 0 fail, typecheck+build exit 0 (added backend-emit + frontend-subscription source-assertion tests; updated the alert-feed set test). Committed `e5bc945`, pushed to `origin/main`, deployed worker `26ddb96d`. Verified live: worker bundle carries the `lender_documents_*` events; browser bundle md5 matches the built asset.
+<!-- agent:boundary:615351a7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

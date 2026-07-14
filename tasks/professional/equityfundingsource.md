@@ -96,10 +96,10 @@ Fixed, deployed, and verified live.
 The initial-mount load still shows the skeleton (correct); only the post-mutation flash is gone. The row now updates in place with no remount. The lender tab passes no `on_change`, so there's no parent-side reload either.
 
 **Verification.** `bun run check` green — 1621 pass / 0 fail, typecheck+build exit 0 (added a source-assertion test that neither `upload_` nor `remove_` calls `load_()`). Committed `9b1e397`, pushed to `origin/main`, deployed worker `08545067`. Live served bundle `index.browser-X5TUB275.js` md5 matches the locally-built asset exactly, so the fix is live.
-<!-- agent:boundary:bda0a578 -->
+<!-- agent:boundary:fede9e8f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes

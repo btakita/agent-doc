@@ -135,10 +135,10 @@ In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=de
 **If you ever need stronger (zero-miss, ordered) guarantees** — e.g. an audit-grade activity stream — the one addition would be per-connection sequence numbers + replay-on-reconnect inside the DO (it's currently a stateless in-memory fan-out). Not needed for this use case, and I did not add it. The single shared DO instance is also fine at EFS's admin headcount; it'd only need sharding at much larger scale.
 
 **Shipped.** `bun run check` green — 1624 pass / 0 fail, typecheck+build exit 0 (added backend-emit + frontend-subscription source-assertion tests; updated the alert-feed set test). Committed `e5bc945`, pushed to `origin/main`, deployed worker `26ddb96d`. Verified live: worker bundle carries the `lender_documents_*` events; browser bundle md5 matches the built asset.
-<!-- agent:boundary:615351a7 -->
+<!-- agent:boundary:73e5dd5f -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
+<!-- agent:queue preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Notes

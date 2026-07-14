@@ -496,9 +496,19 @@ Converted both diagrams to **mermaid** (§2 hub topology, §4.1 lifecycle) and f
 
 **Tradeoffs**
 - **Latency vs throughput — is the few-ms from buffering? Is coalesce-on-backpressure a cheap win?** Yes, the latency is the **flush interval** — you hold messages up to `flushInterval`/batch-size to amortize syscalls + framing, so a message can wait a few ms. Coalesce-on-backpressure is a **very cheap, high-value win for state-like data**: you're not just batching, you're *collapsing* N queued updates for the same key into 1 (conflation), so the slow consumer does *less* work and catches up faster. For non-collapsible data (chat) batching still cuts per-message overhead (a throughput win) but doesn't drop count. Best form is **adaptive/Nagle-like**: flush immediately when idle (low latency), coalesce/batch only when the queue is backed up (throughput when it matters). So — cheap and worth it, especially the conflation path.
+- **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
+- **Local IDE preview (JetBrains/VS Code JCEF):** respects the init directive — this fixes it.
 
 The doc now carries all of this; the response is the quick-reference. Want me to add a worked ack/redelivery sequence diagram (client ↔ hub ↔ outbox) or a mermaid sequence for the multi-device echo path? Either is a small add.
 I don't see the mermaid diagrams on the dark background.
+
+
+
+
+How would CAS be achieved in go? Should we qualify a lock or CAS for the keys<!-- agent:boundary:69949696 --><!-- agent:boundary:69949696 -->
+- **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
+- **Local IDE preview (JetBrains/VS Code JCEF):** respects the init directive — this fixes it.
+
 
 ### Re: Mermaid invisible on dark background — opus-4-8
 
@@ -509,7 +519,36 @@ Two caveats worth knowing:
 - **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
 
 If you're viewing it somewhere that **doesn't render mermaid at all** (you'd see raw `flowchart` text, not an invisible diagram), tell me and I'll either drop back to ASCII art or export the diagrams to PNG and embed them. And if you want the doc to read cleanly on *both* light and dark (e.g. you'll export to PDF on a white page), I can swap `theme:"dark"` for explicit `themeVariables` that contrast on either — just say which surface it's final-rendered on.
-<!-- agent:boundary:628ee762 -->
+How would CAS be achieved in go? Should we qualify a lock or CAS for the ?
+### Re: CAS in Go for the registry — opus-4-8
+
+Important precision here, because "CAS" was doing two jobs in my earlier note. There's **hardware CAS** (a single atomic instruction) and the **logical compare-and-swap** semantics I meant for the unregister race. They're not interchangeable for a map. Added this to §2.3.
+
+**How CAS is achieved in Go (the hardware kind).** `sync/atomic`: `atomic.CompareAndSwapInt64/Pointer`, or the typed Go 1.19+ wrappers `atomic.Int64.CompareAndSwap(old,new)`, `atomic.Pointer[T].CompareAndSwap(old,new)`. The hard constraint: it only works on a **single machine word** — an int32/64, a uintptr, an `unsafe.Pointer`, or a typed atomic. It's lock-free because the CPU does compare-and-write in one uninterruptible step.
+
+**Why you can't hardware-CAS the registry map.** A Go `map[clientKey]*conn` is a multi-word structure (header + buckets). There's no atomic instruction that swaps a map entry — `atomic` can't touch it. So a map mutation **cannot** be a real CAS.
+
+**So: lock or CAS for the registry?** For the *map*, the answer is **lock (or actor), not hardware CAS** — because the thing being mutated isn't word-sized:
+- **Actor model:** the single hub goroutine serializes register/unregister, so "compare the connID, then delete if it matches" is atomic *for free* — no lock, no atomic, just one goroutine. This is the cleanest.
+- **Sharded lock:** do the compare-and-delete **inside the write lock**. That critical section *gives you* CAS semantics (act only if current == expected) without an atomic instruction.
+- **True lock-free (only if read-mostly):** keep the registry as an **immutable** map behind `atomic.Pointer[map[...]]` and mutate copy-on-write — `old := reg.Load(); nw := clone(old); nw[k]=v; reg.CompareAndSwap(old, &nw)`, retry on failure. That's a genuine hardware CAS, but every mutation copies the whole map (O(n)). Our registry is **write-hot** (a mutation on *every* connect and disconnect), so COW is the wrong tool — a sharded `RWMutex` wins. COW-CAS only pays off for rarely-mutated, read-dominated state.
+
+Where a real atomic *does* belong: the **`connID` generation counter** — `connID := atomic.AddUint64(&gen, 1)` — so each new connection gets a unique monotonic generation with no lock. That counter is what the logical compare-and-delete checks against.
+
+**How the "CAS" modifies the map, concretely** (sharded-lock form, now in §2.3):
+```go
+func (s *shard) unregister(k clientKey, connID uint64) {
+    s.mu.Lock()
+    if c, ok := s.m[k]; ok && c.connID == connID { // only delete if still ours
+        delete(s.m, k)
+    }
+    s.mu.Unlock()
+}
+```
+The `c.connID == connID` guard is the whole point: a laggy old connection calling `unregister` after a reconnect already installed a fresh conn (new `connID`) under the same key finds the guard false and **leaves the live connection alone**. Register is the mirror: under the lock, read the existing entry, apply the last-writer-wins eviction, then overwrite.
+
+**Bottom line:** registry = lock or actor (a map isn't word-CAS-able); the only genuine `atomic.CompareAndSwap` in play is if you go read-mostly copy-on-write, and the genuine atomic you *do* want regardless is the `connID` counter. For our write-hot path: **sharded `RWMutex` + compare-connID-under-lock**, or the actor which serializes it for free.
+<!-- agent:boundary:69949696 -->
 <!-- /agent:exchange -->
 
 ## Queue

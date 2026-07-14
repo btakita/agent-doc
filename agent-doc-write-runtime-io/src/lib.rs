@@ -3380,14 +3380,10 @@ mod tests {
         );
     }
     #[test]
-    fn try_ipc_file_fallback_skips_when_patches_already_applied_to_live_buffer() {
+    fn try_ipc_file_fallback_does_not_use_disk_equality_as_editor_ack() {
         // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-        // `[#ipcfilehashskip]` defense-in-depth dedupe gate.
-        //
-        // When the live file already contains the response body (e.g. via a
-        // prior socket-IPC retry whose sidecar ack arrived late), the file-IPC
-        // fallback must hash-compare patch outcome vs current and skip the
-        // write so it does not stack a duplicate `### Re:` heading.
+        // Disk may already contain the response while the editor buffer and
+        // controller receipt are still unresolved. Disk equality is not an ack.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -3404,24 +3400,16 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, already_applied_content).unwrap();
-
         // Build a patch whose application against the current file is a no-op
         // (replace exchange with the same content it already has).
         let exchange_body = "### Re: topic — gpt-5\n\nImplemented.\n";
         let patch = agent_doc_template::PatchBlock::new("exchange", exchange_body);
 
-        let started = std::time::Instant::now();
         let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        let elapsed = started.elapsed();
 
         assert!(
-            result.success,
-            "already-applied file-IPC fallback must short-circuit as success"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_secs(1),
-            "skip path must not block on the 2s IPC timeout: elapsed={:?}",
-            elapsed
+            !result.success,
+            "disk equality must not impersonate an editor delivery receipt"
         );
 
         let patches_dir = agent_doc_dir.join("patches");
@@ -3430,8 +3418,8 @@ mod tests {
             .filter_map(|e| e.ok())
             .collect();
         assert!(
-            leftover.is_empty(),
-            "skip path must clean up any fallback patch files left around"
+            !leftover.is_empty(),
+            "the response operation must remain queued for an editor/controller retry"
         );
 
         let live_after = fs::read_to_string(&doc).unwrap();
@@ -3442,8 +3430,10 @@ mod tests {
 
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("file_ipc_fallback_skip_already_applied"),
-            "skip event must be logged for audit:\n{ops_log}"
+            ops_log.contains("invariant=no_ack")
+                && ops_log.contains("recovery=retry_without_disk_write")
+                && !ops_log.contains("file_ipc_fallback_skip_already_applied"),
+            "missing editor delivery proof must remain pending without disk mutation:\n{ops_log}"
         );
     }
     #[test]

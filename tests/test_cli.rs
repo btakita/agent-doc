@@ -25019,12 +25019,14 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && write_ipc_transport_source.contains("\"try_ipc_mid_turn_cycle_state_current\"")
             && write_ipc_transport_source
                 .contains("\"try_ipc_mid_turn_cycle_state_disk_fallback\"")
-            && write_ipc_transport_source.contains("\"file_ipc_fallback_dedupe_current\"")
-            && write_ipc_transport_source.contains("\"file_ipc_fallback_dedupe_disk_fallback\"")
             && write_ipc_transport_source.contains("\"write_ipc_poll_before_content\"")
             && write_ipc_transport_source
                 .contains("\"write_ipc_poll_before_content_disk_fallback\""),
         "agent-doc-write-ipc-io should route active document reads through named realtime and disk-fallback document authority"
+    );
+    assert!(
+        !write_ipc_transport_source.contains("file_ipc_fallback_skip_already_applied"),
+        "file IPC must not treat disk equality as an editor delivery acknowledgement"
     );
     assert!(
         write_ipc_io_source.contains("pub(crate) fn projected_or_sidecar_cycle_id(")

@@ -4,7 +4,6 @@ use crate::{
     IpcResult, build_ipc_patches_json, ipc_document_content,
     patch_response_headings_already_in_head, projected_or_sidecar_cycle_id,
 };
-use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_document_realtime::write_policy::{
     EditorDeliveryAdmission, EditorDeliveryAdmissionFacts, decide_editor_delivery_admission,
 };
@@ -547,8 +546,8 @@ fn try_ipc_inner(
                     file,
                     &project_root,
                     &patch_id,
-                    std::time::Duration::from_millis(200),
-                    std::time::Duration::from_millis(25),
+                    agent_doc_write_converge_io::visible_write_receipt_timeout(),
+                    agent_doc_write_converge_io::visible_write_receipt_poll_interval(),
                 )?;
                 if let Some(visible_write_content) = visible_write {
                     let snap_content = visible_write_content.content;
@@ -881,7 +880,7 @@ fn try_ipc_inner(
                     });
                 }
                 eprintln!(
-                    "[write] socket already_applied could not prove the response on disk — falling back to file IPC"
+                    "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CPC/file-IPC retry"
                 );
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1075,59 +1074,6 @@ fn try_ipc_inner(
         );
     }
 
-    // Defense-in-depth dedupe gate for the file-IPC fallback when delivering
-    // a response patch. When the plugin already applied the response via a
-    // prior socket retry whose ack-write was slow, applying the same response
-    // patch through file IPC would land a duplicate `### Re:` heading on top
-    // of the live buffer.
-    //
-    // The socket-IPC path catches this via
-    // `agent_doc_ipc_protocol::is_already_applied_receipt_error_message` when the
-    // plugin sends `{"type":"receipt","status":"applied","reason":"already_applied"}`.
-    // Until every plugin emits that ack (`#ipcpluginalready`), the file-IPC
-    // fallback hash-compares response-patch outcomes against the current file:
-    // if applying the response patches to the current file is a structural
-    // no-op (boundary markers excluded), skip the write so the duplicate
-    // cannot land.
-    //
-    // Scope: only response-bearing patches (contain at least one `### Re:`
-    // heading). Pure prompt/component patches fall through to the existing
-    // path, which has its own no-ack guard for unacknowledged live-edit IPC.
-    //
-    // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-    // Phase 2 (remaining) / `[#ipcfilehashskip]`.
-    if !patches.is_empty()
-        && patches
-            .iter()
-            .any(|patch| patch.content.contains("### Re:"))
-        && let Ok(current) = ipc_document_content(
-            file,
-            "file_ipc_fallback_dedupe_current",
-            "file_ipc_fallback_dedupe_disk_fallback",
-        )
-        && let Ok(after_apply) = agent_doc_template_io::apply_patches(&current, patches, "", file)
-        && strip_boundary_for_dedup(&after_apply) == strip_boundary_for_dedup(&current)
-    {
-        eprintln!(
-            "[write] file IPC fallback: patches already present in live buffer — skipping file IPC write (defense-in-depth dedupe)"
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "file_ipc_fallback_skip_already_applied file={} patch_id={} patches={}",
-                file.display(),
-                patch_id,
-                patches.len()
-            ),
-        );
-        cleanup_fallback_patch_files(file);
-        return Ok(IpcResult {
-            success: true,
-            patch_id,
-            skipped_committed_cycle: false,
-        });
-    }
-
     let success = write_ipc_and_poll(
         effects,
         &patch_file,
@@ -1201,8 +1147,8 @@ pub(crate) fn write_ipc_and_poll(
                 doc_file,
                 options.project_root,
                 patch_id,
-                std::time::Duration::from_millis(500),
-                std::time::Duration::from_millis(25),
+                agent_doc_write_converge_io::visible_write_receipt_timeout(),
+                agent_doc_write_converge_io::visible_write_receipt_poll_interval(),
             )? {
                 Some(visible_write_content) => {
                     let baseline = payload
@@ -1231,7 +1177,7 @@ pub(crate) fn write_ipc_and_poll(
                     let receipt_detail =
                         missing_lazily_receipt_detail(doc_file, "lazily_receipt_timeout=true");
                     eprintln!(
-                        "[write] file IPC consumed but lazily visible-write receipt was not available after 500ms ({receipt_detail})"
+                        "[write] file IPC consumed but its lazily visible-write receipt did not arrive within the shared convergence deadline ({receipt_detail})"
                     );
                     log_ipc_proof_failure(
                         doc_file,

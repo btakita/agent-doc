@@ -2650,6 +2650,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "fs2",
+ "lazily 0.40.0",
  "serde_json",
  "tempfile",
  "uuid",

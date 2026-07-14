@@ -827,6 +827,9 @@ The following are correctness violations:
 - dropping any visible operator-authored text, including non-prompt text;
 - using a lazily visible-write receipt or a socket `already_applied` result to authorize a
   whole-document replacement;
+- reading stale disk after a socket `already_applied` result and materializing a
+  missing response into that disk image; without a matching visible-write receipt,
+  the response operation remains pending for CPC/CRDT replay;
 - treating a pluginless editor save or other out-of-band disk write as stale
   drift to reset from `content_ours`, a snapshot, a lazily visible-write receipt, or HEAD;
 - storing realtime authority only in a turn-local cycle sidecar, backup

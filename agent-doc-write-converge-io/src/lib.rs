@@ -42,8 +42,29 @@ use agent_doc_turn::response_replay::{
     materialize_response_in_current_exchange, response_materialized_in_content,
 };
 use anyhow::{Context, Result};
+use lazily::{DeadlineCore, TimelineSource};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+#[cfg(any(test, feature = "test-support"))]
+const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 100;
+#[cfg(not(any(test, feature = "test-support")))]
+const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 6_000;
+const VISIBLE_WRITE_RECEIPT_POLL_MS: u64 = 25;
+
+/// Shared closeout budget for an editor's lazily-backed visible-write receipt.
+///
+/// Socket delivery, file-watcher delivery, and `already_applied` recovery must
+/// all wait on the same authority boundary. Keeping this budget in one place
+/// prevents a chain of contradictory 200/500ms timeouts from amplifying one
+/// slow editor acknowledgement into duplicate delivery attempts.
+pub fn visible_write_receipt_timeout() -> std::time::Duration {
+    std::time::Duration::from_millis(VISIBLE_WRITE_RECEIPT_TIMEOUT_MS)
+}
+
+pub fn visible_write_receipt_poll_interval() -> std::time::Duration {
+    std::time::Duration::from_millis(VISIBLE_WRITE_RECEIPT_POLL_MS)
+}
 
 fn log_flow_event(file: &Path, event: agent_doc_flow::types::FlowEvent) {
     let message =
@@ -359,8 +380,8 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 file,
                 &project_root,
                 patch_id,
-                std::time::Duration::from_millis(500),
-                std::time::Duration::from_millis(25),
+                visible_write_receipt_timeout(),
+                visible_write_receipt_poll_interval(),
             )
             .ok()
             .flatten()
@@ -369,12 +390,27 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
     } else {
         None
     };
-    let current_source = if visible_write_content.is_some() {
-        IpcSnapshotSource::LazilyVisibleWriteEvent
-    } else {
-        IpcSnapshotSource::FileRead
-    };
-    let current = visible_write_content.or_else(|| std::fs::read_to_string(file).ok());
+    if visible_write_content.is_none() {
+        let invariant = if patch_id.is_empty() {
+            "already_applied_missing_patch_id"
+        } else {
+            "already_applied_missing_visible_write_receipt"
+        };
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            (!patch_id.is_empty()).then_some(patch_id),
+            invariant,
+            "retry_without_disk_write",
+            &format!(
+                "wait_ms={} editor_buffer_authority_required=true disk_projection_ignored=true",
+                VISIBLE_WRITE_RECEIPT_TIMEOUT_MS
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+    }
+    let current_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
+    let current = visible_write_content;
     let mut repair_decision = IpcRepairDecision::content_ours(ours.to_string());
     if let Some(current) = current.as_deref()
         && strip_boundary_for_dedup(current) != strip_boundary_for_dedup(ours)
@@ -398,7 +434,10 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 prompt_drift
             ),
         );
-        if prompt_drift {
+        // Prompt-shaped divergence is not enough to attribute activity to the
+        // operator. Until the same authoritative cut proves the response is
+        // present, this is unresolved delivery rather than user typing.
+        if prompt_drift && response_present {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -412,70 +451,27 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         }
 
         if !response_present {
-            if let Some(repaired_current) =
-                materialize_response_in_current_exchange(current, expected_response)
-            {
-                log_ipc_proof_failure_with_recycle(
-                    file,
-                    "socket_already_applied",
-                    Some(patch_id),
-                    "disk_missing_response_probe",
-                    "content_ours_snapshot_visible_response_repair",
-                    &format!(
-                        "response_sha256={} current_len={} current_hash={} repaired_len={} repaired_hash={}",
-                        agent_doc_hash::content_hash(expected_response),
-                        current.len(),
-                        agent_doc_hash::content_hash(current),
-                        repaired_current.len(),
-                        agent_doc_hash::content_hash(&repaired_current)
-                    ),
-                );
-                if let Err(defer) = effects.guard_visible_write_idle_and_current(
-                    file,
-                    "socket_already_applied_missing_disk_response",
-                    current,
-                ) {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "ipc_socket_already_applied_visible_not_idle_file_fallback file={} patch_id={} reason={}",
-                            file.display(),
-                            patch_id,
-                            defer.to_string().replace('\n', " ")
-                        ),
-                    );
-                    return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
-                }
-                effects.atomic_write(file, &repaired_current)?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "ipc_socket_already_applied_missing_disk_response_repaired file={} patch_id={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
-                        file.display(),
-                        patch_id,
-                        repaired_current.len(),
-                        agent_doc_hash::content_hash(&repaired_current),
-                        ours.len(),
-                        agent_doc_hash::content_hash(ours)
-                    ),
-                );
-                repair_decision = IpcRepairDecision::file_read(repaired_current);
-            } else {
-                log_ipc_proof_failure_with_recycle(
-                    file,
-                    "socket_already_applied",
-                    Some(patch_id),
-                    "disk_missing_response_probe",
-                    "file_ipc_fallback",
-                    &format!(
-                        "response_sha256={} current_len={} current_hash={}",
-                        agent_doc_hash::content_hash(expected_response),
-                        current.len(),
-                        agent_doc_hash::content_hash(current)
-                    ),
-                );
-                return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
-            }
+            // `already_applied` is only a transport result. Even when a
+            // visible-write receipt exists, it cannot authorize rebuilding a
+            // whole document or writing a repaired disk image behind a live
+            // editor. Retain the response operation and let the CPC replay its
+            // response-cell delta against a fresh canonical editor cut.
+            log_ipc_proof_failure_with_recycle(
+                file,
+                "socket_already_applied",
+                Some(patch_id),
+                "visible_write_receipt_missing_response",
+                "retry_response_cell_via_cpc_without_disk_write",
+                &format!(
+                    "response_sha256={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
+                    agent_doc_hash::content_hash(expected_response),
+                    current.len(),
+                    agent_doc_hash::content_hash(current),
+                    ours.len(),
+                    agent_doc_hash::content_hash(ours)
+                ),
+            );
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
         } else {
             repair_decision = match current_source {
                 IpcSnapshotSource::LazilyVisibleWriteEvent => {
@@ -1424,6 +1420,8 @@ pub fn poll_visible_write_content_lazily_event(
     poll_interval: std::time::Duration,
 ) -> Result<Option<String>> {
     let start = std::time::Instant::now();
+    let timeout_ms = timeout.as_millis().min(u128::from(u64::MAX)) as u64;
+    let mut deadline = DeadlineCore::new(timeout_ms);
     loop {
         if let Some((content, proof)) = visible_write_content_from_lazily_event(file, patch_id)? {
             agent_doc_ops_log_io::log_op(
@@ -1440,10 +1438,13 @@ pub fn poll_visible_write_content_lazily_event(
             );
             return Ok(Some(content));
         }
-        if start.elapsed() >= timeout {
+        let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        deadline.tick(elapsed_ms);
+        if deadline.is_expired() {
             return Ok(None);
         }
-        std::thread::sleep(poll_interval);
+        let remaining_ms = timeout_ms.saturating_sub(elapsed_ms).max(1);
+        std::thread::sleep(poll_interval.min(std::time::Duration::from_millis(remaining_ms)));
     }
 }
 
@@ -2511,8 +2512,8 @@ pub fn try_editor_converge_live_prompt_drift(
                 file,
                 project_root,
                 patch_id,
-                std::time::Duration::from_millis(500),
-                std::time::Duration::from_millis(25),
+                visible_write_receipt_timeout(),
+                visible_write_receipt_poll_interval(),
             )?;
             let Some(recovered) = visible_write else {
                 agent_doc_ops_log_io::log_op(
@@ -3070,8 +3071,8 @@ pub fn verify_normalization_repair_observed(
         file,
         project_root,
         patch_id,
-        std::time::Duration::from_millis(200),
-        std::time::Duration::from_millis(25),
+        visible_write_receipt_timeout(),
+        visible_write_receipt_poll_interval(),
     ) {
         Ok(Some(content)) => content.content,
         Ok(None) => {
@@ -3994,8 +3995,8 @@ pub fn try_editor_converge(
                 file,
                 &project_root,
                 &patch_id,
-                std::time::Duration::from_millis(500),
-                std::time::Duration::from_millis(25),
+                visible_write_receipt_timeout(),
+                visible_write_receipt_poll_interval(),
             )?;
             let Some(recovered) = visible_write else {
                 return refuse_unproven_editor_delivery(

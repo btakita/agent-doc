@@ -26,7 +26,6 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
-🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -149,7 +148,7 @@ agent-doc **0.34.100** fixes that split:
 The agent still never needs to invoke document repair. Exact legacy whole-document replay is coalesced automatically by normal preflight through CRDT; ambiguous or non-identical operator edits remain fail-closed and operator-owned.
 
 Verification passed twice at **7,554/7,554 tests**, plus focused zero-live materialization, delayed-ACK, strict clippy, deterministic SimWorld, and `make tmux-ci`. The installed CLI/native library is **0.34.100**; the JetBrains plugin remains **0.2.247**. Commit `5b193fc3`, tag `v0.34.100`, and parent pin `c13086958` are pushed/prepared; the new CI and Release workflows were in progress at closeout.
-<!-- agent:boundary:a66741a0 -->
+<!-- agent:boundary:417480cc -->
 <!-- /agent:exchange -->
 ## Queue
 

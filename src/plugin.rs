@@ -8,7 +8,7 @@
 //! - `list()` — scans JetBrains plugin directories for `agent-doc-jetbrains/META-INF/plugin.xml` and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from OS-specific paths (`~/.local/share/JetBrains/*/plugins/` on Linux, `~/Library/Application Support/JetBrains/*/plugins/` on macOS). When multiple IDEs are found, the user is prompted interactively on stderr.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`).
-//! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`.
+//! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
 //!
 //! ## Agentic Contracts
 //! - `install(editor)` — returns `Err` on network failure, missing asset, or CLI install failure.
@@ -25,6 +25,7 @@
 //! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"
 //! - find_asset_prefers_signed: release with both signed and unsigned zip → signed asset selected
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
+//! - find_local_vscode_vsix_requires_manifest_version: stale VSIX files are ignored and a missing current build fails closed
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -393,21 +394,7 @@ fn install_jetbrains_local() -> Result<()> {
 fn install_vscode_local() -> Result<()> {
     let project_root = find_local_build_dir()?;
     let dist_dir = project_root.join("editors/vscode");
-
-    // Find .vsix file
-    let vsix = fs::read_dir(&dist_dir)
-        .context("Failed to read VS Code build directory")?
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.ends_with(".vsix") {
-                Some(e.path())
-            } else {
-                None
-            }
-        })
-        .max_by_key(|p| p.metadata().ok().and_then(|m| m.modified().ok()))
-        .with_context(|| format!("No .vsix file found in {}", dist_dir.display()))?;
+    let vsix = find_local_vscode_vsix(&dist_dir)?;
 
     eprintln!("Installing from local build: {}", vsix.display());
 
@@ -424,6 +411,29 @@ fn install_vscode_local() -> Result<()> {
 
     eprintln!("Extension installed via `{code}`.");
     Ok(())
+}
+
+fn find_local_vscode_vsix(dist_dir: &std::path::Path) -> Result<PathBuf> {
+    let manifest_path = dist_dir.join("package.json");
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(&manifest_path)
+            .with_context(|| format!("Failed to read {}", manifest_path.display()))?,
+    )
+    .with_context(|| format!("Failed to parse {}", manifest_path.display()))?;
+    let version = manifest
+        .get("version")
+        .and_then(Value::as_str)
+        .filter(|version| !version.is_empty())
+        .with_context(|| format!("Missing version in {}", manifest_path.display()))?;
+    let vsix = dist_dir.join(format!("agent-doc-{version}.vsix"));
+    if !vsix.is_file() {
+        bail!(
+            "No VSIX matching package.json version {version} at {}; run `npm run package` in {}",
+            vsix.display(),
+            dist_dir.display()
+        );
+    }
+    Ok(vsix)
 }
 
 fn parse_local_jetbrains_zip_version(name: &str) -> Option<Vec<u32>> {
@@ -517,7 +527,10 @@ pub fn update(editor: &str) -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
-    use super::{find_asset, find_best_local_zip, find_local_zip, has_asset, release_version};
+    use super::{
+        find_asset, find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
+        release_version,
+    };
     use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
@@ -621,6 +634,21 @@ mod tests {
             chosen.ends_with("agent-doc-jetbrains-0.2.91-signed.zip"),
             "signed artifact should win when both builds have the same version"
         );
+    }
+
+    #[test]
+    fn find_local_vscode_vsix_requires_manifest_version() {
+        let tmp = TempDir::new().unwrap();
+        let dist = tmp.path();
+        fs::write(dist.join("package.json"), r#"{"version":"0.2.50"}"#).unwrap();
+        fs::write(dist.join("agent-doc-0.2.47.vsix"), b"stale").unwrap();
+
+        let error = find_local_vscode_vsix(dist).unwrap_err().to_string();
+        assert!(error.contains("package.json version 0.2.50"));
+
+        let current = dist.join("agent-doc-0.2.50.vsix");
+        fs::write(&current, b"current").unwrap();
+        assert_eq!(find_local_vscode_vsix(dist).unwrap(), current);
     }
 }
 

@@ -2160,14 +2160,13 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
 /// Commit barrier for a semantic response cell whose CRDT projection and
 /// `ResponseCellAdded` fact are already durable in the realtime backbone.
 ///
-/// The canonical replica must still cover every live editor operation before
-/// this returns `true`. Outbound canonical-to-editor acknowledgement is not part
-/// of this barrier: the durable response cell can be materialized and committed
-/// while its already-queued editor delivery completes asynchronously.
+/// Durability does not make a stale visible editor safe. The response cell must
+/// reach the same outbound delivery frontier as every other attached write
+/// before closeout can commit it.
 pub fn commit_barrier_for_durable_response_cell(file: &Path) -> bool {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
-    commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
+    commit_barrier_for_file_with_authority_and_delivery(file, authority, true)
 }
 
 fn commit_barrier_for_file_with_authority_and_delivery(
@@ -2850,7 +2849,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_response_cell_can_commit_before_outbound_editor_ack() {
+    fn durable_response_cell_waits_for_outbound_editor_ack() {
         let (_dir, doc) = temp_doc("durable-response-cell.md");
         std::fs::write(
             &doc,
@@ -2859,7 +2858,8 @@ mod tests {
         .unwrap();
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        register_replica_for_file(&doc, "intellij:durable-response-cell")
+        let identity = "intellij:durable-response-cell";
+        register_replica_for_file(&doc, identity)
             .unwrap()
             .expect("live editor should register with the relay");
 
@@ -2878,8 +2878,24 @@ mod tests {
             "generic writes still require outbound editor acknowledgement"
         );
         assert!(
+            !commit_barrier_for_durable_response_cell(&doc),
+            "a durable response cell still requires visible editor acknowledgement"
+        );
+
+        let pull = pull_replica_updates_for_file(&doc, identity)
+            .unwrap()
+            .expect("live editor should receive the response delivery");
+        assert!(!pull.updates.is_empty());
+        for update in pull.updates {
+            assert_eq!(
+                ack_replica_update_for_file(&doc, identity, &update.patch_id, update.generation,)
+                    .unwrap(),
+                Some(true),
+            );
+        }
+        assert!(
             commit_barrier_for_durable_response_cell(&doc),
-            "a state-backbone-proven response cell only requires the inbound consistent cut"
+            "the response cell may commit after the visible editor ACK frontier converges"
         );
 
         let projection = agent_doc_snapshot_io::load_crdt(&doc)

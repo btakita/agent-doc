@@ -8202,6 +8202,36 @@ mod crdt_relay_sim {
     }
 
     #[test]
+    fn response_cell_closeout_materializes_only_after_visible_ack() {
+        let baseline = "# Session\n\noperator prompt\n";
+        let response = "# Session\n\noperator prompt\n\n### Re: prompt — gpt-5\n\nDone.\n";
+        let mut world = RelaySimWorld::new(1);
+        let editor = world.attach("intellij:response-closeout");
+        world.edit_now(editor, 0, 0, baseline);
+        let mut disk_projection = baseline.to_string();
+
+        world
+            .hub
+            .apply_canonical_replace(baseline, response)
+            .expect("semantic response-cell projection");
+        assert!(!world.hub.delivery_converged());
+        assert_eq!(disk_projection, baseline);
+
+        let delivery = world.hub.pending_updates(editor).unwrap().pop().unwrap();
+        world.hub.deliver(editor, &delivery.update).unwrap();
+        world
+            .hub
+            .ack_delivery(editor, &delivery.patch_id, delivery.generation)
+            .unwrap();
+        assert!(world.hub.delivery_converged());
+        disk_projection = world.hub.canonical_text();
+
+        assert_eq!(disk_projection, response);
+        assert_eq!(world.hub.member_text(editor).unwrap(), response);
+        assert_eq!(disk_projection.matches("### Re: prompt").count(), 1);
+    }
+
+    #[test]
     fn disk_projection_recovers_canonical_and_in_memory_wins() {
         // Coverage (phase 6): the disk projection is a recovery input; a restart
         // rebuilds the canonical replica from it, and a stale projection never

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.100
+
+- **Response-cell finalize now reaches visible and disk convergence before commit.** The semantic CRDT response fast path no longer treats durable `ResponseCellAdded` state as permission to commit ahead of outbound editor ACKs. It applies the ordinary quiescence/backpressure barrier, waits for the visible frontier, and materializes the acknowledged canonical cut before snapshot/commit. Retained attached authority with zero registered relay members still projects its canonical response to disk, preventing a committed response from coexisting with a stale pre-response working tree.
+
 ## 0.34.99
 
 - **Preflight self-converges byte-exact legacy whole-document replays through CRDT.** Before prompt parsing, diff generation, or orchestration classification, the normal binary-owned preflight boundary detects only the provable complete-session shape repeated two (or a power-of-two number of) times, waits for typing to settle, coalesces it to one projection through visible-replica acknowledgement, and continues from the converged text. The agent never performs a document-repair workflow; non-identical operator content remains untouched. Pure policy, attached-controller integration, and deterministic SimWorld coverage prevent the replay from expanding into a giant diff or bogus multi-task dispatch.

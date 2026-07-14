@@ -93,9 +93,27 @@ fn response_cell_from_patchback(
 ///
 /// The operation carries no caller baseline or whole-document candidate.  The
 /// controller evaluates it against the apply-time canonical, persists the CRDT
-/// projection, and records `ResponseCellAdded` in the state backbone.  Composite
-/// patchbacks continue through the legacy write path until their individual
-/// semantic operations are decomposed as well.
+/// projection, and records `ResponseCellAdded` in the state backbone. Before the
+/// fast path returns, the canonical projection is routed through the ordinary
+/// write authority so live replicas ACK it and the acknowledged cut is
+/// materialized to disk. Composite patchbacks continue through the legacy write
+/// path until their individual semantic operations are decomposed as well.
+fn materialize_response_cell_projection(file: &Path, content: &str) -> Result<String> {
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, content)?;
+    let materialized =
+        resolve_disk_document_content(file, "response_cell_projection_materialized")?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "response_cell_projection_materialized file={} len={} hash={} transport=crdt_then_disk_projection",
+            file.display(),
+            materialized.len(),
+            agent_doc_hash::content_hash(&materialized),
+        ),
+    );
+    Ok(materialized)
+}
+
 fn try_add_response_cell_via_realtime_backbone(
     file: &Path,
     patches: &[template::PatchBlock],
@@ -129,18 +147,25 @@ fn try_add_response_cell_via_realtime_backbone(
         return Ok(false);
     };
 
-    agent_doc_snapshot_io::save(file, &write.content, agent_doc_ops_log_io::log_op)?;
+    let materialized = materialize_response_cell_projection(file, &write.content)?;
+    anyhow::ensure!(
+        materialized.contains(&response_cell),
+        "response cell {} was not present after acknowledged disk materialization for {}",
+        write.cell_id,
+        file.display(),
+    );
+    agent_doc_snapshot_io::save(file, &materialized, agent_doc_ops_log_io::log_op)?;
     agent_doc_repair_io::pending::clear_pending(file)?;
     agent_doc_ops_log_io::log_cycle(
         file,
         "write_response_cell",
         Some(&response_cell),
-        Some(&write.content),
+        Some(&materialized),
     );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "response_cell_write_done file={} source={} cycle_id={} operation_id={} cell_id={} applied={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            "response_cell_write_done file={} source={} cycle_id={} operation_id={} cell_id={} applied={} content_hash={} materialized_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
             file.display(),
             source,
             state.cycle_id,
@@ -148,6 +173,7 @@ fn try_add_response_cell_via_realtime_backbone(
             write.cell_id,
             write.applied,
             write.content_hash,
+            agent_doc_hash::content_hash(&materialized),
             write.update_bytes,
             write.targets,
             write.live_editors,
@@ -2753,10 +2779,10 @@ mod tests {
         let response =
             template::PatchBlock::new("exchange", "\n### Re: response cell — gpt-5\n\nApplied.\n");
         assert_eq!(
-            response_cell_from_patchback(&[response.clone()], "").as_deref(),
+            response_cell_from_patchback(std::slice::from_ref(&response), "").as_deref(),
             Some("### Re: response cell — gpt-5\n\nApplied.")
         );
-        assert!(response_cell_from_patchback(&[response.clone()], "extra").is_none());
+        assert!(response_cell_from_patchback(std::slice::from_ref(&response), "extra").is_none());
         assert!(
             response_cell_from_patchback(
                 &[response, template::PatchBlock::new("status", "done")],
@@ -2765,6 +2791,46 @@ mod tests {
             .is_none()
         );
         assert!(response_cell_from_patchback(&[], "").is_none());
+    }
+
+    #[test]
+    fn response_cell_projection_materializes_with_retained_authority_and_no_live_replica() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("response-cell-materialization.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: materialize\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "operator prompt\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, baseline).unwrap();
+
+        let editor_id = "intellij:response-cell-materialization";
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(&doc, editor_id, baseline);
+        let canonical = doc.canonicalize().unwrap();
+        let identity = format!("{editor_id}:{}", canonical.display());
+        assert!(
+            agent_doc_crdt_relay_io::deregister_replica_for_file(&canonical, &identity).unwrap(),
+            "fixture should retain the CRDT model after the live replica leaves",
+        );
+        assert!(
+            agent_doc_crdt_relay_io::crdt_authority_for_file(&canonical).editor_attached(),
+            "durable reliable-sync authority remains attached while no relay member is live",
+        );
+
+        let response = "### Re: operator prompt — gpt-5\n\nDone.";
+        let desired = baseline.replace(
+            "<!-- agent:boundary:base -->",
+            &format!("{response}\n<!-- agent:boundary:next -->"),
+        );
+        let _owner = agent_doc_document_realtime::write_authority::owner_scope_guard();
+        let materialized = materialize_response_cell_projection(&canonical, &desired).unwrap();
+
+        assert_eq!(fs::read_to_string(&canonical).unwrap(), materialized);
+        assert!(materialized.contains(response));
+        assert_eq!(materialized.matches("### Re: operator prompt").count(), 1);
     }
 
     #[test]

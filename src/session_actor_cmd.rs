@@ -5075,7 +5075,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let socket = format!("session-clear-direct-pane-{}", uuid::Uuid::new_v4());
         let iso = tmux_router::IsolatedTmux::new(&socket);
         let pane = iso.new_session("test", dir.path()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(150));
         let output_path = dir.path().join("clear.txt");
         let done_path = dir.path().join("clear.done");
         iso.send_keys(
@@ -5087,7 +5086,31 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             ),
         )
         .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        let pane_current_command = || {
+            iso.cmd()
+                .args([
+                    "display-message",
+                    "-t",
+                    &pane,
+                    "-p",
+                    "#{pane_current_command}",
+                ])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        };
+        let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while std::time::Instant::now() < ready_deadline
+            && pane_current_command().as_deref() != Some("sh")
+        {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert_eq!(
+            pane_current_command().as_deref(),
+            Some("sh"),
+            "fixture must prove the line-reader is ready before sending `/clear`",
+        );
 
         send_clear_to_pane(
             &iso,

@@ -135,10 +135,53 @@ In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=de
 **If you ever need stronger (zero-miss, ordered) guarantees** — e.g. an audit-grade activity stream — the one addition would be per-connection sequence numbers + replay-on-reconnect inside the DO (it's currently a stateless in-memory fan-out). Not needed for this use case, and I did not add it. The single shared DO instance is also fine at EFS's admin headcount; it'd only need sharding at much larger scale.
 
 **Shipped.** `bun run check` green — 1624 pass / 0 fail, typecheck+build exit 0 (added backend-emit + frontend-subscription source-assertion tests; updated the alert-feed set test). Committed `e5bc945`, pushed to `origin/main`, deployed worker `26ddb96d`. Verified live: worker bundle carries the `lender_documents_*` events; browser bundle md5 matches the built asset.
-<!-- agent:boundary:73e5dd5f -->
+
+❯ Please ensure all lender forms + uploads across all tabs in a deal emit realtime updates to the admin.
+❯ #spec-test-commit-push-deploy
+
+### Re: All lender deal-page forms + uploads emit realtime updates to the admin — opus-4-8
+
+Done, deployed, and verified live. I audited every lender-facing mutation reachable from the deal page and closed the gaps.
+
+**Lender deal-page forms/uploads — realtime status now:**
+| Action | Route | Before | Now |
+|---|---|---|---|
+| Mark interest | `POST /deals/:id/interested` | ✅ alert | ✅ (unchanged) |
+| Withdraw interest | `DELETE /deals/:id/interested` | ❌ silent | ✅ `lender_interest_removed` |
+| Request additional docs | `POST /deals/:id/document-requests` | ✅ | ✅ (unchanged) |
+| Reveal wire instructions | `POST /deals/:id/wire-instructions/reveal` | ❌ silent | ✅ `lender_wire_instructions_revealed` |
+| Lending-group split | `POST /lender/groups/:id/deals/:dealId/allocations` | ❌ silent | ✅ `lender_group_allocations_changed` |
+| Lender doc upload/delete | `.../lender-documents` | ✅ (last cycle) | ✅ |
+
+**Receive side.** Broadened the admin deal modal's `use_admin_events_` refresh so it now reloads **interests + wire status** in addition to the document loaders — so a lender withdrawing interest, revealing wire instructions, or changing a group split is reflected across the modal's tabs (Interested Lenders, Funding Package wire, docs) without a reload. All pushes ride the existing `AdminEventsRoom` bus with the polling heartbeat as the reliable-delivery fallback — no new infrastructure.
+
+**Scope note.** These are the forms/uploads on the deal page tabs. Account-level lender forms (accreditation, vesting, special instructions) live on the lender's *profile* pages, not a deal's tabs — accreditation already emits; vesting/special-instructions still don't. Say the word if you want those wired too.
+
+**`#spec-test-commit-push-deploy`.** `bun run check` green — 1625 pass / 0 fail, typecheck+build exit 0 (extended the realtime-events emit-coverage test + a modal-refresh assertion). Committed `d0e606b`, pushed to `origin/main`, deployed worker `16389a86`. Verified live: worker bundle carries all three new event types; browser bundle md5 matches the built asset.
+
+### Re: All lender deal-page forms + uploads emit realtime updates to the admin — opus-4-8
+
+Done, deployed, and verified live. I audited every lender-facing mutation reachable from the deal page and closed the gaps.
+
+**Lender deal-page forms/uploads — realtime status now:**
+| Action | Route | Before | Now |
+|---|---|---|---|
+| Mark interest | `POST /deals/:id/interested` | ✅ alert | ✅ (unchanged) |
+| Withdraw interest | `DELETE /deals/:id/interested` | ❌ silent | ✅ `lender_interest_removed` |
+| Request additional docs | `POST /deals/:id/document-requests` | ✅ | ✅ (unchanged) |
+| Reveal wire instructions | `POST /deals/:id/wire-instructions/reveal` | ❌ silent | ✅ `lender_wire_instructions_revealed` |
+| Lending-group split | `POST /lender/groups/:id/deals/:dealId/allocations` | ❌ silent | ✅ `lender_group_allocations_changed` |
+| Lender doc upload/delete | `.../lender-documents` | ✅ (last cycle) | ✅ |
+
+**Receive side.** Broadened the admin deal modal's `use_admin_events_` refresh so it now reloads **interests + wire status** in addition to the document loaders. All pushes ride the existing `AdminEventsRoom` bus with the polling heartbeat as the reliable-delivery fallback — no new infrastructure.
+
+**Scope note.** These are the forms/uploads on the deal page tabs. Account-level lender forms (accreditation, vesting, special instructions) live on the lender's *profile* pages, not a deal's tabs — accreditation already emits; vesting/special-instructions still don't. Say the word if you want those wired too.
+
+**`#spec-test-commit-push-deploy`.** `bun run check` green — 1625 pass / 0 fail, typecheck+build exit 0. Committed `d0e606b`, pushed to `origin/main`, deployed worker `16389a86`. Verified live: worker bundle carries all three new event types; browser bundle md5 matches the built asset.
+<!-- agent:boundary:ea1116c4 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 <!-- /agent:queue -->
 
 ## Notes

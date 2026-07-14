@@ -26,6 +26,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 done
 <!-- /agent:status -->
 
@@ -100,7 +101,39 @@ Cargo yank behavior: https://doc.rust-lang.org/cargo/commands/cargo-yank.html
 ### Re: Codex skill mismatch auto-restart — gpt-5
 
 Completed in agent-doc 0.34.92 (commit `fa516fc5`). When CPC detects that Codex loaded a stale agent-doc skill instruction version, it now initiates a supervisor restart immediately, resumes the latest Codex session with `codex resume --last`, and resubmits the trigger. The operator no longer needs to restart Codex manually for this mismatch.
-<!-- agent:boundary:5179a058 -->
+Please review the turn logic + connection logic. Are there any other places that we can apply coalescence on a RelayCell?
+
+### Re: RelayCell coalescence, turn continuity, JetBrains freeze, and Run Agent Doc routing — gpt-5
+
+Fixed and released as agent-doc `0.34.97` / JetBrains plugin `0.2.247`.
+
+The conversation interruption was deterministic, not incidental: the Codex auto-update instructions explicitly installed with `--reload restart`, called `session restart-supervisor`, and stopped the active turn. Codex updates now install without a reload request, re-read the newly installed skill completely, and continue the same turn in place. Supervisor replacement is no longer part of the active skill-update path.
+
+The 36-second IDEA freeze report showed the EDT waiting in IntelliJ completion while `agent-doc-crdt-replica-events` synchronously waited on that EDT through `CrdtReplicaManager.applyRemoteText -> invokeAndWait`. Remote editor delivery now crosses a keyed RelayCell backpressure bridge:
+
+- one coalesced hot head per document;
+- oldest guarded editor baseline + newest converged text + acknowledgement union;
+- one `invokeLater` editor mutation admitted per EDT turn;
+- no second pull/realignment for a document while its editor apply is pending;
+- acknowledgements remain deferred until the represented text is actually visible;
+- no-op drain retries are scheduled and coalesced instead of sleeping on the sole replica worker for up to 30 seconds.
+
+That is the strategic RelayCell boundary: the displayed document state is a safe keep-latest projection, while the durable CRDT operation plane is deliberately not conflated away. Every op there remains retained until acknowledgement. The turn banner, duplicate route dispatch, and controller recycle paths already implement bounded keyed/single-slot coalescence with their required durable boundary semantics; replacing those mechanically with an in-memory RelayCell would add vocabulary without improving pressure or correctness.
+
+The equityfundingsource route refusal was caused by losing ANSI before classification. Codex renders `Summarize recent commits` as a DIM suggestion, but the plain capture made it indistinguishable from typed operator text. Direct-pane routing now captures ANSI for the protected-input decision and uses a stripped projection only for trigger matching and diagnostics. The dim suggestion is dispatch-ready chrome; identical non-dim typed text remains protected.
+
+Verification completed:
+
+- JetBrains suite: 320 tests passed.
+- Targeted harness, route, and generated-skill tests passed.
+- Full `make check` passed, including clippy, workspace tests, deterministic simulation, version checks, and formal-build gate.
+- Signed plugin zips built; `0.2.247` is installed under IntelliJ IDEA 2026.1.
+- Optimized CLI/native library `0.34.97` and the refreshed Codex skill are installed.
+- Standalone commit `99be1867` and tag `v0.34.97` were pushed; release CI started.
+- Parent workspace commit `fbf345ebc` was prepared and is pushed immediately after this required session closeout.
+
+IntelliJ must be restarted once to load the new plugin classes. The live restart + exact equityfundingsource placeholder/freeze check is retained as operator verification `#jbrelaylive`.
+<!-- agent:boundary:adcdd035 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -192,6 +225,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [ ] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]

@@ -64,6 +64,21 @@ pub enum LivenessOp {
         value: bool,
         stamp: WireStamp,
     },
+    /// Per-`(document_hash, pid)` sync-progress write: the editor's current
+    /// `edit_epoch` (monotonic count of local edit batches) and `synced_epoch` (the
+    /// highest edit batch the editor has confirmed the controller/CRDT received).
+    /// `edit_epoch > synced_epoch` ⇒ the editor holds unsynced edits in flight. This
+    /// is the plane replacement for the divergence signal the live-buffer sidecar's
+    /// `edit_epoch`/`last_synced_epoch` fields carry (`editor_sync_statuses`); highest
+    /// LWW `stamp` wins, so a later report supersedes and a re-delivery is a no-op
+    /// (#sidecar-retirement sync-in-flight foundation).
+    Sync {
+        document_hash: String,
+        pid: Pid,
+        edit_epoch: u64,
+        synced_epoch: u64,
+        stamp: WireStamp,
+    },
 }
 
 /// The controller's convergent liveness projection over one or more documents.
@@ -77,6 +92,10 @@ pub struct LivenessProjection {
     open_set: BTreeMap<(String, Pid), OrSet>,
     /// `pid` → LWW `alive` register.
     alive: BTreeMap<Pid, WireLwwRegister<bool>>,
+    /// `(document_hash, pid)` → LWW `(edit_epoch, synced_epoch)` register. The
+    /// plane's sync-in-flight signal (`edit_epoch > synced_epoch` ⇒ unsynced edits),
+    /// replacing the live-buffer sidecar's epoch fields (#sidecar-retirement).
+    sync_state: BTreeMap<(String, Pid), WireLwwRegister<(u64, u64)>>,
 }
 
 impl LivenessProjection {
@@ -118,6 +137,22 @@ impl LivenessProjection {
                         .insert(*pid, WireLwwRegister::new(*stamp, *value));
                 }
             },
+            LivenessOp::Sync {
+                document_hash,
+                pid,
+                edit_epoch,
+                synced_epoch,
+                stamp,
+            } => {
+                let key = (document_hash.clone(), *pid);
+                let value = (*edit_epoch, *synced_epoch);
+                match self.sync_state.get_mut(&key) {
+                    Some(reg) => reg.set(*stamp, value),
+                    None => {
+                        self.sync_state.insert(key, WireLwwRegister::new(*stamp, value));
+                    }
+                }
+            }
         }
     }
 
@@ -179,6 +214,30 @@ impl LivenessProjection {
             .filter(|((_, pid), set)| set.present() && self.pid_alive(*pid))
             .map(|((doc, _), _)| doc.clone())
             .collect()
+    }
+
+    /// The plane's sync-in-flight signal: is any **live, open** editor holding
+    /// unsynced edits (`edit_epoch > synced_epoch`) for `document_hash`? This is the
+    /// derived-authority replacement for `editor_sync_in_flight` / the barrier's
+    /// live-buffer scan (#sidecar-retirement): a disk write must not clobber an editor
+    /// buffer that is ahead of the last synced epoch. A dead pid's unsynced edits do
+    /// not count (its buffer is gone), matching the whole-editor-death cascade.
+    pub fn document_in_flight(&self, document_hash: &str) -> bool {
+        self.sync_state
+            .iter()
+            .filter(|((doc, _), _)| doc == document_hash)
+            .any(|((doc, pid), reg)| {
+                let (edit_epoch, synced_epoch) = *reg.value();
+                edit_epoch > synced_epoch && self.is_open(doc, *pid) && self.pid_alive(*pid)
+            })
+    }
+
+    /// The last reported `(edit_epoch, synced_epoch)` for `(document_hash, pid)`, or
+    /// `None` if the editor never reported sync progress for the document.
+    pub fn sync_epochs(&self, document_hash: &str, pid: Pid) -> Option<(u64, u64)> {
+        self.sync_state
+            .get(&(document_hash.to_string(), pid))
+            .map(|reg| *reg.value())
     }
 }
 
@@ -288,6 +347,131 @@ mod tests {
             p.is_open("docA", 100),
             "re-open tag t3 not observed by the close"
         );
+    }
+
+    fn open(p: &mut LivenessProjection, doc: &str, pid: Pid) {
+        p.apply(&LivenessOp::Open {
+            document_hash: doc.into(),
+            pid,
+            tag: format!("open-{pid}"),
+        });
+    }
+
+    // #sidecar-retirement sync-in-flight foundation.
+    #[test]
+    fn sync_in_flight_true_when_edit_ahead_of_synced() {
+        let mut p = LivenessProjection::new();
+        open(&mut p, "docA", 100);
+        p.apply(&LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 3,
+            synced_epoch: 1,
+            stamp: stamp(10, 1),
+        });
+        assert!(p.document_in_flight("docA"));
+        assert_eq!(p.sync_epochs("docA", 100), Some((3, 1)));
+    }
+
+    #[test]
+    fn sync_not_in_flight_when_synced_catches_up_lww() {
+        let mut p = LivenessProjection::new();
+        open(&mut p, "docA", 100);
+        p.apply(&LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 3,
+            synced_epoch: 1,
+            stamp: stamp(10, 1),
+        });
+        // A later report at a higher stamp: the editor confirmed sync through 3.
+        p.apply(&LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 3,
+            synced_epoch: 3,
+            stamp: stamp(20, 1),
+        });
+        assert!(!p.document_in_flight("docA"));
+    }
+
+    #[test]
+    fn sync_lww_highest_stamp_wins_regardless_of_order_and_redelivery_is_noop() {
+        let mut p = LivenessProjection::new();
+        open(&mut p, "docA", 100);
+        let newer = LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 5,
+            synced_epoch: 5,
+            stamp: stamp(30, 1),
+        };
+        let older = LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 4,
+            synced_epoch: 2,
+            stamp: stamp(20, 1),
+        };
+        // Apply newer first, then the older (out of order) — the higher stamp holds.
+        p.apply(&newer);
+        p.apply(&older);
+        assert_eq!(p.sync_epochs("docA", 100), Some((5, 5)));
+        assert!(!p.document_in_flight("docA"));
+        // Redelivery of the older op is a no-op.
+        p.apply(&older);
+        assert_eq!(p.sync_epochs("docA", 100), Some((5, 5)));
+    }
+
+    #[test]
+    fn sync_in_flight_ignores_dead_or_closed_editor() {
+        // A closed editor's unsynced edits do not count.
+        let mut closed = LivenessProjection::new();
+        closed.apply(&LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 3,
+            synced_epoch: 1,
+            stamp: stamp(10, 1),
+        });
+        assert!(
+            !closed.document_in_flight("docA"),
+            "no open fact for the pid ⇒ not in flight"
+        );
+        // A dead editor's unsynced edits do not count (whole-editor-death cascade).
+        let mut dead = LivenessProjection::new();
+        open(&mut dead, "docA", 100);
+        dead.apply(&LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 3,
+            synced_epoch: 1,
+            stamp: stamp(10, 1),
+        });
+        assert!(dead.document_in_flight("docA"));
+        dead.apply(&LivenessOp::Alive {
+            pid: 100,
+            value: false,
+            stamp: stamp(15, 1),
+        });
+        assert!(
+            !dead.document_in_flight("docA"),
+            "a dead pid's in-flight edits drop"
+        );
+    }
+
+    #[test]
+    fn sync_op_round_trips_through_the_liveness_frame() {
+        let ops = vec![LivenessOp::Sync {
+            document_hash: "docA".into(),
+            pid: 100,
+            edit_epoch: 7,
+            synced_epoch: 4,
+            stamp: stamp(10, 2),
+        }];
+        let frame = encode_liveness_frame(&ops).expect("encode");
+        let decoded = decode_liveness_frame(&frame).expect("liveness frame").expect("decode");
+        assert_eq!(decoded, ops);
     }
 
     #[test]

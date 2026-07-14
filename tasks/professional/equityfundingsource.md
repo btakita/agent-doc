@@ -24,6 +24,7 @@ queue: stop
 
 <!-- agent:status patch=replace -->
 
+🔴 (restart/recycle your supervisor)
 complete
 <!-- /agent:status -->
 
@@ -45,7 +46,7 @@ In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/29351553-9
 Fixed and deployed. The deal dialog behind `/lenders/deals/:id` (`AvailableDealDialog`) was a variable-height panel — it only had `max-height`, so it grew/shrank and re-centered every time you switched Deal info / Loan Package / Lender Documents / Funding Package. It's now pinned to a **consistent large height** — `height:min(880px, calc(100dvh - 40px))` (large on desktop, viewport-capped on small screens) — with the body scrolling, so switching tabs changes only the inner content and the outer frame stays put (`#deal-modal-consistent-size`).
 
 Shipped `#spec-test-commit-push-deploy`: EFS `main` `03c3cd0`, deployed frontend-only (`deploy:worker:no-migrate`, version `a63a169c-ee60-4e29-8590-99aafd1998cb`; no DB migration). `make check` green (1614 pass). Verified live: served bundle `index.browser-J3EJRHXR.js` is byte-identical (md5 match) to the local build and carries the new `min(880px, calc(100dvh - 40px))` sizing. Spec: `prds/deal-lender-documents.md`.
-<!-- agent:boundary:233cca87 -->
+<!-- agent:boundary:f439f9ed -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

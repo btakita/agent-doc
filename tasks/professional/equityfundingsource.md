@@ -46,7 +46,32 @@ In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/29351553-9
 Fixed and deployed. The deal dialog behind `/lenders/deals/:id` (`AvailableDealDialog`) was a variable-height panel — it only had `max-height`, so it grew/shrank and re-centered every time you switched Deal info / Loan Package / Lender Documents / Funding Package. It's now pinned to a **consistent large height** — `height:min(880px, calc(100dvh - 40px))` (large on desktop, viewport-capped on small screens) — with the body scrolling, so switching tabs changes only the inner content and the outer frame stays put (`#deal-modal-consistent-size`).
 
 Shipped `#spec-test-commit-push-deploy`: EFS `main` `03c3cd0`, deployed frontend-only (`deploy:worker:no-migrate`, version `a63a169c-ee60-4e29-8590-99aafd1998cb`; no DB migration). `make check` green (1614 pass). Verified live: served bundle `index.browser-J3EJRHXR.js` is byte-identical (md5 match) to the local build and carries the new `min(880px, calc(100dvh - 40px))` sizing. Spec: `prds/deal-lender-documents.md`.
-<!-- agent:boundary:f439f9ed -->
+/goal In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=29351553-9050-4f18-aee5-29fc42380bb6&deal_tab=lender-documents, add a button to notify the lender to upload the documents. The email should have a deep link to the lender's dashboard > deal > lender-documents tab. Near the button, display the last time the email was sent. Once a lender is selected, automatically send the email to the lender.
+
+In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=29351553-9050-4f18-aee5-29fc42380bb6&deal_tab=funding-package, add a button to notify the lender the funding package is ready. Near the button, display the last time the email was sent. The email should deep link to the lender dashboard > deal > funding-package tab.
+
+In the admin Deal Pipeline > Deal modal: remove the Wire tab.
+
+### Re: Deal-modal lender-notify emails (Lender Documents + Funding Package) & remove Wire tab — opus-4-8
+
+All three done in the admin Deal Pipeline > Deal modal. Committed + pushed to EFS `main` (`a9aa329`); **not deployed** — see below.
+
+**1. Lender Documents tab — "Notify lender to upload documents".** New button + a "Last sent …" line. It emails the deal's **selected lender** a secure deep link straight to their own `…/lenders/deals/<id>?tab=lender-documents` view (that tab already exists on the lender side). The email is also **auto-sent the moment a lender is newly selected** for the deal (wired into the existing select handler, right alongside the "you've been selected" notice — non-fatal, a mail failure never blocks the selection), so the line is usually already populated when you open the tab.
+
+**2. Funding Package tab — "Notify lender funding package is ready".** New button + "Last sent …" line, deep-linking to `…?tab=funding-package`.
+
+**3. Wire tab — removed.** Gone from the Deal modal tab bar and panel set (a stale `?deal_tab=wire` now falls back to Loan Detail). The wire instructions themselves are untouched — they still live inside the **Funding Package** tab via `LoanWiringSection`, so no wire functionality was lost.
+
+**How it's built**
+- Migration `0137` adds `lender_documents_email_sent_at` / `funding_package_email_sent_at` to `lender_deal_interests` (mirrors the existing `package_sent_at` precedent; the selected interest is the one stamped).
+- `GET /api/admin/deals/:id/lender-notification-emails` (both timestamps + selected-lender email), `POST …/lender-documents-email`, `POST …/funding-package-email`.
+- Two email templates (`deal_lender_documents_request_email_`, `deal_funding_package_ready_email_`); deep links fall back to the request origin when `SITE_URL` is unset in prod.
+- Button shows "Select a lender to notify" until a lender is selected; endpoints 409 when there's no selected lender / no email on file.
+
+**Verification:** `make check` green — **1614 pass, 0 fail**, worker build OK. Updated the four source-assertion tests that pinned the old ActiveTab/Wire-tab shape and added a positive assertion for the auto-send.
+
+**Deploy held (needs your go):** this cycle's queue preset was `#spec-test-commit-push` (no deploy), and `deploy:worker` would run **prod D1 migration 0137** via `cf:d1:migrate:remote`. Queued as `#dlne-deploy` — say the word (or re-run with a `-deploy` preset) and I'll deploy + verify live.
+<!-- agent:boundary:7867a020 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

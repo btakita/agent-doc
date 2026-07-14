@@ -42,6 +42,10 @@ const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focuse
 const CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED: &str = "operator_deferred_clear";
 const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
+const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 fn show_pane_message(
     pane: &str,
@@ -289,11 +293,57 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
         return idle_watch_disk_queue_head(file);
     }
-    let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
-        file,
-        "idle_watch_active_queue_head",
-    )
-    .ok()?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    {
+        let mut probes = ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
+            .lock()
+            .expect("zero-replica idle-watch cache poisoned");
+        if probes
+            .get(&canonical)
+            .is_some_and(|last| last.elapsed() < ZERO_REPLICA_IDLE_WATCH_BACKOFF)
+        {
+            return idle_watch_disk_queue_head(file);
+        }
+        probes.remove(&canonical);
+    }
+    let current =
+        agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+            file,
+            "idle_watch_active_queue_head",
+        );
+    let content = match current {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text, live_editors, ..
+        })) if live_editors > 0 => {
+            ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
+                .lock()
+                .expect("zero-replica idle-watch cache poisoned")
+                .remove(&canonical);
+            text
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+            ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
+                .lock()
+                .expect("zero-replica idle-watch cache poisoned")
+                .insert(canonical, std::time::Instant::now());
+            text
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+            return idle_watch_disk_queue_head(file);
+        }
+        Ok(Some(
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+        ))
+        | Ok(None)
+        | Err(_) => {
+            ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
+                .lock()
+                .expect("zero-replica idle-watch cache poisoned")
+                .insert(canonical, std::time::Instant::now());
+            return idle_watch_disk_queue_head(file);
+        }
+    };
     agent_doc_queue::queue_continuation::live_drainable_continuation_head(
         &content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,

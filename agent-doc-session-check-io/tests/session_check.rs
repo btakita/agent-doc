@@ -3108,6 +3108,74 @@ Body\n\
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "session_check_commit_boundary_recovered");
     }
+
+    #[test]
+    fn session_check_does_not_commit_capture_missing_from_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("doc.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce interrupted response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "doc.md"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "baseline", "--no-verify"])
+            .output()
+            .unwrap();
+
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let response = "### Re: interrupted response — gpt-5\n\nRecovered body.\n";
+        agent_doc_capture_io::capture_response_with_current_content(&doc, response, baseline)
+            .unwrap();
+
+        match inspect(&doc).unwrap() {
+            SessionCheckStatus::Interrupted(message) => assert!(
+                message.contains("response_captured"),
+                "unexpected session-check message: {message}"
+            ),
+            other => {
+                panic!("missing captured response must not be accepted as committed: {other:?}")
+            }
+        }
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:doc.md"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&head.stdout).contains("Recovered body."));
+    }
+
     #[test]
     fn session_check_repairs_committed_historical_snapshot_drift() {
         let tmp = tempfile::TempDir::new().unwrap();

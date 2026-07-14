@@ -476,6 +476,12 @@ interface AgentDocLib : Library {
     fun agent_doc_state_projection(documentHash: String): Pointer?
 
     /**
+     * Recover a durable deferred write into a re-registering editor buffer.
+     * Caller must free a non-null result with [agent_doc_free_string].
+     */
+    fun agent_doc_deferred_write_reconnect_content(filePath: String, editorContent: String): Pointer?
+
+    /**
      * Read the Project Controller→plugin turn-state projection JSON for a document path:
      * `{"state":"idle|awaiting_response|persisting","turn_in_flight":bool,"transition_authority":"project_controller","realtime_steering":{...}}`.
      * The plugin observes this to render turn-in-flight UI and to decide whether a
@@ -1334,6 +1340,20 @@ object NativePatching {
     fun mergeCrdt(base: String, ours: String, theirs: String): String? {
         val lib = AgentDocLib.get() ?: return null
         val ptr = lib.agent_doc_merge_crdt(base, ours, theirs)
+        try {
+            return ptr?.getString(0)
+        } finally {
+            lib.agent_doc_free_string(ptr)
+        }
+    }
+
+    /**
+     * Resolve a Lazily-retained deferred write for a re-registering editor.
+     * Returns null when there is no pending target or recovery is unavailable.
+     */
+    fun deferredWriteReconnectContent(filePath: String, editorContent: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr = lib.agent_doc_deferred_write_reconnect_content(filePath, editorContent)
         try {
             return ptr?.getString(0)
         } finally {

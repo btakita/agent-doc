@@ -403,7 +403,7 @@ impl IpcRepairDecision {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlreadyAppliedSnapshotOutcome {
     Persisted,
-    NeedsFileFallback,
+    NeedsAuthoritativeRetry,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1431,7 +1431,7 @@ mod tests {
         );
         assert_ne!(
             AlreadyAppliedSnapshotOutcome::Persisted,
-            AlreadyAppliedSnapshotOutcome::NeedsFileFallback
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
         );
 
         assert_eq!(FullContentRepairRedelivery::IpcDedupe.label(), "ipc_dedupe");

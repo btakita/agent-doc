@@ -9,6 +9,7 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import io.github.lazily.IngressOutcome
@@ -102,6 +103,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)
     private val remoteEditorApplyScheduled = AtomicBoolean(false)
     private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
+    // An editor apply and its controller ACK cross two different queues (EDT ->
+    // replica worker -> controller socket). Keep the ACK as Lazily-style retained
+    // state until the controller accepts the exact current editor-content proof.
+    // A socket/controller recycle must not turn a successful visible apply into a
+    // permanently orphaned delivery frontier.
+    private val pendingRemoteAckReplays =
+        ConcurrentHashMap<String, ConcurrentHashMap<String, ReplicaRemoteUpdate>>()
     private val disposed = AtomicBoolean(false)
 
     fun start() {
@@ -112,6 +120,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         disposed.set(true)
         remoteEditorApplies.clear()
         remoteEditorApplyPaths.clear()
+        pendingRemoteAckReplays.clear()
         drainRequestedPaths.clear()
         registerFailureCounts.clear()
         registerRetryAfterMs.clear()
@@ -199,9 +208,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
                 chars = text.length
                 shadows[filePath] = text
+                val registrationText = if (forceRefresh) {
+                    NativePatching.deferredWriteReconnectContent(filePath, text) ?: text
+                } else {
+                    text
+                }
                 val forwarder = forwarderFor(
                     filePath,
-                    text,
+                    registrationText,
                     bypassRegisterBackoff = forceRefresh,
                 )
                 (forwarder != null).also { attached ->
@@ -393,6 +407,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (hasPendingLocal(filePath) || remoteEditorApplyPaths.contains(filePath)) return 0
         try {
             val expectedText = shadows[filePath] ?: return 0
+            // Retry an ACK that lost its controller round-trip before pulling more
+            // work. The proof is always recomputed from the current editor buffer;
+            // stale remembered text is never allowed to acknowledge a newer cut.
+            ackCount += replayPendingRemoteAcks(filePath, forwarder)
+            usefulWork = ackCount
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
             // the corrected canonical only when the editor buffer still matches
             // the local replica baseline; normal deltas are merged into the native
@@ -401,13 +420,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (delivery is ReplicaPullDelivery.Replace) {
                 deliveryKind = "replace"
             queuedForEditor = applyReplaceDelivery(filePath, forwarder, expectedText, delivery.text)
-            usefulWork = if (queuedForEditor) 1 else 0
+                usefulWork += if (queuedForEditor) 1 else 0
                 return usefulWork
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
             updateCount = updates.size
             usefulWork = updateCount
-            if (updates.isEmpty()) return 0
+            if (updates.isEmpty()) return usefulWork
 
             if (!editorReplicaBaselineMatches(filePath, forwarder, expectedText)) return usefulWork
             val appliedRemoteUpdates = mutableListOf<ReplicaRemoteUpdate>()
@@ -420,7 +439,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     // local delta may have reached canonical while the editor
                     // buffer moved again before this pull.
                     val visibleText = editorBufferText(filePath) ?: expectedText
-                    if (forwarder.ackRemoteUpdate(update, visibleText)) ackCount++
+                    if (forwarder.ackRemoteUpdate(update, visibleText)) {
+                        ackCount++
+                    } else {
+                        rememberPendingRemoteAck(filePath, update)
+                    }
                     continue
                 }
                 peerUpdateCount++
@@ -449,6 +472,35 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             )
         }
         return usefulWork
+    }
+
+    private fun remoteAckKey(update: ReplicaRemoteUpdate): String =
+        "${update.patchId}:${update.generation}"
+
+    private fun rememberPendingRemoteAck(filePath: String, update: ReplicaRemoteUpdate) {
+        pendingRemoteAckReplays
+            .computeIfAbsent(filePath) { ConcurrentHashMap() }[remoteAckKey(update)] = update
+    }
+
+    private fun rememberPendingRemoteAcks(filePath: String, updates: List<PendingRemoteAck>) {
+        for (ack in updates) rememberPendingRemoteAck(filePath, ack.update)
+    }
+
+    private fun clearPendingRemoteAcks(filePath: String) {
+        pendingRemoteAckReplays.remove(filePath)
+    }
+
+    private fun replayPendingRemoteAcks(filePath: String, forwarder: CrdtReplicaForwarder): Int {
+        val pending = pendingRemoteAckReplays[filePath] ?: return 0
+        val visibleText = editorBufferText(filePath) ?: return 0
+        var acknowledged = 0
+        for ((key, update) in pending.entries) {
+            if (forwarder.ackRemoteUpdate(update, visibleText) && pending.remove(key, update)) {
+                acknowledged++
+            }
+        }
+        if (pending.isEmpty()) pendingRemoteAckReplays.remove(filePath, pending)
+        return acknowledged
     }
 
     /**
@@ -528,6 +580,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // potentially duplicating content. A true rebootstrap discards the
             // divergent lineage and also retires its stale pending delivery.
             if (forwarders.remove(filePath, forwarder)) {
+                // Re-bootstrap replaces the old member lineage. Its pending ACKs
+                // were retired with that member and must not leak onto the newly
+                // registered replica identity.
+                clearPendingRemoteAcks(filePath)
                 forwarder.deregister()
                 val reattached = forwarderFor(
                     filePath,
@@ -662,13 +718,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             details = "target_chars=${pending.targetText.length} applied=${outcome.applied} coalesced_updates=${pending.acknowledgements.size}",
         )
         if (disposed.get()) return
+        if (outcome.applied) {
+            // Retain before crossing back to the worker. If executor submission or
+            // the socket ACK fails, the next drain replays it idempotently.
+            rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)
+        }
         try {
             executor.execute {
                 try {
                     var acked = 0
                     if (outcome.applied) {
                         for (ack in pending.acknowledgements) {
-                            if (ack.forwarder.ackRemoteUpdate(ack.update, outcome.editorText)) acked++
+                            if (ack.forwarder.ackRemoteUpdate(ack.update, outcome.editorText)) {
+                                pendingRemoteAckReplays[pending.filePath]
+                                    ?.remove(remoteAckKey(ack.update), ack.update)
+                                acked++
+                            }
                         }
                     } else if (outcome.editorText != null) {
                         requestRemoteDrain(pending.filePath, "remote-editor-apply-raced")
@@ -768,7 +833,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         initialEditorText: String? = null,
         bypassRegisterBackoff: Boolean = false,
     ): CrdtReplicaForwarder? {
-        forwarders[filePath]?.let { return it }
+        if (bypassRegisterBackoff) {
+            // A controller recycle invalidates server-side membership while the
+            // plugin can still hold a healthy-looking cached forwarder. A true
+            // force refresh must retire that client and issue REGISTER again.
+            forwarders.remove(filePath)?.let { stale ->
+                stale.deregister()
+                log.info("[crdt-replica] retired cached forwarder before forced re-register for ${File(filePath).name}")
+            }
+            clearRegisterFailure(filePath)
+        } else {
+            forwarders[filePath]?.let { return it }
+        }
         if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return null
         val root = resolveProjectRoot(filePath) ?: return null
         val identity = "${EditorIdentity.id}:$filePath"
@@ -903,6 +979,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             instances[project]?.requestTextAdopt(filePath)
         }
 
+        fun forceRefreshOpenDocumentReplicas(project: Project, reason: String) {
+            val manager = instances[project] ?: return
+            FileEditorManager.getInstance(project).openFiles
+                .asSequence()
+                .filter { it.name.endsWith(".md") }
+                .forEach { file ->
+                    val document = FileDocumentManager.getInstance().getDocument(file) ?: return@forEach
+                    manager.log.info("[crdt-replica] forcing open-document re-register for ${file.name} reason=$reason")
+                    manager.ensureOpenDocumentReplica(
+                        file.path,
+                        document,
+                        await = false,
+                        forceRefresh = true,
+                    )
+                }
+        }
+
         fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {
             advanceNonOperatorMutationEpoch(filePath)
             applyingAgentMutations.add(filePath)
@@ -911,6 +1004,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } finally {
                 applyingAgentMutations.remove(filePath)
             }
+        }
+
+        fun forceRefreshOpenDocumentReplica(project: Project, filePath: String, reason: String) {
+            val manager = instances[project] ?: return
+            val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
+            val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+            manager.log.info(
+                "[crdt-replica] forcing delivery-ack re-register for ${file.name} reason=$reason",
+            )
+            manager.ensureOpenDocumentReplica(
+                file.path,
+                document,
+                await = false,
+                forceRefresh = true,
+            )
         }
 
         fun ensureReplicaForOpenDocument(

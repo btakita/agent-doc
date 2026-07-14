@@ -128,6 +128,12 @@ class RefreshBeforeApplyConflictTest {
         assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
         assertTrue("PatchWatcher must watch Project Controller CRDT event signals", patchWatcher.contains(".agent-doc/crdt-replica-events"))
         assertTrue("PatchWatcher must wake CRDT drains from event signals", patchWatcher.contains("processCrdtReplicaEventFile"))
+        assertTrue(
+            "CRDT event protocol states must be parsed into an enum instead of compared as free text",
+            patchWatcher.contains("enum class CrdtReplicaEventReason") &&
+                patchWatcher.contains("CrdtReplicaEventReason.fromToken") &&
+                patchWatcher.contains("CrdtReplicaEventReason.AckRecoveryForceRefresh"),
+        )
         assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
         assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))
         assertFalse("visual highlighter must not use a Swing timer", visualHighlighter.contains("Alarm("))

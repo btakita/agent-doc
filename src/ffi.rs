@@ -2312,6 +2312,90 @@ pub unsafe extern "C" fn agent_doc_state_projection(document_hash: *const c_char
         .into_raw()
 }
 
+/// Reconcile an editor buffer that re-registers after a deferred document
+/// write. Lazily state retains the write base and target; a stale clean buffer
+/// receives the target, while later unsaved editor edits are component-merged.
+///
+/// Returns null when no deferred write exists or recovery cannot be proven.
+/// Caller must free a non-null result with [`agent_doc_free_string`].
+///
+/// # Safety
+///
+/// Both arguments must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
+    file_path: *const c_char,
+    editor_content: *const c_char,
+) -> *mut c_char {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!("[deferred-write] reconnect: non-UTF-8 file path; returning null");
+        return std::ptr::null_mut();
+    };
+    let Ok(editor_content) = (unsafe { CStr::from_ptr(editor_content) }).to_str() else {
+        eprintln!("[deferred-write] reconnect: non-UTF-8 editor content; returning null");
+        return std::ptr::null_mut();
+    };
+    let recovered = match agent_doc_document_realtime_io::deferred_document_write_reconnect_content(
+        std::path::Path::new(path),
+        editor_content,
+    ) {
+        Ok(Some(content)) => Some(content),
+        Ok(None) => match agent_doc_capture_io::load_active(std::path::Path::new(path)) {
+            Ok(Some(capture))
+                if capture.committed_at.is_none()
+                    && capture.discarded_at.is_none()
+                    && !capture.response_body.trim().is_empty()
+                    && !agent_doc_turn::response_replay::response_materialized_in_content(
+                        &capture.response_body,
+                        editor_content,
+                    ) =>
+            {
+                match agent_doc_template_io::parse_template_patchback(
+                    std::path::Path::new(path),
+                    &capture.response_body,
+                    "editor_reconnect_capture_fallback",
+                    agent_doc_ops_log_io::log_op,
+                )
+                .and_then(|plan| {
+                    agent_doc_template_io::apply_patches(
+                        editor_content,
+                        &plan.patches,
+                        &plan.unmatched,
+                        std::path::Path::new(path),
+                    )
+                }) {
+                    Ok(content)
+                        if agent_doc_turn::response_replay::response_materialized_in_content(
+                            &capture.response_body,
+                            &content,
+                        ) =>
+                    {
+                        Some(content)
+                    }
+                    Ok(_) => None,
+                    Err(err) => {
+                        eprintln!("[deferred-write] capture fallback failed for {path}: {err}");
+                        None
+                    }
+                }
+            }
+            Ok(_) => None,
+            Err(err) => {
+                eprintln!("[deferred-write] capture lookup failed for {path}: {err}");
+                None
+            }
+        },
+        Err(err) => {
+            eprintln!("[deferred-write] reconnect failed for {path}: {err}");
+            None
+        }
+    };
+    recovered
+        .and_then(|content| CString::new(content).ok())
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
+}
+
 /// Record a lazily state-backbone event from a plugin.
 ///
 /// `fact_json` must be a JSON object deserializable as a `StateEvent`

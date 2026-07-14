@@ -1,5 +1,8 @@
 # agent-doc Functional Specification
 
+- A controller recycle invalidates relay membership even when an editor still holds a cached client. Forced editor refresh must retire that client and issue a fresh registration. Every deferred document write, including an explicitly authorized `--force-disk` projection, retains its full base and target in Lazily state so reconnect restores or component-merges the editor buffer without consulting Git HEAD. Compact Exchange must compose active captured/deferred response lineage before archiving.
+
+- Captured-response recovery must persist both the response and its complete editor-visible baseline in Lazily `ResponseCaptured` state; hashes alone are not replay authority. A partially materialized response may be reconciled only from added nonblank lines whose multiplicities are proven by the captured baseline and response, with at least two matching lines. The reconciled target must pass through document/editor authority, retain any unrelated operator text, and then replay and commit the complete response once. A legacy hash-only capture may consult a byte-hash-matching Git `HEAD` only as a historical baseline anchor and must fortify Lazily state with the recovered content; it must never restore the working tree to `HEAD`. Template-mode raw captures must become explicit exchange patches before strict replay. An open captured cycle may cross a recovered commit boundary only when the captured response is materially present in `HEAD`.
 > Language-independent specification for the agent-doc interactive document session tool.
 > This document captures the exact behavior a port must reproduce.
 
@@ -28,7 +31,15 @@ Notable invariants:
   coalesced to the latest target; an accepted CRDT replacement is never replayed
   through legacy editor IPC, and disk is only a post-acknowledgement projection
   of exact canonical text. Bounded convergence failure retains the change and
-  fails closed instead of issuing a competing disk write.
+  fails closed instead of issuing a competing disk write. An editor-visible
+  write acknowledgement is durable authority only when its Lazily event carries
+  the full acknowledged content; hashes validate and index that content but
+  cannot reconstruct it. A legacy hash-only `already_applied` receipt gets one
+  bounded live-buffer publication attempt that upgrades the same patch fact. If
+  no editor replica can publish, the full target is retained as a Lazily
+  deferred-write intent and the cycle fails promptly without file IPC or a disk
+  projection. An empty delivery target set is never convergence for an
+  editor-owned write.
   Editor-selected tmux focus is likewise latest-wins per project. A stale or
   pruned actor projection cannot hide a still-running document owner when the
   latest open session log, live pane, and exact process-tree document binding

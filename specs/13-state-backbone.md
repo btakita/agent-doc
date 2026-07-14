@@ -1,5 +1,7 @@
 # State Backbone
 
+`ResponseCaptured` is content-bearing recovery authority: it retains the full response body and the full editor-visible baseline used at capture time, in addition to their hashes. This lets repair distinguish partial response fragments from operator text without consulting the working tree as authority. Legacy hash-only facts can be upgraded by a new revisioned fact after an independently hash-matching baseline is found. `DocumentWriteDeferred` retains the resulting reconciled target when no editor replica can publish it; only matching convergence clears that intent.
+
 `agent-doc` keeps the Cycle State Machine as the global lifecycle authority for
 one response turn. Other state must not be folded into that same finite state
 machine. Document convergence, queue ownership, editor transport, route
@@ -50,6 +52,9 @@ Examples:
 - `EditorPatchApplied`
 - `EditorPatchRejected`
 - `IpcProofInsufficient`
+- `VisibleWriteCommitCandidateObserved`
+- `DocumentWriteDeferred`
+- `DocumentWriteConverged`
 - `CommitObserved`
 - `SessionCheckPassed`
 - `CycleAbandoned`
@@ -66,6 +71,19 @@ Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
 The event log is append-only. Corrections are new events that supersede earlier
 facts by projection rules; they are not in-place mutation of old facts.
+Content-bearing visible-write receipts include the model revision in their
+stable event identity so a fresh editor publication can supersede a legacy
+hash-only fact for the same patch without losing idempotence. A visible-write
+hash is validation metadata, not recoverable content authority.
+`DocumentWriteDeferred` is likewise content-bearing: it retains both
+`expected_content` and `target_content`. A successor intent must be based on the
+prior target or component-compose the prior and new targets over the retained
+base. Matching editor convergence alone retires the intent; a force-disk
+projection or commit does not erase reconnect authority.
+Its cause is a `DocumentWriteDeferredReason` enum in facts and projections, not
+free text. CRDT convergence phases and replica wake-event kinds follow the same
+rule: stable snake-case strings are serialization/log tokens at the boundary,
+while state transitions and dispatch use exhaustive variants internally.
 
 Implementation: `agent-doc-state-backbone/src/lib.rs` defines
 `StateEvent`, `StateFact`, and `EventLedger`. The ledger deduplicates event ids
@@ -91,6 +109,12 @@ document components. Required projections include:
 Reducers must be idempotent and replay-testable. If two modules need the same
 answer, they should consume the same projection instead of recomputing from
 free-form logs or partial document text.
+
+The document projection retains the full target content for an admitted write
+that cannot reach a live editor replica. Only `DocumentWriteConverged` for the
+matching intent clears it. Unrelated convergence facts must not erase pending
+work, and a zero-member relay acknowledgement must not manufacture delivery or
+disk authority.
 
 Implementation: `StateBackboneProjection` reduces the event ledger into
 document, queue, closeout, transport, supervisor, route, and proof projections.

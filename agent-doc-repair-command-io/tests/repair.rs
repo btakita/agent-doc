@@ -764,6 +764,119 @@ mod tests {
     }
 
     #[test]
+    fn recover_plain_response_uses_strict_template_patch_in_git_repo() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ recover the captured response\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let response = "### Re: captured response — gpt-5\n\nRecovered through strict write.\n";
+        agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::ReplayedResponse);
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
+        let response_at = result.find("### Re: captured response — gpt-5").unwrap();
+        assert!(
+            response_at < exchange_close,
+            "response escaped exchange:\n{result}"
+        );
+        assert_eq!(
+            result.matches("### Re: captured response — gpt-5").count(),
+            1
+        );
+        let head = ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["show", "HEAD:test.md"])
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&head.stdout).contains("Recovered through strict write."));
+    }
+
+    #[test]
+    fn recover_historical_capture_uses_partial_proof_then_commits_full_response() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ fix partial response recovery\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+
+        let response = concat!(
+            "### Re: partial response recovery — gpt-5\n\n",
+            "The complete response is durable.\n\n",
+            "- editor-buffer save uses the live target;\n",
+            "- snapshot staging uses the committed target;\n",
+            "- relay convergence stays live.\n",
+        );
+        agent_doc_capture_io::capture_response_with_current_content(&doc, response, baseline)
+            .unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, baseline).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "incorrect_legacy_commit_boundary",
+            Some(baseline),
+            Some(baseline),
+        )
+        .unwrap();
+        let partial = baseline
+            .replace(
+                "❯ fix partial response recovery",
+                "❯ a newer unrelated prompt remains operator-owned",
+            )
+            .replace(
+                "<!-- agent:boundary:abc123 -->",
+                concat!(
+                    "- relay convergence stays live.\n",
+                    "- snapshot staging uses the committed target;\n",
+                    "- editor-buffer save uses the live target;\n",
+                    "<!-- agent:boundary:abc123 -->",
+                ),
+            );
+        std::fs::write(&doc, &partial).unwrap();
+        agent_doc_snapshot_io::save(&doc, &partial, agent_doc_ops_log_io::log_op).unwrap();
+
+        assert_eq!(run(&doc).unwrap(), RepairOutcome::ReplayedResponse);
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("The complete response is durable."));
+        assert!(result.contains("a newer unrelated prompt remains operator-owned"));
+        for line in [
+            "- editor-buffer save uses the live target;",
+            "- snapshot staging uses the committed target;",
+            "- relay convergence stays live.",
+        ] {
+            assert_eq!(
+                result.matches(line).count(),
+                1,
+                "duplicate line in:\n{result}"
+            );
+        }
+        let head = ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["show", "HEAD:test.md"])
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&head.stdout).contains("The complete response is durable.")
+        );
+    }
+
+    #[test]
     fn recover_normalizes_captured_replace_pending_patch() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

@@ -698,6 +698,17 @@ fn try_ipc_inner(
                         },
                     )?;
                     if repair_decision.snap_source.is_visible_write_proven() {
+                        // Fold the content-bearing editor ACK into the canonical relay
+                        // before asking whether disk materialization is safe. A controller
+                        // recycle may leave a durable editor owner with zero registered
+                        // replicas; in that shape the Lazily receipt is the only complete
+                        // content proof and disk must not be used to rediscover it.
+                        fold_visible_write_into_canonical(
+                            file,
+                            &patch_id,
+                            &repair_decision.snapshot_content,
+                            "socket_visible_write",
+                        )?;
                         let proof = visible_write_disk_proof(
                             file,
                             socket_editor_id.as_deref(),
@@ -717,12 +728,6 @@ fn try_ipc_inner(
                                 skipped_committed_cycle: false,
                             });
                         }
-                        fold_visible_write_into_canonical(
-                            file,
-                            &patch_id,
-                            &repair_decision.snapshot_content,
-                            "socket_visible_write",
-                        )?;
                         mark_visible_write_live_buffer_synced_after_write(
                             file,
                             &patch_id,
@@ -880,16 +885,22 @@ fn try_ipc_inner(
                     });
                 }
                 eprintln!(
-                    "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CPC/file-IPC retry"
+                    "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CPC retry without file IPC"
                 );
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ipc_socket_already_applied_fallback_to_file_ipc file={} patch_id={}",
+                        "ipc_socket_already_applied_defer_authoritative_retry file={} patch_id={} file_ipc=false disk_write=false",
                         file.display(),
                         patch_id
                     ),
                 );
+                cleanup_fallback_patch_files(file);
+                return Ok(IpcResult {
+                    success: false,
+                    patch_id,
+                    skipped_committed_cycle: false,
+                });
             }
             Err(e) => {
                 eprintln!(

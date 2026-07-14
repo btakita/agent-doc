@@ -21,6 +21,21 @@ import java.nio.file.Path
 import java.nio.file.StandardWatchEventKinds
 import java.security.MessageDigest
 
+private enum class CrdtReplicaEventReason(val token: String) {
+    RequestFullState("request_full_state"),
+    Fanout("fanout"),
+    ResponseCellAdd("response_cell_add"),
+    CpcWrite("cpc_write"),
+    Rebootstrap("rebootstrap"),
+    AckReplay("ack_replay"),
+    AckRecoveryForceRefresh("ack_recovery_force_refresh");
+
+    companion object {
+        fun fromToken(token: String?): CrdtReplicaEventReason? =
+            entries.firstOrNull { it.token == token }
+    }
+}
+
 /**
  * Watches `.agent-doc/patches/` for JSON patch files and applies them
  * via IntelliJ's Document API. Normal realtime paths use minimal range edits
@@ -453,7 +468,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             val root = com.google.gson.JsonParser.parseString(file.readText()).asJsonObject
             Triple(
                 root.get("file")?.asString?.takeIf { it.isNotBlank() },
-                root.get("reason")?.asString,
+                CrdtReplicaEventReason.fromToken(root.get("reason")?.asString),
                 root.get("signaled_at_ms")?.asLong ?: 0L,
             )
         } catch (e: Exception) {
@@ -465,8 +480,15 @@ class PatchWatcher(private val project: Project) : Disposable {
             val previous = processedCrdtEventMs.put(filePath, signaledAtMs)
             if (previous != null && previous >= signaledAtMs) return
         }
-        if (filePath != null && reason == "request_full_state") {
+        if (filePath != null && reason == CrdtReplicaEventReason.RequestFullState) {
             CrdtReplicaManager.requestTextAdopt(project, filePath)
+        }
+        if (filePath != null && reason == CrdtReplicaEventReason.AckRecoveryForceRefresh) {
+            CrdtReplicaManager.forceRefreshOpenDocumentReplica(
+                project,
+                filePath,
+                "delivery-ack-recovery",
+            )
         }
         CrdtReplicaManager.requestRemoteDrain(project, filePath, "crdt-event")
     }
@@ -651,6 +673,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"
                 LOG.info("[socket] reload_lib received (lib_version=$libVersion); forcing cdylib reload")
                 AgentDocLib.forceReload()
+                CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "reload-lib-$libVersion")
                 // Keep the broadcast watcher baseline in sync so the file event
                 // does not redundantly force a second reload for the same install.
                 AgentDocLib.reloadBroadcastFile()?.let { f ->

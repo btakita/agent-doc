@@ -419,6 +419,7 @@ pub struct ProjectedCapturedResponse {
     pub response_body: String,
     pub file_hash: Option<String>,
     pub snapshot_hash: Option<String>,
+    pub baseline_content: Option<String>,
 }
 
 impl ProjectedCloseoutState {
@@ -475,6 +476,7 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
                     response_body: capture.response_body,
                     file_hash: capture.file_hash,
                     snapshot_hash: capture.snapshot_hash,
+                    baseline_content: capture.baseline_content,
                 }
             }),
             patch_id: projection.patch_id,
@@ -1840,6 +1842,7 @@ fn append_closeout_projection_event(
                 response_body: None,
                 file_hash: None,
                 snapshot_hash: None,
+                baseline_content: None,
             }
         }
         CloseoutProjectionEvent::WriteApplied => {
@@ -1868,20 +1871,37 @@ fn append_closeout_projection_event(
     append_state_fact(file, event_id, fact)
 }
 
+pub struct CapturedResponseFactInput<'a> {
+    pub cycle_id: &'a str,
+    pub capture_id: &'a str,
+    pub response_sha256: &'a str,
+    pub response_body: &'a str,
+    pub file_hash: Option<&'a str>,
+    pub snapshot_hash: Option<&'a str>,
+    pub baseline_content: Option<&'a str>,
+}
+
 pub fn append_response_captured_body(
     file: &Path,
-    cycle_id: &str,
-    capture_id: &str,
-    response_sha256: &str,
-    response_body: &str,
-    file_hash: Option<&str>,
-    snapshot_hash: Option<&str>,
+    input: CapturedResponseFactInput<'_>,
 ) -> Result<bool> {
+    let CapturedResponseFactInput {
+        cycle_id,
+        capture_id,
+        response_sha256,
+        response_body,
+        file_hash,
+        snapshot_hash,
+        baseline_content,
+    } = input;
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(false);
     };
+    let baseline_hash = baseline_content
+        .map(agent_doc_hash::content_hash)
+        .unwrap_or_else(|| "legacy-hash-only".to_string());
     let event_id = format!(
-        "closeout-response-captured-body:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}"
+        "closeout-response-captured-body:v2:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}:{baseline_hash}"
     );
     append_state_fact(
         file,
@@ -1894,6 +1914,7 @@ pub fn append_response_captured_body(
             response_body: Some(response_body.to_string()),
             file_hash: file_hash.map(str::to_string),
             snapshot_hash: snapshot_hash.map(str::to_string),
+            baseline_content: baseline_content.map(str::to_string),
         },
     )
 }
@@ -2860,12 +2881,15 @@ mod tests {
 
         append_response_captured_body(
             &doc,
-            &started.cycle_id,
-            &started.cycle_id,
-            "response-sha",
-            "### Re: topic - gpt-5\n\nDone.\n",
-            Some("file-sha"),
-            Some("snapshot-sha"),
+            CapturedResponseFactInput {
+                cycle_id: &started.cycle_id,
+                capture_id: &started.cycle_id,
+                response_sha256: "response-sha",
+                response_body: "### Re: topic - gpt-5\n\nDone.\n",
+                file_hash: Some("file-sha"),
+                snapshot_hash: Some("snapshot-sha"),
+                baseline_content: Some("body"),
+            },
         )
         .unwrap();
 
@@ -2877,6 +2901,7 @@ mod tests {
         assert_eq!(projected.response_sha256, "response-sha");
         assert_eq!(projected.file_hash.as_deref(), Some("file-sha"));
         assert_eq!(projected.snapshot_hash.as_deref(), Some("snapshot-sha"));
+        assert_eq!(projected.baseline_content.as_deref(), Some("body"));
         assert_eq!(projected.response_body, "### Re: topic - gpt-5\n\nDone.\n");
     }
 

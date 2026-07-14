@@ -384,6 +384,60 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         && let Some(target) =
             post_commit_reposition_target(working, boundary_id.as_deref(), &normalize_prefix_lines)
     {
+        if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+            // A deferred reconnect target is canonical state, not an editor-only
+            // transient projection. Retaining `(HEAD)` here would reintroduce a
+            // stale working-tree diff when the JetBrains replica reconnects.
+            let target = agent_doc_document::transient_markers::strip_head_markers(&target);
+            let (transport, result) = if pending.source.starts_with("force_disk") {
+                (
+                    "force_disk_projection",
+                    agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+                        file, &target,
+                    )
+                    .map(|_| pending.intent_id.clone()),
+                )
+            } else {
+                (
+                    "lazily_deferred",
+                    agent_doc_document_realtime_io::retain_deferred_document_write_target(
+                        file,
+                        working,
+                        &target,
+                        "post_commit_reposition",
+                            agent_doc_document_realtime_io::DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget,
+                    ),
+                )
+            };
+            match result {
+                Ok(intent_id) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "post_commit_reposition_deferred file={} transport={} prior_intent_id={} resulting_intent_id={} target_hash={} recovery=editor_reconnect",
+                            file.display(),
+                            transport,
+                            pending.intent_id,
+                            intent_id,
+                            agent_doc_hash::content_hash(&target),
+                        ),
+                    );
+                }
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "post_commit_reposition_deferred_failed file={} transport={} retained_intent_id={} error={} recovery=retain_existing_target_no_relay_spin",
+                            file.display(),
+                            transport,
+                            pending.intent_id,
+                            err,
+                        ),
+                    );
+                }
+            }
+            return true;
+        }
         match agent_doc_document_realtime_io::apply_canonical_replace_if_attached(
             file,
             working,

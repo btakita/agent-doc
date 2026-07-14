@@ -52,6 +52,14 @@ fn resolve_document_content_for_write_mode(
     }
 }
 
+fn atomic_write_for_write_mode(file: &Path, content: &str, force_disk: bool) -> Result<()> {
+    if force_disk {
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
+    } else {
+        atomic_write(file, content)
+    }
+}
+
 fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Result<bool> {
     if let Some(recover) = flags.empty_response_recovery {
         recover(
@@ -365,7 +373,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     }
     agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
 
-    atomic_write(file, &final_content)?;
+    atomic_write_for_write_mode(file, &final_content, flags.force_disk)?;
 
     agent_doc_ops_log_io::log_cycle(
         file,
@@ -706,13 +714,20 @@ pub(crate) fn run_template(
     // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
     // if editor convergence is unavailable or unproven, fail closed instead of
     // writing the merged document straight to disk.
-    agent_doc_write_converge_io::try_editor_converge(
-        &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
-        file,
-        &final_content,
-        &content_current,
-        "write_template",
-    )?;
+    if flags.force_disk {
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+            file,
+            &final_content,
+        )?;
+    } else {
+        agent_doc_write_converge_io::try_editor_converge(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            &final_content,
+            &content_current,
+            "write_template",
+        )?;
+    }
 
     agent_doc_ops_log_io::log_cycle(
         file,
@@ -1630,7 +1645,7 @@ pub(crate) fn run_stream(
         agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
     }
 
-    atomic_write(file, &final_content)?;
+    atomic_write_for_write_mode(file, &final_content, force_disk)?;
     if force_disk && snapshot_content != final_content {
         match
             agent_doc_controller_io::project_controller::record_visible_write_materialized_carry_forward_for_file(
@@ -2309,154 +2324,19 @@ fn write_path_editor_absent(file: &Path) -> bool {
 }
 
 fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {
-    let current = match agent_doc_controller_io::project_controller::
-        current_text_via_controller_model_read_for_doc(file, "force_disk_pre_write_authority")
-    {
-        Ok(current) => current,
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_unavailable file={} status=controller_read_unavailable timeout_ms=750 error={err}",
-                    file.display()
-                ),
-            );
-            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file) {
-                Ok(current) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "force_disk_editor_authority_local_probe file={} source=nonblocking_relay_after_controller_timeout state={}",
-                            file.display(),
-                            force_disk_current_text_status_label(&current),
-                        ),
-                    );
-                    Some(current)
-                }
-                Err(local_err) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "force_disk_editor_authority_local_probe_failed file={} source=nonblocking_relay_after_controller_timeout error={local_err}",
-                            file.display()
-                        ),
-                    );
-                    None
-                }
-            }
-        }
-    };
-    match current {
-        Some(agent_doc_crdt_relay_io::CurrentText::Detached) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_ready file={} status=detached_authority",
-                    file.display()
-                ),
-            );
-            return Ok(());
-        }
-        Some(agent_doc_crdt_relay_io::CurrentText::Current {
-            text,
-            live_editors: 0,
-            delivery_converged: true,
-        }) => {
-            let disk_matches_canonical = resolve_disk_document_content(
-                file,
-                "force_disk_editor_authority_zero_member_projection_check",
-            )
-            .map(|disk| disk == text)
-            .unwrap_or(false);
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_{} file={} status=editor_open_zero_relay_members disk_matches_canonical={}",
-                    if disk_matches_canonical {
-                        "ready"
-                    } else {
-                        "unavailable"
-                    },
-                    file.display(),
-                    disk_matches_canonical
-                ),
-            );
-            if disk_matches_canonical {
-                return Ok(());
-            }
-        }
-        Some(agent_doc_crdt_relay_io::CurrentText::Current {
-            live_editors,
-            delivery_converged,
-            ..
-        }) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_unavailable file={} status=live_editor_replicas live_editors={} delivery_converged={}",
-                    file.display(),
-                    live_editors,
-                    delivery_converged
-                ),
-            );
-        }
-        Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_unavailable file={} status=editor_attached_model_missing",
-                    file.display()
-                ),
-            );
-        }
-        Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_unavailable file={} status=editor_sync_pending",
-                    file.display()
-                ),
-            );
-        }
-        None => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "force_disk_editor_authority_unavailable file={} status=no_project_root",
-                    file.display()
-                ),
-            );
-        }
-    }
+    // `--force-disk` is the explicit operator escape hatch. The atomic writer
+    // retains the pre-write disk bytes plus the target as a Lazily deferred
+    // intent before touching disk; a reappearing editor then restores the
+    // target or component-merges later unsaved edits. Do not stall the turn on
+    // a missing relay member once that durable handoff is available.
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "force_disk_editor_authority_unavailable file={} status=relay_convergence_pending phase=pre_write",
+            "force_disk_editor_authority_ready file={} status=durable_reconnect_handoff phase=pre_write",
             file.display()
         ),
     );
-    anyhow::bail!(
-        "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as write authority",
-        file.display()
-    )
-}
-
-fn force_disk_current_text_status_label(
-    current: &agent_doc_crdt_relay_io::CurrentText,
-) -> &'static str {
-    match current {
-        agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
-        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
-            "editor_attached_model_missing"
-        }
-        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
-        agent_doc_crdt_relay_io::CurrentText::Current {
-            live_editors: 0,
-            delivery_converged: true,
-            ..
-        } => "current_no_live_editors",
-        agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current_live_editors",
-    }
+    Ok(())
 }
 
 fn merge_recovery_content(
@@ -2757,7 +2637,10 @@ pub fn apply_template_from_string_with_options(
     )?;
 
     if options.force_disk {
-        atomic_write(file, &final_content)?;
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+            file,
+            &final_content,
+        )?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -2822,7 +2705,7 @@ mod tests {
     }
 
     #[test]
-    fn response_cell_projection_materializes_with_retained_authority_and_no_live_replica() {
+    fn response_cell_projection_defers_with_retained_authority_and_no_live_replica() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("response-cell-materialization.md");
@@ -2854,11 +2737,35 @@ mod tests {
             &format!("{response}\n<!-- agent:boundary:next -->"),
         );
         let _owner = agent_doc_document_realtime::write_authority::owner_scope_guard();
-        let materialized = materialize_response_cell_projection(&canonical, &desired).unwrap();
+        let error = materialize_response_cell_projection(&canonical, &desired).unwrap_err();
 
-        assert_eq!(fs::read_to_string(&canonical).unwrap(), materialized);
-        assert!(materialized.contains(response));
-        assert_eq!(materialized.matches("### Re: operator prompt").count(), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("no editor replica was registered"),
+            "zero-replica editor ownership should defer without a disk projection: {error:#}"
+        );
+        assert_eq!(
+            fs::read_to_string(&canonical).unwrap(),
+            baseline,
+            "an editor-owned document without a relay member must remain untouched on disk"
+        );
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
+                .unwrap();
+        let pending = projection
+            .document(&document_hash)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .expect("the full response-cell target should remain durable in Lazily state");
+        assert!(pending.target_content.contains(response));
+        assert_eq!(
+            pending
+                .target_content
+                .matches("### Re: operator prompt")
+                .count(),
+            1
+        );
     }
 
     #[test]

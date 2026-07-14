@@ -519,17 +519,26 @@ pub fn send_refresh_content(
 /// Ask the live editor to republish its current visible-buffer sidecar for
 /// `file` without changing the document.
 pub fn send_publish_live_buffer(project_root: &Path, file: &str) -> Result<bool> {
+    send_publish_live_buffer_with_timeout(
+        project_root,
+        file,
+        Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+    )
+}
+
+/// Ask the editor to publish its current full buffer, bounded by the caller's
+/// authority-recovery budget rather than the generic IPC receipt timeout.
+pub fn send_publish_live_buffer_with_timeout(
+    project_root: &Path,
+    file: &str,
+    timeout: Duration,
+) -> Result<bool> {
     let message = publish_live_buffer_message(file);
 
     // This is a synchronization point for the CRDT relay, not a mere editor
     // liveness probe. Returning on the early `accepted` receipt lets the caller
     // poll the relay before the plugin has registered/refreshed its replica.
-    send_message_with_timeout(
-        project_root,
-        &message,
-        Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
-    )
-    .map(|_| true)
+    send_message_with_timeout(project_root, &message, timeout).map(|_| true)
 }
 
 /// Write a VS Code-style file IPC signal asking the editor to republish its

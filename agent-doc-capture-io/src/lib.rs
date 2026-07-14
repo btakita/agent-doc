@@ -6,7 +6,9 @@
 //! - Persists the latest in-progress streamed response checkpoint under
 //!   `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json`.
 //! - Captures the final parsed response body plus cycle metadata before any
-//!   document write or hook emission.
+//!   document write or hook emission. The full replay baseline is retained in
+//!   both the capture sidecar and the Lazily state projection so recovery can
+//!   reconcile partial editor materialization without restoring Git HEAD.
 //! - `capture_response(file, response)` stores the response, marks the cycle as
 //!   `response_captured`, and returns the saved record.
 //! - `PartialCheckpointWriter` saves the first non-empty partial response and
@@ -93,6 +95,8 @@ pub struct CaptureRecord {
     pub snapshot_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_content: Option<String>,
     pub response_sha256: String,
     pub response_body: String,
     pub state: CaptureState,
@@ -297,6 +301,7 @@ pub fn capture_response_with_current_content(
             .as_deref()
             .map(agent_doc_hash::content_hash),
         file_hash: Some(replay_file_hash(file_content)),
+        baseline_content: Some(file_content.to_string()),
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
         state: CaptureState::Captured,
@@ -312,12 +317,15 @@ pub fn capture_response_with_current_content(
     )?;
     agent_doc_cycle_state_io::append_response_captured_body(
         file,
-        &record.cycle_id,
-        &record.capture_id,
-        &record.response_sha256,
-        &record.response_body,
-        record.file_hash.as_deref(),
-        record.snapshot_hash.as_deref(),
+        agent_doc_cycle_state_io::CapturedResponseFactInput {
+            cycle_id: &record.cycle_id,
+            capture_id: &record.capture_id,
+            response_sha256: &record.response_sha256,
+            response_body: &record.response_body,
+            file_hash: record.file_hash.as_deref(),
+            snapshot_hash: record.snapshot_hash.as_deref(),
+            baseline_content: record.baseline_content.as_deref(),
+        },
     )?;
     Ok(record)
 }
@@ -539,6 +547,105 @@ pub fn replay_file_hash(content: &str) -> String {
     agent_doc_hash::content_hash(
         &agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(content),
     )
+}
+
+/// Result of removing only lines proven to be a partial materialization of a
+/// captured response. The caller must publish `content` through document
+/// authority before replaying the complete response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialResponseReconciliation {
+    pub content: String,
+    pub removed_nonblank_lines: usize,
+}
+
+/// Reconcile an editor buffer that contains a non-contiguous or reordered
+/// subset of a captured response. Baseline line multiplicity protects text
+/// that already existed before capture; response line multiplicity prevents
+/// deleting more copies than the capture could have introduced. At least two
+/// nonblank response lines are required so a coincidental one-line operator
+/// edit cannot be consumed as recovery state.
+pub fn reconcile_partial_response_lines(
+    baseline: &str,
+    current: &str,
+    response: &str,
+) -> Option<PartialResponseReconciliation> {
+    if baseline == current
+        || response.trim().is_empty()
+        || agent_doc_turn::response_replay::response_already_applied(current, response)
+        || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
+            current, response,
+        )
+    {
+        return None;
+    }
+
+    fn line_key(line: &str) -> &str {
+        line.trim_end_matches(['\r', '\n'])
+    }
+
+    let mut baseline_counts = std::collections::HashMap::<&str, usize>::new();
+    for line in baseline.split_inclusive('\n') {
+        *baseline_counts.entry(line_key(line)).or_default() += 1;
+    }
+    let mut response_counts = std::collections::HashMap::<&str, usize>::new();
+    for line in response.split_inclusive('\n') {
+        let key = line_key(line);
+        if !key.trim().is_empty() {
+            *response_counts.entry(key).or_default() += 1;
+        }
+    }
+
+    let mut reconciled = String::with_capacity(current.len());
+    let mut removed_nonblank_lines = 0usize;
+    for line in current.split_inclusive('\n') {
+        let key = line_key(line);
+        if let Some(remaining) = baseline_counts.get_mut(key)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            reconciled.push_str(line);
+            continue;
+        }
+        if let Some(remaining) = response_counts.get_mut(key)
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            removed_nonblank_lines += 1;
+            continue;
+        }
+        reconciled.push_str(line);
+    }
+
+    (removed_nonblank_lines >= 2 && reconciled != current).then_some(
+        PartialResponseReconciliation {
+            content: reconciled,
+            removed_nonblank_lines,
+        },
+    )
+}
+
+/// Upgrade a legacy hash-only capture sidecar after a byte-identical baseline
+/// has been recovered from an independently verified source. This never
+/// overwrites an existing content-bearing baseline.
+pub fn fortify_baseline_content(
+    file: &Path,
+    capture_id: &str,
+    baseline_content: &str,
+) -> Result<bool> {
+    let Some(mut record) = load_by_id(file, capture_id)? else {
+        return Ok(false);
+    };
+    if record.baseline_content.is_some() {
+        return Ok(false);
+    }
+    let baseline_hash = replay_file_hash(baseline_content);
+    if record.file_hash.as_deref() != Some(baseline_hash.as_str()) {
+        return Ok(false);
+    }
+    record.baseline_content = Some(baseline_content.to_string());
+    record.updated_at = now_secs();
+    write_record(file, &record)?;
+    Ok(true)
 }
 
 /// Pure check (no side effects, no benign-drift refresh): returns true when the
@@ -1197,6 +1304,49 @@ mod tests {
         assert_eq!(projected.response_body, "response body");
         assert_eq!(projected.file_hash, record.file_hash);
         assert_eq!(projected.snapshot_hash, record.snapshot_hash);
+        let captured_baseline = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            record.baseline_content.as_deref(),
+            Some(captured_baseline.as_str())
+        );
+        assert_eq!(projected.baseline_content, record.baseline_content);
+    }
+
+    #[test]
+    fn reconciles_reordered_partial_response_lines_without_losing_operator_edits() {
+        let baseline = "before\nanchor\nafter\n";
+        let response = concat!(
+            "### Re: topic — gpt-5\n\n",
+            "- editor-buffer save uses the live target;\n",
+            "- snapshot staging uses the committed target;\n",
+            "- relay convergence stays live.\n",
+        );
+        let current = concat!(
+            "before\n",
+            "operator note\n",
+            "- relay convergence stays live.\n",
+            "- snapshot staging uses the committed target;\n",
+            "anchor\n",
+            "- editor-buffer save uses the live target;\n",
+            "after\n",
+        );
+
+        let reconciled = reconcile_partial_response_lines(baseline, current, response)
+            .expect("partial response should reconcile");
+        assert_eq!(reconciled.removed_nonblank_lines, 3);
+        assert_eq!(reconciled.content, "before\noperator note\nanchor\nafter\n");
+    }
+
+    #[test]
+    fn partial_response_reconciliation_requires_multi_line_proof() {
+        assert!(
+            reconcile_partial_response_lines(
+                "before\nafter\n",
+                "before\n- possibly operator text\nafter\n",
+                "### Re: topic — gpt-5\n\n- possibly operator text\n",
+            )
+            .is_none()
+        );
     }
 
     #[test]

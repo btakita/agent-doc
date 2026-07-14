@@ -149,7 +149,8 @@ impl LivenessProjection {
                 match self.sync_state.get_mut(&key) {
                     Some(reg) => reg.set(*stamp, value),
                     None => {
-                        self.sync_state.insert(key, WireLwwRegister::new(*stamp, value));
+                        self.sync_state
+                            .insert(key, WireLwwRegister::new(*stamp, value));
                     }
                 }
             }
@@ -470,7 +471,9 @@ mod tests {
             stamp: stamp(10, 2),
         }];
         let frame = encode_liveness_frame(&ops).expect("encode");
-        let decoded = decode_liveness_frame(&frame).expect("liveness frame").expect("decode");
+        let decoded = decode_liveness_frame(&frame)
+            .expect("liveness frame")
+            .expect("decode");
         assert_eq!(decoded, ops);
     }
 

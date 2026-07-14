@@ -164,6 +164,12 @@ class TypingTrackerEdtBudgetTest {
             watcher.contains("\"publish_live_buffer\" -> {") &&
                 watcher.contains("TypingTracker.publishLiveBufferNow(file)"),
         )
+        assertTrue(
+            "a native reload broadcast must re-register every open markdown replica",
+            watcher.contains("\"reload_lib\" -> {") &&
+                watcher.contains("AgentDocLib.forceReload()") &&
+                watcher.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
+        )
 
         val publishBody = tracker.substringAfter("fun publishLiveBufferNow")
             .substringBefore("private fun scheduleFullContentReport")
@@ -279,9 +285,10 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "authority-bearing publish/open document repair must wait for the CRDT replica while ordinary open reports stay asynchronous",
-                source.contains("fun ensureOpenDocumentReplica(") &&
+            source.contains("fun ensureOpenDocumentReplica(") &&
                 source.contains("forceRefresh: Boolean = false") &&
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
+                source.contains("NativePatching.deferredWriteReconnectContent(filePath, text)") &&
                 source.contains("executor.submit<Boolean> { attach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
@@ -299,10 +306,19 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
                 source.contains("stale-operator-event-fenced"),
         )
-        assertFalse(
-            "authority-bearing publish must not reregister an existing CRDT replica; the editor buffer is republished through the cached replica",
-            source.contains("private fun refreshForwarderFor(") ||
-                source.contains("refreshed ${'$'}{File(filePath).name} registration"),
+        assertTrue(
+            "forced refresh must retire a cached client and issue REGISTER again after a controller recycle",
+            source.contains("if (bypassRegisterBackoff)") &&
+                source.contains("forwarders.remove(filePath)?.let { stale ->") &&
+                source.contains("stale.deregister()") &&
+                source.contains("retired cached forwarder before forced re-register"),
+        )
+        assertTrue(
+            "visible editor applies must retain failed delivery ACKs and replay them from the current buffer",
+            source.contains("pendingRemoteAckReplays") &&
+                source.contains("rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)") &&
+                source.contains("replayPendingRemoteAcks(filePath, forwarder)") &&
+                source.contains("val visibleText = editorBufferText(filePath)"),
         )
         val remoteDrainBody = source.substringAfter("private fun drainRemoteUpdatesFor")
             .substringBefore("/**\n     * D2")

@@ -558,7 +558,10 @@ impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
         _reason: &str,
     ) -> Result<()> {
         if current_content != target_content {
-            agent_doc_fs::write_atomic(file, target_content.as_bytes())?;
+            agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(
+                file,
+                target_content,
+            )?;
         }
         Ok(())
     }
@@ -747,7 +750,11 @@ fn controller_local_relay_text(current: agent_doc_crdt_relay_io::CurrentText) ->
 
 fn commit_atomic_write(file: &Path, content: &str) -> Result<()> {
     if force_disk_commit_resolution_enabled() {
-        agent_doc_fs::write_atomic(file, content.as_bytes())
+        // Keep post-commit boundary and transient-marker cleanup in the same
+        // durable force-disk lineage. A raw filesystem write here used to leave
+        // Lazily pointing at the pre-cleanup boundary, so a later JetBrains
+        // reconnect could restore stale canonical text and restart turn churn.
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
     } else {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }

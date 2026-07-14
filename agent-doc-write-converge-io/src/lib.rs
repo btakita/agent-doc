@@ -373,14 +373,15 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         return Ok(AlreadyAppliedSnapshotOutcome::Persisted);
     };
 
-    let visible_write_content = if !patch_id.is_empty() {
+    let mut publish_attempted = false;
+    let mut visible_write_content = if !patch_id.is_empty() {
         file.canonicalize().ok().and_then(|canonical| {
             let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
             poll_visible_write_content_lazily_event_or_projection(
                 file,
                 &project_root,
                 patch_id,
-                visible_write_receipt_timeout(),
+                std::time::Duration::ZERO,
                 visible_write_receipt_poll_interval(),
             )
             .ok()
@@ -390,6 +391,68 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
     } else {
         None
     };
+    if visible_write_content.is_none() && !patch_id.is_empty() {
+        publish_attempted = true;
+        match effects
+            .publish_live_buffer_content(file, "socket_already_applied_upgrade_legacy_receipt")
+        {
+            Ok(Some(content)) => {
+                let response_present =
+                    response_materialized_in_content(expected_response, &content)
+                        || baseline
+                            .is_some_and(|base| response_already_in_current(base, ours, &content));
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "ipc_socket_already_applied_live_buffer_published file={} patch_id={} response_present={} len={} hash={} action={}",
+                        file.display(),
+                        patch_id,
+                        response_present,
+                        content.len(),
+                        agent_doc_hash::content_hash(&content),
+                        if response_present {
+                            "upgrade_lazily_receipt"
+                        } else {
+                            "retain_response_for_authoritative_retry"
+                        },
+                    ),
+                );
+                if !response_present {
+                    log_ipc_proof_failure_with_recycle(
+                        file,
+                        "socket_already_applied",
+                        Some(patch_id),
+                        "published_live_buffer_missing_response",
+                        "retry_response_cell_via_cpc_without_file_ipc",
+                        &format!(
+                            "published_len={} published_hash={} response_sha256={}",
+                            content.len(),
+                            agent_doc_hash::content_hash(&content),
+                            agent_doc_hash::content_hash(expected_response),
+                        ),
+                    );
+                    return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
+                }
+                agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+                    file,
+                    patch_id,
+                    &content,
+                    "already_applied_live_buffer_publish_upgrade",
+                )?;
+                visible_write_content = Some(content);
+            }
+            Ok(None) => {}
+            Err(err) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "ipc_socket_already_applied_live_buffer_publish_failed file={} patch_id={} error={}",
+                    file.display(),
+                    patch_id,
+                    err.to_string().replace(char::is_whitespace, "_"),
+                ),
+            ),
+        }
+    }
     if visible_write_content.is_none() {
         let invariant = if patch_id.is_empty() {
             "already_applied_missing_patch_id"
@@ -401,13 +464,13 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             (!patch_id.is_empty()).then_some(patch_id),
             invariant,
-            "retry_without_disk_write",
+            "retry_without_file_ipc_or_disk_write",
             &format!(
-                "wait_ms={} editor_buffer_authority_required=true disk_projection_ignored=true",
-                VISIBLE_WRITE_RECEIPT_TIMEOUT_MS
+                "wait_ms=0 publish_attempted={} editor_buffer_authority_required=true disk_projection_ignored=true",
+                publish_attempted,
             ),
         );
-        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
     }
     let current_source = IpcSnapshotSource::LazilyVisibleWriteEvent;
     let current = visible_write_content;
@@ -471,7 +534,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                     agent_doc_hash::content_hash(ours)
                 ),
             );
-            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
         } else {
             repair_decision = match current_source {
                 IpcSnapshotSource::LazilyVisibleWriteEvent => {
@@ -531,7 +594,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         };
     }
 
-    prefer_visible_content_over_stale_visible_write_snapshot(
+    if prefer_visible_content_over_stale_visible_write_snapshot(
         file,
         "already_applied",
         Some(patch_id),
@@ -539,7 +602,21 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
         Some(ours),
         expected_response,
         &mut repair_decision,
-    );
+    ) {
+        log_ipc_proof_failure_with_recycle(
+            file,
+            "socket_already_applied",
+            Some(patch_id),
+            "visible_write_receipt_superseded_by_worktree",
+            "refresh_editor_cut_without_file_ipc_or_disk_write",
+            &format!(
+                "worktree_len={} worktree_hash={}",
+                repair_decision.snapshot_content.len(),
+                agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+            ),
+        );
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
+    }
 
     if expected_response.trim().is_empty() {
         log_ipc_proof_failure_with_recycle(
@@ -547,7 +624,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_empty_response_probe",
-            "file_ipc_fallback",
+            "authoritative_retry_without_file_ipc",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -556,7 +633,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 agent_doc_hash::content_hash(ours)
             ),
         );
-        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
     }
 
     if repair_decision.snap_source == IpcSnapshotSource::ContentOurs {
@@ -565,7 +642,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_unproven_content_ours",
-            "file_ipc_fallback",
+            "authoritative_retry_without_file_ipc",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -574,7 +651,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 agent_doc_hash::content_hash(ours)
             ),
         );
-        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
     }
 
     let response_present_in_snapshot =
@@ -588,7 +665,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_snapshot_missing_response",
-            "file_ipc_fallback",
+            "retry_response_cell_via_cpc_without_file_ipc",
             &format!(
                 "response_sha256={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 agent_doc_hash::content_hash(expected_response),
@@ -598,7 +675,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 agent_doc_hash::content_hash(ours)
             ),
         );
-        return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
     }
 
     repair_ipc_decision_visible_state(
@@ -625,7 +702,19 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             proof,
         )?;
         if !disk_synced {
-            return Ok(AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+            log_ipc_proof_failure_with_recycle(
+                file,
+                "socket_already_applied",
+                Some(patch_id),
+                "visible_write_receipt_superseded_by_live_editor",
+                "refresh_editor_cut_without_file_ipc_or_disk_write",
+                &format!(
+                    "receipt_len={} receipt_hash={}",
+                    repair_decision.snapshot_content.len(),
+                    agent_doc_hash::content_hash(&repair_decision.snapshot_content),
+                ),
+            );
+            return Ok(AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry);
         }
         mark_visible_write_live_buffer_synced_after_write(
             file,
@@ -1363,6 +1452,30 @@ fn visible_write_content_from_lazily_event(
     else {
         return Ok(None);
     };
+    if let Some(content) = proof.commit_candidate_content.as_ref() {
+        let content_hash = visible_write_content_hash(content);
+        if !content_hash.eq_ignore_ascii_case(&proof.commit_candidate_hash) {
+            anyhow::bail!(
+                "durable Lazily visible-write content for {} patch_id={} does not match its candidate hash: expected={} actual={}",
+                file.display(),
+                patch_id,
+                proof.commit_candidate_hash,
+                content_hash,
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "visible_write_lazily_event_content_recovered file={} patch_id={} candidate_hash={} source={} len={} authority=durable_editor_ack",
+                file.display(),
+                patch_id,
+                proof.commit_candidate_hash,
+                proof.source,
+                content.len(),
+            ),
+        );
+        return Ok(Some((content.clone(), proof)));
+    }
     match current_text_via_recovery_authority(file, "visible_write_lazily_event_content") {
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }))
             if visible_write_content_hash(&text)
@@ -1487,6 +1600,14 @@ pub fn poll_visible_write_content_lazily_event_or_projection(
 /// authority queue is being extracted.
 pub trait EditorConvergenceEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+
+    /// Request and return one fresh, editor-authored full-buffer publication.
+    /// The default is deliberately inert so pure convergence fixtures cannot
+    /// accidentally manufacture editor authority.
+    fn publish_live_buffer_content(&self, file: &Path, source: &str) -> Result<Option<String>> {
+        let _ = (file, source);
+        Ok(None)
+    }
 
     fn apply_canonical_replace_if_attached(
         &self,
@@ -4676,6 +4797,71 @@ mod tests {
 
     struct CrdtOnlyConvergenceEffects;
 
+    struct PublishedBufferConvergenceEffects {
+        content: String,
+    }
+
+    impl EditorConvergenceEffects for PublishedBufferConvergenceEffects {
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            fs::write(file, content)?;
+            Ok(())
+        }
+
+        fn publish_live_buffer_content(
+            &self,
+            _file: &Path,
+            _source: &str,
+        ) -> Result<Option<String>> {
+            Ok(Some(self.content.clone()))
+        }
+
+        fn guard_visible_write_idle_and_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn atomic_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            anyhow::ensure!(
+                fs::read_to_string(file)? == expected_current,
+                "stale test write"
+            );
+            fs::write(file, content)?;
+            Ok(())
+        }
+
+        fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
+            None
+        }
+
+        fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
+
+        fn cleanup_fallback_patch_files(&self, _file: &Path) {}
+
+        fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
+            None
+        }
+
+        fn log_file_ipc_proof_failure(
+            &self,
+            _file: &Path,
+            _patch_id: Option<&str>,
+            _invariant: &str,
+            _recovery: &str,
+            _detail: &str,
+        ) {
+        }
+    }
+
     impl EditorConvergenceEffects for CrdtOnlyConvergenceEffects {
         fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
             panic!("CRDT convergence must not fall through to a disk write")
@@ -4769,6 +4955,159 @@ mod tests {
         assert!(log.contains("transport=crdt_relay"));
         assert!(log.contains("legacy_ipc=skipped"));
         assert!(!log.contains("editor_convergence_attempt"));
+    }
+
+    #[test]
+    fn lazily_editor_ack_recovers_content_when_relay_and_disk_are_stale() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("test.md");
+        let stale = "# Session\n\nstale projection\n";
+        let candidate = "# Session\n\nstale projection\n\n### Re: recovered\n\nComplete.\n";
+        let patch_id = "patch-content-bearing-ack";
+        fs::write(&file, stale).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let candidate_hash = visible_write_content_hash(candidate);
+        let generation = 7;
+        for (event_id, fact) in [
+            (
+                "candidate-generation".to_string(),
+                agent_doc_state_backbone::StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.clone(),
+                    owner: agent_doc_state_backbone::StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ),
+            (
+                "candidate-applied".to_string(),
+                agent_doc_state_backbone::StateFact::EditorPatchApplied {
+                    document_hash: document_hash.clone(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ),
+            (
+                "candidate-content".to_string(),
+                agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash: document_hash.clone(),
+                    patch_id: patch_id.to_string(),
+                    model_revision: generation,
+                    editor_visible_hash: candidate_hash.clone(),
+                    commit_candidate_hash: candidate_hash,
+                    commit_candidate_content: Some(candidate.to_string()),
+                    source: "editor_content_ack".to_string(),
+                },
+            ),
+        ] {
+            let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
+            agent_doc_controller_io::project_controller::append_state_event(dir.path(), &event)
+                .unwrap();
+        }
+
+        let observed = visible_write_content_from_lazily_event(&file, patch_id)
+            .unwrap()
+            .expect("durable content-bearing ACK should be sufficient");
+        assert_eq!(observed.0, candidate);
+        assert_eq!(fs::read_to_string(&file).unwrap(), stale);
+        assert_eq!(
+            observed.1.commit_candidate_content.as_deref(),
+            Some(candidate)
+        );
+    }
+
+    #[test]
+    fn already_applied_publish_upgrades_legacy_hash_only_receipt_in_lazily_state() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("test.md");
+        let baseline = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let candidate = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: Please reply — gpt-5\n\n",
+            "Recovered once.\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let response = "### Re: Please reply — gpt-5\n\nRecovered once.\n";
+        let patch_id = "legacy-hash-only-receipt";
+        fs::write(&file, baseline).unwrap();
+        agent_doc_snapshot_io::save(&file, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let candidate_hash = visible_write_content_hash(candidate);
+        let generation = 11;
+        for (event_id, fact) in [
+            (
+                "legacy-generation".to_string(),
+                agent_doc_state_backbone::StateFact::OwnerGenerationChanged {
+                    document_hash: document_hash.clone(),
+                    owner: agent_doc_state_backbone::StateOwner::EditorIpcBridge,
+                    generation,
+                },
+            ),
+            (
+                "legacy-applied".to_string(),
+                agent_doc_state_backbone::StateFact::EditorPatchApplied {
+                    document_hash: document_hash.clone(),
+                    patch_id: patch_id.to_string(),
+                    actor_generation: generation,
+                },
+            ),
+            (
+                "legacy-candidate".to_string(),
+                agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
+                    document_hash,
+                    patch_id: patch_id.to_string(),
+                    model_revision: generation,
+                    editor_visible_hash: candidate_hash.clone(),
+                    commit_candidate_hash: candidate_hash,
+                    commit_candidate_content: None,
+                    source: "legacy_editor_ack".to_string(),
+                },
+            ),
+        ] {
+            agent_doc_controller_io::project_controller::append_state_event(
+                dir.path(),
+                &agent_doc_state_backbone::StateEvent::new(event_id, fact),
+            )
+            .unwrap();
+        }
+
+        let outcome = persist_already_applied_socket_content_ours_snapshot(
+            &PublishedBufferConvergenceEffects {
+                content: candidate.to_string(),
+            },
+            AlreadyAppliedSocketSnapshotContext {
+                file: &file,
+                patch_id,
+                editor_id: None,
+                baseline: Some(baseline),
+                content_ours: Some(candidate),
+                normalize_prefix_lines: None,
+                expected_response: response,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::Persisted);
+        let upgraded = agent_doc_controller_io::project_controller::visible_write_commit_candidate_for_patch_file(
+            &file,
+            patch_id,
+        )
+        .expect("the explicit editor publication should upgrade the legacy receipt");
+        assert_eq!(
+            upgraded.commit_candidate_content.as_deref(),
+            Some(candidate)
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load(&file).unwrap().as_deref(),
+            Some(candidate)
+        );
     }
 
     #[test]

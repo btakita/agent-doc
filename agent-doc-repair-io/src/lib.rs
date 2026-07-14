@@ -208,7 +208,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let has_pending_response = pending_response.is_some();
     let capture = agent_doc_capture_io::load_active(&canonical)?
         .filter(|capture| capture_state_is_repairable(capture.state));
-    let doc_content = repair_current_document_content(
+    let mut doc_content = repair_current_document_content(
         &canonical,
         "repair_current_document",
         force_disk_override,
@@ -311,6 +311,35 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         let _ = std::fs::remove_file(&pending_path);
         let _ = agent_doc_capture_io::mark_discarded(&canonical);
         return Ok(RepairOutcome::Noop);
+    }
+
+    if let Some(reconciliation) = reconcile_partial_captured_response(
+        &canonical,
+        &doc_content,
+        &response,
+        capture.as_ref(),
+        historical_capture.as_ref(),
+    )? {
+        agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+            &canonical,
+            &reconciliation.content,
+            &doc_content,
+            "repair_partial_captured_response",
+        )?;
+        agent_doc_snapshot_io::save(
+            &canonical,
+            &reconciliation.content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "repair_partial_captured_response_reconciled file={} removed_nonblank_lines={} recovery=replay_complete_capture",
+                canonical.display(),
+                reconciliation.removed_nonblank_lines
+            ),
+        );
+        doc_content = reconciliation.content;
     }
 
     // Dedup guard: check if the response content is already present in the document.
@@ -441,6 +470,92 @@ fn repair_current_document_content(
             .with_context(|| format!("{source}: failed to read {}", file.display()));
     }
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+}
+
+fn reconcile_partial_captured_response(
+    file: &Path,
+    current: &str,
+    response: &str,
+    active: Option<&agent_doc_capture_io::CaptureRecord>,
+    historical: Option<&HistoricalCommittedCapture>,
+) -> Result<Option<agent_doc_capture_io::PartialResponseReconciliation>> {
+    let evidence = if let Some(capture) = active {
+        Some((
+            capture.cycle_id.as_str(),
+            capture.capture_id.as_str(),
+            capture.response_sha256.as_str(),
+            capture.response_body.as_str(),
+            capture.file_hash.as_deref(),
+            capture.snapshot_hash.as_deref(),
+            capture.baseline_content.as_deref(),
+        ))
+    } else {
+        historical.map(|capture| {
+            (
+                capture.cycle_id.as_str(),
+                capture.capture_id.as_str(),
+                capture.response_sha256.as_str(),
+                capture.response_body.as_str(),
+                capture.file_hash.as_deref(),
+                None,
+                capture.baseline_content.as_deref(),
+            )
+        })
+    };
+    let Some((
+        cycle_id,
+        capture_id,
+        response_sha256,
+        response_body,
+        file_hash,
+        snapshot_hash,
+        durable_baseline,
+    )) = evidence
+    else {
+        return Ok(None);
+    };
+
+    let baseline_matches = |content: &str| {
+        file_hash
+            .is_some_and(|expected| expected == agent_doc_capture_io::replay_file_hash(content))
+    };
+    let baseline = if let Some(content) = durable_baseline
+        && baseline_matches(content)
+    {
+        Some(content.to_string())
+    } else if let Some(head) = agent_doc_git_io::revision::show_head(file)?
+        && baseline_matches(&head)
+    {
+        // HEAD is only an independently hashed historical anchor. The target
+        // is still published through editor authority; this is never a Git
+        // restore or a disk-only overwrite.
+        Some(head)
+    } else {
+        None
+    };
+    let Some(baseline) = baseline else {
+        return Ok(None);
+    };
+    let Some(reconciliation) =
+        agent_doc_capture_io::reconcile_partial_response_lines(&baseline, current, response)
+    else {
+        return Ok(None);
+    };
+
+    let _ = agent_doc_capture_io::fortify_baseline_content(file, capture_id, &baseline)?;
+    agent_doc_cycle_state_io::append_response_captured_body(
+        file,
+        agent_doc_cycle_state_io::CapturedResponseFactInput {
+            cycle_id,
+            capture_id,
+            response_sha256,
+            response_body,
+            file_hash,
+            snapshot_hash,
+            baseline_content: Some(&baseline),
+        },
+    )?;
+    Ok(Some(reconciliation))
 }
 
 pub fn repair<R: RepairIoEffects + RepairTemplateWriteEffects, W: RepairReplayWriteEffects>(
@@ -679,7 +794,8 @@ pub fn replay_orphaned_response(
 
     let (fm, _) = agent_doc_frontmatter::frontmatter::parse(doc_content)
         .with_context(|| format!("failed to parse document frontmatter {}", file.display()))?;
-    let use_template_write = fm.resolve_mode().is_template() || response.contains("<!-- patch:");
+    let document_is_template = fm.resolve_mode().is_template();
+    let use_template_write = document_is_template || response.contains("<!-- patch:");
     let response_to_write = if use_template_write {
         match agent_doc_template::replay_guard::classify_replay_payload(response) {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Blocked(reason) => {
@@ -695,6 +811,14 @@ pub fn replay_orphaned_response(
         }
     } else {
         response.to_string()
+    };
+    let response_to_write = if document_is_template && !response_to_write.contains("<!-- patch:") {
+        format!(
+            "<!-- patch:exchange -->\n{}\n<!-- /patch:exchange -->\n",
+            response_to_write.trim_end()
+        )
+    } else {
+        response_to_write
     };
 
     if use_template_write {
@@ -1113,18 +1237,24 @@ pub fn historical_committed_capture_replay(
         file,
         doc_content,
         HistoricalCommittedCapture {
+            cycle_id: capture.cycle_id,
             capture_id: capture.capture_id,
             response_sha256: capture.response_sha256,
             response_body: capture.response_body,
+            file_hash: capture.file_hash,
+            baseline_content: capture.baseline_content,
         },
     )
 }
 
 #[derive(Debug, Clone)]
 pub struct HistoricalCommittedCapture {
+    cycle_id: String,
     capture_id: String,
     response_sha256: String,
     response_body: String,
+    file_hash: Option<String>,
+    baseline_content: Option<String>,
 }
 
 fn historical_committed_capture_replay_candidate(
@@ -1143,22 +1273,63 @@ fn historical_committed_capture_replay_candidate(
     else {
         return Ok(None);
     };
-    if !agent_doc_turn::response_replay::has_matching_orphan_prompt_for_committed_capture(
-        doc_content,
-        response_heading,
-    ) {
+    let has_matching_prompt =
+        agent_doc_turn::response_replay::has_matching_orphan_prompt_for_committed_capture(
+            doc_content,
+            response_heading,
+        );
+    let has_partial_response_proof =
+        historical_capture_has_partial_response_proof(file, doc_content, &capture)?;
+    if !has_matching_prompt && !has_partial_response_proof {
         return Ok(None);
     }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "repair_replay_committed_capture file={} capture_id={} response_sha256={}",
+            "repair_replay_committed_capture file={} capture_id={} response_sha256={} selector={}",
             file.display(),
             capture.capture_id,
-            capture.response_sha256
+            capture.response_sha256,
+            if has_partial_response_proof {
+                "partial_response_proof"
+            } else {
+                "matching_orphan_prompt"
+            }
         ),
     );
     Ok(Some(capture))
+}
+
+fn historical_capture_has_partial_response_proof(
+    file: &Path,
+    current: &str,
+    capture: &HistoricalCommittedCapture,
+) -> Result<bool> {
+    let baseline_matches = |content: &str| {
+        capture
+            .file_hash
+            .as_deref()
+            .is_some_and(|expected| expected == agent_doc_capture_io::replay_file_hash(content))
+    };
+    let baseline = if let Some(content) = capture.baseline_content.as_deref()
+        && baseline_matches(content)
+    {
+        Some(content.to_string())
+    } else if let Some(head) = agent_doc_git_io::revision::show_head(file)?
+        && baseline_matches(&head)
+    {
+        Some(head)
+    } else {
+        None
+    };
+    Ok(baseline.is_some_and(|baseline| {
+        agent_doc_capture_io::reconcile_partial_response_lines(
+            &baseline,
+            current,
+            &capture.response_body,
+        )
+        .is_some()
+    }))
 }
 
 pub fn visible_response_patch_from_document(
@@ -1865,9 +2036,12 @@ fn projected_committed_capture_response(file: &Path) -> Result<Option<Historical
         return Ok(None);
     }
     Ok(Some(HistoricalCommittedCapture {
+        cycle_id: projected.cycle_id,
         capture_id: projected.capture_id,
         response_sha256: projected.response_sha256,
         response_body: projected.response_body,
+        file_hash: projected.file_hash,
+        baseline_content: projected.baseline_content,
     }))
 }
 
@@ -1908,6 +2082,20 @@ pub fn recover_missing_commit_boundary(
         "commit_boundary_recovery",
     )?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
+    if has_open_commit_boundary
+        && let (Some(state), Some(head)) = (state.as_ref(), head_doc.as_deref())
+        && captured_response_materialized_in_head(file, state, head)? == Some(false)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "repair_commit_boundary_not_recovered file={} cycle={} reason=captured_response_missing_from_head",
+                file.display(),
+                state.cycle_id
+            ),
+        );
+        return Ok(None);
+    }
     let reason = match agent_doc_snapshot_io::verify_snapshot_committed(file)? {
         agent_doc_snapshot_io::SnapshotCommitStatus::Committed => head_doc
             .as_deref()
@@ -1950,6 +2138,32 @@ pub fn recover_missing_commit_boundary(
         agent_doc_turn::closeout_guard::CloseoutGuardReason::CommitBoundaryRecovered,
     );
     Ok(Some(reason))
+}
+
+fn captured_response_materialized_in_head(
+    file: &Path,
+    state: &agent_doc_cycle_state_io::CycleState,
+    head: &str,
+) -> Result<Option<bool>> {
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(None);
+    };
+    let response_body = if let Some(projected) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        && projected.cycle_id == state.cycle_id
+        && state.response_sha256.as_deref() == Some(projected.response_sha256.as_str())
+    {
+        Some(projected.response_body)
+    } else {
+        agent_doc_capture_io::load_by_id(file, capture_id)?.and_then(|capture| {
+            (capture.cycle_id == state.cycle_id
+                && state.response_sha256.as_deref() == Some(capture.response_sha256.as_str()))
+            .then_some(capture.response_body)
+        })
+    };
+    Ok(response_body.map(|response| {
+        agent_doc_turn::response_replay::response_materialized_in_content(&response, head)
+    }))
 }
 
 pub fn repair_completed_backlog_items(

@@ -563,7 +563,7 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot")
                 && !log.contains("file_ipc_fallback_skip_already_applied"),
             "unreceipted already_applied must retain the response without disk adoption:\n{log}"
@@ -782,7 +782,7 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(
             outcome,
-            AlreadyAppliedSnapshotOutcome::NeedsFileFallback,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry,
             "a stale receipt must not authorize adoption of a newer disk projection"
         );
         assert_eq!(
@@ -797,8 +797,8 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+            log.contains("invariant=visible_write_receipt_superseded_by_worktree")
+                && log.contains("recovery=refresh_editor_cut_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale visible-write receipt rejection should be auditable:\n{log}"
         );
@@ -885,7 +885,10 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
+        );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
@@ -898,8 +901,8 @@ mod submodule_patch_routing_tests {
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+            log.contains("invariant=visible_write_receipt_superseded_by_live_editor")
+                && log.contains("recovery=refresh_editor_cut_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale live-editor visible-write receipt should fail closed before snapshot adoption:\n{log}"
         );
@@ -1096,7 +1099,7 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
                 && !log.contains("file_ipc_fallback_skip_already_applied")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "unreceipted duplicate retry should be logged without document mutation:\n{log}"
@@ -1147,7 +1150,10 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
+        );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
@@ -1161,7 +1167,7 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_missing_disk_response_repaired"),
             "missing-receipt already_applied must fail closed without disk repair:\n{log}"
         );
@@ -1219,7 +1225,10 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
+        );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
@@ -1317,13 +1326,13 @@ mod submodule_patch_routing_tests {
 
         assert_eq!(
             outcome,
-            AlreadyAppliedSnapshotOutcome::NeedsFileFallback,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry,
             "a stale already_applied receipt must keep the response pending"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+            log.contains("invariant=visible_write_receipt_missing_response")
+                && log.contains("recovery=retry_response_cell_via_cpc_without_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "deferred visible repair must remain pending without a disk write:\n{log}"
         );
@@ -1336,7 +1345,7 @@ mod submodule_patch_routing_tests {
     }
 
     #[test]
-    fn already_applied_without_response_in_content_ours_falls_back() {
+    fn already_applied_without_response_in_content_ours_requires_authoritative_retry() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
@@ -1366,7 +1375,10 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
+        );
         assert_eq!(
             agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
             Some(baseline),
@@ -1375,14 +1387,14 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
-            "response-less already_applied should fail proof and fall back:\n{log}"
+            "response-less already_applied should fail proof without file fallback:\n{log}"
         );
     }
 
     #[test]
-    fn already_applied_empty_response_probe_falls_back() {
+    fn already_applied_empty_response_probe_requires_authoritative_retry() {
         let dir = TempDir::new().unwrap();
         let root = dir.path().canonicalize().unwrap();
         for subdir in ["snapshots", "crdt", "logs", "state/cycles"] {
@@ -1411,13 +1423,16 @@ mod submodule_patch_routing_tests {
         )
         .unwrap();
 
-        assert_eq!(outcome, AlreadyAppliedSnapshotOutcome::NeedsFileFallback);
+        assert_eq!(
+            outcome,
+            AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
+        );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
+                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
-            "empty response probe should fail proof and fall back:\n{log}"
+            "empty response probe should fail proof without file fallback:\n{log}"
         );
     }
 

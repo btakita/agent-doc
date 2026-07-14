@@ -322,7 +322,7 @@ pub fn run(
 
     #[cfg(test)]
     {
-        return run_in_controller(file, keep, component_name, message, tag, commit, force_disk);
+        run_in_controller(file, keep, component_name, message, tag, commit, force_disk)
     }
     #[cfg(not(test))]
     agent_doc_controller_io::project_controller::compact_document_via_controller(
@@ -363,12 +363,13 @@ pub fn run_in_controller(
     }
 
     let effects = runtime_effects()?;
-    let content = (if force_disk {
+    let write_base_content = (if force_disk {
         effects.force_disk_document_content(file, "compact_run_initial_force_disk")
     } else {
         effects.current_document_content(file, "compact_run_initial")
     })
     .with_context(|| format!("failed to read {}", file.display()))?;
+    let content = compose_active_capture_for_compaction(file, &write_base_content)?;
 
     let (fm, body) = frontmatter::parse(&content)?;
 
@@ -396,10 +397,25 @@ pub fn run_in_controller(
         let is_crdt = resolved.is_crdt();
         match keep {
             Some(n) => run_component_compact_partial(
-                file, &content, target, n, message, is_crdt, force_disk,
+                file,
+                &content,
+                &write_base_content,
+                PartialCompactOptions {
+                    target,
+                    keep: n,
+                    message,
+                    is_crdt,
+                    force_disk,
+                },
             ),
             None => run_component_compact_with_options(
-                file, &content, target, message, is_crdt, force_disk,
+                file,
+                &content,
+                &write_base_content,
+                target,
+                message,
+                is_crdt,
+                force_disk,
             ),
         }?
     } else {
@@ -440,7 +456,15 @@ pub fn run_in_controller(
             compacted = reconciled;
         }
 
-        apply_compacted_document(file, &compacted, &compacted, &content, false, force_disk)?;
+        apply_compacted_document(
+            file,
+            &compacted,
+            &compacted,
+            &content,
+            &write_base_content,
+            false,
+            force_disk,
+        )?;
         discard_archived_captures(file, &archive_content);
 
         eprintln!(
@@ -994,11 +1018,67 @@ fn converge_compacted_with_retry(
     }
 }
 
+/// Fold an active, not-yet-committed capture into the compaction input before
+/// selecting archive topics. This closes the race where a response write is
+/// retained for editor delivery while a later Compact Exchange is computed
+/// from an older disk/controller projection. The write CAS still uses
+/// `current_content` as its base; only the archive/summary model is enriched.
+fn compose_active_capture_for_compaction(file: &Path, current_content: &str) -> Result<String> {
+    let Some(capture) = agent_doc_capture_io::load_active(file)? else {
+        return Ok(current_content.to_string());
+    };
+    if capture.committed_at.is_some()
+        || capture.discarded_at.is_some()
+        || capture.response_body.trim().is_empty()
+        || agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            current_content,
+        )
+    {
+        return Ok(current_content.to_string());
+    }
+
+    let plan = agent_doc_template_io::parse_template_patchback(
+        file,
+        &capture.response_body,
+        "compact_active_capture",
+        agent_doc_ops_log_io::log_op,
+    )?;
+    let composed = agent_doc_template_io::apply_patches(
+        current_content,
+        &plan.patches,
+        &plan.unmatched,
+        file,
+    )?;
+    if !agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &composed,
+    ) {
+        anyhow::bail!(
+            "compact: active captured response {} did not materialize in the compaction model for {}; refusing to archive an older projection",
+            capture.capture_id,
+            file.display(),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "compact_active_capture_composed file={} capture_id={} base_hash={} composed_hash={}",
+            file.display(),
+            capture.capture_id,
+            agent_doc_hash::content_hash(current_content),
+            agent_doc_hash::content_hash(&composed),
+        ),
+    );
+    Ok(composed)
+}
+
 fn apply_compacted_document(
     file: &Path,
     compacted: &str,
     snapshot_content: &str,
-    source_content: &str,
+    validation_source_content: &str,
+    write_base_content: &str,
     refresh_crdt: bool,
     force_disk: bool,
 ) -> Result<()> {
@@ -1008,12 +1088,12 @@ fn apply_compacted_document(
 
     // Fail closed before any write if the rebuild dropped a whole item from a
     // non-exchange singleton list component (#compactdropitem).
-    assert_non_exchange_items_preserved(file, source_content, compacted, "apply")?;
+    assert_non_exchange_items_preserved(file, validation_source_content, compacted, "apply")?;
 
     // Fail closed before any write if the rebuild altered a non-exchange
     // opening marker (dropped inline attributes like preset/priority/go)
     // (#compactqattr).
-    assert_non_exchange_markers_preserved(file, source_content, compacted, "apply")?;
+    assert_non_exchange_markers_preserved(file, validation_source_content, compacted, "apply")?;
 
     if force_disk {
         runtime_effects()?.force_disk_atomic_write(file, compacted)?;
@@ -1052,7 +1132,7 @@ fn apply_compacted_document(
         // operator re-runs compact when the editor is idle, instead of surfacing the
         // raw CPC error (the reported JB `Compact Exchange` exit-1). The zero-live
         // editor case is already resolved to disk authority by #stale-lease-cpc-authority.
-        converge_compacted_with_retry(runtime_effects()?, file, compacted, source_content)?;
+        converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
     }
 
     agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
@@ -1078,7 +1158,7 @@ fn run_component_compact(
     message: Option<&str>,
     is_crdt: bool,
 ) -> Result<String> {
-    run_component_compact_with_options(file, content, target, message, is_crdt, false)
+    run_component_compact_with_options(file, content, content, target, message, is_crdt, false)
         .map(|targets| targets.committed)
 }
 
@@ -1090,7 +1170,7 @@ fn run_component_compact_force_disk(
     message: Option<&str>,
     is_crdt: bool,
 ) -> Result<String> {
-    run_component_compact_with_options(file, content, target, message, is_crdt, true)
+    run_component_compact_with_options(file, content, content, target, message, is_crdt, true)
         .map(|targets| targets.committed)
 }
 
@@ -1099,6 +1179,7 @@ fn run_component_compact_force_disk(
 fn run_component_compact_with_options(
     file: &Path,
     content: &str,
+    write_base_content: &str,
     target: &str,
     message: Option<&str>,
     is_crdt: bool,
@@ -1178,6 +1259,7 @@ fn run_component_compact_with_options(
         &compacted,
         &snapshot_compacted,
         content,
+        write_base_content,
         is_crdt,
         force_disk,
     )?;
@@ -1201,15 +1283,27 @@ fn run_component_compact_with_options(
 ///
 /// Archives all but the last `keep` `### Re:` topic sections; rebuilds the component
 /// with an archive pointer + preamble (or `message`) + kept sections.
+struct PartialCompactOptions<'a> {
+    target: &'a str,
+    keep: usize,
+    message: Option<&'a str>,
+    is_crdt: bool,
+    force_disk: bool,
+}
+
 fn run_component_compact_partial(
     file: &Path,
     content: &str,
-    target: &str,
-    keep: usize,
-    message: Option<&str>,
-    is_crdt: bool,
-    force_disk: bool,
+    write_base_content: &str,
+    options: PartialCompactOptions<'_>,
 ) -> Result<CompactDocumentTargets> {
+    let PartialCompactOptions {
+        target,
+        keep,
+        message,
+        is_crdt,
+        force_disk,
+    } = options;
     let components = element::parse(content)?;
     let comp = components
         .iter()
@@ -1319,6 +1413,7 @@ fn run_component_compact_partial(
         &compacted,
         &snapshot_compacted,
         content,
+        write_base_content,
         is_crdt,
         force_disk,
     )?;
@@ -1749,7 +1844,19 @@ mod tests {
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
 
-        run_component_compact_partial(&file, doc, "exchange", 1, None, false, true).unwrap();
+        run_component_compact_partial(
+            &file,
+            doc,
+            doc,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 1,
+                message: None,
+                is_crdt: false,
+                force_disk: true,
+            },
+        )
+        .unwrap();
 
         let result = std::fs::read_to_string(&file).unwrap();
         let exchange = agent_doc_element::element::parse(&result)
@@ -2181,6 +2288,55 @@ mod tests {
             !ops_log.contains("late_fallback_patch_rejected"),
             "operator compact is not a stale response fallback"
         );
+    }
+
+    #[test]
+    fn compact_exchange_archives_active_capture_missing_from_current_projection() {
+        let doc = concat!(
+            "---\nagent_doc_session: test-captured-compact\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: older topic\n\nOlder response.\n\n",
+            "❯ describe the recovery\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: describe the recovery — gpt-5\n\n",
+            "Captured response that never reached the current projection.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
+        agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(doc), Some(doc)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(&file, response, doc).unwrap();
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            None,
+            Some("skip"),
+            false,
+            true,
+        )
+        .unwrap();
+
+        let archive = std::fs::read_dir(agent_doc_dir.join("archives"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("md"))
+            .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+            .expect("compact archive");
+        assert!(archive.contains("Captured response that never reached"));
+        let ops = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
+        assert!(ops.contains("compact_active_capture_composed"));
     }
 
     #[test]
@@ -3431,6 +3587,7 @@ mod tests {
             &file,
             malformed_compacted,
             malformed_compacted,
+            source,
             source,
             false,
             false,

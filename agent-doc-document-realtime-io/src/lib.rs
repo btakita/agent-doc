@@ -35,6 +35,7 @@ use agent_doc_document_realtime::{
     write_policy::{self, VisibleWriteReconcile},
 };
 pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
+pub use agent_doc_state_backbone::DocumentWriteDeferredReason;
 
 /// Wall-clock seconds (since UNIX epoch) of the last controller RPC failure
 /// observed by [`observe_live_editor_authority`] (the controller-timeout path).
@@ -100,6 +101,7 @@ use agent_doc_crdt_relay_io::{
 };
 
 static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
+static DOCUMENT_WRITE_INTENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
     Mutex<HashMap<PathBuf, DocumentAuthorityObservation>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -115,6 +117,115 @@ const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_000;
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
 const CRDT_WRITE_BACKOFF_MAX_MS: u64 = 250;
+const CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS: u64 = 250;
+#[cfg(test)]
+const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 500;
+#[cfg(not(test))]
+const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 2_000;
+#[cfg(test)]
+const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
+#[cfg(not(test))]
+const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CrdtConvergenceState {
+    TypingQuiescence,
+    ControllerModelBackpressure,
+    EditorAttachedModelMissing,
+    EditorSyncPending,
+    DeliveryAckPending,
+    OperatorAdvancedAfterApply,
+    CompareAndSwapRaced,
+}
+
+impl CrdtConvergenceState {
+    const fn token(self) -> &'static str {
+        match self {
+            Self::TypingQuiescence => "typing_quiescence",
+            Self::ControllerModelBackpressure => "controller_model_backpressure",
+            Self::EditorAttachedModelMissing => "editor_attached_model_missing",
+            Self::EditorSyncPending => "editor_sync_pending",
+            Self::DeliveryAckPending => "delivery_ack_pending",
+            Self::OperatorAdvancedAfterApply => "operator_advanced_after_apply",
+            Self::CompareAndSwapRaced => "compare_and_swap_raced",
+        }
+    }
+}
+
+impl std::fmt::Display for CrdtConvergenceState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.token())
+    }
+}
+
+#[derive(Default)]
+struct AckRecoveryState {
+    started: Option<std::time::Instant>,
+    last_signal: Option<std::time::Instant>,
+    force_refresh_sent: bool,
+}
+
+impl AckRecoveryState {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn wait(&mut self, file: &Path, source: &str, live_editors: usize) -> Result<()> {
+        let now = std::time::Instant::now();
+        let started = *self.started.get_or_insert(now);
+        let elapsed_ms = now
+            .duration_since(started)
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64;
+        let force_refresh =
+            elapsed_ms >= CRDT_ACK_FORCE_REFRESH_AFTER_MS && !self.force_refresh_sent;
+        let signal_due = force_refresh
+            || self.last_signal.is_none_or(|last| {
+                now.duration_since(last)
+                    >= std::time::Duration::from_millis(CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS)
+            });
+        if signal_due {
+            let reason = if force_refresh {
+                self.force_refresh_sent = true;
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh
+            } else {
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
+            };
+            if let Err(err) =
+                agent_doc_crdt_relay_io::signal_crdt_replica_event(file, reason, live_editors)
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_crdt_ack_recovery_signal_failed file={} reason={} error={err}",
+                        file.display(),
+                        reason,
+                    ),
+                );
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_crdt_ack_recovery_signal file={} reason={} elapsed_ms={} live_editors={} strategy=retained_ack_replay_then_bounded_reregister",
+                        file.display(),
+                        reason,
+                        elapsed_ms,
+                        live_editors,
+                    ),
+                );
+            }
+            self.last_signal = Some(now);
+        }
+        if elapsed_ms >= CRDT_ACK_RECOVERY_TIMEOUT_MS {
+            anyhow::bail!(
+                "{source}: editor delivery ACK recovery for {} did not settle within {}ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)",
+                file.display(),
+                CRDT_ACK_RECOVERY_TIMEOUT_MS,
+            );
+        }
+        Ok(())
+    }
+}
 
 /// Controller transport congestion and an already-running model bootstrap are
 /// not document conflicts. Closeout owns a larger convergence deadline than
@@ -180,6 +291,10 @@ pub static RUNTIME_WRITE_CONVERGENCE_EFFECTS: RuntimeWriteConvergenceEffects =
 impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConvergenceEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         atomic_write_through_authority(file, content)
+    }
+
+    fn publish_live_buffer_content(&self, file: &Path, source: &str) -> Result<Option<String>> {
+        publish_fresh_live_buffer_content(file, source)
     }
 
     fn apply_canonical_replace_if_attached(
@@ -280,6 +395,54 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
                 detail
             ),
         );
+    }
+}
+
+fn publish_fresh_live_buffer_content(file: &Path, source: &str) -> Result<Option<String>> {
+    #[cfg(any(test, feature = "test-support"))]
+    const PUBLISH_TIMEOUT_MS: u64 = 100;
+    #[cfg(not(any(test, feature = "test-support")))]
+    const PUBLISH_TIMEOUT_MS: u64 = 1_000;
+
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let path = canonical.to_string_lossy().to_string();
+    let before: std::collections::HashMap<Option<String>, u64> =
+        agent_doc_debounce::live_buffer_snapshots(&path)
+            .into_iter()
+            .map(|snapshot| (snapshot.editor_id, snapshot.edit_epoch))
+            .collect();
+    let timeout = std::time::Duration::from_millis(PUBLISH_TIMEOUT_MS);
+    agent_doc_crdt_relay_io::request_document_model_live_buffer_publish_with_timeout(
+        &canonical, source, timeout,
+    )?;
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let fresh = agent_doc_debounce::live_buffer_snapshots(&path)
+            .into_iter()
+            .filter(|snapshot| {
+                snapshot.content.is_some()
+                    && snapshot.len == snapshot.content.as_deref().map(str::len).unwrap_or(0)
+                    && before
+                        .get(&snapshot.editor_id)
+                        .is_none_or(|epoch| snapshot.edit_epoch > *epoch)
+            })
+            .max_by_key(|snapshot| (snapshot.edit_epoch, snapshot.timestamp_ms));
+        if let Some(snapshot) = fresh {
+            let content = snapshot.content.expect("filtered content-bearing snapshot");
+            if agent_doc_hash::content_hash(&content).eq_ignore_ascii_case(&snapshot.hash) {
+                clear_deferred_document_write_intent(
+                    &canonical,
+                    &snapshot.hash,
+                    "fresh_live_buffer_publish",
+                )?;
+                return Ok(Some(content));
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
 }
 
@@ -457,6 +620,7 @@ pub fn atomic_write_force_disk_through_authority(path: &Path, content: &str) -> 
         return result;
     }
 
+    retain_force_disk_reconnect_intent(path, content)?;
     atomic_write_authority_raw(path, content)
 }
 
@@ -536,7 +700,8 @@ pub fn apply_canonical_replace_if_attached(
     let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
     let mut pending_target: Option<String> = None;
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpcRelayWrite> = None;
-    let mut wait_reason = "typing_quiescence";
+    let mut ack_recovery = AckRecoveryState::default();
+    let mut wait_state = CrdtConvergenceState::TypingQuiescence;
     let mut last_notice = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(2))
         .unwrap_or_else(std::time::Instant::now);
@@ -550,7 +715,7 @@ pub fn apply_canonical_replace_if_attached(
                 &format!(
                     "{source}_crdt_convergence_timeout file={} reason={} timeout_ms={} recovery=retry_crdt_merge_no_legacy_replay",
                     file.display(),
-                    wait_reason,
+                    wait_state,
                     CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
                 ),
             );
@@ -558,7 +723,7 @@ pub fn apply_canonical_replace_if_attached(
                 "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); pending change retained for retry",
                 file.display(),
                 CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
-                wait_reason,
+                wait_state,
             );
         }
 
@@ -584,7 +749,7 @@ pub fn apply_canonical_replace_if_attached(
         let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
             Ok(current) => Some(current),
             Err(err) if transient_convergence_backpressure_error(&err) => {
-                wait_reason = "controller_model_backpressure";
+                wait_state = CrdtConvergenceState::ControllerModelBackpressure;
                 // The authority/model boundary already records the failed
                 // attempt. The common two-second notice below coalesces retry
                 // telemetry instead of logging every controller/model poll.
@@ -597,10 +762,10 @@ pub fn apply_canonical_replace_if_attached(
             match observed {
                 agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(None),
                 agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
-                    wait_reason = "editor_attached_model_missing";
+                    wait_state = CrdtConvergenceState::EditorAttachedModelMissing;
                 }
                 agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
-                    wait_reason = "editor_sync_pending";
+                    wait_state = CrdtConvergenceState::EditorSyncPending;
                 }
                 agent_doc_crdt_relay_io::CurrentText::Current {
                     text: relay_text,
@@ -614,6 +779,11 @@ pub fn apply_canonical_replace_if_attached(
                                 .expect("pending CRDT target must retain its write receipt");
                             relay_write.delivery_converged = true;
                             relay_write.live_editors = live_editors;
+                            clear_deferred_document_write_intent(
+                                file,
+                                &relay_write.content_hash,
+                                source,
+                            )?;
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
@@ -635,21 +805,19 @@ pub fn apply_canonical_replace_if_attached(
                             // one. The editor pulls a coalesced canonical frontier;
                             // this poll applies backpressure until that frontier is
                             // visible and ACKed.
-                            wait_reason = "delivery_ack_pending";
+                            wait_state = CrdtConvergenceState::DeliveryAckPending;
+                            ack_recovery.wait(file, source, live_editors)?;
                         } else {
                             // Operator text arrived after our write. Recompute from
                             // the original base/agent candidate against the newest
                             // converged operator cut, then issue one new CRDT delta.
                             pending_target = None;
                             pending_write = None;
+                            ack_recovery.reset();
                             backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
-                            wait_reason = "operator_advanced_after_apply";
+                            wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
                             continue;
                         }
-                    } else if write_policy::decide_crdt_write_admission(delivery_converged)
-                        == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
-                    {
-                        wait_reason = "prior_delivery_ack_pending";
                     } else {
                         let effective_target =
                             if relay_text == expected_current || relay_text == content {
@@ -665,7 +833,59 @@ pub fn apply_canonical_replace_if_attached(
                                 "{source}: failed to CRDT-merge the settled editor version for {}",
                                 file.display()
                             )
-                        })?
+                            })?
+                            };
+
+                        let zero_replica_visible_write_proven = live_editors == 0
+                            && relay_text == effective_target
+                            && durable_visible_write_content_proves_target(file, &effective_target);
+                        if live_editors == 0 && relay_text == effective_target {
+                            if zero_replica_visible_write_proven {
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_zero_replica_visible_write_proven file={} content_hash={} authority=lazily_editor_ack action=allow_matching_disk_projection",
+                                        file.display(),
+                                        agent_doc_hash::content_hash(&effective_target),
+                                    ),
+                                );
+                            } else {
+                                let intent_id = ensure_deferred_document_write_intent(
+                                    file,
+                                    &relay_text,
+                                    &effective_target,
+                                    source,
+                                    DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+                                )?;
+                                anyhow::bail!(
+                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; recovery=await_editor_replica_no_disk_write",
+                                    file.display(),
+                                );
+                            }
+                        }
+
+                        // Retain every accepted candidate before it crosses the
+                        // CRDT delivery boundary. This is the Lazily handoff that
+                        // lets a client ACK retry or forced replica re-register
+                        // finish after this process exits without asking an agent
+                        // to reconstruct or duplicate the response.
+                        let retained_intent_id = ensure_deferred_document_write_intent(
+                            file,
+                            &relay_text,
+                            &effective_target,
+                            source,
+                            if live_editors == 0 {
+                                DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
+                            } else {
+                                DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                            },
+                        )?;
+
+                        let zero_replica_intent =
+                            if live_editors == 0 && !zero_replica_visible_write_proven {
+                                Some(retained_intent_id)
+                            } else {
+                                None
                             };
 
                         match apply_cpc_write_through_relay_authority(
@@ -675,8 +895,33 @@ pub fn apply_canonical_replace_if_attached(
                             source,
                         ) {
                             Ok(None) => return Ok(None),
+                            Ok(Some(relay_write))
+                                if relay_write.applied && relay_write.targets == 0 =>
+                            {
+                                let intent_id = zero_replica_intent.unwrap_or_else(|| {
+                                    "durable-intent-recorded-before-cpc-write".to_string()
+                                });
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write",
+                                        file.display(),
+                                        intent_id,
+                                        relay_write.content_hash,
+                                    ),
+                                );
+                                anyhow::bail!(
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; recovery=await_editor_replica_no_disk_write",
+                                    file.display(),
+                                );
+                            }
                             Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
                                 relay_write.live_editors = live_editors;
+                                clear_deferred_document_write_intent(
+                                    file,
+                                    &relay_write.content_hash,
+                                    source,
+                                )?;
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
@@ -692,9 +937,10 @@ pub fn apply_canonical_replace_if_attached(
                                 return Ok(Some(relay_write));
                             }
                             Ok(Some(relay_write)) => {
-                                wait_reason = "delivery_ack_pending";
+                                wait_state = CrdtConvergenceState::DeliveryAckPending;
                                 pending_target = Some(effective_target);
                                 pending_write = Some(relay_write);
+                                ack_recovery.reset();
                                 backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
                             }
                             Err(err) => {
@@ -702,13 +948,13 @@ pub fn apply_canonical_replace_if_attached(
                                 if detail.contains("recovery=retry_crdt_merge")
                                     || detail.contains("editor_sync_pending")
                                 {
-                                    wait_reason = "compare_and_swap_raced";
+                                    wait_state = CrdtConvergenceState::CompareAndSwapRaced;
                                     agent_doc_ops_log_io::log_op(
                                         file,
                                         &format!(
                                             "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
                                             file.display(),
-                                            wait_reason,
+                                            wait_state,
                                             backoff_ms,
                                         ),
                                     );
@@ -726,7 +972,7 @@ pub fn apply_canonical_replace_if_attached(
             eprintln!(
                 "[write] Waiting for typing/CRDT versions to settle for {} (reason={}, elapsed={}ms)",
                 file.display(),
-                wait_reason,
+                wait_state,
                 started.elapsed().as_millis(),
             );
             agent_doc_ops_log_io::log_op(
@@ -734,7 +980,7 @@ pub fn apply_canonical_replace_if_attached(
                 &format!(
                     "{source}_crdt_convergence_wait file={} reason={} elapsed_ms={} backoff_ms={} strategy=coalesced_latest_frontier",
                     file.display(),
-                    wait_reason,
+                    wait_state,
                     started.elapsed().as_millis(),
                     backoff_ms,
                 ),
@@ -904,6 +1150,296 @@ fn record_document_authority(
             );
         }
     }
+}
+
+/// Return the durable deferred write for `file`, if one still awaits editor
+/// acknowledgement. Consumers use this to extend the same Lazily lineage
+/// instead of starting a competing relay write during closeout.
+pub fn pending_document_write(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+        .ok()?
+        .document(&document_hash)?
+        .document
+        .pending_write
+        .clone()
+}
+
+/// Extend an existing deferred write with a later canonical target without
+/// touching disk. If no deferred write exists, this starts one.
+pub fn retain_deferred_document_write_target(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    reason: DocumentWriteDeferredReason,
+) -> Result<String> {
+    ensure_deferred_document_write_intent(file, expected_current, content, source, reason)
+}
+
+fn pending_document_write_for_target(
+    file: &Path,
+    target_hash: &str,
+) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
+    pending_document_write(file)
+        .as_ref()
+        .filter(|pending| pending.target_hash.eq_ignore_ascii_case(target_hash))
+        .cloned()
+}
+
+fn durable_visible_write_content_proves_target(file: &Path, content: &str) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let candidate_hash = agent_doc_hash::content_hash(
+        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content),
+    );
+    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+        .ok()
+        .and_then(|projection| {
+            projection
+                .document(&document_hash)
+                .and_then(|document| document.applied_visible_write_candidate(&candidate_hash))
+                .cloned()
+        })
+        .and_then(|candidate| candidate.commit_candidate_content)
+        .is_some_and(|candidate_content| candidate_content == content)
+}
+
+fn ensure_deferred_document_write_intent(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    reason: DocumentWriteDeferredReason,
+) -> Result<String> {
+    let mut expected_content = expected_current.to_string();
+    let mut target_content = content.to_string();
+    let requested_target_hash = agent_doc_hash::content_hash(content);
+    if let Some(pending) = pending_document_write(file) {
+        if pending
+            .target_hash
+            .eq_ignore_ascii_case(&requested_target_hash)
+        {
+            return Ok(pending.intent_id);
+        }
+
+        let expected_hash = agent_doc_hash::content_hash(expected_current);
+        if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
+            let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
+                agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
+            });
+            let merge_base = pending
+                .expected_content
+                .clone()
+                .filter(|base| {
+                    agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+                })
+                .or_else(|| {
+                    (expected_hash.eq_ignore_ascii_case(&pending.expected_hash))
+                        .then(|| expected_current.to_string())
+                })
+                .or(legacy_disk_base);
+            let Some(merge_base) = merge_base else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_deferred_write_preserved_prior file={} prior_intent_id={} reason=missing_content_bearing_merge_base requested_hash={requested_target_hash}",
+                        file.display(),
+                        pending.intent_id,
+                    ),
+                );
+                return Ok(pending.intent_id);
+            };
+            let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
+            target_content = agent_doc_merge::crdt::merge_by_component(
+                Some(&base_state),
+                &pending.target_content,
+                content,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to compose deferred document writes for {}",
+                    file.display()
+                )
+            })?;
+            // Preserve the original editor cut as the merge base across a
+            // chain of canonical target refinements (commit boundary moves,
+            // marker cleanup, compaction). Re-basing on the prior target would
+            // make a reconnecting pre-force editor look like it deleted the
+            // response introduced by that target.
+            expected_content = merge_base;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_deferred_write_composed file={} prior_intent_id={} requested_hash={requested_target_hash} composed_hash={}",
+                    file.display(),
+                    pending.intent_id,
+                    agent_doc_hash::content_hash(&target_content),
+                ),
+            );
+        } else if let Some(retained_base) = pending.expected_content.clone().filter(|base| {
+            agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+        }) {
+            expected_content = retained_base;
+        }
+    }
+    let target_hash = agent_doc_hash::content_hash(&target_content);
+    if let Some(pending) = pending_document_write_for_target(file, &target_hash) {
+        return Ok(pending.intent_id);
+    }
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let sequence = DOCUMENT_WRITE_INTENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let intent_id = format!("{now_nanos}-{sequence}-{target_hash}");
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("document-write-deferred-{document_hash}-{intent_id}"),
+        agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+            document_hash,
+            intent_id: intent_id.clone(),
+            expected_hash: agent_doc_hash::content_hash(&expected_content),
+            expected_content: Some(expected_content),
+            target_hash,
+            target_content,
+            source: source.to_string(),
+            reason,
+        },
+    );
+    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
+        .with_context(|| {
+            format!(
+                "failed to retain deferred document write in Lazily state for {}",
+                file.display()
+            )
+        })?;
+    Ok(intent_id)
+}
+
+/// Reconcile a reappearing editor buffer with the newest durable deferred
+/// document target. A clean/stale buffer receives the target directly; later
+/// unsaved operator edits are component-merged over the retained base. This is
+/// the reconnect half of zero-replica and explicit `--force-disk` recovery.
+pub fn deferred_document_write_reconnect_content(
+    file: &Path,
+    editor_content: &str,
+) -> Result<Option<String>> {
+    let Some(pending) = pending_document_write(file) else {
+        return Ok(None);
+    };
+    let editor_hash = agent_doc_hash::content_hash(editor_content);
+    if editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
+        return Ok(Some(pending.target_content));
+    }
+
+    let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
+        agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
+    });
+    let base = pending
+        .expected_content
+        .clone()
+        .filter(|content| {
+            agent_doc_hash::content_hash(content).eq_ignore_ascii_case(&pending.expected_hash)
+        })
+        .or(legacy_disk_base)
+        .with_context(|| {
+            format!(
+                "deferred write {} for {} has no content-bearing merge base",
+                pending.intent_id,
+                file.display()
+            )
+        })?;
+    if editor_hash.eq_ignore_ascii_case(&pending.expected_hash) {
+        return Ok(Some(pending.target_content));
+    }
+
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&base).encode_state();
+    let merged = agent_doc_merge::crdt::merge_by_component(
+        Some(&base_state),
+        &pending.target_content,
+        editor_content,
+    )
+    .with_context(|| {
+        format!(
+            "failed to merge reappearing editor content with deferred write {} for {}",
+            pending.intent_id,
+            file.display()
+        )
+    })?;
+    if agent_doc_hash::content_hash(&merged).eq_ignore_ascii_case(&pending.target_hash) {
+        return Ok(Some(pending.target_content));
+    }
+    ensure_deferred_document_write_intent(
+        file,
+        &pending.target_content,
+        &merged,
+        "editor_reconnect",
+        DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+    )?;
+    Ok(Some(merged))
+}
+
+fn retain_force_disk_reconnect_intent(file: &Path, content: &str) -> Result<()> {
+    if !agent_doc_document_realtime::write_authority::is_visible_document(file) {
+        return Ok(());
+    }
+    let pre_force_disk = std::fs::read_to_string(file).unwrap_or_default();
+    if pre_force_disk == content {
+        return Ok(());
+    }
+    ensure_deferred_document_write_intent(
+        file,
+        &pre_force_disk,
+        content,
+        "force_disk",
+        DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
+    )?;
+    Ok(())
+}
+
+fn clear_deferred_document_write_intent(
+    file: &Path,
+    target_hash: &str,
+    source: &str,
+) -> Result<()> {
+    let Some(pending) = pending_document_write_for_target(file, target_hash) else {
+        return Ok(());
+    };
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!(
+            "document-write-converged-{document_hash}-{}",
+            pending.intent_id
+        ),
+        agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+            document_hash,
+            intent_id: pending.intent_id,
+            target_hash: target_hash.to_string(),
+            source: source.to_string(),
+        },
+    );
+    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
+        .with_context(|| {
+            format!(
+                "failed to settle deferred document write in Lazily state for {}",
+                file.display()
+            )
+        })?;
+    Ok(())
 }
 
 /// Record that disk is the current document replica because no live editor owns
@@ -2225,12 +2761,13 @@ mod tests {
     }
 
     #[test]
-    fn compact_exchange_waits_through_prior_ack_backpressure_then_converges() {
-        // Regression for the live JB failure: Compact Exchange observed
-        // `prior_delivery_ack_pending`, then one 0.8s controller read timeout
-        // escaped and aborted the command. The shared convergence budget must
-        // outlive that individual RPC window, retain the compact target, and
-        // apply it once the previous visible frontier is ACKed.
+    fn compact_exchange_coalesces_prior_ack_backpressure_and_nudges_recovery() {
+        // Regression for the live JB failure: a response was already visible in
+        // the editor but its ACK was lost, so Compact Exchange sat behind
+        // `prior_delivery_ack_pending` for a full minute. The next target is safe
+        // to queue once: the relay's final-content ACK drains the cumulative
+        // prefix. While waiting, the binary actively nudges ACK replay and then a
+        // bounded client re-register instead of requiring controller recycling.
         let baseline = "# Session\n\nseed\n";
         let source = "# Session\n\nseed\n\n## Exchange\n\nold response\n";
         let compacted = "# Session\n\nseed\n\n## Exchange\n\n*Compacted.*\n";
@@ -2264,15 +2801,16 @@ mod tests {
 
         assert!(
             started.elapsed() >= std::time::Duration::from_millis(800),
-            "fixture must exercise a wait longer than one reported controller timeout"
+            "fixture must exercise a delayed prior delivery ACK"
         );
         assert!(write.delivery_converged);
         assert_eq!(write.content_hash, agent_doc_hash::content_hash(compacted));
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("compact_crdt_convergence_wait")
-                && log.contains("reason=prior_delivery_ack_pending"),
-            "compact should coalesce backpressure while retaining its target:\n{log}"
+                && log.contains("compact_crdt_ack_recovery_signal")
+                && log.contains("reason=ack_recovery_force_refresh"),
+            "compact should retain its target and actively recover the ACK path:\n{log}"
         );
     }
 
@@ -2349,6 +2887,91 @@ mod tests {
         assert!(log.contains("transport=crdt_then_disk_projection"));
     }
 
+    #[test]
+    fn serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n<!-- agent:boundary id=deferred -->\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-zero-replica-defer";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let started = std::time::Instant::now();
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "zero-replica authority must fail fast instead of stalling the turn"
+        );
+        assert!(
+            format!("{err:#}").contains("await_editor_replica_no_disk_write"),
+            "unexpected error: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            baseline,
+            "the editor-owned file projection must not change behind JetBrains"
+        );
+
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
+                .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let pending = projection
+            .document(&document_hash)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .expect("deferred target must survive in Lazily state");
+        assert_eq!(pending.target_content, target);
+        assert_eq!(pending.target_hash, agent_doc_hash::content_hash(target));
+        assert_eq!(pending.expected_content.as_deref(), Some(baseline));
+        assert_eq!(pending.reason, "editor_owner_without_registered_replica");
+
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, baseline)
+                .unwrap()
+                .as_deref(),
+            Some(target),
+            "a clean stale editor buffer should restore the durable target",
+        );
+        let editor_with_unsaved_note = format!("{baseline}\noperator note\n");
+        let merged = deferred_document_write_reconnect_content(&file, &editor_with_unsaved_note)
+            .unwrap()
+            .expect("deferred write should merge with later editor text");
+        assert!(merged.contains("agent:boundary id=deferred"));
+        assert!(merged.contains("operator note"));
+    }
+
+    #[test]
+    fn force_disk_retains_reconnect_lineage_and_merges_reappearing_editor_text() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: agent\n\nresponse\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+
+        atomic_write_force_disk_through_authority(&file, target).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
+                .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let pending = projection
+            .document(&document_hash)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .expect("force-disk must retain reconnect lineage");
+        assert_eq!(pending.expected_content.as_deref(), Some(baseline));
+        assert_eq!(pending.target_content, target);
+        assert_eq!(pending.source, "force_disk");
+
+        let editor_with_unsaved_note = format!("{baseline}\noperator note after relay loss\n");
+        let merged = deferred_document_write_reconnect_content(&file, &editor_with_unsaved_note)
+            .unwrap()
+            .expect("reappearing editor should reconcile against force-disk target");
+        assert!(merged.contains("### Re: agent"));
+        assert!(merged.contains("operator note after relay loss"));
+    }
+
     fn wait_for_active_typing_indicator(file: &str) {
         for _ in 0..100 {
             if agent_doc_debounce::typing_indicator_status(
@@ -2396,6 +3019,7 @@ mod tests {
                     model_revision,
                     editor_visible_hash: candidate_hash.clone(),
                     commit_candidate_hash: candidate_hash.clone(),
+                    commit_candidate_content: Some(candidate_content.to_string()),
                     source: source.to_string(),
                 },
             ),

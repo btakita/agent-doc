@@ -67,6 +67,39 @@ use agent_doc_document_realtime::watch_authority::{
 };
 use lazily::DurableOutbox;
 
+/// Stable event kinds written to `.agent-doc/crdt-replica-events/`.
+/// Strings are a wire encoding only; producers select a closed enum variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrdtReplicaEventReason {
+    RequestFullState,
+    Fanout,
+    ResponseCellAdd,
+    CpcWrite,
+    Rebootstrap,
+    AckReplay,
+    AckRecoveryForceRefresh,
+}
+
+impl CrdtReplicaEventReason {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::RequestFullState => "request_full_state",
+            Self::Fanout => "fanout",
+            Self::ResponseCellAdd => "response_cell_add",
+            Self::CpcWrite => "cpc_write",
+            Self::Rebootstrap => "rebootstrap",
+            Self::AckReplay => "ack_replay",
+            Self::AckRecoveryForceRefresh => "ack_recovery_force_refresh",
+        }
+    }
+}
+
+impl std::fmt::Display for CrdtReplicaEventReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.token())
+    }
+}
+
 fn reliable_sync_database_path(project_root: &Path) -> PathBuf {
     project_root
         .join(".agent-doc")
@@ -586,7 +619,16 @@ fn ensure_document_model_with_current_text_observer_inner(
             first_label,
         ),
     );
-    if let Err(err) = request_document_model_live_buffer_publish(file, source) {
+    let ensure_timeout_ms = if matches!(first, CurrentText::EditorAttachedMissingReplica) {
+        DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS
+    } else {
+        DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
+    };
+    if let Err(err) = request_document_model_live_buffer_publish_with_timeout(
+        file,
+        source,
+        std::time::Duration::from_millis(ensure_timeout_ms),
+    ) {
         ensure_guard.record_failure(first_label);
         return Err(err);
     }
@@ -608,11 +650,6 @@ fn ensure_document_model_with_current_text_observer_inner(
     // (`with_hub_seeded_from_file` adds to the existing hub, never clobbers it).
     // `EditorSyncPending` keeps the full window: there a hub already exists with the
     // editor's un-flushed ops that are worth waiting for.
-    let ensure_timeout_ms = if matches!(first, CurrentText::EditorAttachedMissingReplica) {
-        DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS
-    } else {
-        DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
-    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
@@ -920,7 +957,11 @@ fn suppressed_document_model_ensure_result(
     );
 }
 
-fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Result<()> {
+pub fn request_document_model_live_buffer_publish_with_timeout(
+    file: &Path,
+    source: &str,
+    timeout: std::time::Duration,
+) -> Result<()> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     let path_str = canonical.to_string_lossy().to_string();
@@ -928,7 +969,11 @@ fn request_document_model_live_buffer_publish(file: &Path, source: &str) -> Resu
         agent_doc_fs::document_state_hash(&canonical).unwrap_or_else(|e| format!("hash_error:{e}"));
     let listener_active = agent_doc_ipc_io::is_listener_active(&project_root);
     let (transport, publish_result) = if listener_active {
-        match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &path_str) {
+        match agent_doc_ipc_io::send_publish_live_buffer_with_timeout(
+            &project_root,
+            &path_str,
+            timeout,
+        ) {
             Ok(true) => ("editor_ipc", Ok(true)),
             Ok(false) => {
                 agent_doc_ops_log_io::log_op(
@@ -1304,7 +1349,9 @@ pub fn relay_replica_update_for_file(
         // drifted canonical. Additive + regression-safe: the union-merge above already
         // kept the editor's edits; the adopt corrects the drift when it lands, and once
         // the canonical is clean subsequent updates fold onto it with nothing to re-add.
-        if let Err(err) = signal_crdt_replica_event(file, "request_full_state", 0) {
+        if let Err(err) =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::RequestFullState, 0)
+        {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1318,7 +1365,8 @@ pub fn relay_replica_update_for_file(
         with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
     if !packet.targets.is_empty()
         && !packet.update.is_empty()
-        && let Err(err) = signal_crdt_replica_event(file, "fanout", packet.targets.len())
+        && let Err(err) =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::Fanout, packet.targets.len())
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1389,14 +1437,19 @@ fn apply_cpc_write_on_hub(
     }
     let before_hash = agent_doc_hash::content_hash(&canonical);
     let packet = hub.apply_canonical_replace(expected_current, content)?;
+    let applied = before_hash != agent_doc_hash::content_hash(content);
+    let targets = packet.targets.len();
     Ok(CpcRelayWrite {
-        applied: before_hash != agent_doc_hash::content_hash(content),
+        applied,
         content_len: content.len(),
         content_hash: agent_doc_hash::content_hash(content),
         update_bytes: packet.update.len(),
-        targets: packet.targets.len(),
+        targets,
         live_editors: hub.live_count(),
-        delivery_converged: hub.delivery_converged(),
+        // An empty delivery set proves convergence only for an idempotent
+        // no-op. If canonical content advanced while a durable editor owner
+        // has no registered replica, nobody has observed that frontier yet.
+        delivery_converged: hub.delivery_converged() && (!applied || targets > 0),
     })
 }
 
@@ -1475,7 +1528,11 @@ pub fn add_response_cell_for_file(
 
     if result.targets > 0
         && result.update_bytes > 0
-        && let Err(err) = signal_crdt_replica_event(file, "response_cell_add", result.targets)
+        && let Err(err) = signal_crdt_replica_event(
+            file,
+            CrdtReplicaEventReason::ResponseCellAdd,
+            result.targets,
+        )
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1577,7 +1634,8 @@ pub fn apply_cpc_write_for_file(
     let result = result?;
     if result.targets > 0
         && result.update_bytes > 0
-        && let Err(err) = signal_crdt_replica_event(file, "cpc_write", result.targets)
+        && let Err(err) =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::CpcWrite, result.targets)
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -2551,7 +2609,7 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
     };
     let outcome = outcome?;
     if matches!(outcome, DiskChangeOutcome::RebuiltFromDisk { live_members } if live_members > 0)
-        && let Err(err) = signal_crdt_replica_event(file, "rebootstrap", 0)
+        && let Err(err) = signal_crdt_replica_event(file, CrdtReplicaEventReason::Rebootstrap, 0)
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -2573,7 +2631,11 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
 
 /// Wake editor replicas that watch `.agent-doc/crdt-replica-events/` so they can
 /// drain queued CRDT deliveries from the controller without a fixed pull loop.
-pub fn signal_crdt_replica_event(file: &Path, reason: &str, targets: usize) -> Result<()> {
+pub fn signal_crdt_replica_event(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+) -> Result<()> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let path = agent_doc_fs::crdt_replica_event_path_for(&canonical)?;
     if let Some(parent) = path.parent() {
@@ -2592,7 +2654,7 @@ pub fn signal_crdt_replica_event(file: &Path, reason: &str, targets: usize) -> R
     let body = serde_json::json!({
         "file": canonical.to_string_lossy(),
         "doc_hash": doc_hash,
-        "reason": reason,
+        "reason": reason.token(),
         "targets": targets,
         "signaled_at_ms": signaled_at_ms,
         "process_pid": std::process::id(),

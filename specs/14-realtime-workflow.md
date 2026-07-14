@@ -45,12 +45,24 @@ Sidecars renamed to `{stem}.stale-*` are quarantined diagnostics and must not
 re-enter current live-buffer enumeration or editor-capability gating.
 Reliable-sync liveness remains the authority proof for deciding whether disk
 convergence must fail closed behind an editor.
+When a controller recycle removes server-side membership but the editor still
+holds a cached client, refresh must retire that cached client and issue a new
+registration. Native-library reload broadcasts refresh all open document
+replicas. Re-registration restores a Lazily-retained deferred target into an
+unchanged buffer or component-merges later unsaved operator edits over the
+retained base.
 If a hot-path read observes an editor owner but no usable CRDT relay model, the
 binary must first attempt a bounded document-model ensure through read-only
 editor publish/re-registration before returning an error. A failed ensure is a
 named startup/reconciliation failure; it must not be collapsed into the raw
 missing-replica observation, and it must not use disk as a successful
 editor-authoritative value.
+
+An explicitly authorized `--force-disk` write is the sole exception to waiting
+for editor delivery. It must first retain the complete pre-write disk base and
+target as a durable deferred intent, may then write and commit disk without
+relay membership, and must reconcile the editor from that intent when the
+replica returns. Git HEAD is never the recovery base.
 
 When no live editor owner owns the document, the current visible file
 is the source of truth. A stored snapshot may seed a merge candidate, but merge
@@ -346,8 +358,20 @@ Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
    delivery, flags the member for the replace-capable bootstrap above, and keeps
    disk materialization closed. Older plugins may omit the hash only during the
    rolling install compatibility window. Hash-qualified receipts are cumulative:
-   when an editor coalesces generations and proves the final target for generation
-   N, the relay atomically advances every older pending generation through N.
+when an editor coalesces generations and proves the final target for generation
+N, the relay atomically advances every older pending generation through N.
+
+JetBrains must retain an ACK after the visible editor apply until the controller
+accepts it. Retry recomputes the proof from the current editor buffer; remembered
+text is never accepted as proof. A mismatched proof triggers the replace-capable
+re-bootstrap, while a transport failure remains in the client ACK replay ledger.
+The binary wakes this replay while convergence is pending and, after a bounded
+grace period, sends a targeted force-refresh event that re-registers the document
+replica from the editor plus the Lazily deferred-write reconnect target. The
+candidate is retained before delivery, so process exit, controller recycle, or a
+same-target finalize retry cannot lose or duplicate the response. Recovery is
+bounded and automatic; it must not require closing the editor tab, recycling the
+controller, or choosing between force-disk and an uncommitted response.
 
 ### Turn-State Projection To The Plugin
 
@@ -882,5 +906,13 @@ Implementations must keep tests for these cases:
 - out-of-band disk writes while an editor owns the document reconcile with the
   live editor buffer or fail closed before any agent response lands;
 - lazily visible-write drift cannot reset operator-visible file content;
+- an editor ACK persists its full visible content in Lazily, and a legacy
+  hash-only `already_applied` receipt is upgraded by one bounded live-buffer
+  publication without file-IPC fallback;
+- an editor-owned write with zero registered replicas retains its full target
+  as a Lazily deferred-write intent, returns promptly, and does not project to
+  disk; later replica bootstrap/publication restores and proves that target;
+- an applied relay mutation with an empty target set is not delivery
+  convergence;
 - harness Stop-hook recovery cannot commit transcript-shaped or direct-patched
   responses.

@@ -2867,6 +2867,7 @@ struct VisibleWriteCommitCandidatePayload {
     model_revision: u64,
     editor_visible_hash: String,
     commit_candidate_hash: String,
+    commit_candidate_content: String,
     source: String,
 }
 
@@ -2950,6 +2951,7 @@ pub fn record_visible_write_commit_candidate_for_file(
         model_revision,
         editor_visible_hash: commit_candidate_hash.clone(),
         commit_candidate_hash,
+        commit_candidate_content: candidate_content.to_string(),
         source: source.to_string(),
     };
     record_visible_write_commit_candidate_direct(
@@ -8500,7 +8502,10 @@ fn visible_write_commit_candidate_events(
             "applied",
             document_hash,
             &payload.patch_id,
-            &payload.commit_candidate_hash,
+            &format!(
+                "{}-{}",
+                payload.commit_candidate_hash, payload.model_revision
+            ),
         ),
         agent_doc_state_backbone::StateFact::EditorPatchApplied {
             document_hash: document_hash.to_string(),
@@ -8513,7 +8518,10 @@ fn visible_write_commit_candidate_events(
             "candidate",
             document_hash,
             &payload.patch_id,
-            &payload.commit_candidate_hash,
+            &format!(
+                "{}-{}",
+                payload.commit_candidate_hash, payload.model_revision
+            ),
         ),
         agent_doc_state_backbone::StateFact::VisibleWriteCommitCandidateObserved {
             document_hash: document_hash.to_string(),
@@ -8521,6 +8529,7 @@ fn visible_write_commit_candidate_events(
             model_revision: payload.model_revision,
             editor_visible_hash: payload.editor_visible_hash.clone(),
             commit_candidate_hash: payload.commit_candidate_hash.clone(),
+            commit_candidate_content: Some(payload.commit_candidate_content.clone()),
             source: payload.source.clone(),
         },
     );
@@ -12813,6 +12822,7 @@ mod tests {
             model_revision: 7,
             editor_visible_hash: commit_candidate_hash.clone(),
             commit_candidate_hash: commit_candidate_hash.clone(),
+            commit_candidate_content: content.to_string(),
             source: "test_direct_durable".to_string(),
         };
 
@@ -12835,6 +12845,10 @@ mod tests {
         assert_eq!(
             reconciled.commit_candidate_hash,
             proof.commit_candidate_hash
+        );
+        assert_eq!(
+            reconciled.commit_candidate_content.as_deref(),
+            Some(content)
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();

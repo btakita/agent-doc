@@ -6,6 +6,7 @@
 //! and small local state machines for closed subdomains.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use lazily::{
     CausalReceipt, ReceiptApplyStatus, ReceiptOutcome, ReceiptProjection, ThreadSafeContext,
@@ -43,6 +44,91 @@ pub enum StateDomain {
     Supervisor,
     Route,
     Proof,
+}
+
+/// Typed causes for a document target remaining in the Lazily write lineage.
+///
+/// The JSON representation intentionally stays a snake-case string so existing
+/// controller databases remain readable. `Legacy` preserves forward/backward
+/// compatibility without returning the internal API to free-text state checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DocumentWriteDeferredReason {
+    EditorOwnerWithoutRegisteredReplica,
+    CrdtDeliveryAckPending,
+    MergeUnsavedEditorCutWithDeferredTarget,
+    RetainEditorReconnectLineageBeforeDiskProjection,
+    ExtendPendingEditorReconnectTarget,
+    Legacy(String),
+}
+
+impl DocumentWriteDeferredReason {
+    pub fn token(&self) -> &str {
+        match self {
+            Self::EditorOwnerWithoutRegisteredReplica => "editor_owner_without_registered_replica",
+            Self::CrdtDeliveryAckPending => "crdt_delivery_ack_pending",
+            Self::MergeUnsavedEditorCutWithDeferredTarget => {
+                "merge_unsaved_editor_cut_with_deferred_target"
+            }
+            Self::RetainEditorReconnectLineageBeforeDiskProjection => {
+                "retain_editor_reconnect_lineage_before_disk_projection"
+            }
+            Self::ExtendPendingEditorReconnectTarget => "extend_pending_editor_reconnect_target",
+            Self::Legacy(token) => token,
+        }
+    }
+}
+
+impl From<&str> for DocumentWriteDeferredReason {
+    fn from(value: &str) -> Self {
+        match value {
+            "editor_owner_without_registered_replica" => Self::EditorOwnerWithoutRegisteredReplica,
+            "crdt_delivery_ack_pending" => Self::CrdtDeliveryAckPending,
+            "merge_unsaved_editor_cut_with_deferred_target" => {
+                Self::MergeUnsavedEditorCutWithDeferredTarget
+            }
+            "retain_editor_reconnect_lineage_before_disk_projection" => {
+                Self::RetainEditorReconnectLineageBeforeDiskProjection
+            }
+            "extend_pending_editor_reconnect_target" => Self::ExtendPendingEditorReconnectTarget,
+            token => Self::Legacy(token.to_string()),
+        }
+    }
+}
+
+impl From<String> for DocumentWriteDeferredReason {
+    fn from(value: String) -> Self {
+        Self::from(value.as_str())
+    }
+}
+
+impl fmt::Display for DocumentWriteDeferredReason {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.token())
+    }
+}
+
+impl PartialEq<&str> for DocumentWriteDeferredReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.token() == *other
+    }
+}
+
+impl Serialize for DocumentWriteDeferredReason {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.token())
+    }
+}
+
+impl<'de> Deserialize<'de> for DocumentWriteDeferredReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::from)
+    }
 }
 
 impl StateDomain {
@@ -124,6 +210,26 @@ pub enum StateFact {
         content_hash: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         editor_id: Option<String>,
+    },
+    DocumentWriteDeferred {
+        document_hash: String,
+        intent_id: String,
+        expected_hash: String,
+        /// Full canonical/editor content the target was derived from. Older
+        /// events may omit this field; reconnect recovery can use disk only
+        /// when it still proves `expected_hash` in that compatibility case.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_content: Option<String>,
+        target_hash: String,
+        target_content: String,
+        source: String,
+        reason: DocumentWriteDeferredReason,
+    },
+    DocumentWriteConverged {
+        document_hash: String,
+        intent_id: String,
+        target_hash: String,
+        source: String,
     },
     QueueHeadSelected {
         document_hash: String,
@@ -313,6 +419,11 @@ pub enum StateFact {
         file_hash: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         snapshot_hash: Option<String>,
+        /// Full editor-visible document content used as the response replay
+        /// baseline. Hashes remain useful indexes, but recovery must retain
+        /// the bytes needed to reconcile a partially materialized response.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        baseline_content: Option<String>,
     },
     /// The currently durable pending response body for an open closeout cycle.
     ///
@@ -413,6 +524,8 @@ pub enum StateFact {
         model_revision: u64,
         editor_visible_hash: String,
         commit_candidate_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        commit_candidate_content: Option<String>,
         source: String,
     },
     VisibleWriteMaterializedCarryForwardObserved {
@@ -538,6 +651,8 @@ impl StateFact {
             | Self::BaselineSaved { document_hash, .. }
             | Self::FileWatchChangeObserved { document_hash, .. }
             | Self::DocumentAuthorityObserved { document_hash, .. }
+            | Self::DocumentWriteDeferred { document_hash, .. }
+            | Self::DocumentWriteConverged { document_hash, .. }
             | Self::QueueHeadSelected { document_hash, .. }
             | Self::QueueHeadDeferred { document_hash, .. }
             | Self::QueueHeadCompleted { document_hash, .. }
@@ -601,7 +716,9 @@ impl StateFact {
             | Self::DocumentCellMergeAckCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
             | Self::FileWatchChangeObserved { .. }
-            | Self::DocumentAuthorityObserved { .. } => StateDomain::Document,
+            | Self::DocumentAuthorityObserved { .. }
+            | Self::DocumentWriteDeferred { .. }
+            | Self::DocumentWriteConverged { .. } => StateDomain::Document,
             Self::QueueHeadSelected { .. }
             | Self::QueueHeadDeferred { .. }
             | Self::QueueHeadCompleted { .. }
@@ -646,6 +763,8 @@ impl StateFact {
             Self::BaselineSaved { .. } => "baseline_saved",
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
+            Self::DocumentWriteDeferred { .. } => "document_write_deferred",
+            Self::DocumentWriteConverged { .. } => "document_write_converged",
             Self::QueueHeadSelected { .. } => "queue_head_selected",
             Self::QueueHeadDeferred { .. } => "queue_head_deferred",
             Self::QueueHeadCompleted { .. } => "queue_head_completed",
@@ -978,6 +1097,37 @@ impl DocumentStateProjection {
                     self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
                 }
             }
+            StateFact::DocumentWriteDeferred {
+                intent_id,
+                expected_hash,
+                expected_content,
+                target_hash,
+                target_content,
+                source,
+                reason,
+                ..
+            } => {
+                self.document.pending_write = Some(DocumentWriteIntentProjection {
+                    intent_id: intent_id.clone(),
+                    expected_hash: expected_hash.clone(),
+                    expected_content: expected_content.clone(),
+                    target_hash: target_hash.clone(),
+                    target_content: target_content.clone(),
+                    source: source.clone(),
+                    reason: reason.clone(),
+                });
+            }
+            StateFact::DocumentWriteConverged {
+                intent_id,
+                target_hash,
+                ..
+            } => {
+                if self.document.pending_write.as_ref().is_some_and(|pending| {
+                    pending.intent_id == *intent_id && pending.target_hash == *target_hash
+                }) {
+                    self.document.pending_write = None;
+                }
+            }
             StateFact::QueueHeadSelected {
                 node_key,
                 backlog_id,
@@ -1168,6 +1318,7 @@ impl DocumentStateProjection {
                 response_body,
                 file_hash,
                 snapshot_hash,
+                baseline_content,
                 ..
             } => {
                 self.closeout
@@ -1192,6 +1343,7 @@ impl DocumentStateProjection {
                         snapshot_hash: snapshot_hash
                             .clone()
                             .or_else(|| self.closeout.response_snapshot_hash.clone()),
+                        baseline_content: baseline_content.clone(),
                     });
                 }
             }
@@ -1396,6 +1548,7 @@ impl DocumentStateProjection {
                 model_revision,
                 editor_visible_hash,
                 commit_candidate_hash,
+                commit_candidate_content,
                 source,
                 ..
             } => {
@@ -1404,6 +1557,7 @@ impl DocumentStateProjection {
                     *model_revision,
                     editor_visible_hash,
                     commit_candidate_hash,
+                    commit_candidate_content.as_deref(),
                     source,
                 );
             }
@@ -1852,6 +2006,20 @@ pub struct DocumentProjection {
     pub latest_file_watch_change: Option<FileWatchChangeProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_authority: Option<DocumentAuthorityProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_write: Option<DocumentWriteIntentProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentWriteIntentProjection {
+    pub intent_id: String,
+    pub expected_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_content: Option<String>,
+    pub target_hash: String,
+    pub target_content: String,
+    pub source: String,
+    pub reason: DocumentWriteDeferredReason,
 }
 
 impl DocumentProjection {
@@ -2475,6 +2643,8 @@ pub struct CapturedResponseProjection {
     pub file_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_content: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2666,6 +2836,7 @@ impl VisibleWriteProjection {
         model_revision: u64,
         editor_visible_hash: &str,
         commit_candidate_hash: &str,
+        commit_candidate_content: Option<&str>,
         source: &str,
     ) {
         let current_revision = self
@@ -2687,6 +2858,7 @@ impl VisibleWriteProjection {
                 model_revision,
                 editor_visible_hash: editor_visible_hash.to_string(),
                 commit_candidate_hash: commit_candidate_hash.to_string(),
+                commit_candidate_content: commit_candidate_content.map(str::to_string),
                 source: source.to_string(),
             },
         );
@@ -2781,6 +2953,8 @@ pub struct VisibleWriteCommitCandidateProjection {
     pub model_revision: u64,
     pub editor_visible_hash: String,
     pub commit_candidate_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_candidate_content: Option<String>,
     pub source: String,
 }
 
@@ -4213,6 +4387,7 @@ mod tests {
                 response_body: Some("### Re: topic - gpt-5\n\nDone.\n".into()),
                 file_hash: Some("file-sha".into()),
                 snapshot_hash: Some("snapshot-sha".into()),
+                baseline_content: Some("captured baseline\n".into()),
             },
         ));
         ledger.append(state_event(
@@ -4244,6 +4419,10 @@ mod tests {
         assert_eq!(captured.response_body, "### Re: topic - gpt-5\n\nDone.\n");
         assert_eq!(captured.file_hash.as_deref(), Some("file-sha"));
         assert_eq!(captured.snapshot_hash.as_deref(), Some("snapshot-sha"));
+        assert_eq!(
+            captured.baseline_content.as_deref(),
+            Some("captured baseline\n")
+        );
     }
 
     #[test]
@@ -4568,6 +4747,7 @@ mod tests {
                 response_body: None,
                 file_hash: None,
                 snapshot_hash: None,
+                baseline_content: None,
             },
         ));
         ledger.append(state_event(
@@ -5077,6 +5257,7 @@ mod tests {
                 model_revision: 7,
                 editor_visible_hash: "candidate-a".into(),
                 commit_candidate_hash: "candidate-a".into(),
+                commit_candidate_content: Some("editor-visible candidate".into()),
                 source: "test".into(),
             },
         ));
@@ -5097,7 +5278,77 @@ mod tests {
             .expect("applied candidate");
         assert_eq!(candidate.patch_id, "patch-1");
         assert_eq!(candidate.model_revision, 7);
+        assert_eq!(
+            candidate.commit_candidate_content.as_deref(),
+            Some("editor-visible candidate")
+        );
         assert!(doc.applied_visible_write_candidate("candidate-b").is_none());
+    }
+
+    #[test]
+    fn deferred_document_write_remains_durable_until_matching_convergence() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "write-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "intent-1".into(),
+                expected_hash: "base".into(),
+                expected_content: Some("editor-owned base".into()),
+                target_hash: "target".into(),
+                target_content: "editor-owned target".into(),
+                source: "boundary".into(),
+                reason: "editor_owner_without_registered_replica".into(),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        let pending = projected
+            .document
+            .pending_write
+            .as_ref()
+            .expect("pending write");
+        assert_eq!(pending.target_content, "editor-owned target");
+        assert_eq!(
+            pending.expected_content.as_deref(),
+            Some("editor-owned base")
+        );
+
+        ledger.append(state_event(
+            "wrong-write-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "intent-2".into(),
+                target_hash: "target".into(),
+                source: "test".into(),
+            },
+        ));
+        assert!(
+            ledger
+                .project_document("doc-a")
+                .unwrap()
+                .document
+                .pending_write
+                .is_some(),
+            "an unrelated receipt must not clear the intent"
+        );
+
+        ledger.append(state_event(
+            "write-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "intent-1".into(),
+                target_hash: "target".into(),
+                source: "test".into(),
+            },
+        ));
+        assert!(
+            ledger
+                .project_document("doc-a")
+                .unwrap()
+                .document
+                .pending_write
+                .is_none()
+        );
     }
 
     #[test]

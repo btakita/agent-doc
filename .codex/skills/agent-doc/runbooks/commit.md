@@ -37,6 +37,27 @@ Do not run `--force-disk` from a harness unless the operator explicitly chooses
 that escape hatch, because force-disk is a human recovery decision rather than
 an automatic closeout strategy.
 
+A live editor buffer that differs from disk is usually a **valid unsaved-document
+state, not a wedge** (`#unsaved-buffer-divergence-valid`). When the editor has the
+document open with unsaved changes, its in-memory buffer legitimately diverges from
+disk, and `finalize` / `write --commit` will report `live_prompt_drift`,
+`content_ours` (editor) ≠ candidate (disk/CRDT), or `visible document write …
+deferred: document changed after the response merge was computed; retry after
+typing stops`. This is the expected behavior of the safety guard, not a stale
+plugin. Do **not** escalate it with `make install` + `agent-doc admin recycle` +
+`write --commit --force-disk` to force the write through — forcing disk over a valid
+guard can clobber the operator's unsaved edits. Distinguish the two causes before
+acting: only treat drift as the stale-binary case (`#staleloop-recycle-restart`,
+below) when there is an actual `stale_install` warning or a controller recycle-yield
+projection tracing the drift to a binary older than the installed build; a divergence
+with no such signal is just an unsaved buffer and needs no fix. In particular, once
+the assistant response has already reached `committed` in HEAD (verify with
+`git show HEAD:<FILE>`) and `session-check` returns OK / `no_drainable_work`, the
+closeout is complete — state-only leftovers from `--done <id>` / queue-strike
+mutations that land in the working tree but not HEAD are fine and reconcile when the
+operator saves the buffer or on the next cycle. Leave them; do not chase them with
+force-disk or a rebuild.
+
 Crucially, a degraded-but-proven transport is **not** a reason to stall an active queue drain. When `queue_continuation_required == true`, the binary emits `queue_continuation_guidance` (and `session-check` prints the same line) restating that degraded IPC, high session-accretion, and `semantic_completion_match` warnings are **not** stop reasons after a proven closeout. The stop conditions are a failed closeout, an unproven IPC/delivery retry condition, a `session-check` interruption, or a `lint-gate` block. A stale-binary supervisor is not a passive keep-going condition: recycle/yield at the boundary, then continue on the fresh binary. The mechanism depends on the staleness kind (`#supselfheal`): a busy/idle supervisor is freed when the short-TTL drain lease expires, but a stale-**binary** supervisor (older than the installed build) does **not** self-heal by lease expiry — it recycles non-disruptively via the controller recycle-yield projection, the wedge-triggered recycle (a wedged editor-IPC write requests a recycle through the policy owner), an explicit `agent-doc admin recycle`, or a bounded kill+relaunch when the in-place `execve` cannot start. Do not invent a stop reason from proven transport degradation, and do not punt a drainable head to "a fresh session" because the supervisor looked stale. When a stale-**binary** supervisor is genuinely blocking the drain (a live controller recycle-yield projection, a `stale_install` warning, or persistent `live_prompt_drift_after_preflight` traced to a finalize client newer than the running supervisor), the recovery is active, not passive (`#staleloop-recycle-restart`): yield/restart the loop when recycle-yield guidance is emitted; otherwise run the install if the binary is stale relative to source (`make install` — fast local profile, incremental target dir, and cdylib install), run `agent-doc admin recycle <FILE>`, then **restart the loop** so the turn ends, the supervisor recycles onto the new binary at idle, and the next iteration drains against a matched supervisor. Recycling but then stopping instead of restarting the loop is itself the bug; only stop-and-report if the recycle cannot be initiated. `make install` / `agent-doc lib-install` now **auto-broadcast a cdylib reload to editor plugins** (`#cdylib-reload-broadcast`): the JetBrains and VS Code plugins watch a single global reload-broadcast file written next to the installed cdylib and force their existing native-reload path immediately instead of waiting for the next lazy FFI call, so the editor half of the fleet no longer needs a manual restart. `agent-doc admin reload-lib` re-announces that broadcast on demand alongside `admin recycle` — the API-driven reload that replaces the manual editor-plugin restart step (running supervisors still recycle onto the new binary at their idle boundary).
 
 ## Explicit Exceptions

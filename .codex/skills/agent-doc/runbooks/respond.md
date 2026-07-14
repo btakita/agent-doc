@@ -12,6 +12,15 @@ rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
+  the operator may add a prompt WHILE your turn is running. Every item the
+  operator adds must be addressed and worked on, never committed-and-ignored. If
+  `session-check` reports a committed cycle plus a fresh operator prompt, that is
+  realtime steering, **not** a failed closeout: your prior response is already in
+  HEAD. Address the surfaced prompt (the binary hands it to you **verbatim**) in
+  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run finalize on
+  the prior response, do NOT `--force-disk` (it clobbers the operator's live
+  edits), and do NOT re-answer a prompt already committed in HEAD.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

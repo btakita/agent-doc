@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.88"
+agent-doc-version: "0.34.97"
 ---
 
 # agent-doc
@@ -57,7 +57,7 @@ Detect subcommands before the normal workflow:
 - `compact <FILE>` → run `agent-doc compact <FILE> --commit` and stop.
 - `compact exchange <FILE>` → follow [runbooks/compact-exchange.md](runbooks/compact-exchange.md) and stop.
 
-**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex --reload restart`; on `SKILL_RELOAD=restart`, tell the user to restart this Codex session and re-invoke `agent-doc <FILE>`, then stop. If already up to date, treat as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
+**Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`. If newer, run `agent-doc skill install --harness codex` without a reload request. After a real update, re-read the installed `.codex/skills/agent-doc/SKILL.md` completely and continue the same turn under those instructions. Do not call `agent-doc session restart-supervisor`, stop, or ask the user to restart: replacing an active Codex child interrupts the conversation, while the explicit re-read loads the updated workflow in place. If install says already up to date, treat it as stale instruction drift, continue this turn, and use the installed Codex instructions. If `agent-doc` is missing or versions match, skip. See [runbooks/harness-invocation.md](runbooks/harness-invocation.md).
 
 Run `agent-doc preflight <FILE>`. Preflight owns recovery before diffing and prints the cycle contract: `baseline_file`, `no_changes`, `warnings`, `claims`, `slash_commands`, `builtin_commands`, `orchestration_request`, `prompt_presets_requested`, tier/model fields, `agent_model`, `diff_type`, and the diff contract.
 

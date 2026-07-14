@@ -71,7 +71,20 @@ All three done in the admin Deal Pipeline > Deal modal. Committed + pushed to EF
 **Verification:** `make check` green — **1614 pass, 0 fail**, worker build OK. Updated the four source-assertion tests that pinned the old ActiveTab/Wire-tab shape and added a positive assertion for the auto-send.
 
 **Deploy held (needs your go):** this cycle's queue preset was `#spec-test-commit-push` (no deploy), and `deploy:worker` would run **prod D1 migration 0137** via `cf:d1:migrate:remote`. Queued as `#dlne-deploy` — say the word (or re-run with a `-deploy` preset) and I'll deploy + verify live.
-<!-- agent:boundary:7867a020 -->
+deploy
+
+### Re: Deploy the lender-notify email work (#dlne-deploy) — opus-4-8
+
+Deployed and verified live. Ran the full `deploy:worker` from the clean `main` checkout (`a9aa329`): build → **prod D1 migration 0137** (`cf:d1:migrate:remote`) → worker deploy.
+
+**Deployed:** version `28e99924-bbe3-4390-8d0a-6d8f33d8dbbd`, new bundle `index.browser-5NDSCDAE.js` at https://equityfundingsource.brian-takita.workers.dev.
+
+**Verified live:**
+- **Prod D1 migration 0137 applied** — queried remote `lender_deal_interests`; both `lender_documents_email_sent_at` and `funding_package_email_sent_at` columns now exist.
+- **Live bundle carries the new code** — the served HTML references `index.browser-5NDSCDAE.js` (byte-match to this deploy), and that bundle contains the new `lender-notification-emails` and `lender-documents-email` endpoints.
+
+So the admin Deal modal now has the working "Notify lender to upload documents" (Lender Documents tab) and "Notify lender funding package is ready" (Funding Package tab) buttons with "Last sent …" lines, the auto-send-on-lender-select, and the Wire tab removed — all live.
+<!-- agent:boundary:27cd3618 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

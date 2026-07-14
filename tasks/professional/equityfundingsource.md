@@ -56,7 +56,32 @@ The wire-instructions **editor** (routing/account numbers, upload) stays on the 
 - Commit + push: `25c9f12` on `main`, pushed to `origin`.
 - Deploy: `deploy:worker` (frontend-only, no migrations) → version `e1f2fe96`.
 - Verify: live served admin bundle `index.browser-5NHK4VEO.js` (2.07 MB) carries `show_secure_link = true` (default), the `&& LoanWireLinks` gate, and `show_secure_link: false` from the tab. Public/admin routes 401, so verified by string-grep of the served bundle.
-<!-- agent:boundary:ae257512 -->
+/goal In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=documentst > Loan Package tab says 6/13. It should be 13/13 since all 13 of the documents are present. Use the same logic for the Lender Documents + Funding Package tabs.
+
+All complete tabs should be green and incomplete tabs should be red. In the above link:
+- Loan Documents should be green
+- Lender Documents should be red
+- Funding Package should be red
+- Closing should be red
+
+### Re: Loan Package "6/13" should be "13/13" + green/red tab completeness — opus-4-8
+
+Fixed, deployed, and verified live.
+
+**Root cause (confirmed against prod D1 for deal `070770ae` / loan `a1f2d74c`).** The deal has 13 document types in the catalogue but only **6 are required** for it — all 6 required types have their document uploaded; the other 7 are non-required (default-off or overridden off) and left empty. The badge denominator counted all 13 types and the numerator only types-with-a-doc, so a *complete* deal read "6/13". The Loan Package is genuinely complete.
+
+**Fix (`#deal-tab-complete-ratio`).** Introduced a **satisfied** count: a category is satisfied when it has a document **or** it is not required for this deal. So this deal reads **13/13** (6 with docs + 7 not-required). A missing *required* doc drops it below full and flags incomplete.
+
+- Badge is now the completeness ratio `"<satisfied>/<total>"` (same shape as the Closing tab), replacing `"<uploaded> · <with>/<total>"`.
+- The count pill renders **green** when `satisfied === total`, **red** otherwise. Applied to all four tabs — Loan Package, Lender Documents, Funding Package, and Closing (colored from its step count).
+- Same satisfied logic for Lender Documents (all 5 sections needed) and Funding Package (all loan types must be flagged). Summary line now reads "<n> documents uploaded · <x> of <y> requirements met".
+
+**Live states match your spec** (queried prod): Loan Package **13/13 green**; Lender Documents **0/5 red** (no lender docs uploaded); Funding Package **red** (2 of 6 loan types flagged into the package); Closing **red** (deal still `published`, not closed).
+
+**Verification.** `bun run check` green — 1620 pass / 0 fail, typecheck+build exit 0 (added `#deal-tab-complete-ratio` pure-helper + UI-wiring tests). Committed `2dfa985`, pushed to `origin/main`, deployed worker version `0eed9586`. Live bundle `index.browser-6TJ3TG6I.js` carries `satisfied_categories`, the ratio badge, and the green/red pill colors (verified by string-grep; admin routes 401).
+
+One interpretation note: I took "13/13" literally — the denominator stays the full 13-type catalogue and non-required types count as satisfied. If you'd rather the ratio only count *required* types (so it'd read 6/6), say the word and I'll switch it.
+<!-- agent:boundary:9147f348 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

@@ -9,6 +9,10 @@ pub struct CommandOptions {
     pub is_ipc: bool,
     pub force_disk: bool,
     pub origin: Option<String>,
+    /// Explicit closeout intent: the response creates no actionable follow-up work.
+    /// The runtime encodes this as a transient guard marker in captured response
+    /// evidence so pre-write and pre-commit checks share the same durable proof.
+    pub no_pending_capture: bool,
     pub pending_add: Vec<String>,
     pub pending_add_to: Vec<String>,
     pub pending_add_gated: Vec<String>,
@@ -80,6 +84,7 @@ impl CommandOptions {
             is_ipc: false,
             force_disk,
             origin: Some("repair_replay".to_string()),
+            no_pending_capture: false,
             pending_add: Vec::new(),
             pending_add_to: Vec::new(),
             pending_add_gated: Vec::new(),

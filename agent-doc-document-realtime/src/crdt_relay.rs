@@ -37,10 +37,12 @@
 //! and [`DISK_IS_RECOVERY_PROJECTION_ONLY`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Write;
 
 use anyhow::{Result, anyhow};
 use lazily::{CellHandle, EphemeralMapCore, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
 
@@ -85,7 +87,60 @@ pub struct PendingReplicaUpdate {
     pub origin: u64,
     pub target: u64,
     pub generation: u64,
+    /// Hash of the canonical visible text the editor must actually show before
+    /// this delivery may advance the ACK frontier. Generation alone proves only
+    /// that a frame was handled, not that the native replica and editor buffer
+    /// converged (#crdt-content-ack).
+    pub expected_content_hash: String,
     pub update: Vec<u8>,
+}
+
+fn content_hash(text: &str) -> String {
+    let mut out = String::with_capacity(64);
+    for byte in Sha256::digest(text.as_bytes()) {
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
+}
+
+/// Minimal single-span codepoint edit turning `current` into `content`.
+///
+/// Canonical response writes used to delete and reinsert the whole document.
+/// That retained every tombstone and turned a 32 KiB response into a 7 MiB
+/// delta. Shared prefix/suffix peeling preserves CRDT lineage outside the
+/// changed span and bounds the update by the actual response edit.
+fn minimal_char_span_edit(current: &str, content: &str) -> Result<Option<(u32, u32, String)>> {
+    if current == content {
+        return Ok(None);
+    }
+    let current_chars = current.chars().collect::<Vec<_>>();
+    let content_chars = content.chars().collect::<Vec<_>>();
+    let mut prefix = 0usize;
+    let max_prefix = current_chars.len().min(content_chars.len());
+    while prefix < max_prefix && current_chars[prefix] == content_chars[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    let max_suffix = (current_chars.len() - prefix).min(content_chars.len() - prefix);
+    while suffix < max_suffix
+        && current_chars[current_chars.len() - 1 - suffix]
+            == content_chars[content_chars.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    let delete_len = current_chars.len() - prefix - suffix;
+    let insert = content_chars[prefix..content_chars.len() - suffix]
+        .iter()
+        .collect::<String>();
+    Ok(Some((
+        prefix
+            .try_into()
+            .map_err(|_| anyhow!("canonical edit offset exceeds CRDT codepoint range"))?,
+        delete_len
+            .try_into()
+            .map_err(|_| anyhow!("canonical edit length exceeds CRDT codepoint range"))?,
+        insert,
+    )))
 }
 
 /// Delivery/ACK state for one registered editor replica.
@@ -664,8 +719,9 @@ impl RelayHub {
         self.relay(client_id)
     }
 
-    /// Apply a CPC-authored whole-document replacement to the canonical replica
-    /// and queue the resulting CRDT delta for every live editor replica.
+    /// Apply a CPC-authored document target to the canonical replica using the
+    /// minimal changed span, then queue the resulting CRDT delta for every live
+    /// editor replica.
     ///
     /// This is the controller→editor direction of the relay. The caller supplies
     /// the `expected_current` text it merged against; if the canonical text has
@@ -686,12 +742,8 @@ impl RelayHub {
         }
         apply_canonical_document_tree_replace(&current, content)?;
         let before = self.canonical.state_vector();
-        if current != content {
-            let delete_len: u32 = current
-                .len()
-                .try_into()
-                .map_err(|_| anyhow!("canonical text is too large for a single CRDT replace"))?;
-            self.canonical.apply_local_edit(0, delete_len, content);
+        if let Some((offset, delete_len, insert)) = minimal_char_span_edit(&current, content)? {
+            self.canonical.apply_local_edit(offset, delete_len, &insert);
         }
         let update = self.canonical.diff(&before)?;
         let mut targets: Vec<u64> = self
@@ -717,6 +769,7 @@ impl RelayHub {
         if packet.update.is_empty() {
             return;
         }
+        let expected_content_hash = content_hash(&self.canonical.text());
         for target in &packet.targets {
             let Some(member) = self.members.get_mut(target) else {
                 continue;
@@ -728,6 +781,7 @@ impl RelayHub {
                 origin: packet.origin,
                 target: *target,
                 generation,
+                expected_content_hash: expected_content_hash.clone(),
                 update: packet.update.clone(),
             });
         }
@@ -751,6 +805,22 @@ impl RelayHub {
         patch_id: &str,
         generation: u64,
     ) -> Result<bool> {
+        self.ack_delivery_with_content_hash(client_id, patch_id, generation, None)
+    }
+
+    /// ACK one delivery only after the editor proves its applied visible text.
+    ///
+    /// `None` retains wire compatibility with older editor plugins during an
+    /// install handoff. Current plugins send a hash; a mismatch keeps the update
+    /// pending and schedules a replace-capable rebootstrap instead of allowing a
+    /// divergent unsaved editor buffer to race a disk materialization.
+    pub fn ack_delivery_with_content_hash(
+        &mut self,
+        client_id: u64,
+        patch_id: &str,
+        generation: u64,
+        applied_content_hash: Option<&str>,
+    ) -> Result<bool> {
         let member = self
             .members
             .get_mut(&client_id)
@@ -762,6 +832,29 @@ impl RelayHub {
         else {
             return Ok(false);
         };
+        if let Some(applied_content_hash) = applied_content_hash {
+            // A coalescing editor may apply several queued generations as one
+            // visible target. Its final hash is a cumulative receipt: matching a
+            // later pending target proves every older delivery through that
+            // target is represented, so advance the whole prefix atomically.
+            let Some(matched_pos) = member
+                .pending
+                .iter()
+                .rposition(|update| update.expected_content_hash == applied_content_hash)
+            else {
+                self.pending_rebootstrap.insert(client_id);
+                return Ok(false);
+            };
+            if matched_pos < pos {
+                self.pending_rebootstrap.insert(client_id);
+                return Ok(false);
+            }
+            let acknowledged_generation = member.pending[matched_pos].generation;
+            member.pending.drain(..=matched_pos);
+            member.last_ack_generation = member.last_ack_generation.max(acknowledged_generation);
+            self.pending_rebootstrap.remove(&client_id);
+            return Ok(true);
+        }
         member.pending.remove(pos);
         member.last_ack_generation = member.last_ack_generation.max(generation);
         Ok(true)
@@ -1451,6 +1544,87 @@ mod tests {
             .expect("target delivery snapshot");
         assert_eq!(target.current_generation, 1);
         assert_eq!(target.last_ack_generation, 1);
+    }
+
+    #[test]
+    fn content_mismatch_ack_keeps_frontier_pending_and_requests_rebootstrap() {
+        let mut hub = RelayHub::from_text(1, "base\n");
+        hub.register(2).unwrap();
+        hub.apply_canonical_replace("base\n", "base\nresponse\n")
+            .unwrap();
+
+        let pending = hub.pending_updates(2).unwrap().pop().unwrap();
+        assert_eq!(
+            pending.expected_content_hash,
+            content_hash("base\nresponse\n")
+        );
+        assert!(
+            !hub.ack_delivery_with_content_hash(
+                2,
+                &pending.patch_id,
+                pending.generation,
+                Some(&content_hash("base\nstale editor buffer\n")),
+            )
+            .unwrap()
+        );
+        assert_eq!(hub.pending_updates(2).unwrap().len(), 1);
+        assert_eq!(hub.pending_rebootstrap_members(), vec![2]);
+        assert!(!hub.delivery_converged());
+
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                2,
+                &pending.patch_id,
+                pending.generation,
+                Some(&pending.expected_content_hash),
+            )
+            .unwrap()
+        );
+        assert!(hub.delivery_converged());
+        assert!(hub.pending_rebootstrap_members().is_empty());
+    }
+
+    #[test]
+    fn final_coalesced_hash_cumulatively_acknowledges_older_generations() {
+        let mut hub = RelayHub::from_text(1, "base\n");
+        hub.register(2).unwrap();
+        hub.apply_canonical_replace("base\n", "base\none\n")
+            .unwrap();
+        hub.apply_canonical_replace("base\none\n", "base\none\ntwo\n")
+            .unwrap();
+        let pending = hub.pending_updates(2).unwrap();
+        assert_eq!(pending.len(), 2);
+
+        assert!(
+            hub.ack_delivery_with_content_hash(
+                2,
+                &pending[0].patch_id,
+                pending[0].generation,
+                Some(&pending[1].expected_content_hash),
+            )
+            .unwrap()
+        );
+        assert!(hub.pending_updates(2).unwrap().is_empty());
+        assert_eq!(hub.delivery_snapshot()[0].last_ack_generation, 2);
+        assert!(hub.delivery_converged());
+    }
+
+    #[test]
+    fn canonical_response_uses_bounded_minimal_span_delta() {
+        let base = format!("{}\n", "a".repeat(5_000));
+        let target = format!("{base}résumé ✓\n");
+        let mut hub = RelayHub::from_text(1, &base);
+        hub.register(2).unwrap();
+
+        let packet = hub.apply_canonical_replace(&base, &target).unwrap();
+
+        assert_eq!(hub.canonical_text(), target);
+        assert_eq!(hub.member_text(2).unwrap(), target);
+        assert!(
+            packet.update.len() < 5_000,
+            "a short append must not encode a whole-document delete/reinsert; update_bytes={}",
+            packet.update.len()
+        );
     }
 
     #[test]

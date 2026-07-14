@@ -26,12 +26,16 @@ pub fn ready_busy_conflict_reconcile_decision(
 pub fn stale_busy_idle_reconcile_decision(
     actor_busy: bool,
     pane_has_busy_cue: bool,
+    turn_active: bool,
+    dispatch_grace_active: bool,
     clear_cooldown_active: bool,
     consecutive_idle_busy_ticks: u32,
     required_ticks: u32,
 ) -> bool {
     actor_busy
         && !pane_has_busy_cue
+        && !turn_active
+        && !dispatch_grace_active
         && !clear_cooldown_active
         && consecutive_idle_busy_ticks >= required_ticks
 }
@@ -56,6 +60,8 @@ mod tests {
             true,
             false,
             false,
+            false,
+            false,
             REQUIRED_TICKS,
             REQUIRED_TICKS
         ));
@@ -65,7 +71,15 @@ mod tests {
     fn stale_busy_reconcile_waits_for_full_debounce() {
         for ticks in 0..REQUIRED_TICKS {
             assert!(
-                !stale_busy_idle_reconcile_decision(true, false, false, ticks, REQUIRED_TICKS),
+                !stale_busy_idle_reconcile_decision(
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                    ticks,
+                    REQUIRED_TICKS
+                ),
                 "should not reconcile after only {ticks} idle ticks"
             );
         }
@@ -77,6 +91,8 @@ mod tests {
             true,
             true,
             false,
+            false,
+            false,
             REQUIRED_TICKS + 10,
             REQUIRED_TICKS
         ));
@@ -85,6 +101,8 @@ mod tests {
     #[test]
     fn stale_busy_reconcile_skips_when_actor_ready() {
         assert!(!stale_busy_idle_reconcile_decision(
+            false,
+            false,
             false,
             false,
             false,
@@ -98,8 +116,36 @@ mod tests {
         assert!(!stale_busy_idle_reconcile_decision(
             true,
             false,
+            false,
+            false,
             true,
             REQUIRED_TICKS,
+            REQUIRED_TICKS
+        ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_skips_while_owned_turn_is_active() {
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            true,
+            false,
+            false,
+            REQUIRED_TICKS + 10,
+            REQUIRED_TICKS
+        ));
+    }
+
+    #[test]
+    fn stale_busy_reconcile_skips_during_fresh_dispatch_grace() {
+        assert!(!stale_busy_idle_reconcile_decision(
+            true,
+            false,
+            false,
+            true,
+            false,
+            REQUIRED_TICKS + 10,
             REQUIRED_TICKS
         ));
     }

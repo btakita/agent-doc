@@ -273,7 +273,10 @@ internal object CpcRouteClient {
             name = "editor_route",
             payloadType = "agent-doc.editor_route.v1",
             payload = payload,
-            idempotencyKey = routeKey ?: relativePath,
+            // Retries of one click share an attempt id; a later intentional click
+            // gets a new id. Durable controller receipts still coalesce attempts
+            // while the prior document turn is in flight.
+            idempotencyKey = attemptId ?: routeKey ?: relativePath,
             commandId = commandId,
             deadlineMs = waitForReadySeconds * 1000,
             supersede = false,

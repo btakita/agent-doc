@@ -639,6 +639,42 @@ pub fn validate_replay_with_current_content(
         return Ok(());
     }
 
+    // A legacy editor could replay the complete session projection while a
+    // response cell was in flight, then overwrite that response from its stale
+    // cache. Preflight now coalesces that malformed dual projection through the
+    // CRDT before interrupted-cycle recovery. The resulting byte hash is
+    // intentionally different from the captured baseline even though no
+    // operator text changed. Rebase only when the exact baseline used by the
+    // matching open cycle independently coalesces to the current document.
+    // This is a structural proof, not a generic drift waiver: divergent or
+    // reordered projections still fail closed below.
+    if file_mismatch
+        && let Some((copies, retained_additions)) =
+            captured_baseline_coalesces_to_current(file, capture, current_file)?
+    {
+        agent_doc_snapshot_io::save(file, current_file, agent_doc_ops_log_io::log_op)?;
+        let rebased_snapshot_hash = agent_doc_hash::content_hash(current_file);
+        refresh_replay_baseline_for_reason(
+            file,
+            capture,
+            &current_file_hash,
+            Some(&rebased_snapshot_hash),
+            CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline,
+        )?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "capture_replay_baseline_coalesced file={} capture_id={} cycle_id={} copies={} retained_additions={} recovery=replay_captured_response",
+                file.display(),
+                capture.capture_id,
+                capture.cycle_id,
+                copies,
+                retained_additions,
+            ),
+        );
+        return Ok(());
+    }
+
     if file_mismatch {
         anyhow::bail!(
             "captured response baseline no longer matches current document for {}. Rebuild sidecars without clearing session state: `agent-doc reset --from-current --preserve-session {}`",
@@ -651,6 +687,43 @@ pub fn validate_replay_with_current_content(
         file.display(),
         file.display()
     );
+}
+
+fn captured_baseline_coalesces_to_current(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file: &str,
+) -> Result<Option<(usize, usize)>> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !state.is_open()
+        || state.cycle_id != capture.cycle_id
+        || state.capture_id.as_deref() != Some(capture.capture_id.as_str())
+        || state.response_sha256.as_deref() != Some(capture.response_sha256.as_str())
+    {
+        return Ok(None);
+    }
+    let Some(baseline_file) = state.baseline_file.as_deref() else {
+        return Ok(None);
+    };
+    let Ok(captured_baseline) = std::fs::read_to_string(baseline_file) else {
+        return Ok(None);
+    };
+    let Some(replay) =
+        agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(
+            &captured_baseline,
+        )
+    else {
+        return Ok(None);
+    };
+    let coalesced =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            replay.canonical,
+        );
+    let current =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current_file);
+    Ok((coalesced == current).then_some((replay.copies, replay.retained_additions)))
 }
 
 /// Returns true when the captured `response_body` is still contiguously
@@ -1335,7 +1408,73 @@ mod tests {
         assert!(err.to_string().contains("baseline no longer matches"));
         assert!(
             err.to_string()
-                .contains("agent-doc reset --from-current --preserve-session")
+            .contains("agent-doc reset --from-current --preserve-session")
+        );
+    }
+
+    #[test]
+    fn validate_replay_rebases_after_proven_whole_document_replay_coalescence() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let canonical = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "Operator prompt\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let replayed = format!("{canonical}{canonical}");
+        std::fs::write(&doc, &replayed).unwrap();
+        agent_doc_snapshot_io::save(&doc, &replayed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(&replayed),
+            Some(&replayed),
+        )
+        .unwrap();
+        let baseline = dir.path().join("captured-baseline.md");
+        std::fs::write(&baseline, &replayed).unwrap();
+        agent_doc_cycle_state_io::record_turn_checkpoint(
+            &doc,
+            Some(baseline.to_string_lossy().as_ref()),
+            &["Operator prompt".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
+        let capture = capture_response(
+            &doc,
+            "<!-- patch:exchange -->\n### Re: prompt — gpt-5\n\nRecovered.\n<!-- /patch:exchange -->\n",
+        )
+        .unwrap();
+
+        let divergent = canonical.replace("Operator prompt", "Operator changed prompt");
+        assert_eq!(
+            captured_baseline_coalesces_to_current(&doc, &capture, &divergent).unwrap(),
+            None,
+            "structurally divergent operator text must remain fail-closed",
+        );
+
+        std::fs::write(&doc, canonical).unwrap();
+        validate_replay(&doc, &capture)
+            .expect("proven whole-document replay coalescence should safely rebase replay");
+
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            Some(canonical),
+            "sidecar snapshot should converge to the JB-authoritative projection",
+        );
+        let refreshed = load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(replay_file_hash(canonical).as_str()),
+        );
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("capture_replay_baseline_coalesced")
+                && log.contains("reason=whole_document_replay_coalesced_baseline"),
+            "coalesced replay recovery must leave a specific audit trail:\n{log}",
         );
     }
 

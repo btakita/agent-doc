@@ -185,6 +185,7 @@ pub enum MetadataDriftAuthority {
 pub enum CloseoutRecoveryMutationReason {
     BenignReplayBaseline,
     QueueOnlyReplayBaseline,
+    WholeDocumentReplayCoalescedBaseline,
     CommitQueueMetadataDrift,
     ResetFromVisible,
     RestoreHeadMetadata,
@@ -198,6 +199,9 @@ impl CloseoutRecoveryMutationReason {
         match self {
             Self::BenignReplayBaseline => "benign_replay_baseline",
             Self::QueueOnlyReplayBaseline => "queue_only_replay_baseline",
+            Self::WholeDocumentReplayCoalescedBaseline => {
+                "whole_document_replay_coalesced_baseline"
+            }
             Self::CommitQueueMetadataDrift => "commit_queue_metadata_drift",
             Self::ResetFromVisible => "reset_from_visible",
             Self::RestoreHeadMetadata => "restore_head_metadata",
@@ -210,6 +214,9 @@ impl CloseoutRecoveryMutationReason {
     pub const fn capture_refresh_event(self) -> &'static str {
         match self {
             Self::QueueOnlyReplayBaseline => "capture_baseline_refreshed_for_queue_only_drift",
+            Self::WholeDocumentReplayCoalescedBaseline => {
+                "capture_baseline_refreshed_for_whole_document_replay_coalescence"
+            }
             _ => "capture_baseline_refreshed_for_benign_drift",
         }
     }
@@ -217,6 +224,9 @@ impl CloseoutRecoveryMutationReason {
     pub const fn capture_refresh_message(self) -> &'static str {
         match self {
             Self::QueueOnlyReplayBaseline => "queue-only drift detected",
+            Self::WholeDocumentReplayCoalescedBaseline => {
+                "whole-document replay coalescence detected"
+            }
             _ => "benign drift detected",
         }
     }
@@ -960,10 +970,14 @@ mod tests {
             CloseoutRecoveryMutationReason::BenignReplayBaseline.as_str(),
             "benign_replay_baseline"
         );
-        assert_eq!(
-            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
-            "queue_only_replay_baseline"
-        );
+    assert_eq!(
+        CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
+        "queue_only_replay_baseline"
+    );
+    assert_eq!(
+        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline.as_str(),
+        "whole_document_replay_coalesced_baseline"
+    );
         assert_eq!(
             CloseoutRecoveryMutationReason::CommitQueueMetadataDrift.as_str(),
             "commit_queue_metadata_drift"
@@ -996,10 +1010,20 @@ mod tests {
             CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_event(),
             "capture_baseline_refreshed_for_queue_only_drift"
         );
-        assert_eq!(
-            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_message(),
-            "queue-only drift detected"
-        );
+    assert_eq!(
+        CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_message(),
+        "queue-only drift detected"
+    );
+    assert_eq!(
+        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
+            .capture_refresh_event(),
+        "capture_baseline_refreshed_for_whole_document_replay_coalescence"
+    );
+    assert_eq!(
+        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
+            .capture_refresh_message(),
+        "whole-document replay coalescence detected"
+    );
         assert_eq!(
             CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_event(),
             "capture_baseline_refreshed_for_benign_drift"

@@ -26,6 +26,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use lazily::{DeadlineCore, TimelineSource};
 use std::path::{Path, PathBuf};
 
 use agent_doc_document_realtime::{
@@ -92,6 +93,29 @@ const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_000;
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
 const CRDT_WRITE_BACKOFF_MAX_MS: u64 = 250;
+
+/// Controller transport congestion and an already-running model bootstrap are
+/// not document conflicts. Closeout owns a larger convergence deadline than
+/// either attempt, so these failures are absorbed by the existing coalesced
+/// backoff loop instead of escaping to the agent as a prompt to retry an
+/// already-accepted response cell.
+fn transient_convergence_backpressure_error(err: &anyhow::Error) -> bool {
+    let detail = format!("{err:#}").to_ascii_lowercase();
+    [
+        "timed out",
+        "would block",
+        "temporarily unavailable",
+        "connection refused",
+        "connection reset",
+        "broken pipe",
+        "failed to connect",
+        "no such file or directory",
+        "reason=in_progress",
+        "active recovery attempt finishes",
+    ]
+    .iter()
+    .any(|needle| detail.contains(needle))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DocumentAuthorityObservation {
@@ -482,7 +506,10 @@ pub fn apply_canonical_replace_if_attached(
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
     let started = std::time::Instant::now();
-    let deadline = started + std::time::Duration::from_millis(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
+    // Keep the write budget as a portable lazily timeline. Individual controller
+    // RPC timeouts are congestion signals inside this larger deadline, not a
+    // reason to abandon an already-accepted compact/finalize mutation.
+    let mut deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(expected_current).encode_state();
     let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
     let mut pending_target: Option<String> = None;
@@ -493,8 +520,9 @@ pub fn apply_canonical_replace_if_attached(
         .unwrap_or_else(std::time::Instant::now);
 
     loop {
-        let now = std::time::Instant::now();
-        if now >= deadline {
+        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        deadline.tick(elapsed_ms);
+        if deadline.is_expired() {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -516,10 +544,7 @@ pub fn apply_canonical_replace_if_attached(
         // happens in the caller, outside the controller RPC loop, so editor
         // deltas and delivery ACKs remain responsive while typing settles.
         if pending_target.is_none() {
-            let remaining_ms = deadline
-                .saturating_duration_since(now)
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64;
+            let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
             guard_visible_write_idle_with_budget(
                 file,
                 source,
@@ -534,88 +559,38 @@ pub fn apply_canonical_replace_if_attached(
             })?;
         }
 
-        match observe_live_editor_authority_after_model_ensure(file, source)? {
-            agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(None),
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
-                wait_reason = "editor_attached_model_missing";
+        let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
+            Ok(current) => Some(current),
+            Err(err) if transient_convergence_backpressure_error(&err) => {
+                wait_reason = "controller_model_backpressure";
+                // The authority/model boundary already records the failed
+                // attempt. The common two-second notice below coalesces retry
+                // telemetry instead of logging every controller/model poll.
+                None
             }
-            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
-                wait_reason = "editor_sync_pending";
-            }
-            agent_doc_crdt_relay_io::CurrentText::Current {
-                text: relay_text,
-                live_editors,
-                delivery_converged,
-            } => {
-                if let Some(applied_target) = pending_target.as_ref() {
-                    if delivery_converged && relay_text == *applied_target {
-                        let mut relay_write = pending_write
-                            .take()
-                            .expect("pending CRDT target must retain its write receipt");
-                        relay_write.delivery_converged = true;
-                        relay_write.live_editors = live_editors;
-                        agent_doc_ops_log_io::log_op(
-                            file,
-                            &format!(
-                                "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
-                                file.display(),
-                                relay_write.content_hash,
-                                relay_write.update_bytes,
-                                relay_write.targets,
-                                live_editors,
-                                started.elapsed().as_millis(),
-                            ),
-                        );
-                        return Ok(Some(relay_write));
-                    }
-                    if write_policy::decide_crdt_write_admission(delivery_converged)
-                        == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
-                    {
-                        // Do not stack a second write behind an unacknowledged
-                        // one. The editor pulls a coalesced canonical frontier;
-                        // this poll applies backpressure until that frontier is
-                        // visible and ACKed.
-                        wait_reason = "delivery_ack_pending";
-                    } else {
-                        // Operator text arrived after our write. Recompute from
-                        // the original base/agent candidate against the newest
-                        // converged operator cut, then issue one new CRDT delta.
-                        pending_target = None;
-                        pending_write = None;
-                        backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
-                        wait_reason = "operator_advanced_after_apply";
-                        continue;
-                    }
-                } else if write_policy::decide_crdt_write_admission(delivery_converged)
-                    == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
-                {
-                    wait_reason = "prior_delivery_ack_pending";
-                } else {
-                    let effective_target =
-                        if relay_text == expected_current || relay_text == content {
-                            content.to_string()
-                        } else {
-                            agent_doc_merge::crdt::merge_by_component(
-                            Some(&base_state),
-                            content,
-                            &relay_text,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "{source}: failed to CRDT-merge the settled editor version for {}",
-                                file.display()
-                            )
-                        })?
-                        };
+            Err(err) => return Err(err),
+        };
 
-                    match apply_cpc_write_through_relay_authority(
-                        file,
-                        &relay_text,
-                        &effective_target,
-                        source,
-                    ) {
-                        Ok(None) => return Ok(None),
-                        Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
+        if let Some(observed) = observed {
+            match observed {
+                agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(None),
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+                    wait_reason = "editor_attached_model_missing";
+                }
+                agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                    wait_reason = "editor_sync_pending";
+                }
+                agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: relay_text,
+                    live_editors,
+                    delivery_converged,
+                } => {
+                    if let Some(applied_target) = pending_target.as_ref() {
+                        if delivery_converged && relay_text == *applied_target {
+                            let mut relay_write = pending_write
+                                .take()
+                                .expect("pending CRDT target must retain its write receipt");
+                            relay_write.delivery_converged = true;
                             relay_write.live_editors = live_editors;
                             agent_doc_ops_log_io::log_op(
                                 file,
@@ -631,29 +606,93 @@ pub fn apply_canonical_replace_if_attached(
                             );
                             return Ok(Some(relay_write));
                         }
-                        Ok(Some(relay_write)) => {
+                        if write_policy::decide_crdt_write_admission(delivery_converged)
+                            == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
+                        {
+                            // Do not stack a second write behind an unacknowledged
+                            // one. The editor pulls a coalesced canonical frontier;
+                            // this poll applies backpressure until that frontier is
+                            // visible and ACKed.
                             wait_reason = "delivery_ack_pending";
-                            pending_target = Some(effective_target);
-                            pending_write = Some(relay_write);
+                        } else {
+                            // Operator text arrived after our write. Recompute from
+                            // the original base/agent candidate against the newest
+                            // converged operator cut, then issue one new CRDT delta.
+                            pending_target = None;
+                            pending_write = None;
                             backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                            wait_reason = "operator_advanced_after_apply";
+                            continue;
                         }
-                        Err(err) => {
-                            let detail = format!("{err:#}");
-                            if detail.contains("recovery=retry_crdt_merge")
-                                || detail.contains("editor_sync_pending")
-                            {
-                                wait_reason = "compare_and_swap_raced";
+                    } else if write_policy::decide_crdt_write_admission(delivery_converged)
+                        == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
+                    {
+                        wait_reason = "prior_delivery_ack_pending";
+                    } else {
+                        let effective_target =
+                            if relay_text == expected_current || relay_text == content {
+                                content.to_string()
+                            } else {
+                                agent_doc_merge::crdt::merge_by_component(
+                            Some(&base_state),
+                            content,
+                            &relay_text,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "{source}: failed to CRDT-merge the settled editor version for {}",
+                                file.display()
+                            )
+                        })?
+                            };
+
+                        match apply_cpc_write_through_relay_authority(
+                            file,
+                            &relay_text,
+                            &effective_target,
+                            source,
+                        ) {
+                            Ok(None) => return Ok(None),
+                            Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
+                                relay_write.live_editors = live_editors;
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
-                                        "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
+                                        "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
                                         file.display(),
-                                        wait_reason,
-                                        backoff_ms,
+                                        relay_write.content_hash,
+                                        relay_write.update_bytes,
+                                        relay_write.targets,
+                                        live_editors,
+                                        started.elapsed().as_millis(),
                                     ),
                                 );
-                            } else {
-                                return Err(err);
+                                return Ok(Some(relay_write));
+                            }
+                            Ok(Some(relay_write)) => {
+                                wait_reason = "delivery_ack_pending";
+                                pending_target = Some(effective_target);
+                                pending_write = Some(relay_write);
+                                backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                            }
+                            Err(err) => {
+                                let detail = format!("{err:#}");
+                                if detail.contains("recovery=retry_crdt_merge")
+                                    || detail.contains("editor_sync_pending")
+                                {
+                                    wait_reason = "compare_and_swap_raced";
+                                    agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
+                                            file.display(),
+                                            wait_reason,
+                                            backoff_ms,
+                                        ),
+                                    );
+                                } else {
+                                    return Err(err);
+                                }
                             }
                         }
                     }
@@ -680,8 +719,9 @@ pub fn apply_canonical_replace_if_attached(
             );
             last_notice = std::time::Instant::now();
         }
-        let sleep_for = std::time::Duration::from_millis(backoff_ms)
-            .min(deadline.saturating_duration_since(std::time::Instant::now()));
+        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
+        let sleep_for = std::time::Duration::from_millis(backoff_ms.min(remaining_ms));
         if !sleep_for.is_zero() {
             std::thread::sleep(sleep_for);
         }
@@ -2008,6 +2048,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn controller_transport_congestion_is_retryable_but_semantic_errors_are_not() {
+        assert!(transient_convergence_backpressure_error(&anyhow::anyhow!(
+            "timed out after 0.8s waiting for project controller response"
+        )));
+        assert!(transient_convergence_backpressure_error(&anyhow::anyhow!(
+            "connection reset by peer"
+        )));
+        assert!(transient_convergence_backpressure_error(&anyhow::anyhow!(
+            "document model publish suppressed; reason=in_progress; retry after the active recovery attempt finishes"
+        )));
+        assert!(!transient_convergence_backpressure_error(&anyhow::anyhow!(
+            "malformed template patchback"
+        )));
+    }
+
     // ── Rung 2 (`#rtwfeed`) CPC-owned CRDT feed ──
 
     /// Build a temp project with `.agent-doc/` and the document on disk. Returns
@@ -2055,8 +2111,19 @@ mod tests {
         file: std::path::PathBuf,
         identity: &'static str,
     ) -> std::thread::JoinHandle<()> {
+        ack_crdt_deliveries(file, identity, 1, std::time::Duration::ZERO)
+    }
+
+    fn ack_crdt_deliveries(
+        file: std::path::PathBuf,
+        identity: &'static str,
+        count: usize,
+        initial_delay: std::time::Duration,
+    ) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
             let started = std::time::Instant::now();
+            std::thread::sleep(initial_delay);
+            let mut acked = 0usize;
             loop {
                 let pull = test_support_pull_replica_updates_for_file(&file, identity)
                     .expect("pull CRDT delivery")
@@ -2072,10 +2139,13 @@ mod tests {
                         .expect("ACK CRDT delivery"),
                         Some(true),
                     );
-                    return;
+                    acked += 1;
+                    if acked == count {
+                        return;
+                    }
                 }
                 assert!(
-                    started.elapsed() < std::time::Duration::from_secs(2),
+                    started.elapsed() < std::time::Duration::from_secs(3),
                     "timed out waiting for CRDT delivery"
                 );
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -2107,6 +2177,58 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
                 .unwrap()
                 .contains("transport=crdt_only")
+        );
+    }
+
+    #[test]
+    fn compact_exchange_waits_through_prior_ack_backpressure_then_converges() {
+        // Regression for the live JB failure: Compact Exchange observed
+        // `prior_delivery_ack_pending`, then one 0.8s controller read timeout
+        // escaped and aborted the command. The shared convergence budget must
+        // outlive that individual RPC window, retain the compact target, and
+        // apply it once the previous visible frontier is ACKed.
+        let baseline = "# Session\n\nseed\n";
+        let source = "# Session\n\nseed\n\n## Exchange\n\nold response\n";
+        let compacted = "# Session\n\nseed\n\n## Exchange\n\n*Compacted.*\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-compact-prior-ack";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let prior =
+            apply_cpc_write_through_relay_authority(&file, baseline, source, "seed_prior_delivery")
+                .unwrap()
+                .expect("seed write should use attached CRDT relay");
+        assert!(
+            !prior.delivery_converged,
+            "the prior frontier must await ACK"
+        );
+
+        let ack = ack_crdt_deliveries(
+            file.clone(),
+            identity,
+            2,
+            std::time::Duration::from_millis(850),
+        );
+        let started = std::time::Instant::now();
+        let write = apply_canonical_replace_if_attached(&file, source, compacted, "compact")
+            .unwrap()
+            .expect("compact write should remain pending and then converge");
+        ack.join().unwrap();
+
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(800),
+            "fixture must exercise a wait longer than one reported controller timeout"
+        );
+        assert!(write.delivery_converged);
+        assert_eq!(write.content_hash, agent_doc_hash::content_hash(compacted));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_crdt_convergence_wait")
+                && log.contains("reason=prior_delivery_ack_pending"),
+            "compact should coalesce backpressure while retaining its target:\n{log}"
         );
     }
 

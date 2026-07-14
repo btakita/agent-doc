@@ -40,10 +40,24 @@ pub struct CommandDispatchResult {
 pub struct DirectPaneAcceptance {
     pub status: CommandDispatchStatus,
     pub elapsed: Duration,
+    /// True only when pane evidence proved that this submission crossed the
+    /// composer boundary: the trigger was observed and then consumed, or the
+    /// harness exposed an active-turn busy cue. A stable empty composer alone
+    /// remains transport acceptance, not end-to-end submission proof.
+    pub dispatch_observed: bool,
     /// Whether the trigger text was still visible in the pane when the window
     /// closed (only meaningful when `status == TimedOut`).
     pub trigger_visible: bool,
     pub diagnostic_path: Option<PathBuf>,
+}
+
+impl DirectPaneAcceptance {
+    /// End-to-end submission proof is deliberately stronger than transport
+    /// acceptance: stable-empty without a consumed draft or busy cue is not
+    /// enough to authorize another route attempt.
+    pub fn end_to_end_submitted(&self) -> bool {
+        self.status == CommandDispatchStatus::Accepted && self.dispatch_observed
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,6 +231,7 @@ pub fn poll_direct_pane_acceptance(
                 if direct_pane_acceptance_poll_status(&mut poll_state, elapsed, cmd_still_in_input)
                     .is_some()
                 {
+                    let dispatch_observed = poll_state.saw_trigger_visible();
                     let capture_hash = last_capture.as_ref().map(|(_, _, hash, _)| hash.as_str());
                     log_route_submit_observation(RouteSubmitObservationLogFacts {
                         file,
@@ -233,6 +248,7 @@ pub fn poll_direct_pane_acceptance(
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
+                        dispatch_observed,
                         trigger_visible: false,
                         diagnostic_path: None,
                     };
@@ -263,6 +279,7 @@ pub fn poll_direct_pane_acceptance(
                     return DirectPaneAcceptance {
                         status: CommandDispatchStatus::Accepted,
                         elapsed,
+                        dispatch_observed: true,
                         trigger_visible: false,
                         diagnostic_path: None,
                     };
@@ -318,6 +335,7 @@ pub fn poll_direct_pane_acceptance(
     DirectPaneAcceptance {
         status: CommandDispatchStatus::TimedOut,
         elapsed,
+        dispatch_observed: false,
         trigger_visible,
         diagnostic_path,
     }
@@ -386,6 +404,7 @@ pub fn send_direct_pane_enter_resubmit_until_stable(
     let mut status = initial.status;
     let mut trigger_visible = initial.trigger_visible;
     let mut elapsed = initial.elapsed;
+    let mut dispatch_observed = initial.dispatch_observed;
     let mut diagnostic_path = initial.diagnostic_path;
     let mut attempts_sent = 0usize;
     let profile_allows_pending_draft_enter_resubmit =
@@ -411,6 +430,7 @@ pub fn send_direct_pane_enter_resubmit_until_stable(
             attempts_sent,
         );
         elapsed += retry.elapsed;
+        dispatch_observed |= retry.dispatch_observed;
         status = retry.status;
         trigger_visible = retry.trigger_visible;
         if retry.diagnostic_path.is_some() {
@@ -421,6 +441,7 @@ pub fn send_direct_pane_enter_resubmit_until_stable(
     DirectPaneAcceptance {
         status,
         elapsed,
+        dispatch_observed,
         trigger_visible,
         diagnostic_path,
     }
@@ -573,6 +594,7 @@ pub fn send_command_unchecked(
             DirectPaneAcceptance {
                 status: CommandDispatchStatus::TimedOut,
                 elapsed: Duration::ZERO,
+                dispatch_observed: false,
                 trigger_visible: true,
                 diagnostic_path: existing_draft_diagnostic_path,
             },
@@ -897,6 +919,24 @@ fn late_resubmit_harness_surface_visible(content: &str, harness: &HarnessConfig)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervisor_acceptance_requires_composer_or_active_turn_observation() {
+        let stable_empty = DirectPaneAcceptance {
+            status: CommandDispatchStatus::Accepted,
+            elapsed: Duration::from_millis(900),
+            dispatch_observed: false,
+            trigger_visible: false,
+            diagnostic_path: None,
+        };
+        assert!(!stable_empty.end_to_end_submitted());
+
+        let consumed = DirectPaneAcceptance {
+            dispatch_observed: true,
+            ..stable_empty
+        };
+        assert!(consumed.end_to_end_submitted());
+    }
 
     #[test]
     fn route_pane_snapshot_preserves_redacted_terminal_capture() {

@@ -69,6 +69,7 @@ class CrdtReplicaForwarderTest {
         val sentUpdates = mutableListOf<ByteArray>()
         val pendingUpdates = mutableListOf<ReplicaRemoteUpdate>()
         val ackedUpdates = mutableListOf<String>()
+        val ackedContentHashes = mutableListOf<String?>()
 
         override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
             if (refuseRegister) return null
@@ -83,8 +84,15 @@ class CrdtReplicaForwarderTest {
         override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> =
             pendingUpdates.toList()
 
-        override fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean {
+        override fun ackUpdate(
+            filePath: String,
+            identity: String,
+            patchId: String,
+            generation: Long,
+            contentHash: String?,
+        ): Boolean {
             ackedUpdates.add("$patchId:$generation")
+            ackedContentHashes.add(contentHash)
             pendingUpdates.removeIf { it.patchId == patchId && it.generation == generation }
             return true
         }
@@ -167,9 +175,13 @@ class CrdtReplicaForwarderTest {
         val pulled = fwd.pullRemoteUpdates()
         assertEquals(1, pulled.size)
         assertEquals("FROM-PEER", fwd.applyRemoteUpdate(pulled[0].update))
-        assertTrue(fwd.ackRemoteUpdate(pulled[0]))
+        assertTrue(fwd.ackRemoteUpdate(pulled[0], "FROM-PEER"))
 
         assertEquals(listOf("crdt:1:2:1:1"), transport.ackedUpdates)
+        assertEquals(
+            listOf("a6c6f01a3d023a48fd52677f25b60502ea1c596e76c6e5ae91b5216d4d035841"),
+            transport.ackedContentHashes,
+        )
         assertTrue(transport.pendingUpdates.isEmpty())
     }
 

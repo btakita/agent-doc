@@ -38,7 +38,7 @@ class CpcRouteClientCommandPlaneTest {
         assertEquals("editor_route", submit.get("name").asString)
         assertEquals("agent-doc.editor_route.v1", submit.get("payload_type").asString)
         assertEquals("cmd-fixed", submit.get("command_id").asString)
-        assertEquals("root:plan.md:run", submit.get("idempotency_key").asString)
+        assertEquals("attempt-7", submit.get("idempotency_key").asString)
         assertEquals("same_idempotency_key", submit.getAsJsonObject("policy").get("dedupe").asString)
         assertTrue(submit.get("payload_hash").asString.startsWith("sha256:"))
 

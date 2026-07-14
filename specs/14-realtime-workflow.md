@@ -101,6 +101,15 @@ by `agent_doc_markdown_ast::exchange_tree::response_identity_digest` and is used
 consistently by the append filter and the convergence dedup in
 `agent-doc-merge`.
 
+A whole-document replay is transport corruption, not a prompt the agent must
+repair. Preflight and route preparation may coalesce two structurally complete
+copies only when they have byte-identical frontmatter and either are identical
+or one copy's lines are an order-preserving subset of the other. The superset is
+the canonical projection so concurrent live prompt additions are retained. Two
+divergent or reordered copies remain ambiguous and must fail closed. The
+coalesced projection is written through CRDT authority before prompt-residue
+classification or dispatch.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,
@@ -316,6 +325,17 @@ Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
    (preserving cursor/undo) and re-bootstraps the native replica so later deltas are
    relative to the corrected state. The `ReplicaPullDelivery` type (`Deltas` |
    `Replace`) is mirrored across both frontends per the Editor Parity Requirement.
+
+   **Content-qualified ACK.** Every delta item also carries the SHA-256
+   `expected_content_hash` of the canonical visible target. After applying the
+   delta to its native replica *and* installing the converged text in the editor,
+   the plugin sends the visible buffer's `content_hash` with `replica_ack`.
+   Generation equality alone is not convergence: a hash mismatch retains the
+   delivery, flags the member for the replace-capable bootstrap above, and keeps
+   disk materialization closed. Older plugins may omit the hash only during the
+   rolling install compatibility window. Hash-qualified receipts are cumulative:
+   when an editor coalesces generations and proves the final target for generation
+   N, the relay atomically advances every older pending generation through N.
 
 ### Turn-State Projection To The Plugin
 

@@ -65,6 +65,30 @@ fn recover_empty_response_if_configured(file: &Path, flags: &WriteFlags) -> Resu
     }
 }
 
+const NO_PENDING_CAPTURE_MARKER: &str = "<!-- no-pending-capture -->";
+
+/// Persist the caller's explicit no-followup closeout intent as response
+/// evidence. The marker is stripped by the ordinary transient-marker cleanup,
+/// so it never becomes document content, while both pre-write and pre-commit
+/// guards observe the same durable capture on retries.
+fn encode_no_pending_capture_intent(file: &Path, response: &mut String, enabled: bool) {
+    if !enabled || response.contains(NO_PENDING_CAPTURE_MARKER) {
+        return;
+    }
+    if !response.ends_with('\n') {
+        response.push('\n');
+    }
+    response.push_str(NO_PENDING_CAPTURE_MARKER);
+    response.push('\n');
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "pending_capture_intent file={} outcome=declared_none source=cli_no_followups evidence=transient_response_marker",
+            file.display()
+        ),
+    );
+}
+
 fn projected_cycle_id_for_ipc_payload(file: &Path) -> Option<String> {
     agent_doc_cycle_state_io::load_with_closeout_projection(file)
         .ok()
@@ -221,7 +245,8 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
 
     // Strip leading "## Assistant" heading if present — the write command adds its own
-    let response = agent_doc_turn::response_text::strip_assistant_heading(&response);
+    let mut response = agent_doc_turn::response_text::strip_assistant_heading(&response);
+    encode_no_pending_capture_intent(file, &mut response, flags.no_pending_capture);
     let pending_flags = super::pending_write_flags(&flags);
     agent_doc_session_check_io::prewrite_pending_capture_check(file, &response, &pending_flags)?;
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
@@ -450,6 +475,7 @@ pub(crate) fn run_template(
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
+    encode_no_pending_capture_intent(file, &mut response, flags.no_pending_capture);
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
@@ -876,6 +902,7 @@ pub(crate) fn run_stream(
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
+    encode_no_pending_capture_intent(file, &mut response, flags.no_pending_capture);
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 
@@ -1787,6 +1814,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     if let Some(response_override) = normalized.response_for_capture {
         response = response_override;
     }
+    encode_no_pending_capture_intent(file, &mut response, flags.no_pending_capture);
     let patches = normalized.patches;
     let unmatched = normalized.unmatched;
 

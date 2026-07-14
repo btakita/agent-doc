@@ -313,6 +313,7 @@ mod tests {
             duplicate.unwrap(),
             agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::DuplicateSuppressed
         );
+        assert!(shared.prompt_dispatch_grace_active(std::time::Duration::from_secs(15)));
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"

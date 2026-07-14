@@ -18,6 +18,7 @@ export interface ReplicaRemoteUpdate {
     origin: number;
     target: number;
     generation: number;
+    expectedContentHash?: string;
     update: Uint8Array;
 }
 
@@ -31,7 +32,13 @@ export interface ReplicaTransport {
     /** D2: fetch the pending delivery, distinguishing additive deltas from a replace
      * delivery (out-of-band deletion re-bootstrap). Defaults to wrapping pullUpdates. */
     pullDelivery?(filePath: string, identity: string): Promise<ReplicaPullDelivery>;
-    ackUpdate(filePath: string, identity: string, patchId: string, generation: number): Promise<boolean>;
+    ackUpdate(
+        filePath: string,
+        identity: string,
+        patchId: string,
+        generation: number,
+        contentHash?: string,
+    ): Promise<boolean>;
     deregister(filePath: string, identity: string): Promise<void>;
 }
 
@@ -135,9 +142,12 @@ export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUp
         const origin = asNumber(entry.origin) ?? 0;
         const target = asNumber(entry.target) ?? 0;
         const generation = asNumber(entry.generation);
+        const expectedContentHash = typeof entry.expected_content_hash === 'string'
+            ? entry.expected_content_hash
+            : undefined;
         const update = decodeBase64(entry.update_b64);
         if (!patchId || generation == null || update == null) return [];
-        return [{ patchId, origin, target, generation, update }];
+        return [{ patchId, origin, target, generation, expectedContentHash, update }];
     });
 }
 
@@ -209,10 +219,12 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         identity: string,
         patchId: string,
         generation: number,
+        contentHash?: string,
     ): Promise<boolean> {
         const response = await this.send(this.controllerRequest('replica_ack', filePath, identity, {
             patch_id: patchId,
             generation,
+            ...(contentHash ? { content_hash: contentHash } : {}),
         }));
         return !!(response?.ok && isRecord(response.data) && response.data.acknowledged === true);
     }
@@ -387,9 +399,15 @@ export class CrdtReplicaForwarder {
             .then((updates) => ({ kind: 'deltas', updates }));
     }
 
-    ackRemoteUpdate(update: ReplicaRemoteUpdate): Promise<boolean> {
+    ackRemoteUpdate(update: ReplicaRemoteUpdate, appliedText?: string): Promise<boolean> {
         if (!this.attached) return Promise.resolve(false);
-        return this.transport.ackUpdate(this.filePath, this.identity, update.patchId, update.generation);
+        return this.transport.ackUpdate(
+            this.filePath,
+            this.identity,
+            update.patchId,
+            update.generation,
+            appliedText === undefined ? undefined : sha256(appliedText),
+        );
     }
 
     async deregister(): Promise<void> {
@@ -564,9 +582,16 @@ export class CrdtReplicaManager {
             this.applyingRemote.delete(filePath);
         }
         if (installed) {
-            // Re-bootstrap the native replica against the corrected canonical.
+            // Re-bootstrap from canonical state instead of locally editing a
+            // divergent replica until its text happens to match. The latter
+            // mints duplicate ops and can re-corrupt canonical on publish.
             await forwarder.deregister();
-            await forwarder.register();
+            if (this.forwarders.get(filePath) === forwarder) {
+                this.forwarders.delete(filePath);
+            }
+            if (!(await this.forwarderFor(filePath))) {
+                this.logger.warn(`[crdt-replica] canonical re-bootstrap could not reattach ${filePath}; the next document event will retry`);
+            }
         }
     }
 
@@ -655,7 +680,8 @@ export class CrdtReplicaManager {
             for (const update of updates) {
                 if (this.hasPendingLocal(filePath)) break;
                 if (!shouldApplyRemoteUpdate(update, forwarder.currentClientId)) {
-                    await forwarder.ackRemoteUpdate(update);
+                    const visibleText = this.currentEditorText(filePath) ?? this.shadows.get(filePath);
+                    await forwarder.ackRemoteUpdate(update, visibleText);
                     continue;
                 }
                 const expectedText = this.shadows.get(filePath);
@@ -669,7 +695,7 @@ export class CrdtReplicaManager {
                     const applied = await this.options.applyText(filePath, converged, expectedText);
                     if (applied) {
                         this.shadows.set(filePath, converged);
-                        await forwarder.ackRemoteUpdate(update);
+                        await forwarder.ackRemoteUpdate(update, converged);
                     } else {
                         const current = this.currentEditorText(filePath);
                         if (current != null) {

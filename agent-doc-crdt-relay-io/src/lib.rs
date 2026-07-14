@@ -1689,22 +1689,37 @@ pub fn ack_replica_update_for_file(
     patch_id: &str,
     generation: u64,
 ) -> Result<Option<bool>> {
+    ack_replica_update_for_file_with_content_hash(file, identity, patch_id, generation, None)
+}
+
+/// Hash-qualified variant of [`ack_replica_update_for_file`]. Current editor
+/// plugins send the visible editor text hash so a handled CRDT generation cannot
+/// be mistaken for actual convergence. `None` is accepted only for compatibility
+/// with an older plugin during the crash-safe install handoff.
+pub fn ack_replica_update_for_file_with_content_hash(
+    file: &Path,
+    identity: &str,
+    patch_id: &str,
+    generation: u64,
+    applied_content_hash: Option<&str>,
+) -> Result<Option<bool>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
     let acknowledged = with_hub_seeded_from_file(file, |hub| {
-        hub.ack_delivery(client_id, patch_id, generation)
+        hub.ack_delivery_with_content_hash(client_id, patch_id, generation, applied_content_hash)
     })??;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_ack file={} authority=multi_replica client_id={} patch_id={} generation={} acknowledged={}",
+            "crdt_replica_ack file={} authority=multi_replica client_id={} patch_id={} generation={} content_hash={} acknowledged={}",
             file.display(),
             client_id,
             patch_id,
             generation,
+            applied_content_hash.unwrap_or("legacy-unverified"),
             acknowledged,
         ),
     );
@@ -2888,8 +2903,14 @@ mod tests {
         assert!(!pull.updates.is_empty());
         for update in pull.updates {
             assert_eq!(
-                ack_replica_update_for_file(&doc, identity, &update.patch_id, update.generation,)
-                    .unwrap(),
+                ack_replica_update_for_file_with_content_hash(
+                    &doc,
+                    identity,
+                    &update.patch_id,
+                    update.generation,
+                    Some(&update.expected_content_hash),
+                )
+                .unwrap(),
                 Some(true),
             );
         }

@@ -395,7 +395,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 if (hasPendingLocal(filePath)) break
                 if (!shouldApplyRemoteCrdtUpdateUtil(update, forwarder.clientId)) {
                     selfEchoCount++
-                    if (forwarder.ackRemoteUpdate(update)) ackCount++
+                    // Self-echo still needs visible-content proof: the operator's
+                    // local delta may have reached canonical while the editor
+                    // buffer moved again before this pull.
+                    val visibleText = editorBufferText(filePath) ?: expectedText
+                    if (forwarder.ackRemoteUpdate(update, visibleText)) ackCount++
                     continue
                 }
                 peerUpdateCount++
@@ -495,10 +499,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             return false
         }
         if (installed) {
-            // Keep the editor node attached. The visible editor buffer is the
-            // authority after the guarded replace, so align the local native
-            // replica from that buffer through the same CPC relay path.
-            forwarder.ensureEditorText(canonical)
+            // Re-open from the canonical bootstrap. Editing the divergent local
+            // CRDT until its *text* matches would mint replacement ops and merge
+            // them back into a canonical that already contains the response,
+            // potentially duplicating content. A true rebootstrap discards the
+            // divergent lineage and also retires its stale pending delivery.
+            if (forwarders.remove(filePath, forwarder)) {
+                forwarder.deregister()
+                val reattached = forwarderFor(
+                    filePath,
+                    canonical,
+                    alignExisting = false,
+                    bypassRegisterBackoff = true,
+                )
+                if (reattached == null) {
+                    log.warn("[crdt-replica] canonical re-bootstrap could not reattach ${File(filePath).name}; the normal attach path will retry")
+                }
+            }
         }
         return installed
     }
@@ -609,7 +626,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     var acked = 0
                     if (outcome.applied) {
                         for (ack in pending.acknowledgements) {
-                            if (ack.forwarder.ackRemoteUpdate(ack.update)) acked++
+                            if (ack.forwarder.ackRemoteUpdate(ack.update, outcome.editorText)) acked++
                         }
                     } else if (outcome.editorText != null) {
                         shadows[pending.filePath] = outcome.editorText

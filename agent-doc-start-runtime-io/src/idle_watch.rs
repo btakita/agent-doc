@@ -704,13 +704,26 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 } else {
                     None
                 };
+                let turn_active = actor_busy
+                    && turn_active_for_owned_pane_with_idle_evidence(
+                        &path,
+                        &shared,
+                        false,
+                        &mut session_log,
+                    );
+                let dispatch_grace_active = actor_busy
+                    && shared.prompt_dispatch_grace_active(std::time::Duration::from_secs(15));
                 match pane_busy_cue {
-                    Some(false) => idle_busy_ticks = idle_busy_ticks.saturating_add(1),
+                    Some(false) if !turn_active && !dispatch_grace_active => {
+                        idle_busy_ticks = idle_busy_ticks.saturating_add(1)
+                    }
                     _ => idle_busy_ticks = 0,
                 }
                 if stale_busy_idle_reconcile_decision(
                     actor_busy,
                     pane_busy_cue == Some(true),
+                    turn_active,
+                    dispatch_grace_active,
                     clear_cooldown_active,
                     idle_busy_ticks,
                     STALE_BUSY_RECONCILE_TICKS,

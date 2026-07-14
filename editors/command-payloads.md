@@ -50,7 +50,11 @@ All payloads are JSON objects. Absent optional fields default as noted.
 
 ### `agent-doc.editor_route.v1`
 
-Idempotency key: `"<project-root>:<relative-path>:run"`.
+Idempotency key: `editor_attempt_id` when present, otherwise the stable
+`"<project-root>:<relative-path>:run"` route key. Transport retries of one
+editor action therefore coalesce, while a later intentional action has a new
+attempt identity. The controller separately coalesces any action while the
+document generation still has an unconsumed dispatch receipt.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -123,8 +127,12 @@ terminal outcome is still a causal receipt.
 
 Idempotency key: the replica op's own id.
 
-Wraps the existing `crdt_replica` op body (register / update / pull / ack)
-unchanged; the command envelope adds the command id, generation guard, and
+Wraps the existing `crdt_replica` op body (register / update / pull / ack); a
+delta pull carries `expected_content_hash`, and current clients return the
+visible editor buffer's SHA-256 as `content_hash` in the ACK. A generation ACK
+whose content hash differs remains pending and requests canonical re-bootstrap;
+it cannot open the disk-materialization barrier. The command envelope adds the
+command id, generation guard, and
 receipt projection so replica traffic shares the same reconnect story. The
 existing `Snapshot` / `Delta` / `CrdtSync` state plane is not replaced — this is
 the additive command sibling.

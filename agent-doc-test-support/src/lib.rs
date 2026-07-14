@@ -218,12 +218,15 @@ fn spawn_crdt_delivery_pump(
                             );
                             return;
                         }
-                        if let Err(err) = agent_doc_crdt_relay_io::ack_replica_update_for_file(
-                            &canonical,
-                            &identity,
-                            &update.patch_id,
-                            update.generation,
-                        ) {
+                        if let Err(err) =
+                            agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
+                                &canonical,
+                                &identity,
+                                &update.patch_id,
+                                update.generation,
+                                Some(&update.expected_content_hash),
+                            )
+                        {
                             eprintln!(
                                 "test CRDT delivery pump failed to ACK {}: {err:#}",
                                 canonical.display()

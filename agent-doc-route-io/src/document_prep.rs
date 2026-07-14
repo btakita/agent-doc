@@ -24,6 +24,7 @@ pub struct RouteDuplicatePromptCleanup {
     pub content: String,
     pub removed_answered_tail: bool,
     pub removed_comment: bool,
+    pub coalesced_replay_copies: Option<usize>,
 }
 
 pub fn prepare_route_document(
@@ -89,6 +90,24 @@ pub fn prepare_route_document(
                 file.display()
             );
         }
+        if let Some(copies) = cleanup.coalesced_replay_copies {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_document_replay_coalesced file={} copies={} replay_len={} canonical_len={} replay_hash={} canonical_hash={} transport=crdt",
+                    file.display(),
+                    copies,
+                    updated_content.len(),
+                    cleanup.content.len(),
+                    agent_doc_hash::content_hash(&updated_content),
+                    agent_doc_hash::content_hash(&cleanup.content),
+                ),
+            );
+            eprintln!(
+                "[route] coalesced {copies} monotonic whole-document replay projections through CRDT for {}",
+                file.display()
+            );
+        }
         updated_content = cleanup.content;
     }
 
@@ -102,12 +121,19 @@ pub fn scrub_duplicate_prompt_comments_for_route(
     content: &str,
     preserve_docs: &[&str],
 ) -> Result<Option<RouteDuplicatePromptCleanup>> {
-    let (frontmatter, _) = frontmatter::parse(content)
+    let mut cleaned_content = content.to_string();
+    let mut coalesced_replay_copies = None;
+    if let Some(replay) =
+        agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(content)
+    {
+        cleaned_content = replay.canonical.to_string();
+        coalesced_replay_copies = Some(replay.copies);
+    }
+    let (frontmatter, _) = frontmatter::parse(&cleaned_content)
         .context("failed to parse document frontmatter before route cleanup")?;
     if !frontmatter.resolve_mode().is_template() {
         return Ok(None);
     }
-    let mut cleaned_content = content.to_string();
     let mut removed_answered_tail = false;
     let mut removed_comment = false;
     if let Some(tail_cleaned) =
@@ -127,11 +153,12 @@ pub fn scrub_duplicate_prompt_comments_for_route(
     }
     agent_doc_template::guard_no_duplicate_prompt_residue_outside_exchange(&cleaned_content)
         .context("route duplicate prompt residue guard failed")?;
-    if removed_answered_tail || removed_comment {
+    if removed_answered_tail || removed_comment || coalesced_replay_copies.is_some() {
         Ok(Some(RouteDuplicatePromptCleanup {
             content: cleaned_content,
             removed_answered_tail,
             removed_comment,
+            coalesced_replay_copies,
         }))
     } else {
         Ok(None)

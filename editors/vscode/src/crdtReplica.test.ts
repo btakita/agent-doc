@@ -55,7 +55,7 @@ class FakeNode implements ReplicaNode {
 class FakeTransport implements ReplicaTransport {
     broadcasts: Array<{ filePath: string; identity: string; update: Uint8Array }> = [];
     pending: ReplicaRemoteUpdate[] = [];
-    acked: Array<{ patchId: string; generation: number }> = [];
+    acked: Array<{ patchId: string; generation: number; contentHash?: string }> = [];
     deregistered: string[] = [];
     broadcastGate: Promise<void> | undefined;
     registerCount = 0;
@@ -79,8 +79,9 @@ class FakeTransport implements ReplicaTransport {
         _identity: string,
         patchId: string,
         generation: number,
+        contentHash?: string,
     ): Promise<boolean> {
-        this.acked.push({ patchId, generation });
+        this.acked.push({ patchId, generation, contentHash });
         this.pending = this.pending.filter((update) => update.patchId !== patchId);
         return true;
     }
@@ -182,7 +183,11 @@ describe('crdt replica manager', () => {
         await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, [{ text: 'remote text', expectedText: 'base' }]);
-        assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:2:3', generation: 3 }]);
+        assert.deepStrictEqual(transport.acked, [{
+            patchId: 'crdt:1:2:3',
+            generation: 3,
+            contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+        }]);
     });
 
     it('passes expected editor text so stale CRDT remote targets are not ACKed over typing', async () => {
@@ -250,7 +255,11 @@ describe('crdt replica manager', () => {
 
         assert.deepStrictEqual(applied, []);
         assert.deepStrictEqual(node.updates, []);
-        assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:42:42:5', generation: 5 }]);
+        assert.deepStrictEqual(transport.acked, [{
+            patchId: 'crdt:42:42:5',
+            generation: 5,
+            contentHash: 'cae662172fd450bb0cd710a769079c05bfc5d8e35efa6576edc7d0377afdd4a2',
+        }]);
     });
 
     it('forwards undo of an applied remote update as a local delta', async () => {
@@ -365,7 +374,11 @@ describe('crdt replica manager', () => {
         await manager.drainRemoteUpdates();
 
         assert.deepStrictEqual(applied, ['remote text']);
-        assert.deepStrictEqual(transport.acked, [{ patchId: 'crdt:1:42:7', generation: 7 }]);
+        assert.deepStrictEqual(transport.acked, [{
+            patchId: 'crdt:1:42:7',
+            generation: 7,
+            contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+        }]);
     });
 
     it('force-refresh republishes editor text through the cached replica', async () => {
@@ -416,11 +429,13 @@ describe('crdt replica IPC response parsing', () => {
                     origin: 1,
                     target: 42,
                     generation: 5,
+                    expected_content_hash: 'canonical-hash',
                     update_b64: Buffer.from([3, 4]).toString('base64'),
                 }],
             },
         });
         assert.strictEqual(pull.length, 1);
         assert.deepStrictEqual(Array.from(pull[0].update), [3, 4]);
+        assert.strictEqual(pull[0].expectedContentHash, 'canonical-hash');
     });
 });

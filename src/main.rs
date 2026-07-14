@@ -1450,6 +1450,10 @@ struct WriteArgs {
     /// Write origin identifier for tracing (e.g., "skill", "watch", "stream")
     #[arg(long)]
     origin: Option<String>,
+    /// Declare that this response intentionally creates no actionable follow-up work.
+    /// This is the first-class equivalent of the transient no-pending-capture marker.
+    #[arg(long = "no-followups", alias = "no-pending-capture")]
+    no_pending_capture: bool,
     /// Add a new backlog item at the beginning of the list (repeatable).
     /// Multiple flags in one invocation land in flag order, top-down: the first
     /// `--backlog-add` is topmost (what you read is what you get). For a specific
@@ -3987,6 +3991,7 @@ fn try_main() -> anyhow::Result<()> {
                     is_ipc: args.ipc,
                     force_disk: args.force_disk,
                     origin: args.origin,
+                    no_pending_capture: args.no_pending_capture,
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,
                     pending_add_gated: args.pending_add_gated,
@@ -4045,6 +4050,7 @@ fn try_main() -> anyhow::Result<()> {
                     is_ipc: args.ipc,
                     force_disk: args.force_disk,
                     origin: args.origin,
+                    no_pending_capture: args.no_pending_capture,
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,
                     pending_add_gated: args.pending_add_gated,

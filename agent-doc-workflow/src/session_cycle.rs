@@ -32,6 +32,7 @@ pub struct FinalizeRerunCommand<'a> {
     pub is_ipc: bool,
     pub force_disk: bool,
     pub origin: Option<&'a str>,
+    pub no_pending_capture: bool,
     pub pending_add: &'a [String],
     pub pending_add_to: &'a [String],
     pub pending_add_gated: &'a [String],
@@ -291,6 +292,9 @@ pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<
     }
     if let Some(origin) = command.origin {
         push_arg(&mut args, "--origin", origin);
+    }
+    if command.no_pending_capture {
+        args.push("--no-followups".to_string());
     }
     push_repeated_args(&mut args, "--backlog-add", command.pending_add);
     push_repeated_pair_args(&mut args, "--backlog-add-to", command.pending_add_to);
@@ -885,6 +889,7 @@ mod tests {
             is_ipc: false,
             force_disk: false,
             origin: None,
+            no_pending_capture: false,
             pending_add: &empty,
             pending_add_to: &empty,
             pending_add_gated: &empty,
@@ -944,6 +949,7 @@ mod tests {
             is_ipc: true,
             force_disk: true,
             origin: Some("skill"),
+            no_pending_capture: true,
             pending_add: &pending_add,
             pending_add_to: &pending_add_to,
             pending_add_gated: &pending_add_gated,
@@ -976,6 +982,7 @@ mod tests {
         assert!(rendered.contains("--baseline-file .agent-doc/baseline.md"));
         assert!(rendered.contains("--template --stream --ipc --force-disk"));
         assert!(rendered.contains("--origin skill"));
+        assert!(rendered.contains("--no-followups"));
         assert!(rendered.contains("--backlog-add 'item with spaces'"));
         assert!(rendered.contains("--backlog-add-to tasks/other.md 'target item'"));
         assert!(rendered.contains("--backlog-add-gated gated"));

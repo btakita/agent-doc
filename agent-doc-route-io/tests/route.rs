@@ -3539,3 +3539,40 @@ mod tests {
         );
     }
 }
+
+#[test]
+fn route_coalesces_monotonic_whole_document_replay_before_residue_guard() {
+    let stale = concat!(
+        "---\nagent_doc_session: replay-test\nagent_doc_format: template\n---\n\n",
+        "## Exchange\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Session Summary\n\n",
+        "*Compacted. Content archived to `.agent-doc/archives/prior.md`*\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:done -->\n<!-- /agent:done -->\n",
+    );
+    let live = stale.replace(
+        "<!-- /agent:exchange -->",
+        concat!(
+            "In the funding package, move wire instructions above the notices.\n",
+            "#spec-test-commit-push-deploy\n",
+            "<!-- /agent:exchange -->"
+        ),
+    );
+    let replayed = format!("{live}{stale}");
+
+    let cleanup = scrub_duplicate_prompt_comments_for_route(&replayed, &[])
+        .unwrap()
+        .expect("route should coalesce a stale monotonic whole-document replay");
+
+    assert_eq!(cleanup.coalesced_replay_copies, Some(2));
+    assert_eq!(cleanup.content, live);
+    assert_eq!(
+        cleanup
+            .content
+            .matches("Compacted. Content archived")
+            .count(),
+        1
+    );
+    assert!(cleanup.content.contains("#spec-test-commit-push-deploy"));
+}

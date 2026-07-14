@@ -239,6 +239,16 @@ fn finalize_input_schema() -> Value {
     properties.insert("allow_replace_pending".to_string(), bool_property(None));
     properties.insert("force_disk".to_string(), bool_property(None));
     properties.insert(
+        "no_followups".to_string(),
+        bool_property(Some(
+            "Declare that the response intentionally creates no actionable follow-up work.",
+        )),
+    );
+    properties.insert(
+        "no_pending_capture".to_string(),
+        bool_property(Some("Legacy name for no_followups.")),
+    );
+    properties.insert(
         "force_disk_operator_override".to_string(),
         string_property(Some(
             "Required when force_disk=true. Summarize the operator's explicit decision to bypass live-editor convergence.",
@@ -551,6 +561,8 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         is_ipc: bool_arg(args, "ipc", false)?,
         force_disk,
         origin: Some(origin),
+        no_pending_capture: bool_arg(args, "no_followups", false)?
+            || bool_arg(args, "no_pending_capture", false)?,
         pending_add,
         pending_add_to,
         pending_add_gated,
@@ -883,6 +895,8 @@ mod tests {
             "commit_sibling",
             "commit_sibling_message",
             "force_disk_operator_override",
+            "no_followups",
+            "no_pending_capture",
         ] {
             assert!(props.contains_key(key), "missing finalize schema key {key}");
         }

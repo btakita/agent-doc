@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use crate::direct_pane_dispatch::{
     CommandDispatchResult, CommandDispatchStatus, RouteSubmitObservationLogFacts,
     log_dispatch_inject, log_route_latency, log_route_submit_observation,
-    preserve_route_pane_snapshot, print_route_pane_snapshot_hint, send_command_unchecked,
+    poll_direct_pane_acceptance, preserve_route_pane_snapshot, print_route_pane_snapshot_hint,
+    send_command_unchecked, send_direct_pane_enter_resubmit_until_stable,
     try_late_direct_pane_enter_resubmit_after_unproven_dispatch,
 };
 use crate::dispatch_start::{
@@ -212,6 +213,63 @@ pub fn dispatch_via_supervisor_ipc_with_mode(
         "[route] Dispatched {} via supervisor IPC → pane {}",
         trigger, pane
     );
+
+    // Supervisor IPC `ok` proves only that the bytes crossed the transport.
+    // Observe the owned pane before reporting success: the trigger must either
+    // be seen and consumed or produce an active-turn cue. If it remains as a
+    // draft, recover with bounded Enter-only resubmits; never inject the prompt
+    // text a second time. A stable empty composer without either observation is
+    // ambiguous and therefore fails closed instead of enabling a second route.
+    let acceptance = poll_direct_pane_acceptance(
+        tmux,
+        pane,
+        file,
+        harness,
+        &trigger,
+        "supervisor_ipc_acceptance",
+    );
+    let acceptance = send_direct_pane_enter_resubmit_until_stable(
+        tmux,
+        pane,
+        file,
+        harness,
+        &trigger,
+        "supervisor_ipc_resubmit_acceptance",
+        acceptance,
+    );
+    if acceptance.trigger_visible {
+        let diagnostic = acceptance
+            .diagnostic_path
+            .as_ref()
+            .map(|path| format!(" snapshot_path={}", path.display()))
+            .unwrap_or_default();
+        anyhow::bail!(
+            "authoritative actor transport accepted the routed trigger for {} in pane {}, but the trigger remained drafted after {}ms; refusing duplicate prompt injection{}",
+            file.display(),
+            pane,
+            acceptance.elapsed.as_millis(),
+            diagnostic,
+        );
+    }
+
+    if !acceptance.end_to_end_submitted() {
+        // A fast harness can consume the trigger before the first capture and
+        // clear its busy cue before the stable-empty poll completes. Transport
+        // acceptance plus the controller's durable open dispatch receipt is
+        // enough to suppress a second prompt. For synchronous routes, the
+        // stronger dispatch-start tracker below still gets its full chance to
+        // prove the turn; async editor routes return accepted admission now.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_actor_transport_accepted_composer_unobserved file={} pane={} harness={} elapsed_ms={} action=retain_dispatch_receipt_no_prompt_reinject",
+                file.display(),
+                pane,
+                harness.binary,
+                acceptance.elapsed.as_millis(),
+            ),
+        );
+    }
 
     if !options.await_start_proof {
         return Ok(RoutedDispatchStartProof::CommandAcceptedOnly);

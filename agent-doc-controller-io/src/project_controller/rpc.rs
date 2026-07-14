@@ -4501,6 +4501,7 @@ struct ControllerCrdtReplicaPayload {
     update_b64: Option<String>,
     patch_id: Option<String>,
     generation: Option<u64>,
+    content_hash: Option<String>,
     awareness_b64: Option<String>,
     source: Option<String>,
 }
@@ -5337,6 +5338,7 @@ fn controller_crdt_replica_data(
                                 "origin": update.origin,
                                 "target": update.target,
                                 "generation": update.generation,
+                                "expected_content_hash": update.expected_content_hash,
                                 "update_b64": base64_standard_encode(&update.update),
                             })
                         })
@@ -5361,8 +5363,12 @@ fn controller_crdt_replica_data(
             let generation = payload
                 .generation
                 .context("CRDT replica ack payload missing generation")?;
-            match agent_doc_crdt_relay_io::ack_replica_update_for_file(
-                canonical, identity, patch_id, generation,
+            match agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
+                canonical,
+                identity,
+                patch_id,
+                generation,
+                payload.content_hash.as_deref(),
             )? {
                 Some(acknowledged) => Ok(serde_json::json!({ "acknowledged": acknowledged })),
                 None => Ok(crdt_replica_refused_data("detached_authority")),
@@ -9278,8 +9284,8 @@ pub(crate) fn handle_mark_lifecycle(
     // #qflood: a transition to Ready means the turn finished, so any dispatch in
     // flight for this document is now consumed — release the in-flight marker so the
     // open-dispatch set stays accurate for the next busy episode's coalescing and for
-    // restart recovery. Stall-safety does not depend on this (a turn always starts
-    // from a Ready dispatch, which never coalesces); it keeps the table honest.
+    // restart recovery. A Ready projection alone is not sufficient to bypass an
+    // open receipt; only this controller-owned lifecycle boundary consumes it.
     if matches!(state, agent_doc_sqlite::state_store::ActorState::Ready) {
         match open_state_db(&bootstrap.project_root)
             .and_then(|conn| state_store::mark_open_dispatches_consumed(&conn, &document_id))
@@ -9782,56 +9788,48 @@ pub(crate) fn handle_dispatch(
         anyhow::bail!("{message} receipt_id={}", receipt.receipt_id);
     }
 
-    // #qflood: coalesce a redundant in-flight re-dispatch. While the actor is
-    // actively running a turn (Busy) and a dispatch for this cycle is already in
-    // flight (accepted, not yet consumed), an AUTO re-fire (route auto-start on a
-    // file-change save, idle-queue continuation, `/loop` tick) must not pile another
-    // trigger into the busy pane. The first dispatch of a turn comes from a Ready
-    // actor and is never coalesced, so this can never stall the queue — it only
-    // suppresses the redundant re-fire; the next dispatch once the actor is Ready
-    // submits cleanly. Backpressure, never a queue stop.
-    if matches!(
-        record.state,
-        agent_doc_sqlite::state_store::ActorState::Busy
-    ) {
-        let conn = open_state_db(&bootstrap.project_root)?;
-        let in_flight =
-            state_store::has_open_in_flight_dispatch(&conn, &document_id, record.generation)?;
-        if dispatch_should_coalesce_in_flight(in_flight, false) {
-            let receipt = insert_dispatch_attempt_record(
-                &bootstrap.project_root,
-                ControllerDispatchReceiptInsert {
-                    document_id: &document_id,
-                    generation: record.generation,
-                    command_kind: &command_kind,
-                    accepted_stage: None,
-                    failed_stage: Some("coalesced_in_flight"),
-                    diagnostic_payload: &diagnostic_payload,
-                    result_status: ControllerDispatchResultStatus::Blocked,
-                    proof_scope: ControllerDispatchProofScope::AcceptedOnly,
-                    dispatch_start_proven: false,
-                },
-            )?;
-            agent_doc_ops_log_io::log_op(
-                &file,
-                &format!(
-                    "dispatch_coalesced_in_flight session={} pane={} generation={} state={} kind={} receipt_id={} reason=in_flight_redispatch",
-                    session_id,
-                    pane_id,
-                    record.generation,
-                    record.state.as_str(),
-                    command_kind,
-                    receipt.receipt_id
-                ),
-            );
-            anyhow::bail!(
-                "dispatch coalesced for {}: a dispatch for generation {} is already in flight (#qflood); {} receipt_id={}",
-                file.display(),
+    // #qflood: the durable unconsumed receipt is authoritative backpressure.
+    // Coalesce a second dispatch even if the lossy actor projection briefly says
+    // Ready (for example, an idle-pane reconcile racing composer submission).
+    // The first dispatch has no open receipt and always passes; a genuine Ready
+    // transition consumes the prior receipt, so the next cycle also passes.
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let in_flight =
+        state_store::has_open_in_flight_dispatch(&conn, &document_id, record.generation)?;
+    if dispatch_should_coalesce_in_flight(in_flight, false) {
+        let receipt = insert_dispatch_attempt_record(
+            &bootstrap.project_root,
+            ControllerDispatchReceiptInsert {
+                document_id: &document_id,
+                generation: record.generation,
+                command_kind: &command_kind,
+                accepted_stage: None,
+                failed_stage: Some("coalesced_in_flight"),
+                diagnostic_payload: &diagnostic_payload,
+                result_status: ControllerDispatchResultStatus::Blocked,
+                proof_scope: ControllerDispatchProofScope::AcceptedOnly,
+                dispatch_start_proven: false,
+            },
+        )?;
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "dispatch_coalesced_in_flight session={} pane={} generation={} state={} kind={} receipt_id={} reason=in_flight_redispatch",
+                session_id,
+                pane_id,
                 record.generation,
-                DISPATCH_COALESCED_IN_FLIGHT_MARKER,
+                record.state.as_str(),
+                command_kind,
                 receipt.receipt_id
-            );
-        }
+            ),
+        );
+        anyhow::bail!(
+            "dispatch coalesced for {}: a dispatch for generation {} is already in flight (#qflood); {} receipt_id={}",
+            file.display(),
+            record.generation,
+            DISPATCH_COALESCED_IN_FLIGHT_MARKER,
+            receipt.receipt_id
+        );
     }
 
     let accepted_stage = match record.state {
@@ -13959,7 +13957,7 @@ mod tests {
         );
     }
     #[test]
-    fn qflood_coalesces_busy_in_flight_redispatch_and_releases_on_ready() {
+    fn qflood_coalesces_in_flight_despite_ready_projection_drift_and_releases_on_ready() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/qflood.md");
@@ -14012,8 +14010,28 @@ mod tests {
             "the first busy dispatch must be in flight"
         );
 
-        // Re-fire while still Busy and in flight ⇒ coalesced (bail), not piled into
-        // the pane as another trigger.
+        // Simulate the exact race from Run Agent Doc: a lossy pane reconciler
+        // projects Ready before the command has established/finished its turn.
+        // This direct state write intentionally bypasses the controller's genuine
+        // Ready boundary, so the durable receipt remains open.
+        agent_doc_session_actor_io::transition_state_direct(
+            &doc,
+            "session-qf",
+            "%41",
+            Some(1),
+            agent_doc_sqlite::state_store::ActorState::Ready,
+            "test",
+            "premature_idle_projection",
+        )
+        .unwrap();
+        assert!(
+            state_store::has_open_in_flight_dispatch(&conn, &document_id, 1).unwrap(),
+            "projection drift must not consume the controller-owned receipt"
+        );
+
+        // Re-fire while the receipt is in flight ⇒ coalesced (bail), even though
+        // the actor projection says Ready. It cannot pile another trigger into
+        // the pane.
         let err = handle_dispatch(&bootstrap, None, dispatch()).unwrap_err();
         assert!(
             format!("{err:#}").contains("coalesced"),
@@ -14041,8 +14059,8 @@ mod tests {
             .unwrap();
         assert_eq!(coalesced, 1, "the coalesced re-dispatch must be recorded");
 
-        // Actor returns to Ready (turn finished): the in-flight marker is released so
-        // the next turn dispatches cleanly.
+        // A genuine controller-owned Ready boundary releases the in-flight marker
+        // so the next turn dispatches cleanly.
         let mark_ready = ControllerRequest {
             command: "mark_lifecycle".to_string(),
             file: Some(doc.clone()),

@@ -1541,6 +1541,7 @@ impl SessionActorRuntime {
 #[derive(Debug, Clone)]
 struct PromptDispatchProjection {
     key: String,
+    admitted_at: std::time::Instant,
 }
 
 /// Shared state between the main supervisor loop and the IPC handler thread.
@@ -1745,8 +1746,19 @@ impl SupervisorShared {
         {
             return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Duplicate { key };
         }
-        *projection = Some(PromptDispatchProjection { key: key.clone() });
+        *projection = Some(PromptDispatchProjection {
+            key: key.clone(),
+            admitted_at: std::time::Instant::now(),
+        });
         agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Accepted { key }
+    }
+
+    fn prompt_dispatch_grace_active(&self, grace: std::time::Duration) -> bool {
+        self.prompt_dispatch_projection
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|projection| projection.admitted_at.elapsed() < grace)
     }
 
     fn clear_prompt_dispatch_projection_on_failure(&self, key: &str) {

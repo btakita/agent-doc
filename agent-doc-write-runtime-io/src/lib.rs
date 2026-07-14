@@ -425,6 +425,7 @@ pub(crate) struct WriteFlags {
     pub(crate) pending_kept_open_ids: Vec<String>,
     pub(crate) strict_closeout: bool,
     pub(crate) force_disk: bool,
+    pub(crate) no_pending_capture: bool,
     pub(crate) empty_response_recovery: Option<EmptyResponseRecovery>,
     pub(crate) rerun_command_base: Option<String>,
 }
@@ -1334,6 +1335,7 @@ fn run_command_inner(
         pending_kept_open_ids: pending_kept_open_ids.clone(),
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
+        no_pending_capture: options.no_pending_capture,
         empty_response_recovery,
         rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
             required_commit: commit_mode == CommitMode::Required,
@@ -1344,6 +1346,7 @@ fn run_command_inner(
             is_ipc: options.is_ipc,
             force_disk: options.force_disk,
             origin: options.origin.as_deref(),
+            no_pending_capture: options.no_pending_capture,
             pending_add: &options.pending_add,
             pending_add_to: &options.pending_add_to,
             pending_add_gated: &options.pending_add_gated,

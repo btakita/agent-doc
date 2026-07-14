@@ -8,6 +8,8 @@ import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
@@ -201,12 +203,28 @@ class CrdtReplicaForwarder(
         return delivery
     }
 
-    /** ACK a remote update after the caller has applied [applyRemoteUpdate]'s text to the editor buffer. */
-    fun ackRemoteUpdate(update: ReplicaRemoteUpdate): Boolean {
+    /**
+     * ACK only after the caller has applied [applyRemoteUpdate]'s text to the
+     * visible editor buffer. The content hash turns the ACK into convergence
+     * proof; a generation alone proves only that a frame was handled.
+     */
+    fun ackRemoteUpdate(update: ReplicaRemoteUpdate, appliedText: String?): Boolean {
         if (!attached) return false
         val started = System.nanoTime()
-        return transport.ackUpdate(filePath, identity, update.patchId, update.generation)
-            .also { logSlow("transport.ackUpdate", started, details = "patch_id=${update.patchId} generation=${update.generation} ok=$it") }
+        val appliedContentHash = appliedText?.let(::sha256Text)
+        return transport.ackUpdate(
+            filePath,
+            identity,
+            update.patchId,
+            update.generation,
+            appliedContentHash,
+        ).also {
+            logSlow(
+                "transport.ackUpdate",
+                started,
+                details = "patch_id=${update.patchId} generation=${update.generation} expected_hash=${update.expectedContentHash ?: "legacy"} applied_hash=${appliedContentHash ?: "unavailable"} ok=$it",
+            )
+        }
     }
 
     /** Deregister the replica from the hub and close the local FFI replica. */
@@ -248,8 +266,14 @@ data class ReplicaRemoteUpdate(
     val origin: Long,
     val target: Long,
     val generation: Long,
+    val expectedContentHash: String? = null,
     val update: ByteArray,
 )
+
+private fun sha256Text(text: String): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest(text.toByteArray(StandardCharsets.UTF_8))
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 /**
  * The outcome of a `replica_pull` (D2). The CPC decides which kind to send
@@ -304,7 +328,13 @@ interface ReplicaTransport {
         ReplicaPullDelivery.Deltas(pullUpdates(filePath, identity))
 
     /** `replica_ack`: confirm a pulled update has been applied to the local editor. */
-    fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean = false
+    fun ackUpdate(
+        filePath: String,
+        identity: String,
+        patchId: String,
+        generation: Long,
+        contentHash: String? = null,
+    ): Boolean = false
 
     /** `replica_deregister`. */
     fun deregister(filePath: String, identity: String)
@@ -415,15 +445,23 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
                 origin = item.get("origin")?.asLong ?: 0L,
                 target = item.get("target")?.asLong ?: 0L,
                 generation = item.get("generation")?.asLong ?: return@mapNotNull null,
+                expectedContentHash = item.get("expected_content_hash")?.asString,
                 update = decodeBase64(updateB64) ?: return@mapNotNull null,
             )
         }
     }
 
-    override fun ackUpdate(filePath: String, identity: String, patchId: String, generation: Long): Boolean {
+    override fun ackUpdate(
+        filePath: String,
+        identity: String,
+        patchId: String,
+        generation: Long,
+        contentHash: String?,
+    ): Boolean {
         val request = controllerRequest("replica_ack", filePath, identity) {
             it.addProperty("patch_id", patchId)
             it.addProperty("generation", generation)
+            if (contentHash != null) it.addProperty("content_hash", contentHash)
         }
         val response = send(request) ?: return false
         return response.ok && (response.data?.get("acknowledged")?.asBoolean ?: false)

@@ -28858,14 +28858,19 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         crdt_relay_host.contains("use agent_doc_document_realtime::crdt_relay::{"),
         "crdt_relay_host should call the focused realtime relay directly"
     );
+    for required_snippet in [
+        "forwarders.remove(filePath, forwarder)",
+        "forwarder.deregister()",
+        "canonical,\n                    alignExisting = false,\n                    bypassRegisterBackoff = true,",
+    ] {
+        assert!(
+            jetbrains_crdt_replica_manager.contains(required_snippet),
+            "JetBrains CRDT replace recovery must discard the divergent replica and rebootstrap from canonical state: {required_snippet}"
+        );
+    }
     assert!(
-        !jetbrains_crdt_replica_manager
-            .contains("forwarder.deregister()\n            forwarder.register()"),
-        "JetBrains CRDT replace recovery must not reregister the editor replica; it should align the attached replica from the editor buffer through the CPC relay"
-    );
-    assert!(
-        jetbrains_crdt_replica_manager.contains("forwarder.ensureEditorText(canonical)"),
-        "JetBrains CRDT replace recovery should keep the editor replica attached and align through the CPC relay"
+        !jetbrains_crdt_replica_manager.contains("forwarder.ensureEditorText(canonical)"),
+        "JetBrains CRDT replace recovery must not mint corrective ops on a divergent lineage"
     );
     for forbidden_snippet in [
         "use crate::crdt_relay::",

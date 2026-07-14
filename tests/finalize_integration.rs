@@ -1693,6 +1693,37 @@ fn finalize_fails_closed_when_internal_session_check_rejects_closeout() {
 }
 
 #[test]
+fn finalize_no_followups_records_closeout_intent_without_visible_guard_marker() {
+    let (tmp, doc) = setup_template_doc();
+    enable_strict_pending_capture(&doc);
+    init_git_repo(tmp.path(), &doc);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--no-followups",
+            "--force-disk",
+        ])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: complete — gpt-5\nThe requested work is complete.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("### Re: complete — gpt-5"));
+    assert!(!content.contains("no-pending-capture"));
+    let head = head_blob(tmp.path());
+    assert!(head.contains("### Re: complete — gpt-5"));
+    assert!(!head.contains("no-pending-capture"));
+    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(ops.contains("pending_capture_intent"));
+    assert!(ops.contains("outcome=declared_none"));
+}
+
+#[test]
 fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();

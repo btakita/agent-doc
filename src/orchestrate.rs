@@ -940,6 +940,7 @@ mod th {
                     is_ipc: false,
                     force_disk: true,
                     origin: Some("orchestrate_test".to_string()),
+                    no_pending_capture: false,
                     pending_add: Vec::new(),
                     pending_add_to: Vec::new(),
                     pending_add_gated: Vec::new(),

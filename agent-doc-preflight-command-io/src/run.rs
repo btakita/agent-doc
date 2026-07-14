@@ -161,10 +161,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             content = settled_content;
             if let Some(copies) = replay_copies {
                 warnings.push(PreflightWarning {
-                    code: "exact_document_replay_coalesced".to_string(),
-                    message: format!(
-                        "coalesced {copies} byte-identical whole-document projections through the CRDT authority before preflight"
-                    ),
+                        code: "exact_document_replay_coalesced".to_string(),
+                        message: format!(
+                            "coalesced {copies} whole-document replay projections through the CRDT authority before preflight while retaining monotonic live additions"
+                        ),
                     document_agent: None,
                     active_harness: None,
                 });
@@ -1508,7 +1508,7 @@ fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(Strin
     let copies = replay.copies;
     let canonical = replay.canonical.to_string();
     eprintln!(
-        "[preflight] coalescing {copies} byte-identical whole-document projections through CRDT"
+        "[preflight] coalescing {copies} whole-document replay projections through CRDT while retaining monotonic live additions"
     );
     agent_doc_ops_log_io::log_op(
         file,

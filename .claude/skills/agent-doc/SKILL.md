@@ -117,6 +117,8 @@ cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline
 RESPONSE
 ```
 
+Declare pending-capture intent on the first closeout attempt: when the completed response creates no actionable follow-up work, pass `--no-followups`; otherwise use the appropriate `--backlog-add*` flags. Do not search for a hidden suppression marker or retry merely to add one—the CLI records `--no-followups` as transient closeout evidence and removes it from visible document content.
+
 **IMPORTANT — patch markers:** template-mode responses MUST include both the opening AND closing `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` markers, or the write is rejected (`malformed template patchback`) / lost (`0 template patches found`). **Do NOT use the Edit tool for write-back** (concurrent-edit "file modified" errors).
 
 `finalize` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `write --commit` shares that fail-closed boundary for repair writes.

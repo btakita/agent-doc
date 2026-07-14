@@ -72,11 +72,18 @@ pub const fn decide_crdt_write_admission(delivery_converged: bool) -> CrdtWriteA
 pub struct ExactDocumentReplay<'a> {
     pub canonical: &'a str,
     pub copies: usize,
+    /// Lines present only in the retained projection. Zero means every replay
+    /// copy was byte-identical; non-zero means a stale copy was a strict,
+    /// order-preserving subset of the retained live projection.
+    pub retained_additions: usize,
 }
 
 /// Coalesce a legacy dual-delivery whole-document replay to one canonical
-/// projection. The detector is deliberately narrow so operator-authored
-/// repeated content can never be mistaken for transport corruption.
+/// projection. Besides byte-identical copies, this accepts one deliberately
+/// narrow live shape: two complete projections with the same byte-identical
+/// frontmatter where one projection's lines are an order-preserving subset of
+/// the other. The superset is retained, so text added while a stale replica was
+/// replayed cannot be lost. Divergent or reordered copies remain fail-closed.
 pub fn coalesce_exact_document_replay(content: &str) -> Option<ExactDocumentReplay<'_>> {
     let mut canonical = content;
     let mut copies = 1usize;
@@ -94,8 +101,60 @@ pub fn coalesce_exact_document_replay(content: &str) -> Option<ExactDocumentRepl
         copies = copies.saturating_mul(2);
     }
 
-    (copies > 1 && looks_like_complete_agent_doc_projection(canonical))
-        .then_some(ExactDocumentReplay { canonical, copies })
+    if copies > 1 && looks_like_complete_agent_doc_projection(canonical) {
+        return Some(ExactDocumentReplay {
+            canonical,
+            copies,
+            retained_additions: 0,
+        });
+    }
+
+    coalesce_monotonic_dual_document_replay(content)
+}
+
+fn coalesce_monotonic_dual_document_replay(content: &str) -> Option<ExactDocumentReplay<'_>> {
+    let frontmatter_end = content.find("\n---\n")?.checked_add(5)?;
+    let frontmatter = content.get(..frontmatter_end)?;
+    let split = content.get(frontmatter_end..)?.find(frontmatter)? + frontmatter_end;
+    let first = content.get(..split)?;
+    let second = content.get(split..)?;
+    if !looks_like_complete_agent_doc_projection(first)
+        || !looks_like_complete_agent_doc_projection(second)
+    {
+        return None;
+    }
+
+    let first_lines = first.lines().collect::<Vec<_>>();
+    let second_lines = second.lines().collect::<Vec<_>>();
+    let (canonical, retained_additions) =
+        if line_sequence_is_subsequence(&second_lines, &first_lines) {
+            (first, first_lines.len().saturating_sub(second_lines.len()))
+        } else if line_sequence_is_subsequence(&first_lines, &second_lines) {
+            (second, second_lines.len().saturating_sub(first_lines.len()))
+        } else {
+            return None;
+        };
+    (retained_additions > 0).then_some(ExactDocumentReplay {
+        canonical,
+        copies: 2,
+        retained_additions,
+    })
+}
+
+fn line_sequence_is_subsequence(needle: &[&str], haystack: &[&str]) -> bool {
+    let mut matched = 0usize;
+    for line in haystack {
+        if needle
+            .get(matched)
+            .is_some_and(|candidate| candidate == line)
+        {
+            matched += 1;
+            if matched == needle.len() {
+                return true;
+            }
+        }
+    }
+    matched == needle.len()
 }
 
 fn looks_like_complete_agent_doc_projection(content: &str) -> bool {
@@ -2698,6 +2757,32 @@ mod tests {
 
         assert_eq!(coalesced.canonical, canonical);
         assert_eq!(coalesced.copies, 2);
+        assert_eq!(coalesced.retained_additions, 0);
+    }
+
+    #[test]
+    fn monotonic_document_replay_retains_live_lines_from_newer_projection() {
+        let stale = complete_session_projection("operator text");
+        let live = complete_session_projection(concat!(
+            "operator text\n",
+            "In the funding package, move the wire instructions above the notices.\n",
+            "#spec-test-commit-push-deploy"
+        ));
+        let replayed = format!("{live}{stale}");
+
+        let coalesced = coalesce_exact_document_replay(&replayed).unwrap();
+
+        assert_eq!(coalesced.canonical, live);
+        assert_eq!(coalesced.copies, 2);
+        assert_eq!(coalesced.retained_additions, 2);
+    }
+
+    #[test]
+    fn monotonic_document_replay_rejects_divergent_complete_copies() {
+        let first = complete_session_projection("operator text\nfirst independent edit");
+        let second = complete_session_projection("operator text\nsecond independent edit");
+
+        assert!(coalesce_exact_document_replay(&format!("{first}{second}")).is_none());
     }
 
     #[test]

@@ -8169,6 +8169,39 @@ mod crdt_relay_sim {
     }
 
     #[test]
+    fn preflight_boundary_coalesces_legacy_whole_document_replay_via_crdt() {
+        use agent_doc_document_realtime::write_policy::coalesce_exact_document_replay;
+
+        let canonical = concat!(
+            "---\nagent_doc_session: sim\n---\n\n",
+            "<!-- agent:exchange patch=append -->\noperator text\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n<!-- /agent:done -->\n",
+        );
+        let replayed = canonical.repeat(2);
+        let mut world = RelaySimWorld::new(1);
+        let editor = world.attach("intellij:legacy-replay");
+        world.edit_now(editor, 0, 0, &replayed);
+
+        let replayed_canonical = world.hub.canonical_text();
+        let coalesced = coalesce_exact_document_replay(&replayed_canonical).unwrap();
+        assert_eq!(coalesced.copies, 2);
+        world
+            .hub
+            .apply_canonical_replace(&replayed, coalesced.canonical)
+            .expect("preflight convergence write");
+        let delivery = world.hub.pending_updates(editor).unwrap().pop().unwrap();
+        world.hub.deliver(editor, &delivery.update).unwrap();
+        world
+            .hub
+            .ack_delivery(editor, &delivery.patch_id, delivery.generation)
+            .unwrap();
+
+        assert!(world.hub.delivery_converged());
+        assert_eq!(world.hub.canonical_text(), canonical);
+        assert_eq!(world.hub.member_text(editor).unwrap(), canonical);
+    }
+
+    #[test]
     fn disk_projection_recovers_canonical_and_in_memory_wins() {
         // Coverage (phase 6): the disk projection is a recovery input; a restart
         // rebuilds the canonical replica from it, and a stale projection never

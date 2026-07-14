@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.99
+
+- **Preflight self-converges byte-exact legacy whole-document replays through CRDT.** Before prompt parsing, diff generation, or orchestration classification, the normal binary-owned preflight boundary detects only the provable complete-session shape repeated two (or a power-of-two number of) times, waits for typing to settle, coalesces it to one projection through visible-replica acknowledgement, and continues from the converged text. The agent never performs a document-repair workflow; non-identical operator content remains untouched. Pure policy, attached-controller integration, and deterministic SimWorld coverage prevent the replay from expanding into a giant diff or bogus multi-task dispatch.
+
 ## 0.34.98
 
 - **Attached editor writes settle and converge through one CRDT mutation plane.** Binary-owned writes wait for typing quiescence, apply acknowledgement-driven backpressure while a delivery frontier is in flight, coalesce repeated intent to the newest operator cut plus the original agent target, and rebase with the component-aware CRDT merge before retrying. An accepted CRDT replacement is never replayed through legacy editor IPC, and disk materialization occurs only after exact canonical text is visibly acknowledged; bounded failure retains the change and fails closed instead of provoking a JetBrains File Cache Conflict.

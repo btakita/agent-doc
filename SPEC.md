@@ -29,6 +29,12 @@ Notable invariants:
   through legacy editor IPC, and disk is only a post-acknowledgement projection
   of exact canonical text. Bounded convergence failure retains the change and
   fails closed instead of issuing a competing disk write.
+  The normal preflight boundary also recognizes the narrowly provable legacy
+  corruption shape where a structurally complete session document is repeated
+  byte-for-byte two (or a power-of-two number of) times. It automatically
+  coalesces that replay to one projection through the same CRDT/ACK path before
+  parsing, diffing, or dispatch; the agent must never run a document-repair
+  workflow for this transport artifact. Non-identical content is never eligible.
   Editor delivery must target the live plugin-owner `editor_id` when an owner
   lease exists; untargeted file-IPC fallback is not delivery proof for an
   editor-owned document.

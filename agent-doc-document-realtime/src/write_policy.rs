@@ -65,6 +65,46 @@ pub const fn decide_crdt_write_admission(delivery_converged: bool) -> CrdtWriteA
     }
 }
 
+/// A byte-exact replay of the complete session document. This is distinct from
+/// ordinary duplicated prose: the candidate must be two (or a power-of-two
+/// number of) identical, structurally complete agent-doc projections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExactDocumentReplay<'a> {
+    pub canonical: &'a str,
+    pub copies: usize,
+}
+
+/// Coalesce a legacy dual-delivery whole-document replay to one canonical
+/// projection. The detector is deliberately narrow so operator-authored
+/// repeated content can never be mistaken for transport corruption.
+pub fn coalesce_exact_document_replay(content: &str) -> Option<ExactDocumentReplay<'_>> {
+    let mut canonical = content;
+    let mut copies = 1usize;
+
+    loop {
+        let len = canonical.len();
+        if len == 0 || !len.is_multiple_of(2) {
+            break;
+        }
+        let midpoint = len / 2;
+        if !canonical.is_char_boundary(midpoint) || canonical[..midpoint] != canonical[midpoint..] {
+            break;
+        }
+        canonical = &canonical[..midpoint];
+        copies = copies.saturating_mul(2);
+    }
+
+    (copies > 1 && looks_like_complete_agent_doc_projection(canonical))
+        .then_some(ExactDocumentReplay { canonical, copies })
+}
+
+fn looks_like_complete_agent_doc_projection(content: &str) -> bool {
+    content.starts_with("---\n")
+        && content.contains("\nagent_doc_session:")
+        && content.contains("<!-- agent:exchange")
+        && content.trim_end().ends_with("<!-- /agent:done -->")
+}
+
 /// Admission policy for legacy editor patch transports under reliable document
 /// liveness. Payload delivery is allowed only when both authorities agree that
 /// an editor is live. A disagreement is fail-closed; an agreed detached state
@@ -2642,6 +2682,45 @@ pub fn classify_committed_historical_agent_doc_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn complete_session_projection(body: &str) -> String {
+        format!(
+            "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange patch=append -->\n{body}\n<!-- /agent:exchange -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n"
+        )
+    }
+
+    #[test]
+    fn exact_document_replay_coalesces_to_one_complete_projection() {
+        let canonical = complete_session_projection("operator text");
+        let replayed = canonical.repeat(2);
+
+        let coalesced = coalesce_exact_document_replay(&replayed).unwrap();
+
+        assert_eq!(coalesced.canonical, canonical);
+        assert_eq!(coalesced.copies, 2);
+    }
+
+    #[test]
+    fn exact_document_replay_coalesces_repeated_dual_delivery() {
+        let canonical = complete_session_projection("operator text");
+        let replayed = canonical.repeat(4);
+
+        let coalesced = coalesce_exact_document_replay(&replayed).unwrap();
+
+        assert_eq!(coalesced.canonical, canonical);
+        assert_eq!(coalesced.copies, 4);
+    }
+
+    #[test]
+    fn exact_document_replay_rejects_nonidentical_or_non_session_content() {
+        let canonical = complete_session_projection("operator text");
+        assert!(
+            coalesce_exact_document_replay(&format!("{canonical}{canonical}new typing")).is_none()
+        );
+        assert!(
+            coalesce_exact_document_replay("ordinary repetition\nordinary repetition\n").is_none()
+        );
+    }
 
     #[test]
     fn direct_disk_fallback_refusal_tracks_live_editor_authority() {

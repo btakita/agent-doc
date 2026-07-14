@@ -111,7 +111,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // #rtwwire (rung 3): classify against the realtime document model. When an
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
-    let content = resolve_current_preflight_document(file, "initial")?;
+    let mut content = resolve_current_preflight_document(file, "initial")?;
     // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
     // tree from the authoritative current text, render it, and log whether it
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
@@ -123,8 +123,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             &agent_doc_markdown_lossless::shadow_audit_ops_log_line(&content, "preflight_initial"),
         );
     }
-    let pre_mutation_unresolved_exchange_prompt =
-        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
@@ -155,7 +153,26 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // prompt.
     if !options.probe {
         agent_doc_preflight_io::debounce::wait_for_typing_idle_before_mutation(file)?;
+        if agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(&content)
+            .is_some()
+        {
+            let (settled_content, replay_copies) =
+                converge_exact_document_replay_before_preflight(file)?;
+            content = settled_content;
+            if let Some(copies) = replay_copies {
+                warnings.push(PreflightWarning {
+                    code: "exact_document_replay_coalesced".to_string(),
+                    message: format!(
+                        "coalesced {copies} byte-identical whole-document projections through the CRDT authority before preflight"
+                    ),
+                    document_agent: None,
+                    active_harness: None,
+                });
+            }
+        }
     }
+    let pre_mutation_unresolved_exchange_prompt =
+        agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
 
     // Step 0-pre: interrupted-cycle guard (#cyc1). Use exact persisted cycle
     // state instead of inferring solely from `ops.log`.
@@ -1481,6 +1498,49 @@ fn preflight_commit_error_is_live_editor_pending(err: &anyhow::Error) -> bool {
         || message.contains("editor_attached_model_missing")
 }
 
+fn converge_exact_document_replay_before_preflight(file: &Path) -> Result<(String, Option<usize>)> {
+    let current = resolve_current_preflight_document(file, "exact_document_replay_check")?;
+    let Some(replay) =
+        agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(&current)
+    else {
+        return Ok((current, None));
+    };
+    let copies = replay.copies;
+    let canonical = replay.canonical.to_string();
+    eprintln!(
+        "[preflight] coalescing {copies} byte-identical whole-document projections through CRDT"
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_exact_document_replay action=coalesce transport=crdt copies={} replay_len={} canonical_len={} replay_hash={} canonical_hash={}",
+            copies,
+            current.len(),
+            canonical.len(),
+            agent_doc_hash::content_hash(&current),
+            agent_doc_hash::content_hash(&canonical),
+        ),
+    );
+    agent_doc_document_realtime_io::atomic_write_through_authority(file, &canonical)
+        .context("failed to converge exact whole-document replay through CRDT authority")?;
+    let converged = resolve_current_preflight_document(file, "exact_document_replay_converged")?;
+    anyhow::ensure!(
+        agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(&converged)
+            .is_none(),
+        "exact whole-document replay remained after CRDT convergence"
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "preflight_exact_document_replay action=converged transport=crdt copies={} canonical_len={} canonical_hash={}",
+            copies,
+            converged.len(),
+            agent_doc_hash::content_hash(&converged),
+        ),
+    );
+    Ok((converged, Some(copies)))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(unused_imports)]
@@ -1548,6 +1608,42 @@ mod tests {
         run(&doc).unwrap();
         // If run() returns Ok(()), the JSON was printed to stdout without error.
         // The test verifies no panic and no error return.
+    }
+
+    #[test]
+    fn preflight_boundary_coalesces_exact_document_replay_through_crdt() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let canonical = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "operator text\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let replayed = canonical.repeat(2);
+        std::fs::write(&doc, &replayed).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-replay-test",
+            &replayed,
+        );
+
+        let (settled, copies) = converge_exact_document_replay_before_preflight(&doc).unwrap();
+
+        assert_eq!(copies, Some(2));
+        assert_eq!(settled, canonical);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), canonical);
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("preflight_exact_document_replay action=converged transport=crdt"));
+        assert!(ops.contains("transport=crdt_then_disk_projection"));
+
+        std::fs::remove_file(&doc).unwrap();
     }
 
     #[test]

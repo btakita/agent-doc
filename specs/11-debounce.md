@@ -108,6 +108,8 @@ An unacknowledged delivery frontier is backpressure, not permission to add anoth
 
 This prevents CRDT-plus-IPC double application from appearing as local typing, temporarily duplicating the file, and provoking JetBrains File Cache Conflict. See `runbooks/jb-cache-conflict.md` and the SimWorld scenario `file_cache_conflict_backpressure_applies_coalesced_latest_once_after_ack`.
 
+At the normal preflight boundary, the binary also self-converges the residual legacy shape produced before this invariant shipped: if the entire structurally complete session document is repeated byte-for-byte, it waits for the same quiescence gate and coalesces the copies through CRDT delivery before any prompt parsing, diff output, or orchestration classification. This is binary-owned invariant enforcement, not an agent repair step. A non-identical suffix, an incomplete document, or ordinary repeated prose fails the narrow detector and remains operator-owned. Deterministic coverage is `preflight_boundary_coalesces_legacy_whole_document_replay_via_crdt`.
+
 ## Untracked File Edge Case
 
 **Gap:** Files passed to `document_changed()` are tracked in the in-process `LAST_CHANGE` map. Files never passed to `document_changed()` return `idle=true` immediately (design choice to prevent `await_idle` blocking forever on unknown files).

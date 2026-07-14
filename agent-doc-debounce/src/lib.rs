@@ -847,9 +847,85 @@ fn read_live_buffer_snapshot(file: &str, path: &std::path::Path) -> Option<LiveB
 /// comparison for the reliable-sync plane, which likewise only reflects live editors)
 /// and the full list as a hash→path index to resolve the plane's hashes to readable
 /// paths.
+/// Delete durable live-buffer sidecar files whose owning editor pid is dead
+/// (`#lbreap` / sidecar-retirement step 6 "GC the dead-pid backlog").
+///
+/// The historical `#lbreap` liveness scan only *filtered* dead-pid sidecars out of
+/// the strict-live set; it never deleted them. A crashed IDE leaves one sidecar per
+/// document it had open (observed: 468 files from a single dead pid), and every
+/// `read_dir`-based scan then re-reads all of them, degrading the controller
+/// read/convergence path until a write wedges with `controller_transport_backpressure`.
+/// This reaps the durable layer so the directory stays bounded.
+///
+/// The load-bearing "is this editor a live member" decision runs through lazily's
+/// [`OrSet`](lazily::OrSet) — the same add-wins membership primitive the reliable-sync
+/// liveness plane uses (`orset_add_wins_over_stale_remove`): a sidecar whose pid is
+/// alive `add`s its editor id, and a file is reaped iff its editor id is not
+/// `present()`. The pid is parsed from the filename suffix (`<pathhash>.<editor_id>`),
+/// so a directory of hundreds of dead-pid files is reaped without reading their
+/// contents. Legacy single-editor sidecars (no id in the name) and non-JetBrains ids
+/// (pid not probeable) are conservatively kept — only a provably-dead JetBrains pid is
+/// reaped. Returns the number of files deleted.
+pub fn reap_dead_live_buffer_sidecars(project_root: &std::path::Path) -> usize {
+    let dir = project_root.join(LIVE_BUFFER_DIR);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    // (path, editor_id) for every sidecar, editor_id parsed from the filename suffix
+    // after the first '.' (the path-hash stem contains no '.'); a legacy single-editor
+    // sidecar has no suffix and therefore no id.
+    let mut files: Vec<(std::path::PathBuf, Option<String>)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let editor_id = name.split_once('.').map(|(_, id)| id.to_string());
+        files.push((path, editor_id));
+    }
+    // Live-membership authority on lazily's OrSet (add-wins), keyed by editor id: a
+    // live pid adds its id; `present()` is the membership decision. A dead pid never
+    // adds, so its id is absent → its sidecars are reaped.
+    let mut membership: std::collections::BTreeMap<String, lazily::OrSet> =
+        std::collections::BTreeMap::new();
+    for (_, id) in &files {
+        if let Some(id) = id
+            && editor_id_is_live_for_delivery(id)
+        {
+            membership.entry(id.clone()).or_default().add(id.clone());
+        }
+    }
+    let mut reaped = 0;
+    for (path, id) in files {
+        let reap = match id {
+            Some(id) => !membership.get(&id).is_some_and(lazily::OrSet::present),
+            // A legacy single-editor sidecar cannot prove a dead pid — keep it.
+            None => false,
+        };
+        if reap {
+            match std::fs::remove_file(&path) {
+                Ok(()) => reaped += 1,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => eprintln!(
+                    "[lbreap] failed to reap dead-pid live-buffer sidecar {}: {err}",
+                    path.display()
+                ),
+            }
+        }
+    }
+    reaped
+}
+
 pub fn live_buffer_document_paths_with_liveness(
     project_root: &std::path::Path,
 ) -> Vec<(String, bool)> {
+    // Self-heal the sidecar-retirement dead-pid backlog before the durable scan: a
+    // crashed IDE's orphaned sidecars would otherwise inflate this whole-dir scan
+    // (the controller reliable-sync path) until convergence wedges (`#lbreap`).
+    reap_dead_live_buffer_sidecars(project_root);
     let dir = project_root.join(LIVE_BUFFER_DIR);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
@@ -2956,6 +3032,74 @@ mod tests {
         assert_eq!(
             preflight_debounce_max_wait(6000),
             std::time::Duration::from_secs(7)
+        );
+    }
+
+    /// A pid that is definitely dead: spawn `true`, then reap it.
+    fn reaped_dead_pid() -> u32 {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        let pid = child.id();
+        child.wait().expect("reap true");
+        pid
+    }
+
+    #[test]
+    fn reap_dead_live_buffer_sidecars_deletes_dead_pid_keeps_live_and_legacy() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join(".agent-doc").join("live-buffer");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let live_pid = std::process::id();
+        let dead_pid = reaped_dead_pid();
+        let stem = "abc123def456";
+        let live = dir.join(format!("{stem}.jetbrains-{live_pid}-uuid-live"));
+        let dead = dir.join(format!("{stem}.jetbrains-{dead_pid}-uuid-dead"));
+        let legacy = dir.join(stem); // no editor id — kept conservatively
+        // Contents are irrelevant: the reaper decides from the filename, never a read.
+        std::fs::write(&live, "{}").unwrap();
+        std::fs::write(&dead, "{}").unwrap();
+        std::fs::write(&legacy, "{}").unwrap();
+
+        let reaped = reap_dead_live_buffer_sidecars(tmp.path());
+
+        assert_eq!(reaped, 1, "only the dead-pid sidecar is reaped");
+        assert!(live.is_file(), "the live editor's sidecar is preserved");
+        assert!(!dead.exists(), "the dead-pid sidecar is deleted");
+        assert!(legacy.is_file(), "a legacy no-id sidecar is preserved");
+    }
+
+    #[test]
+    fn reap_dead_live_buffer_sidecars_bounds_the_dead_pid_backlog_and_self_heals_the_scan() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join(".agent-doc").join("live-buffer");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let dead_pid = reaped_dead_pid();
+        // A crashed IDE leaves one sidecar per document it had open (the observed
+        // 468-file backlog). Simulate 50 dead-pid sidecars across distinct docs.
+        for i in 0..50 {
+            let f = dir.join(format!("stem{i:04}.jetbrains-{dead_pid}-uuid{i}"));
+            std::fs::write(&f, "{}").unwrap();
+        }
+        // Plus one live session document with a valid snapshot the durable scan sees.
+        let doc = tmp.path().join("live-doc.md");
+        std::fs::write(&doc, "disk").unwrap();
+        let doc_str = doc.to_string_lossy().to_string();
+        let live_id = format!("jetbrains-{}-uuidlive", std::process::id());
+        document_changed_with_content_for_editor(&doc_str, "disk", Some(&live_id));
+
+        let count_before = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(count_before, 51);
+
+        // The durable scan self-heals the backlog, then reports the live document.
+        let live = live_buffer_document_paths_with_liveness(tmp.path());
+        let count_after = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(count_after, 1, "the 50 dead-pid sidecars are reaped");
+        assert!(
+            live.iter().any(|(path, strict)| path == &doc_str && *strict),
+            "the live document remains strictly-live after the reap"
         );
     }
 }

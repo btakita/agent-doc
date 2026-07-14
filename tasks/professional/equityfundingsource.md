@@ -83,7 +83,31 @@ Deployed and verified live. Ran the full `deploy:worker` from the clean `main` c
 - **Live bundle carries the new code** — the served HTML references `index.browser-5NDSCDAE.js` (byte-match to this deploy), and that bundle contains the new `lender-notification-emails` and `lender-documents-email` endpoints.
 
 So the admin Deal modal now has the working "Notify lender to upload documents" (Lender Documents tab) and "Notify lender funding package is ready" (Funding Package tab) buttons with "Last sent …" lines, the auto-send-on-lender-select, and the Wire tab removed — all live.
-<!-- agent:boundary:d9043054 -->
+In the emails, please show the property photos. Can we use a img src with a token to keep the image semi-secure?
+
+### Re: Property photos in the lender emails — opus-4-8
+
+Yes — and that exact pattern already exists in the codebase, so we don't have to invent it.
+
+**What's already there:** `loan_package/routes.ts` serves `GET /dp/:token/photos/:doc_id` — a cookie-less, token-guarded image route built specifically for email:
+- `:token` is a per-deal `loan_package_link` token — unguessable, and revocable (`revoked_at` → HTTP 410).
+- It checks the photo belongs to the deal's loan and only serves real images. The shared `documents` pool stores images as `application/octet-stream`, so the route maps the file extension to a real `image/*` type — otherwise no mail client renders them.
+- It sets `cache-control: public, max-age=86400` with a comment literally reading "these images ride in an email; let mail proxies cache them."
+
+So `<img src="https://efs.../dp/<token>/photos/<doc_id>">` in the email body **is** the "img src with a token" approach you're describing, and it's already production-tested by the loan-package share flow.
+
+**How "semi-secure" it actually is (honest framing):** a token URL is a *bearer capability*:
+- ✅ unguessable, scoped to one deal, revocable, and can be time-bounded.
+- ⚠️ anyone the email is forwarded to can open it, and Gmail/Outlook fetch images through their own image proxy (which caches them). You can't tie access to the lender's identity because email clients send no cookies/auth. That's the inherent ceiling of *any* image in *any* email — "semi-secure" is exactly the right expectation, not a limitation of this design.
+
+**Wiring it into the two lender emails — one real decision:**
+- `deal_funding_package_ready_email_` is easy: a `loan_package_link` already exists in that flow — reuse its token.
+- `deal_lender_documents_request_email_` auto-sends the moment a lender is selected, *before* a loan-package link necessarily exists — so we'd mint a link (or a dedicated per-deal signed photo token using the same HMAC scheme as the guest-chat JWT in `messages/guest.ts`) at send time.
+
+**Recommendation:** mint/reuse a per-deal `loan_package_link` token at send time for both emails, pull the first 1–3 photos from `borrower_property_photos_R_`, and render them as an `<img>` block in the shared `render_` template — capped in count and size so the email stays light for mail-client rendering limits.
+
+Want me to implement that? It touches `render_` (new images block), both email builders, and the two send sites. Queued as `#lender-email-photos` either way.
+<!-- agent:boundary:4553fbd0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

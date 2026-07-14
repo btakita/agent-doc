@@ -32,52 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260714-020832.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260714-040502.md`*
 
 Compacted content:
-- Archived 2 response topic(s): Revert uploaded documents from Lender Documents; Funding Package document destination
-- Prior summary/context: ❯ Please revert the last change. The Lender Documents are incoming from the lender. Uploaded documents should not be ...
-In the Admin Deal Pipeline > Deal modal > Loan Package + Lender Documents + Funding Package tabs, please include the number of uploaded documents / categories with at least 1 document / total document categories.
-
-Funding Package tab should include a slot for the wire instructions, which are required for the lender to wire funds to escrow. Please include an appropriate indicator.
-
-#spec-test-commit-push-deploy
-
-### Re: Document counts on the Loan Package / Lender Documents / Funding Package tabs — opus-4-8
-
-Each of the three deal-modal document tabs now shows an at-a-glance completeness indicator:
-
-- **Tab-bar badge** — compact `<uploaded> · <with>/<total>` (e.g. `4 · 2/5`): uploaded documents · categories with ≥1 document / total categories. Hidden while counts load.
-- **In-tab summary line** — readable `"N documents uploaded across X of Y categories"`.
-
-Category definitions per tab: **Loan Package** = the per-deal required-document checklist rows; **Lender Documents** = the fixed sections + custom types (+ an "Other" bucket); **Funding Package** = the document types on the loan, with `uploaded` counting only funding-package-flagged docs. Badges stay live — children fire `on_change`/`on_docs_changed` on upload/delete/type-change/funding-package-toggle so the parent refetches. Pure count logic lives in `deal_document_counts.ts` (12 unit tests).
-
-### Re: Funding Package wire-instructions slot — opus-4-8
-
-The Funding Package tab now renders a distinct **Wire instructions** slot indicator above the documents grid, reusing the deal wire status: ○ Not filled (red — required before the lender can wire to escrow), ● Filled — not sent (amber), ✓ Sent to lender (green). The existing `LoanWiringSection` stays below as the place to fill numbers and issue the secure link.
-
-### Shipped
-
-`make check` green (1606 pass, build + worker build ok). Committed `7eb8787`, pushed EFS `main`, deployed frontend-only (`deploy:worker:no-migrate`, version `df4e7f16`). Verified live: served bundle hash `index.browser-D4NRJJ4Q.js` is byte-identical to the local build of this commit, and it carries every new string (`uploaded across`, the `·` badge separator, the wire-slot labels). No DB migration in this change. Spec: `prds/deal-tab-document-counts.md`.
-/goal In https://equityfundingsource.brian-takita.workers.dev/lenders/dashboard, make a separate category for deals that the lender has been selected for. In https://equityfundingsource.brian-takita.workers.dev/lenders/deals/29351553-9050-4f18-aee5-29fc42380bb6, make tabs for Lender Documents for the lender to upload their documents and a Funding Package tab. Make sure all tabs have a unique url.
-
-
-### Re: Lender self-upload docs, unique deal-tab URLs, dashboard "selected for" category — opus-4-8
-
-Shipped all three to EFS `main` (`750c28e`, pushed). `#spec-test-commit-push` — code + spec + tests, no deploy.
-
-**1. Dashboard "selected for" category** — `/lenders/dashboard` now surfaces a dedicated **Deals You've Been Selected For** category (green, above *Deals I'm Interested In*), so a deal EFS selected the lender for no longer hides among interest-only deals. A pure `group_dashboard_deals_` helper partitions browseable deals into available / selected / of-interest, so a selected deal appears in exactly one place and the initial load + interest-toggle can't diverge.
-
-**2. Lender Documents upload tab** — the selected lender uploads their own funding-stage documents (term sheet, proof of funds, underwriting conditions, counter-signed items, funding authorization, plus any admin-added custom types) directly from the deal page. The admin and lender surfaces now share one config-driven `DealLenderDocuments` core; only endpoints/source/copy differ. New lender-gated routes — `GET`/`POST /api/investor/deals/:id/lender-documents`, `GET /api/investor/lender-documents/:id/download`, `DELETE /api/investor/lender-documents/:id` — force `source=lender`, gate on selection/funding, and let the lender delete only their own uploads (admin-added rows are read-only to them, server-enforced).
-
-**3. Unique URL per tab** — every tab on `/lenders/deals/:id` is now addressable: **Deal info** is the bare deal URL, and **Loan Package** / **Lender Documents** / **Funding Package** use `?tab=packet` / `?tab=lender-documents` / `?tab=funding-package`. Tab clicks sync the URL even inside the dashboard deal dialog (which already sits on `/lenders/deals/:id`), and never rewrite a non-deal route.
-
-`make check` green (1614 pass, frontend + worker build ok). Spec: `prds/deal-lender-documents.md`. Not deployed — see backlog for the deploy + live-verify follow-up (the goal named live URLs; `#spec-test-commit-push` stops at push).
-
-### Re: Deploy to workers.dev — opus-4-8
-
-Deployed frontend-only (`deploy:worker:no-migrate`, version `25942a08-70d2-44f5-b3bf-7412a656bc61`; no DB migration). Verified live: served bundle `index.browser-5HRJBSJB.js` is byte-identical (md5 match) to the local build of `750c28e` and carries every new string — `Deals You've Been Selected For`, `tab=lender-documents`, the lender upload copy, and the `investor-deal-selected-` card ids. Backlog `#z9np` closed.
-<!-- agent:boundary:53354b0e -->
+- Archived 4 response topic(s): Document counts on the Loan Package / Lender Documents / Funding Package tabs; Funding Package wire-instructions slot; Lender self-upload docs, unique deal-tab URLs, dashboard "selected for" category; 1 more
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): Revert uploaded documents from Lender Documents; Funding Packa...
+<!-- agent:boundary:348fb98e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -104,7 +64,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#z9np] [recommended] Deploy + live-verify the lender self-upload / dashboard-category / unique-tab-URL change on workers.dev (deal 29351553-9050-4f18-aee5-29fc42380bb6): #spec-test-commit-push shipped code to EFS main (750c28e) but did NOT deploy. Run deploy:worker:no-migrate (frontend-only, no migration) and confirm the lender deal page shows the Lender Documents upload tab + unique ?tab= URLs and the dashboard shows the 'Deals You've Been Selected For' category.
 <!-- /agent:backlog -->
 
 ## Review

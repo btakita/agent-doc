@@ -123,7 +123,27 @@ Done, shipped, and live. Both deal-lender notification emails now embed borrower
 **Verification:** `make check` green — **1615 pass, 0 fail** (added a source-assertion test pinning the helper, the send-site wiring, and both templates' photo block). Spec updated: new "Lender-notify emails and inline property photos" section in `prds/deal-lender-documents.md`.
 
 **Shipped `#spec-test-commit-push-deploy`:** EFS `main` `7966f62`, deployed worker-only (`deploy:worker:no-migrate` — no new migration; reuses the existing `loan_package_links` / photo schema). Version `c189f2a8-7f48-496a-a047-359b6154f09d` at https://equityfundingsource.brian-takita.workers.dev (home 200, admin endpoint guarded 401). The email HTML is server-side and only fires on admin-gated actions, so it can't be curled anonymously — the green source-assertion test is the wiring proof.
-<!-- agent:boundary:1e3160fd -->
+Generate sample documents in tasks/professional/equityfundingsource/samples for:
+- all Lender Documents pdfs
+- wire instruction pdf
+
+### Re: Generate sample Lender Documents + wire instruction PDFs — opus-4-8
+
+Done. Six new sample PDFs are in `tasks/professional/equityfundingsource/samples/`, generated from the committed generator so they stay reproducible and in sync with the catalogues.
+
+**Lender Documents** (`samples/lender-documents/`) — one per built-in `deal_lender_documents` category:
+- `term-sheet.pdf` — Term sheet / commitment letter
+- `proof-of-funds.pdf` — Deal-specific proof of funds
+- `underwriting-conditions.pdf` — Underwriting conditions
+- `counter-signed-items.pdf` — Counter-signed items
+- `funding-authorization.pdf` — Funding authorization
+
+**Wire instruction** (`samples/funding-package/wire-instructions.pdf`) — built from the `loan_wire_instructions` field set (beneficiary bank, ABA/routing, account number/name/type, SWIFT, reference, special instructions). All-synthetic values with a "Do NOT wire real funds" banner.
+
+**How they're made:** extended `bin/make-sample-documents.ts` (the committed source of truth for the sample set) with the Lender Documents catalogue — kept in sync with `lib/deal_lender_documents/repo.ts` `DEAL_LENDER_DOCUMENT_CATEGORIES` and the UI catalogue — and the wire set (kept in sync with `lib/wire_link/repo.ts`). Ran `bun run bin/make-sample-documents.ts` and copied the two new subtrees into the samples dir (that dir is gitignored, so the artifacts are local; the generator is what's committed).
+
+**Verified:** every PDF is a valid single-page US-Letter file (`%PDF-1.4` header, `pdfinfo` Pages: 1, `pdftotext` renders the full body text). `make check` green — **1615 pass, 0 fail** (the sample-generator test now also asserts the six new filenames pass the upload guard). Committed + pushed: EFS `main` `ddccf1f`. No deploy — this is dev-only sample tooling with no runtime change.
+<!-- agent:boundary:d0894787 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

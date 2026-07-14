@@ -5,6 +5,38 @@ The concrete implementation of **S6** from
 "eliminate the durable filesystem sidecars entirely" north star. S6 was previously
 rejected on premises that S5 (2026-07-11) invalidated; this plan supersedes that decision.
 
+## Progress 2026-07-14 — operator directive "full retirement now" (supersedes "keep for background durability")
+
+Two destructive step-6 slices landed after a live controller wedge
+(`controller_transport_backpressure`) was root-caused to the un-reaped sidecar backlog
+(a crashed IDE left **468 files** from one dead pid; 1218 total in one project). Manually
+reaping 1007 dead-pid files un-wedged the controller and confirmed the diagnosis.
+
+- **Dead-pid GC (`5aba6732`)** — `agent_doc_debounce::reap_dead_live_buffer_sidecars`
+  deletes provably-dead-pid sidecars, wired into the durable
+  `live_buffer_document_paths_with_liveness` scan so it self-heals. The load-bearing
+  live-membership decision runs on lazily's `OrSet` (add-wins), the same primitive the
+  reliable-sync plane uses. Conservative: only a provably-dead JetBrains pid is reaped;
+  legacy no-id / non-JetBrains sidecars are kept. `agent-doc-debounce` gains `lazily`.
+- **Write scoping (`368d75cb`)** — both digest-content FFI write paths now gate on
+  `live_buffer_sidecar_in_scope` (= `is_agent_doc_document_for_file`), so a sidecar is
+  written only for agent-doc **session documents**, matching the plane's scope. Stops
+  sidecars accruing for `node_modules/**/README.md`, plain specs, and source tabs.
+
+Both verified green (`make check` 7588 tests) in an **isolated worktree** — a concurrent
+session was mid-edit in the shared tree (its `compact_document` trait addition broke the
+in-place build), so commits were made via temp-index compare-and-swap against a green HEAD
+to avoid entangling that session's work.
+
+**Remaining for full retirement** (unchanged from the handoff below, minus the two GC/scoping
+follow-ups now done): the hard piece is **sync-in-flight on the plane** — `editor_sync_statuses`
+/ `await_editor_sync_barrier` still read sidecars to detect unsaved editor drift before a disk
+write, and the plane tracks open-set + pid-alive but **not** per-editor edit-epoch vs synced-epoch,
+so it cannot yet answer "is this editor's edit in flight." That signal must move onto the plane
+(a per-editor epoch/frontier cursor) before the sidecar **writers** + reaper can be deleted. The
+durable store is already lazily-owned (`SqliteOutbox` = lazily `DurableOutbox`). Then: delete the
+writers, then delete the reaper, keeping the outbox/ledger as the recycle-recovery source.
+
 ## Goal
 
 Replace the cross-process filesystem **sidecars** — the plugin-owner lease and the

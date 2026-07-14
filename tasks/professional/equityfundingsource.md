@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -32,60 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260713-212603.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260714-020832.md`*
 
 Compacted content:
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Lender Documents UI parity and release closeout; CI/tooling cl...
-❯ Please revert the last change. The Lender Documents are incoming from the lender. Uploaded documents should not be a part of this.
-❯ #spec-test-commit-push-deploy
-### Re: Revert uploaded documents from Lender Documents — gpt-5
-
-Reverted the uploaded-loan-document catalogue integration and restored the Lender Documents boundary.
-
-- **Behavior:** Ordinary `loan_documents` no longer populate Lender Documents types, rows, or file links. The tab now contains only its built-in categories, per-loan custom lender-document types, and documents stored in the lender-document workflow.
-- **Spec and regression:** The PRD now states that borrower/admin upload workflows remain separate. A regression test locks the repository, list response, and UI against reintroducing `uploaded_document_types` or querying `loan_documents`.
-- **Verification:** The focused suite passed (21 tests, 0 failures), and full `make check` completed successfully. This repo has no GitHub Actions workflow named `CI`.
-- **Commit:** EFS `12b2ccb` (`revert(admin): isolate lender document types (#lender-doc-types)`), containing only the five intended implementation/spec/test paths.
-- **Release:** Deployed Worker version `49a9c080-e6a5-4ab2-a83b-94f7ae147091`. Pre- and post-deploy checks found no pending D1 migrations; D1 Time Travel returned a current recovery bookmark; the public site returned 200 and the protected admin pipeline returned the expected 303 Access redirect. The EFS commit is pushed immediately after this binary-owned session closeout.
-
-Suggested commit message (used):
-
-```txt
-revert(admin): isolate lender document types (#lender-doc-types)
-
-Remove ordinary loan-document catalogue merging from the Lender Documents API
-and UI, clarify workflow ownership in the PRD, and add regression coverage.
-```
-In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=ca0fa649-8782-4af8-aa63-82a6015c2b87&deal_tab=funding-package > Signed loan documents & evidence of insurance: the topic should be Funding Package...not lender deal preview ![img_1.png](img_1.png). We are reusing the upload component also seen in the Loan Package tab ![img_2.png](img_2.png).
-
-Please add a 3rd distinct row for the Funding Package. The Funding Package checkbox should be to present the Funding Package documents to the lender.
-
-### Re: Funding Package document destination — gpt-5
-
-Implemented and deployed the independent Funding Package document destination shown in the screenshots.
-
-- Added a third, separately persisted **Include in Funding Package** row to the shared admin document card. The existing lender-preview and Loan Package controls retain their current meanings.
-- Renamed the admin upload area to **Funding Package documents** so the tab no longer describes a lender deal preview.
-- Added `loan_documents.funding_package_visible` through migration `0136`, repository reads/writes, and the admin PATCH contract.
-- Added a distinct lender **Funding Package** tab and `?tab=funding-package` deep link. Funding Package documents are exposed only after the lender is selected or while the loan is funding-pending/active.
-- Added `prds/funding-package-documents.md` and focused regression coverage for persistence, API visibility, eligibility, admin labels, lender navigation, empty state, and existing Loan Package behavior.
-
-Verification and release evidence:
-
-- Focused suites: 53 passed, 0 failed.
-- Full `make check`: 1,594 passed, 0 failed; application build and Worker bundle succeeded.
-- This repository has no GitHub Actions workflow named `CI`, so there was no remote CI run to inspect.
-- Committed and pushed as `a0a7f0a` (`feat(funding): add lender Funding Package documents (#5q9q)`).
-- Applied production migration `0136`; the remote migration list is now empty.
-- Deployed Cloudflare Worker version `63a2f68c-0beb-4349-8380-1398138620c2`.
-- Post-deploy probes: public root HTTP 200; protected admin route HTTP 303 to Cloudflare Access, as expected.
-
-Suggested commit message (used):
-
-```text
-feat(funding): add lender Funding Package documents (#5q9q)
-```
-<!-- agent:boundary:605828a5 -->
+- Archived 2 response topic(s): Revert uploaded documents from Lender Documents; Funding Package document destination
+- Prior summary/context: ❯ Please revert the last change. The Lender Documents are incoming from the lender. Uploaded documents should not be ...
+<!-- agent:boundary:653c0fea -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

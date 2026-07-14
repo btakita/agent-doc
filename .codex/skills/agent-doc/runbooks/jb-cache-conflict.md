@@ -14,6 +14,12 @@ For a document with an attached CRDT replica, every ordinary binary-owned write 
 
 The retry is responsive and bounded: it uses 25–250 ms exponential backoff, reports progress every two seconds, and fails closed after 60 seconds with the agent change retained for retry. It never falls back to a competing disk write while an editor-owned replica remains attached. Deterministic coverage is `file_cache_conflict_backpressure_applies_coalesced_latest_once_after_ack` in `src/sim_world.rs` plus the document-realtime IO acknowledgement/rebase tests.
 
+## Automatic Legacy-Replay Convergence
+
+The agent should never need to repair a document. On ordinary preflight, before prompt parsing or diff generation, the binary checks one deliberately narrow legacy corruption signature: the complete agent-doc projection is present byte-for-byte twice (or a power-of-two number of times). After typing settles, the binary coalesces those identical copies through the same CRDT replacement and visible-replica acknowledgement path, then continues preflight from the converged text. It logs `preflight_exact_document_replay action=coalesce|converged transport=crdt` and emits a small `exact_document_replay_coalesced` warning instead of expanding the replay into a giant diff or bogus orchestration request.
+
+The detector requires a complete session frontmatter and component structure and exact byte identity. Any non-identical operator edit, incomplete suffix, or ordinary repeated prose is ineligible and remains untouched. Coverage includes the pure replay policy, attached preflight integration, and SimWorld scenario `preflight_boundary_coalesces_legacy_whole_document_replay_via_crdt`.
+
 The dialog contract below remains the recovery path for older plugins, already-open legacy conflicts, or writes that began before this contract was installed.
 
 ## Dialog Contract

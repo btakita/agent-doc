@@ -498,7 +498,18 @@ Converted both diagrams to **mermaid** (§2 hub topology, §4.1 lifecycle) and f
 - **Latency vs throughput — is the few-ms from buffering? Is coalesce-on-backpressure a cheap win?** Yes, the latency is the **flush interval** — you hold messages up to `flushInterval`/batch-size to amortize syscalls + framing, so a message can wait a few ms. Coalesce-on-backpressure is a **very cheap, high-value win for state-like data**: you're not just batching, you're *collapsing* N queued updates for the same key into 1 (conflation), so the slow consumer does *less* work and catches up faster. For non-collapsible data (chat) batching still cuts per-message overhead (a throughput win) but doesn't drop count. Best form is **adaptive/Nagle-like**: flush immediately when idle (low latency), coalesce/batch only when the queue is backed up (throughput when it matters). So — cheap and worth it, especially the conflation path.
 
 The doc now carries all of this; the response is the quick-reference. Want me to add a worked ack/redelivery sequence diagram (client ↔ hub ↔ outbox) or a mermaid sequence for the multi-device echo path? Either is a small add.
-<!-- agent:boundary:69949696 -->
+I don't see the mermaid diagrams on the dark background.
+
+### Re: Mermaid invisible on dark background — opus-4-8
+
+That's a contrast problem, not a rendering failure: mermaid's default theme draws black strokes + dark text, which vanish on your dark editor background. Added `%%{init: {"theme":"dark"}}%%` as the first line of **both** diagrams (§2 hub topology, §4.1 lifecycle) — the built-in `dark` theme uses light-gray nodes, white text, and light edges, so they show up on a dark background.
+
+Two caveats worth knowing:
+- **Local IDE preview (JetBrains/VS Code JCEF):** respects the init directive — this fixes it.
+- **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
+
+If you're viewing it somewhere that **doesn't render mermaid at all** (you'd see raw `flowchart` text, not an invisible diagram), tell me and I'll either drop back to ASCII art or export the diagrams to PNG and embed them. And if you want the doc to read cleanly on *both* light and dark (e.g. you'll export to PDF on a white page), I can swap `theme:"dark"` for explicit `themeVariables` that contrast on either — just say which surface it's final-rendered on.
+<!-- agent:boundary:628ee762 -->
 <!-- /agent:exchange -->
 
 ## Queue

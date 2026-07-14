@@ -56,7 +56,36 @@ revert(admin): isolate lender document types (#lender-doc-types)
 Remove ordinary loan-document catalogue merging from the Lender Documents API
 and UI, clarify workflow ownership in the PRD, and add regression coverage.
 ```
-<!-- agent:boundary:e9ca8868 -->
+In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?dialog=deal&dialog_deal_id=ca0fa649-8782-4af8-aa63-82a6015c2b87&deal_tab=funding-package > Signed loan documents & evidence of insurance: the topic should be Funding Package...not lender deal preview ![img_1.png](img_1.png). We are reusing the upload component also seen in the Loan Package tab ![img_2.png](img_2.png).
+
+Please add a 3rd distinct row for the Funding Package. The Funding Package checkbox should be to present the Funding Package documents to the lender.
+
+### Re: Funding Package document destination — gpt-5
+
+Implemented and deployed the independent Funding Package document destination shown in the screenshots.
+
+- Added a third, separately persisted **Include in Funding Package** row to the shared admin document card. The existing lender-preview and Loan Package controls retain their current meanings.
+- Renamed the admin upload area to **Funding Package documents** so the tab no longer describes a lender deal preview.
+- Added `loan_documents.funding_package_visible` through migration `0136`, repository reads/writes, and the admin PATCH contract.
+- Added a distinct lender **Funding Package** tab and `?tab=funding-package` deep link. Funding Package documents are exposed only after the lender is selected or while the loan is funding-pending/active.
+- Added `prds/funding-package-documents.md` and focused regression coverage for persistence, API visibility, eligibility, admin labels, lender navigation, empty state, and existing Loan Package behavior.
+
+Verification and release evidence:
+
+- Focused suites: 53 passed, 0 failed.
+- Full `make check`: 1,594 passed, 0 failed; application build and Worker bundle succeeded.
+- This repository has no GitHub Actions workflow named `CI`, so there was no remote CI run to inspect.
+- Committed and pushed as `a0a7f0a` (`feat(funding): add lender Funding Package documents (#5q9q)`).
+- Applied production migration `0136`; the remote migration list is now empty.
+- Deployed Cloudflare Worker version `63a2f68c-0beb-4349-8380-1398138620c2`.
+- Post-deploy probes: public root HTTP 200; protected admin route HTTP 303 to Cloudflare Access, as expected.
+
+Suggested commit message (used):
+
+```text
+feat(funding): add lender Funding Package documents (#5q9q)
+```
+<!-- agent:boundary:605828a5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

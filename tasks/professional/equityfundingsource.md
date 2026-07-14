@@ -32,12 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260714-154827.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260714-154832.md`*
 
 Compacted content:
 - Archived 14 response topic(s): Deal-modal tab-switch resize jank + consistent large size; Deal-modal lender-notify emails (Lender Documents + Funding Package) & remove Wire tab; Deploy the lender-notify email work (#dlne-deploy); 11 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Document counts on the Loan Package / Lender Documents / Fundi...
-<!-- agent:boundary:32c859a2 -->
+<!-- agent:boundary:747fd9ee -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

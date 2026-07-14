@@ -710,17 +710,14 @@ fn captured_baseline_coalesces_to_current(
     let Ok(captured_baseline) = std::fs::read_to_string(baseline_file) else {
         return Ok(None);
     };
-    let Some(replay) =
-        agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(
-            &captured_baseline,
-        )
-    else {
+    let Some(replay) = agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(
+        &captured_baseline,
+    ) else {
         return Ok(None);
     };
-    let coalesced =
-        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            replay.canonical,
-        );
+    let coalesced = agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+        replay.canonical,
+    );
     let current =
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current_file);
     Ok((coalesced == current).then_some((replay.copies, replay.retained_additions)))
@@ -1408,7 +1405,7 @@ mod tests {
         assert!(err.to_string().contains("baseline no longer matches"));
         assert!(
             err.to_string()
-            .contains("agent-doc reset --from-current --preserve-session")
+                .contains("agent-doc reset --from-current --preserve-session")
         );
     }
 
@@ -1427,12 +1424,7 @@ mod tests {
         let replayed = format!("{canonical}{canonical}");
         std::fs::write(&doc, &replayed).unwrap();
         agent_doc_snapshot_io::save(&doc, &replayed, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(
-            &doc,
-            Some(&replayed),
-            Some(&replayed),
-        )
-        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&replayed), Some(&replayed)).unwrap();
         let baseline = dir.path().join("captured-baseline.md");
         std::fs::write(&baseline, &replayed).unwrap();
         agent_doc_cycle_state_io::record_turn_checkpoint(

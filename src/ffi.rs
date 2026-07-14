@@ -3328,7 +3328,10 @@ mod tests {
             "# Some library\n\nDocs.\n"
         ));
         // A source file is never a session document.
-        assert!(!live_buffer_sidecar_in_scope("/tmp/src/main.rs", "fn main() {}\n"));
+        assert!(!live_buffer_sidecar_in_scope(
+            "/tmp/src/main.rs",
+            "fn main() {}\n"
+        ));
     }
 
     #[test]

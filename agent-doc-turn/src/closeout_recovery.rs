@@ -970,14 +970,14 @@ mod tests {
             CloseoutRecoveryMutationReason::BenignReplayBaseline.as_str(),
             "benign_replay_baseline"
         );
-    assert_eq!(
-        CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
-        "queue_only_replay_baseline"
-    );
-    assert_eq!(
-        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline.as_str(),
-        "whole_document_replay_coalesced_baseline"
-    );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.as_str(),
+            "queue_only_replay_baseline"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline.as_str(),
+            "whole_document_replay_coalesced_baseline"
+        );
         assert_eq!(
             CloseoutRecoveryMutationReason::CommitQueueMetadataDrift.as_str(),
             "commit_queue_metadata_drift"
@@ -1010,20 +1010,20 @@ mod tests {
             CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_event(),
             "capture_baseline_refreshed_for_queue_only_drift"
         );
-    assert_eq!(
-        CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_message(),
-        "queue-only drift detected"
-    );
-    assert_eq!(
-        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
-            .capture_refresh_event(),
-        "capture_baseline_refreshed_for_whole_document_replay_coalescence"
-    );
-    assert_eq!(
-        CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
-            .capture_refresh_message(),
-        "whole-document replay coalescence detected"
-    );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::QueueOnlyReplayBaseline.capture_refresh_message(),
+            "queue-only drift detected"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
+                .capture_refresh_event(),
+            "capture_baseline_refreshed_for_whole_document_replay_coalescence"
+        );
+        assert_eq!(
+            CloseoutRecoveryMutationReason::WholeDocumentReplayCoalescedBaseline
+                .capture_refresh_message(),
+            "whole-document replay coalescence detected"
+        );
         assert_eq!(
             CloseoutRecoveryMutationReason::BenignReplayBaseline.capture_refresh_event(),
             "capture_baseline_refreshed_for_benign_drift"

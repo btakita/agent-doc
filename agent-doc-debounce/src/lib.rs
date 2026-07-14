@@ -3098,7 +3098,8 @@ mod tests {
         let count_after = std::fs::read_dir(&dir).unwrap().count();
         assert_eq!(count_after, 1, "the 50 dead-pid sidecars are reaped");
         assert!(
-            live.iter().any(|(path, strict)| path == &doc_str && *strict),
+            live.iter()
+                .any(|(path, strict)| path == &doc_str && *strict),
             "the live document remains strictly-live after the reap"
         );
     }

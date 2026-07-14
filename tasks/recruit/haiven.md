@@ -430,7 +430,75 @@ Other decisions worth a glance before you edit:
 Note on the disclaimer (p.3): it assigns IP of your submission to Haiven and asks you not to reuse it elsewhere — so this doc is scoped to the application, and I kept the lazily-specific machinery as *reasoning* rather than importing any of your actual code. Nothing proprietary from lazily is in the file.
 
 It's a draft for you to make your own — the reasoning and structure are there; adjust the leans to match how you'd actually pitch it in the interview. Say the word and I'll turn it into a submission-ready PDF/slides with a cleaner diagram.
-<!-- agent:boundary:82b5c9fb -->
+
+Please render the diagrams in mermaid.
+- `on success we stamp a server-authoritative clientID (from the token subject)`: What is subject? Is it in the payload as json?
+- Would the `Single hub goroutine (actor)` handle <100k connections?
+- Can `(b) Sharded lock-based registry` use a lock-free design? Why can't we use channels to mutate the registry? What is the practical performance difference between a lock and a channel?
+- With golang, is there any advantage to having multiple hub processes on an instance? If yes, can a socket be transferred between processes?
+- If we use stateless routing, what is the message bus? An external service?
+- Where does the auth occur? Another service?
+- How would a disconnect be handled as an unregister? Is there a potential of a race condition with multiple connections?
+- "Rate within the client's budget for this service?": Please go more into the budget.
+- Backpressure > Block the producer: What happens if the producer is blocked? How would a slow client be handled? Why would slow client cause system-wide blocks when we have a separate goroutine for each connection?
+- How would recovering from a spill work? Do we stream from the durable data source?
+- Would a Topic fanout be in a separate goroutine actor or bounded worker queue? In the bounded worker queue case, would there be a queue actor goroutine that handles push/pop? Would there be an actor that enqueues while the workers dequeue?
+- Would the ping/pong be handled directly by the connection goroutine?
+- Would each message have its own write deadline?
+- Would a at-least-once hold a message in memory + retry until acked?
+- How would multiple user connections on different devices be handled?
+- Show me the circuit breaker simplified code.
+- Buffering vs shedding > at-least-once: would the buffer have spill on overflow? Do we send back a degraded state message to the client?
+- Buffering vs shedding > at-most-once? Do we send back a degraded state message to the client?
+- Tradeoffs > Latency vs throughput: Is the batch/coalesce few ms latency due to waiting for messages to buffer? If we batch/coalesce on backpressure, will this be a very cheap win?
+- With client dedupe by id, do long-running clients need to hold all received message ids, or can we drop old ids...using ULID?
+- How would ws backpressure be implemented? Does the client pull or do we wait for acks?
+- If a client sends a chat, there is no id since the hub defines the message id. It then receives the topic message. How would the sending client dedupe...by looking up the user id? How would multiple devices be handled? Would we need a device id?
+- Please type chat, presence, notifications, moderation signals, and other events for game messages, such as ui state.
+
+### Re: Design review — mermaid + 22 questions — opus-4-8
+
+Converted both diagrams to **mermaid** (§2 hub topology, §4.1 lifecycle) and folded the deeper answers into the doc where they belong: precise backpressure (§4.3), envelope `device`/`corr` (§8), multi-device + echo dedup (§6.1), circuit-breaker code (§6.4), spill recovery + fan-out worker model (§4.3/§4.4). Answers to everything below.
+
+**Identity & auth**
+- **`subject`?** It's the JWT `sub` claim — the principal/user id, inside the *token's* payload (the signed middle segment), **not** the WS message body. The hub verifies the signature, reads `sub`, uses it as `clientID`, and overwrites any client-supplied identity. So the client never asserts who it is in a message.
+- **Where does auth happen — another service?** Token *issuance* is a separate auth service (your login/OAuth flow). Token *verification* happens **in the hub, locally** — it checks the JWT signature against the auth service's published public keys (JWKS), no network hop per connect. Opaque tokens would need a call to an introspection endpoint (cache it); short-lived JWTs avoid that. Verify pre-upgrade so bad tokens never get a socket.
+
+**Concurrency & scale**
+- **Single hub goroutine at <100k connections?** Yes for connection *count* — register/unregister are just map ops (tens of millions/sec through one goroutine; 100k idle conns is nothing). The ceiling isn't connections, it's **fan-out message rate**: one goroutine iterating a 100k-member topic on every broadcast is where it strains. So keep registry *mutation* in the actor, move fan-out *iteration* to sharded reads + a worker pool (§4.4).
+- **Sharded lock-free? Why not channels? lock vs channel cost?** Lock-free is possible (atomic pointer-swap over an immutable map, or a concurrent hashmap) but hard to get right — a sharded `RWMutex` is the pragmatic 99% answer. **Why not a channel for the registry:** a channel *is* a mutex + queue that serializes every op through one goroutine on one core — that's exactly the bottleneck you're removing; it gives you ownership/serialization, not parallelism. A sharded `RWMutex` lets N readers proceed across cores concurrently. **Practical cost:** an uncontended mutex lock/unlock ≈ 20–25ns (atomic CAS); a channel send/recv ≈ 100–300ns (runtime scheduler, possible goroutine park/unpark) — so ~5–10× per op, *plus* the channel funnels to one core while the RWMutex scales reads. Rule of thumb: channels for coordination/handoff, locks/atomics for hot shared-state reads.
+- **Multiple hub processes per instance? Can a socket move between processes?** Little CPU upside — one Go process already uses all cores (GOMAXPROCS), and IPC adds cost. You'd do it for **isolation**: a panic/crash drops fewer clients, independent deploy/restart, and **GC isolation** (splitting a huge heap shrinks per-process GC pause — the real reason at scale). Socket handoff on Linux: **yes** — either `SO_REUSEPORT` so the kernel load-balances accepts across processes (each accepts its own; no transfer needed — the clean multi-process pattern), or pass an existing fd via `SCM_RIGHTS` over a Unix socket (`unix.Sendmsg` ancillary data) for graceful/zero-downtime handoff. Default stays single-process; multi-process is a GC/fault-isolation play, not throughput.
+
+**Stateless routing**
+- **What's the message bus — an external service?** Yes — a separate process/cluster the hub nodes connect to: NATS (or JetStream for persistence), Redis pub/sub or Streams, Kafka/Redpanda, or cloud pub/sub. It's the shared nervous system that lets any node reach a client held by any other node. Can be self-hosted (NATS is a single Go binary) or managed.
+
+**Connection lifecycle**
+- **Disconnect → unregister; race with multiple connections?** Two real races. (1) Both pumps detecting failure and both unregistering → guard with `sync.Once`. (2) The nastier one: an old conn's cleanup firing *after* a reconnect registered a fresh conn under the same key, evicting the live one. Fix: **unregister is a compare-and-swap on `connID`** — only delete if the registered `connID` still equals this conn's. The actor model serializes this for free; sharded locks need the CAS written explicitly. Now in §4.1/§6.1.
+
+**Backpressure & flow control**
+- **Rate budget — deeper.** Per-`(client, service)` **token bucket** (`golang.org/x/time/rate`): a rate (tokens/sec) + burst (bucket size); each inbound message costs a token; empty → `rate_limited` (drop or error). Enforced in the read loop before dispatch. Tuned per service (chat 10/s burst 20, presence 2/s…). Optionally a *global* per-service bucket too, to protect a downstream from the whole fleet. Buckets are tiny (a few words); lazily create + GC idle ones.
+- **Block producer — what actually blocks, and why "system-wide" with per-conn goroutines?** Good catch — I made this precise in §4.3. Your instinct is right for the *read* side: a slow *sender* only stalls its own `readPump`. The system-wide risk is the *write/fan-out* side: a **shared** producer (fan-out loop or a downstream pushing to many) doing a *blocking* `clientCh <- msg` on one full queue stalls that shared goroutine, delaying everyone else on it. Fix: non-blocking enqueue (`select { case ch<-msg: default: policy() }`). Per-conn goroutines protect reads; the write path must never block on a slow receiver.
+- **Spill recovery — stream from the durable source?** Yes. The outbox is an append-only log (embedded store or bus-with-retention). Recovery is a **cursor**: on drain-below-low-water or reconnect (`resumeToken`), stream sequentially from the last-acked offset in **bounded batches** (never load the whole backlog), re-enqueue in order, advance the cursor as acks land. §4.3.
+- **Fan-out — actor or bounded worker queue? Is there a queue-actor doing push/pop? Separate enqueuer vs workers?** Split it: **membership** mutation stays in a per-topic actor (serialized subscribe/unsubscribe); **delivery** goes to a bounded **worker pool**. You do *not* hand-write a push/pop queue actor — a buffered `chan job` already *is* a concurrent-safe MPMC queue, so the broadcast pushes jobs and M workers pop and deliver. Enqueue to each recipient stays non-blocking. §4.4.
+- **Ping/pong on the connection goroutine directly?** Yes, and split across its two pumps: `writePump` owns the ping (it owns all writes — you can't safely write a ping from elsewhere) via a ticker; `readPump` handles the pong (the library's pong handler runs in the read context) and refreshes the read deadline. No global ping goroutine. (At extreme scale you can share one ticker to cut timer count, but the write still goes through `writePump`.)
+- **Write deadline per message?** Yes — `SetWriteDeadline(now + writeWait)` **immediately before each write**, per frame. A deadline is an absolute time; set once, a later write inherits an already-expired one. It's just a field write — cheap.
+- **WS backpressure — client pull or wait for acks?** WebSocket has **no native pull / app flow-control** — it's push over TCP. You get two levers: (1) **TCP backpressure** — if the client stops reading, the server's write blocks / send buffer fills, which your **write deadline** detects → treat as slow consumer; (2) **app-level ack/credit window** for guaranteed classes — client acks, server sends up to a window of unacked (TCP-window-like flow control at the app layer). Most hubs use (1) + the overflow policy for at-most-once, and add (2) only for at-least-once. There's no "client pull" in WS itself (that's SSE/long-poll territory or a custom credit protocol).
+
+**Delivery guarantees**
+- **At-least-once = hold in memory + retry until acked?** Essentially yes: keep the message in an **unacked buffer** keyed by `id`/`seq`, deliver, start a retry timer; client ack (by `id`) removes it; timeout → redeliver with backoff + attempt cap. For crash-safety the unacked set must be **durable** (the outbox) — memory-only downgrades to at-most-once across a node crash. Client dedups on redelivery.
+- **Buffering vs shedding — at-least-once: spill on overflow? degraded message?** Yes to both: the bounded unacked buffer spills to the durable outbox; if durable is also exhausted/down, shed oldest **and** send a `service_degraded` control message so the UI shows "reconnecting." §6.4.
+- **Buffering vs shedding — at-most-once: degraded message?** Don't buffer (presence/typing) — shed silently, but **do** emit a lightweight degraded signal (`presence.stale`) so the client greys out presence instead of trusting stale-as-fresh. §6.4.
+
+**Multi-device & dedup**
+- **Multiple devices on different networks?** Key the registry by **`(clientID, deviceID)`**, not `clientID`. `clientID` = user (JWT `sub`); `deviceID` = client-generated per-install UUID (persisted on device). Presence aggregates across a user's devices (online if any is); user-targeted fan-out delivers to all their device connections; the duplicate/LWW eviction applies per `(clientID, deviceID)` — a different device coexists, a reconnect from the *same* device with a newer `connID` evicts the old socket. §6.1.
+- **Client dedup — hold all ids, or drop old using ULID?** Don't hold all. ULIDs are time-ordered, so the client keeps a per-service **high-water mark** + a small recent-id set sized to the redelivery/resume window; anything below the mark is assumed processed → drop. Bounded regardless of session length. §6.1.
+- **Sender dedup — client has no `id` on send, then gets the topic echo. Match by user id? multi-device? need a device id?** This is why `corr` + `device` are in the envelope (§8). The sender stamps a client-local `corr` on send and renders optimistically; the hub assigns the authoritative `id` and **echoes `corr`** (+ origin `device`) in the fan-out copy. The **originating device** matches by `corr`, replaces its optimistic copy, no duplicate. The user's **other devices** have no matching `corr` → render as normal inbound. So yes — you need a `deviceId`; without it you can't tell "my own echo on this device" from "my other device's message." Matching by user id alone can't do that.
+
+**Tradeoffs**
+- **Latency vs throughput — is the few-ms from buffering? Is coalesce-on-backpressure a cheap win?** Yes, the latency is the **flush interval** — you hold messages up to `flushInterval`/batch-size to amortize syscalls + framing, so a message can wait a few ms. Coalesce-on-backpressure is a **very cheap, high-value win for state-like data**: you're not just batching, you're *collapsing* N queued updates for the same key into 1 (conflation), so the slow consumer does *less* work and catches up faster. For non-collapsible data (chat) batching still cuts per-message overhead (a throughput win) but doesn't drop count. Best form is **adaptive/Nagle-like**: flush immediately when idle (low latency), coalesce/batch only when the queue is backed up (throughput when it matters). So — cheap and worth it, especially the conflation path.
+
+The doc now carries all of this; the response is the quick-reference. Want me to add a worked ack/redelivery sequence diagram (client ↔ hub ↔ outbox) or a mermaid sequence for the multi-device echo path? Either is a small add.
+<!-- agent:boundary:69949696 -->
 <!-- /agent:exchange -->
 
 ## Queue

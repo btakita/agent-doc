@@ -16,7 +16,8 @@ Interactive document sessions with AI agents.
 - **NEVER swallow errors** — no `let _ =` on fallible operations. Always log at minimum a warning to stderr. Silent failures make bugs invisible and waste debugging cycles.
 - **Behavioral fixes are packagable, not per-user agent memory** — when an agent-doc *session* behaves wrong (the agent stalled the queue, asked the wrong thing, mishandled closeout), fix it in the **product** so every user benefits: a binary heuristic, a `SKILL.md`/runbook instruction surface, or these development instructions. Do **not** resolve agent-doc behavior problems by writing a per-user agent-memory note — agent-doc ships to other people, and a memory only helps one operator. Memory is for facts about *a specific environment*, never for correcting shipped agent-doc behavior.
 - **Do the agent-doable deploy/release work without asking (`#deploy-just-do-it`)** — when a session produces a shippable agent-doc change, execute *every* agent-doable release/deploy sub-step autonomously: version bump (`Cargo.toml` + `pyproject.toml`), `VERSIONS.md` entry, `make check`, commit, `make install-full`, push, `agent-doc admin recycle`, tag, and publish. Do **NOT** defer these to the operator, and do **NOT** ask "should I deploy/release?" — operator approval is assumed for anything an agent can do. The **only** operator-gated step is the genuine live-session eyeball (a human watching a real editor/pane prove the behavior); record it as a non-blocking `[operator-verify]` follow-up. An `[operator-verify]` item never licenses skipping the build/install/push/recycle/publish — it means "do all the agent-doable sub-steps now, leave only the live human check." Asking permission for agent-doable deploy work is itself the bug.
-- **Operator-visible document text is authoritative** — Preserve user edits; let `agent-doc write --stream` merge. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots are backup/audit state, not hot-path authority; fail closed or retry through the editor instead.
+- **Operator-visible document text is authoritative** — Preserve user edits through one final `agent-doc finalize --stream` transaction. Never write a partial response to the document, and never recover, patch, or hook-closeout by replacing operator text with `content_ours`, a snapshot, a partial capture, or a lazily visible-write receipt. Snapshots and partial captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead.
+- **Response closeout is atomic** — The complete final response, queue-head consumption, backlog/done mutations, snapshot, and commit succeed as one transaction or none becomes authoritative. `repair` is exceptional crash recovery, never part of a healthy response cycle.
 - **Realtime operator steering must be surfaced verbatim and in aggregate, never dropped or thrashed (`#realtime-steering-verbatim` / `#realtime-steering-aggregate` / `#no-thrash-steering`)** — a document is realtime: the operator may add a prompt while the turn is active, and every item the operator adds must be addressed and worked on, not committed-and-ignored. When a committed cycle's document carries a fresh operator prompt, the binary must (a) hand the agent that prompt **verbatim** (the full text via `RealtimeSteering::verbatim`, not a first-line preview) and (b) instruct it clearly to address the prompt in the CURRENT turn — never a bare interrupt that reads like a failed closeout. **Steering is a concurrent aggregate, not a FIFO queue:** when the operator adds several prompts mid-turn, the binary must surface **all** of them at once — not just the first, and not drained one head at a time — so the agent processes the concurrent directives together and can find patterns across them. `agent_doc_diff::all_unstarted_prompt_bearing_changes_from_diff` returns every unstarted directive (with `first_*` defined as its head), `baseline_comparison::RealtimeSteeringSet` / `realtime_steering_all[_between]` aggregate them, `RealtimeSteeringSet::verbatim_aggregate()` concatenates them verbatim with a count header, and `session-check`'s `detect_unstarted_prompt_bearing_diff` (`realtime_steering_set_since_turn_baseline`) surfaces that aggregate. The clear instruction must say: the prior response is already committed in HEAD; re-run `agent-doc <FILE>` to continue; do **not** re-run finalize on the prior response, do **not** `--force-disk` (that clobbers the operator's live edits), and do **not** re-answer a prompt already committed in HEAD (the realtime replica reconciles the committed response back into the live buffer). This is what prevents the thrash loop (repeated preflight/finalize, empty cycles, force-disk clobbers) that a concurrent operator edit used to induce. Keep `session_check.rs`'s `realtime_steering_closeout_guidance`, `baseline_comparison::RealtimeSteering{,Set}`, `prompt_bearing.rs`, `is_committed_prompt_diff_interruption`, `SKILL.md`, and `runbooks/respond.md` aligned; the strategic direction is to back exchange + steering with the lazily graph (`SeqCrdt` exchange nodes, plus a reactive **observable set** — not a drain-one-head `QueueCell` — for steering) so concurrent editing reconciles as a CRDT instead of a bespoke merge.
 - **Session-accretion compaction guidance is queue-aware (`#no-compact-prompt-during-queue-drain`)** — while an `agent:queue` is actively draining (`queue_active: true`), `session_accretion.rs` must NOT surface "ask the user before compacting" guidance: a self-driving queue is meant to run unattended, so a compaction question stalls the queued work. On an active queue the binary emits don't-stall guidance and compacts only on an explicit `agent_doc_auto_compact` opt-in; off the queue it asks before compacting. Keep `compaction_guidance` in `session_accretion.rs` the single source of that wording.
 - **Operator-authored queue order is authoritative (`#qauthorder`)** — queue convergence must keep an operator-added queue line at the document slot the operator authored it in: never auto-bubble it to the top and never duplicate it. Holding the slot must not mutate the line's visible text (do **not** inject a `:pushpin:` the operator never typed); use a position-lock keyed off the line's stable identity instead. Free-text operator lines need the same convergence dedup the `do [#id]` heads already get (`#qdedupsync` is free-text-blind) so a CRDT/backlog-sync re-emit cannot leave a visible duplicate. Reconcile with `sort_prompts_by_priority` position-lock (`#queue-operator-pin-position-lock`), `annotate_manual_queue_additions` (`#7r2s`), and `#backlog-queue-append-stable` rather than regressing them. Plan: `tasks/agent-doc/plan-queue-preserve-operator-author-order.md`.
@@ -116,7 +117,7 @@ src/
   boundary.rs       # Boundary marker management (insert, remove, reposition)
   crdt.rs           # CRDT foundation (yrs-based conflict-free merge)
   merge.rs          # 3-way merge + CRDT merge path
-  stream.rs         # Stream command: real-time CRDT write-back loop
+  stream.rs         # Stream command: recovery checkpoints + one final CRDT write
   ffi.rs            # C ABI exports for editor plugins (JNA/FFI); ffi_git_commit unsets GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE so it works correctly when called from git hook contexts
   ipc_socket.rs     # Socket-based IPC (Unix domain sockets via interprocess crate)
   lib.rs            # Library target re-exports
@@ -172,13 +173,13 @@ invocation, JSON parsing, and session flags.
 ### StreamingAgent Contract
 
 Streaming backends implement `StreamingAgent::send_streaming()` → `Iterator<StreamChunk>`.
-Used by `agent-doc stream` for real-time write-back. Currently only `claude` supports streaming
+Used by `agent-doc stream` for real-time generation with one final write-back. Currently only `claude` supports streaming
 (via `--output-format stream-json`). Each `StreamChunk` has cumulative text, optional
 `thinking` content, `is_final` flag, and optional `session_id` on the final chunk.
 
 ## Stream Mode
 
-Stream mode (`agent_doc_format: template` + `agent_doc_write: crdt`) enables real-time agent output with CRDT-based conflict-free merge. Legacy: `agent_doc_mode: stream` is still supported as a deprecated alias.
+Stream mode (`agent_doc_format: template` + `agent_doc_write: crdt`) enables real-time agent generation with CRDT-based conflict-free final merge. Partial output never enters the document. Legacy: `agent_doc_mode: stream` is still supported as a deprecated alias.
 
 **Usage:** `agent-doc stream <FILE> [--interval 200] [--agent claude] [--model opus] [--no-git]`
 
@@ -186,16 +187,15 @@ Stream mode (`agent_doc_format: template` + `agent_doc_write: crdt`) enables rea
 1. Validates document uses CRDT write strategy (`resolved.is_crdt()`), reads `StreamConfig` from frontmatter
 2. Computes diff, builds prompt requesting patch-block format
 3. Spawns streaming agent (`claude -p --output-format stream-json`)
-4. Timer thread (default 200ms) periodically flushes accumulated text to document:
-   `flock → read file → apply template patch (replace mode) → atomic write → unlock`
-5. On completion: saves CRDT state + snapshot, updates resume ID, optional git commit
+4. Buffers accumulated text outside the document; timer ticks may update only recovery sidecars
+5. On completion: validates and writes the complete response once, then saves CRDT state + snapshot, updates resume ID, and optionally commits
 
 **Frontmatter:**
 ```yaml
 agent_doc_format: template
 agent_doc_write: crdt
 agent_doc_stream:
-  interval: 200           # write-back interval (ms), default 200
+  interval: 200           # stream polling/final flush interval (ms), default 200
   strip_ansi: true        # strip ANSI codes from output
   target: exchange        # target component name
   thinking: false         # include chain-of-thought (default: false)
@@ -215,7 +215,7 @@ Stream mode can capture the agent's chain-of-thought (thinking blocks) from Clau
 
 **Parser:** `extract_assistant_content()` in `streaming.rs` extracts both `"type": "text"` and
 `"type": "thinking"` content blocks. Thinking is buffered separately (`thinking_buffer`) and
-flushed on the same timer interval as response text.
+is published only with the complete final response.
 
 Use this frontmatter structure to enable thinking with a separate log component:
 ```markdown

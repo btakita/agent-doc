@@ -272,6 +272,10 @@ pub fn run_once(
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    let _ = agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+        file,
+        "generation_cycle_start",
+    );
 
     eprintln!("[run] starting for {}", file.display());
 
@@ -808,32 +812,16 @@ pub fn apply_template_response_with_authority(
 
     let content_current =
         direct_run_current_document_content(file, force_disk, "direct_run_template_merge_current")?;
-    let (final_content, crdt_state) = if content_current == baseline {
-        let state = if use_crdt {
-            Some(agent_doc_merge::crdt::CrdtDoc::from_text(&content_ours).encode_state())
-        } else {
-            None
-        };
-        (content_ours, state)
+    let final_content = if content_current == baseline {
+        content_ours
     } else if force_disk {
         eprintln!(
             "File was modified during force-disk run. Applying patches to current document..."
         );
-        let merged = match apply_simple_exchange_patch_to_current(
-            file,
-            &content_current,
-            &patches,
-            &unmatched,
-        ) {
+        match apply_simple_exchange_patch_to_current(file, &content_current, &patches, &unmatched) {
             Some(result) => result?,
             None => agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?,
-        };
-        let state = if use_crdt {
-            Some(agent_doc_merge::crdt::CrdtDoc::from_text(&merged).encode_state())
-        } else {
-            None
-        };
-        (merged, state)
+        }
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
         let base_state = match agent_doc_snapshot_io::crdt_merge_base_state_with(
@@ -858,18 +846,15 @@ pub fn apply_template_response_with_authority(
         {
             eprintln!("[crdt] disk-demotion reconcile failed (non-fatal): {e}");
         }
-        let (merged, state) = agent_doc_merge::merge_contents_crdt(
+        let (merged, _pre_normalization_state) = agent_doc_merge::merge_contents_crdt(
             Some(&base_state),
             &content_ours,
             &content_current,
         )?;
-        (merged, Some(state))
+        merged
     } else {
         eprintln!("File was modified during run. Merging changes...");
-        (
-            agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?,
-            None,
-        )
+        agent_doc_merge_io::merge_contents(baseline, &content_ours, &content_current)?
     };
     let final_content = normalize_direct_run_template_content(
         effects,
@@ -878,6 +863,14 @@ pub fn apply_template_response_with_authority(
         snapshot_doc.as_deref(),
         &final_content,
     )?;
+    // The merge result can contain two independently minted checkpoint
+    // boundaries (one from response placement and one from concurrent
+    // preflight/editor state). Normalization collapses that to the canonical
+    // visible singleton. Persist CRDT state from the normalized text, never
+    // from the pre-normalization merge frontier, or the next authoritative
+    // write can resurrect the discarded marker.
+    let crdt_state =
+        use_crdt.then(|| agent_doc_merge::crdt::CrdtDoc::from_text(&final_content).encode_state());
 
     if !force_disk {
         agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_template")?;
@@ -943,6 +936,12 @@ pub fn normalize_direct_run_template_content(
     } else {
         content.to_string()
     };
+    // A CRDT merge can retain adjacent independently-minted checkpoint
+    // boundaries. Collapse only that generated shape in place; scattered or
+    // inline markers fail closed instead of turning an ordinary run into a
+    // legacy repair path. Keeping the marker in place preserves the partition
+    // between this response and any newer unresolved prompts.
+    let normalized = template::collapse_adjacent_boundary_markers(&normalized)?;
     effects.normalize_template_structure_or_fail(&normalized, file)
 }
 

@@ -15,57 +15,37 @@ In debounced mode, the watch daemon waits 500ms after the last file change befor
 
 In reactive mode, the watch daemon processes file changes immediately. CRDT merge handles concurrent edits — if the user edits the document while the agent is streaming a response, both sets of changes are preserved via conflict-free merge at each 200ms flush interval.
 
-### Flush Cycle
+### Final Write Cycle
 
 ```
 USER EDITS                    AGENT STREAM                    DOCUMENT
-    │                              │                              │
-    │  ① file save                 │                              │
-    ├─────────────────────────────►│                              │
-    │  (watch: immediate,          │                              │
-    │   no debounce)               │                              │
-    │                              │  ② read + diff + prompt      │
-    │                              ├─────────────────────────────►│
-    │                              │                              │
-    │                              │  ③ send to Claude (stream)   │
-    │                              │  ┌──────────────────────┐    │
-    │                              │  │ Timer: every 200ms   │    │
-    │                              │  │                      │    │
-    │   ④ user keeps editing       │  │  ⑤ flush:            │    │
-    ├──────────────────────────────┼──┤   read file (has     │    │
-    │                              │  │   user edits!)       │    │
-    │                              │  │                      │    │
-    │                              │  │   CRDT 3-way merge:  │    │
-    │                              │  │   base = baseline    │    │
-    │                              │  │   ours = agent text  │    │
-    │                              │  │   theirs = file now  │    │
-    │                              │  │        ↓             │    │
-    │                              │  │   merged = agent +   ├───►│ ⑥ atomic
-    │                              │  │           user edits │    │   write
-    │                              │  │                      │    │
-    │                              │  │  (repeat every 200ms)│    │
-    │                              │  └──────────────────────┘    │
-    │                              │                              │
-    │                              │  ⑦ stream complete           │
-    │                              │  final flush + snapshot      │
-    │                              ├─────────────────────────────►│
-    │                              │                              │
-    │  ⑧ next edit                 │                              │
-    ├─────────────────────────────►│  ⑨ new cycle (immediate)     │
-    │                              │  diff sees only new user     │
-    │                              │  content (agent output       │
-    │                              │  already in snapshot)        │
+│                              │                              │
+│  ① file save                 │                              │
+├─────────────────────────────►│  ② read + immutable baseline │
+│                              │  ③ send to backend           │
+│  ④ user keeps editing        │  ⑤ buffer partial chunks     │
+├──────────────────────────────┤     + recovery sidecars only │
+│                              │                              │
+│                              │  ⑥ final chunk               │
+│                              │  ⑦ validate complete payload │
+│                              │  ⑧ one CRDT merge + closeout │
+│                              ├─────────────────────────────►│
+│                              │                              │
+│  ⑨ next edit                 │  ⑩ next cycle                │
+├─────────────────────────────►│                              │
 ```
 
-### CRDT Merge at Flush (Step ⑤)
+### CRDT Merge at Final Write (Step ⑧)
 
-Each 200ms flush reads the current file from disk, which may contain user edits made since the last flush. The CRDT 3-way merge combines:
+Only the complete final response is merged. The transaction combines:
 
-- **Baseline**: document state saved before the agent started (step ②)
-- **Ours**: cumulative agent response (replace into target component)
-- **Theirs**: current file on disk (contains any concurrent user edits)
+- **Baseline**: immutable document state saved before generation started.
+- **Ours**: the complete validated assistant response.
+- **Theirs**: current editor authority, including concurrent user edits.
 
-The merged result preserves both the agent's streaming output in the target component and user edits elsewhere in the document.
+The merged result preserves concurrent user edits while response placement,
+queue/backlog changes, snapshot publication, and commit cross one closeout boundary.
+Timer ticks never merge a cumulative response prefix into the document.
 
 ### Loop Prevention
 
@@ -130,18 +110,18 @@ All write-back paths build an overlay-aware merge base, then converge through `m
                                        │
                     ┌──────────────────┼──────────────────┐
                     │                  │                   │
-            write.rs             write.rs              stream.rs
-          (run_stream)     (apply_stream_           (stream_loop
-           --stream)        from_string)             final save)
+finalize.rs          write.rs              stream.rs
+(finalize_stream) (apply_stream_           (stream_loop
+final only)       from_string)             final save)
                     │                  │                   │
                     ▼                  ▼                   ▼
-              agent-doc          agent-doc            agent-doc
-              write --stream     repair               stream
+agent-doc          agent-doc            agent-doc
+finalize --stream  repair               stream
 ```
 
-- **`agent-doc write --stream`**: The SKILL-level write-back path. Used when Claude Code's `/agent-doc` skill writes a response to the document.
-- **`agent-doc repair`** (legacy alias: `recover`): Repairs orphaned stream responses from `.agent-doc/pending/` and repairs stale document-cycle state after an interrupted run.
-- **`agent-doc stream`**: The real-time streaming path. Timer-based flush loop writes cumulative agent output to the document every 200ms.
+- **`agent-doc finalize --stream`**: The skill-level final write-back path. It receives one complete response and owns document, queue/backlog, snapshot, and commit closeout.
+- **`agent-doc repair`** (legacy alias: `recover`): Exceptional crash/restart recovery for orphaned final captures or stale cycle state; it is not part of healthy streaming.
+- **`agent-doc stream`**: The real-time generation path. It buffers chunks and writes recovery-only partial checkpoints, then writes the complete final output once. Timer ticks never publish cumulative prefixes into the document.
 
 All three prefer the structured `.overlay.yrs` markdown projection as the merge base when it matches the active cycle baseline. If the overlay sidecar is missing, corrupt, or stale, the merge falls back to the explicit baseline text and logs the fallback reason before calling `merge_contents_crdt()`.
 

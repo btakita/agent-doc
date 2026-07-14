@@ -994,7 +994,10 @@ pub fn gather_closeout_recovery_evidence(
     )?;
     let editor_ipc = closeout_editor_ipc_evidence(file, &visible_doc);
     let binary_freshness =
-        match agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file) {
+        match agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+            file,
+            "closeout_evidence",
+        ) {
             Some(warning) => CloseoutBinaryFreshnessEvidence::Stale { warning },
             None => CloseoutBinaryFreshnessEvidence::NoStaleWarning,
         };

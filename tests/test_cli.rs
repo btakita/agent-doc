@@ -1775,8 +1775,10 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // were removed from editor write convergence. CPC owns process recycling;
         // editor IPC proof failures now stay on retry/repair paths.
         ("agent-doc-write-converge-io/src/convergence_fixture_tests.rs", "reason=") => 11,
-        // +1 for the audited `bare_write_escalated_to_commit ... reason=response_body_placed`
-        // ops_log diagnostic on the #bare-write-captured-uncommitted escalation path.
+        // -1 (#final-response-transaction): the post-mutation
+        // `bare_write_escalated_to_commit ... reason=response_body_placed`
+        // recovery path was removed. Bare session writes now fail before input,
+        // capture, or document mutation.
         // +1 for the audited `queue_consume_divergence_reconciled ... reason=crdt_merge_authoritative`
         // ops_log diagnostic: when the post-CRDT-merge document queue diverges from
         // the snapshot, consume reconciles (document wins) instead of bailing
@@ -1839,7 +1841,7 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // now proves the earlier partial-materialization retry path instead of
         // asserting an extra visible-repair `reason=` literal. The production
         // recovery still logs `recovery=visible_repair_required` in write/ipc.rs.
-        ("agent-doc-write-runtime-io/src/lib.rs", "reason=") => 13,
+        ("agent-doc-write-runtime-io/src/lib.rs", "reason=") => 12,
         _ => 0,
     }
 }
@@ -16239,10 +16241,9 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "project_controller::rpc should call focused controller binary staleness policy directly"
     );
     assert!(
-        rpc_source.contains("pub fn schedule_stale_supervisor_pcp_recycle(")
-            && preflight_warnings_source.contains("schedule_stale_supervisor_pcp_recycle(")
-            && preflight_warnings_source.contains("Automatic PCP recycle request status"),
-        "preflight stale-supervisor detection must automatically request the PCP idle-boundary recycle, not only warn"
+        rpc_source.contains("pub fn recycle_stale_supervisor_for_turn_stage(")
+            && preflight_warnings_source.contains("recycle_stale_supervisor_for_turn_stage("),
+        "stale-supervisor detection must automatically request a safe idle-boundary recycle, not only warn"
     );
     assert!(
         project_controller_source.contains("CrashRecoveryStats::new(")
@@ -17530,6 +17531,40 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         assert!(
             !dependencies.contains_key(forbidden),
             "agent-doc-controller must stay free of core, orchestration, git, editor IPC, sqlite, or tmux crates"
+        );
+    }
+}
+
+#[test]
+fn test_stale_supervisor_recycle_is_checked_at_every_turn_stage() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (relative_path, stage) in [
+        (
+            "agent-doc-preflight-command-io/src/run.rs",
+            "preflight_entry",
+        ),
+        ("agent-doc-run-io/src/lib.rs", "generation_cycle_start"),
+        ("agent-doc-stream-io/src/lib.rs", "stream_generation_start"),
+        (
+            "agent-doc-write-runtime-io/src/lib.rs",
+            "finalize_write_start",
+        ),
+        ("agent-doc-commit-io/src/lib.rs", "commit_start"),
+        ("agent-doc-compact-io/src/lib.rs", "compact_start"),
+        (
+            "agent-doc-session-check-io/src/command.rs",
+            "session_check_start",
+        ),
+        (
+            "agent-doc-session-check-io/src/command.rs",
+            "closeout_proof_start",
+        ),
+        ("agent-doc-flow-io/src/closeout.rs", "closeout_evidence"),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert!(
+            source.contains("recycle_stale_supervisor_for_turn_stage(") && source.contains(stage),
+            "{relative_path} must schedule a proven-stale supervisor recycle at stage {stage}"
         );
     }
 }
@@ -21537,7 +21572,7 @@ fn test_agent_doc_preflight_io_owns_warning_collection_graph() {
         "pub fn initial_warnings(",
         "pub fn content_and_staleness_warnings(",
         "agent_doc_model_tier::harness_mismatch_warning",
-        "agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc",
+        "agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage",
         "agent_doc_model_tier::codex_network_access_non_codex_harness_warning",
         "agent_doc_workflow::preflight_policy::post_exchange_comment_prompt_preset_warning",
         "agent_doc_workflow::preflight_policy::component_attr_preflight_warning",
@@ -32632,19 +32667,25 @@ fn test_cli_init_file_lazy_project_init() {
 
 fn assert_operator_authority_instructions(content: &str, surface: &str) {
     assert!(
-        content.contains("Preserve user edits; let `agent-doc write --stream` merge"),
-        "{surface} should tell agents to preserve user edits through the merge path"
+        content.contains("Preserve user edits")
+            && content.contains("final `agent-doc finalize --stream` transaction"),
+        "{surface} should tell agents to preserve user edits through one final transaction"
     );
     assert!(
         content.contains("Operator-visible document text is authoritative"),
         "{surface} should state the operator-visible document is authoritative"
     );
     assert!(
-        content.contains("never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt"),
+        content.contains("never recover, patch, or hook-closeout by replacing")
+            && content.contains("`content_ours`")
+            && content.contains("a snapshot")
+            && content.contains("a lazily visible-write receipt"),
         "{surface} should forbid content_ours/snapshot/receipt replacement that drops operator text"
     );
     assert!(
-        content.contains("Snapshots are backup/audit state, not hot-path authority"),
+        content.contains(
+            "Snapshots and partial captures are backup/audit state, not hot-path authority"
+        ),
         "{surface} should keep snapshots out of hot-path document authority"
     );
     assert!(

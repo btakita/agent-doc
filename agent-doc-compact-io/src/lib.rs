@@ -307,6 +307,13 @@ pub fn run(
     commit: bool,
     force_disk: bool,
 ) -> Result<()> {
+    if file.exists() {
+        let _ =
+            agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+                file,
+                "compact_start",
+            );
+    }
     let stdin_message;
     let message = if message == Some("-") {
         use std::io::Read;
@@ -353,15 +360,6 @@ pub fn run_in_controller(
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    // Create a pre-compact git tag at HEAD before modifying the document.
-    // Skipped if tag == Some("skip").
-    if tag != Some("skip")
-        && let Err(e) =
-            agent_doc_git_io::checkpoint::create_pre_mutation_tag(file, "pre-compact", tag)
-    {
-        eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
-    }
-
     let effects = runtime_effects()?;
     let write_base_content = (if force_disk {
         effects.force_disk_document_content(file, "compact_run_initial_force_disk")
@@ -369,11 +367,61 @@ pub fn run_in_controller(
         effects.current_document_content(file, "compact_run_initial")
     })
     .with_context(|| format!("failed to read {}", file.display()))?;
+    // Compact is not a repair command. Gate the exact realtime/disk authority
+    // before creating tags, composing captures, mutating CRDT state, or
+    // committing. This prevents a no-op compact from laundering a malformed
+    // document into HEAD.
+    agent_doc_lint_io::validate_integrity_on_content_with_logger(
+        file,
+        &write_base_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    agent_doc_lint_io::run_on_content_with_logger(
+        file,
+        &write_base_content,
+        None,
+        agent_doc_ops_log_io::log_op,
+    )?;
+
     let content = compose_active_capture_for_compaction(file, &write_base_content)?;
 
     let (fm, body) = frontmatter::parse(&content)?;
 
     let resolved = fm.resolve_mode();
+    // Determine a semantic no-op before the checkpoint tag or any archive/document
+    // effect. A no-op must not become a generic commit or repair surface.
+    let requested_noop = if resolved.is_template() {
+        let target = component_name.unwrap_or("exchange");
+        let components = element::parse(&content)?;
+        let comp = components
+            .iter()
+            .find(|component| component.name == target)
+            .ok_or_else(|| anyhow::anyhow!("component '{}' not found in document", target))?;
+        let old_content = comp.content(&content);
+        match keep {
+            Some(keep) => parse_topic_sections_with_tail(old_content).sections.len() <= keep,
+            None if target == "exchange" => split_component_content_at_boundary(old_content)
+                .0
+                .trim()
+                .is_empty(),
+            None => old_content.trim().is_empty(),
+        }
+    } else {
+        parse_inline_exchanges(body).len() <= keep.unwrap_or(2)
+    };
+    if requested_noop {
+        eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
+        return Ok(());
+    }
+
+    // Create a pre-compact git tag at HEAD only after integrity and semantic
+    // mutation validation. Skipped if tag == Some("skip").
+    if tag != Some("skip")
+        && let Err(e) =
+            agent_doc_git_io::checkpoint::create_pre_mutation_tag(file, "pre-compact", tag)
+    {
+        eprintln!("[compact] Warning: could not create pre-compact tag: {}", e);
+    }
     // Compact Exchange intentionally has two targets when an unresolved prompt
     // follows the exchange boundary: the live target preserves that prompt, while
     // the committed target omits it. Keep both through flush + commit closeout so
@@ -479,6 +527,14 @@ pub fn run_in_controller(
         );
         CompactDocumentTargets::same(compacted)
     };
+
+    // A no-op compact is not a response-repair escape hatch. In particular,
+    // do not use unrelated snapshot/capture drift to manufacture a commit when
+    // the requested compaction retained the document byte-for-byte.
+    if targets.live == content && targets.committed == content {
+        eprintln!("[compact] no compaction changes; leaving document and commit state untouched");
+        return Ok(());
+    }
 
     // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence in
     // `apply_compacted_document` updated only the live editor's in-memory buffer;
@@ -4030,13 +4086,13 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n",
             "### Re: archived-one — gpt-5\n\nOld response one.\n\n",
             "### Re: archived-two — gpt-5\n\nOld response two.\n",
-            "<!-- agent:boundary:before-compact -->\n",
+            "<!-- agent:boundary:deadbeef:before-compact -->\n",
             "<!-- /agent:exchange -->\n",
         );
         let prompt = "Fix the next binary issue without restoring git HEAD.";
         let live = committed.replace(
-            "<!-- agent:boundary:before-compact -->\n",
-            &format!("<!-- agent:boundary:before-compact -->\n{prompt}\n"),
+            "<!-- agent:boundary:deadbeef:before-compact -->\n",
+            &format!("<!-- agent:boundary:deadbeef:before-compact -->\n{prompt}\n"),
         );
 
         fs::write(&file, committed).unwrap();
@@ -4111,6 +4167,80 @@ mod tests {
                 .any(|line| line.contains("crdt_adopt_authoritative_text")
                     && line.contains("changed=true")),
             "compact commit must not reset a converged live editor to the HEAD-only projection:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn compact_integrity_gate_fails_before_tag_archive_or_document_mutation() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let malformed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:notes -->\ncorrupted\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:notes -->\n",
+        );
+        fs::write(&doc, malformed).unwrap();
+
+        let err = run(&doc, Some(1), Some("exchange"), None, None, true, false)
+            .expect_err("compact must reject malformed component authority");
+        assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
+        assert!(!dir.path().join(".agent-doc/archives").exists());
+    }
+
+    #[test]
+    fn no_op_compact_does_not_create_a_tag_or_commit_dirty_document() {
+        use std::fs;
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let doc = root.join("session.md");
+        let initial = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: only topic — gpt-5\n\ncomplete\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, initial).unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        git(root, &["add", "session.md"]);
+        git(root, &["commit", "-q", "-m", "seed"]);
+        let head_before = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        let dirty = initial.replace("complete", "complete but locally annotated");
+        fs::write(&doc, &dirty).unwrap();
+
+        run(&doc, Some(1), Some("exchange"), None, None, true, false)
+            .expect("semantic no-op compact should return cleanly");
+
+        let head_after = Command::new("git")
+            .current_dir(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(head_after, head_before);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), dirty);
+        let tags = Command::new("git")
+            .current_dir(root)
+            .args(["tag", "--list", "agent-doc/*"])
+            .output()
+            .unwrap()
+            .stdout;
+        assert!(
+            tags.is_empty(),
+            "no-op compact must not create a checkpoint tag"
         );
     }
 

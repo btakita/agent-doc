@@ -76,8 +76,8 @@
 //! - `template_info_legacy_mode_works`: `response_mode: template` frontmatter key recognized
 //! - `template_info_append_mode`: non-template doc → `template_mode = false`, empty component list
 //! - `is_template_mode_detection`: `Some("template")` → true; other strings and `None` → false
-//! - (aspirational) `apply_patches_boundary_invariant`: after any apply_patches call with an exchange component, a boundary marker exists at end of exchange
-//! - (aspirational) `reposition_boundary_removes_stale`: multiple stale boundaries are reduced to exactly one at end of exchange
+//! - `apply_patches_boundary_invariant`: after any apply_patches call with an exchange component, a boundary marker exists at end of exchange
+//! - `reposition_boundary_removes_stale`: full-line and inline stale boundaries are reduced to exactly one standalone marker at end of exchange
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -1368,6 +1368,74 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
     result
 }
 
+/// Collapse only adjacent, standalone boundary markers produced by one CRDT
+/// merge frontier, preserving their semantic position relative to unresolved
+/// prompt text. Scattered or inline markers are document corruption and fail
+/// closed so ordinary response paths cannot silently act as legacy repair.
+pub fn collapse_adjacent_boundary_markers(doc: &str) -> Result<String> {
+    let lines = doc.split_inclusive('\n').collect::<Vec<_>>();
+    let code_ranges = element::find_code_ranges(doc);
+    let mut marker_lines = Vec::new();
+    let mut offset = 0usize;
+
+    for (line_index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        let boundary_pos = line.find(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX);
+        if let Some(relative_pos) = boundary_pos {
+            let absolute_pos = offset + relative_pos;
+            let in_code = code_ranges
+                .iter()
+                .any(|&(start, end)| absolute_pos >= start && absolute_pos < end);
+            if !in_code {
+                let id = agent_doc_element_boundary::boundary::extract_id(trimmed)
+                    .filter(|id| {
+                        agent_doc_element_boundary::boundary::format_marker(id) == trimmed
+                    })
+                    .with_context(|| {
+                        format!(
+                            "boundary singleton guard rejected inline or malformed marker on line {}",
+                            line_index + 1
+                        )
+                    })?;
+                if id.is_empty() {
+                    anyhow::bail!(
+                        "boundary singleton guard rejected empty marker on line {}",
+                        line_index + 1
+                    );
+                }
+                marker_lines.push(line_index);
+            }
+        }
+        offset += line.len();
+    }
+
+    if marker_lines.len() <= 1 {
+        return Ok(doc.to_string());
+    }
+    for pair in marker_lines.windows(2) {
+        if lines[pair[0] + 1..pair[1]]
+            .iter()
+            .any(|line| !line.trim().is_empty())
+        {
+            anyhow::bail!(
+                "boundary singleton guard rejected {} non-adjacent markers",
+                marker_lines.len()
+            );
+        }
+    }
+
+    let keep = *marker_lines
+        .last()
+        .expect("multiple markers have a last line");
+    let mut result = String::with_capacity(doc.len());
+    for (line_index, line) in lines.into_iter().enumerate() {
+        if line_index == keep || !marker_lines.contains(&line_index) {
+            result.push_str(line);
+        }
+    }
+    Ok(result)
+}
+
 /// Strip transient ` (HEAD)` suffixes from markdown headings and bold-text
 /// pseudo-headers, skipping fenced code blocks.
 fn strip_transient_head_markers(content: &str) -> String {
@@ -1631,35 +1699,10 @@ pub(crate) fn annotate_re_headings_with_head(
     lines.concat()
 }
 
-/// Remove all boundary markers from a document (line-level removal).
-/// Skips boundaries inside fenced code blocks (lesson #13).
+/// Remove every protocol boundary marker outside fenced code blocks, including
+/// historical inline duplicates produced by interrupted editor patchback.
 fn remove_all_boundaries(doc: &str) -> String {
-    let prefix = "<!-- agent:boundary:";
-    let suffix = " -->";
-    let code_ranges = element::find_code_ranges(doc);
-    let in_code = |pos: usize| {
-        code_ranges
-            .iter()
-            .any(|&(start, end)| pos >= start && pos < end)
-    };
-    let mut result = String::with_capacity(doc.len());
-    let mut offset = 0;
-    for line in doc.lines() {
-        let trimmed = line.trim();
-        let is_boundary = trimmed.starts_with(prefix) && trimmed.ends_with(suffix);
-        if is_boundary && !in_code(offset) {
-            // Skip boundary marker lines outside code blocks
-            offset += line.len() + 1; // +1 for newline
-            continue;
-        }
-        result.push_str(line);
-        result.push('\n');
-        offset += line.len() + 1;
-    }
-    if !doc.ends_with('\n') && result.ends_with('\n') {
-        result.pop();
-    }
-    result
+    agent_doc_element_boundary::boundary::remove_all(doc)
 }
 
 /// Find a boundary marker ID inside a component's content, skipping code blocks.
@@ -2604,6 +2647,11 @@ real status content
             result1.contains("<!-- agent:boundary:"),
             "cycle 1 must have boundary"
         );
+        assert_eq!(
+            result1.matches("<!-- agent:boundary:").count(),
+            1,
+            "cycle 1 must have exactly one boundary: {result1}"
+        );
 
         // Cycle 2 — use cycle 1's output as the new doc (simulates next write)
         let response2 = "<!-- patch:exchange -->\nResponse 2.\n<!-- /patch:exchange -->\n";
@@ -2612,6 +2660,11 @@ real status content
         assert!(
             result2.contains("<!-- agent:boundary:"),
             "cycle 2 must have boundary"
+        );
+        assert_eq!(
+            result2.matches("<!-- agent:boundary:").count(),
+            1,
+            "cycle 2 must have exactly one boundary: {result2}"
         );
     }
     #[test]
@@ -2740,6 +2793,60 @@ User prompt here.
             1,
             "exactly one boundary should remain"
         );
+    }
+    #[test]
+    fn reposition_boundary_removes_stale_full_line_and_inline_duplicates() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: earlier -- model\n\nPartial body.\n",
+            "<!-- agent:boundary:old-full -->\n",
+            "How would CAS work?<!-- agent:boundary:old-inline-a -->",
+            "<!-- agent:boundary:old-inline-b -->\n",
+            "### Re: CAS -- model\n\nComplete body.\n",
+            "<!-- agent:boundary:old-tail -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+
+        let result = reposition_boundary_to_end_clean_with_id(doc, Some("final-boundary"));
+
+        assert_eq!(
+            result.matches("<!-- agent:boundary:").count(),
+            1,
+            "{result}"
+        );
+        assert!(
+            result.contains("How would CAS work?\n### Re: CAS -- model"),
+            "inline markers must be removed without fragmenting prompt text: {result}"
+        );
+        assert!(
+            result.contains(
+                "Complete body.\n<!-- agent:boundary:final-boundary -->\n<!-- /agent:exchange -->"
+            ),
+            "the sole boundary must be a standalone marker at exchange end: {result}"
+        );
+    }
+    #[test]
+    fn collapse_adjacent_boundary_markers_preserves_unresolved_prompt_partition() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: answer -- model\n\nDone.\n",
+            "<!-- agent:boundary:first -->\n",
+            "<!-- agent:boundary:last -->\n",
+            "❯ A newer unresolved prompt.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let collapsed = collapse_adjacent_boundary_markers(doc).unwrap();
+        assert_eq!(collapsed.matches("<!-- agent:boundary:").count(), 1);
+        assert!(collapsed.contains("<!-- agent:boundary:last -->\n❯ A newer unresolved prompt."));
+    }
+
+    #[test]
+    fn collapse_adjacent_boundary_markers_rejects_scattered_or_inline_corruption() {
+        let scattered = "<!-- agent:boundary:first -->\ntext\n<!-- agent:boundary:last -->\n";
+        assert!(collapse_adjacent_boundary_markers(scattered).is_err());
+        let inline = "prompt<!-- agent:boundary:inline -->\n";
+        assert!(collapse_adjacent_boundary_markers(inline).is_err());
     }
     #[test]
     fn reposition_appends_head_to_last_re_heading() {

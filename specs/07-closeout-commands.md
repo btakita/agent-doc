@@ -43,6 +43,8 @@ or prove capabilities, but it may not change the closeout semantics.
 
 `agent-doc compact <FILE> [--component NAME] [--message TEXT] [--tag NAME] [--commit]`
 
+- Before creating a checkpoint tag, archive, summary, snapshot, or commit, compact must pass the mandatory document-integrity gate: the component tree is balanced and every active id-backed queue reference names open tracked work. Dialect `off` cannot disable this gate.
+- A semantic no-op compact must return without committing unrelated working-tree, snapshot, capture, or editor drift. Compact is never a repair/commit escape hatch for an invalid document.
 - Rewrites exchange or another component into a compacted summary/archive-pointer state.
 - The CLI and editor actions are command submitters only. The CPC owns the full
   Compact Exchange transaction: authoritative read, archive/summary computation,
@@ -74,6 +76,8 @@ or prove capabilities, but it may not change the closeout semantics.
 
 `agent-doc write <FILE> [--baseline-file PATH] [--stream] [--ipc] [--force-disk] [--origin ORIGIN]`
 
+- A session-document response requires `finalize` or explicit `write --commit`. Bare/non-committing `write`, including `write --stream`, fails before stdin, response capture, document mutation, queue mutation, or lifecycle advancement; partial response checkpoints may exist only in recovery sidecars.
+- Strict response placement, answered queue-head removal, backlog/review/done mutations, snapshot publication, and commit are one transaction. A failure before terminal proof must not expose a response prefix or mark a queue head consumed. `AlreadyApplied` is valid only when the visible document proves the exact complete expected final response from this transaction.
 - Parses `patch:*` blocks from stdin, applies them against the baseline, merges with current disk content when needed, and saves snapshot/CRDT state.
 - IPC-first write remains the default when the editor patch directory exists; `--force-disk` bypasses IPC.
 - `--force-disk` applies to the full strict closeout boundary: response placement, queue consumption, done-id queue marking, snapshot updates, and commit. A forced recovery must not place the response directly and then re-enter editor convergence for queue consume, because that strands the answered head active after the visible response is already on disk.
@@ -227,6 +231,7 @@ or prove capabilities, but it may not change the closeout semantics.
 
 `agent-doc session-check <FILE>`
 
+- Runs the mandatory document-integrity gate before reporting a terminal result. A malformed component tree or active id-backed queue reference whose id is absent from open backlog/review/icebox work is an interruption even when cycle state says `committed`; lint dialect `off` cannot bypass it.
 - Verifies that the latest response cycle reached a terminal committed state and that no likely direct assistant patchback bypassed the binary-owned write path.
 - Fails on open cycle states, uncommitted visible `### Re:` / `## Assistant` patchbacks, hidden `snapshot != HEAD` closeout drift, or committed-cycle exchange drift that appends a prompt+response pair or other new assistant response content.
 - Preflight/sync closeout-drift guards reuse the same exchange-drift detection for promptless response-body drift, so a prior OpenCode/Codex/direct-exec response body that is visible only in the working tree cannot be hidden behind a generic clean snapshot or postponed to the next manual commit. Prompt-bearing user edits still flow into the next normal preflight diff.

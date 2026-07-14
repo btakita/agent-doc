@@ -354,6 +354,7 @@ pub(crate) fn exchange_stream_seed(doc: &str) -> Result<Option<ExchangeStreamSee
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn render_streamed_exchange(seed: &ExchangeStreamSeed, response: &str) -> String {
     let trimmed = response.trim_end();
     if trimmed.is_empty() {
@@ -374,11 +375,10 @@ pub(crate) fn render_streamed_exchange(seed: &ExchangeStreamSeed, response: &str
 
 pub(crate) fn stream_step_response(
     file: &Path,
-    seed: &ExchangeStreamSeed,
+    _seed: &ExchangeStreamSeed,
     chunks: Box<dyn Iterator<Item = Result<StreamChunk>>>,
 ) -> Result<StreamStepResult> {
     let mut response = String::new();
-    let mut last_streamed_response = None;
     let mut checkpoint_writer = agent_doc_capture_io::PartialCheckpointWriter::new(file);
 
     for chunk_result in chunks {
@@ -394,17 +394,6 @@ pub(crate) fn stream_step_response(
                 checkpoint_writer
                     .maybe_checkpoint_with_current_content(&response, &current_content)?;
             }
-            if !chunk.is_final && should_stream_exchange_patch(&response) {
-                let exchange = render_streamed_exchange(seed, &response);
-                agent_doc_stream_io::flush_to_document(
-                    file,
-                    &exchange,
-                    "exchange",
-                    "",
-                    &crate::CLI_STREAM_RUNTIME_EFFECTS,
-                )?;
-                last_streamed_response = Some(response.clone());
-            }
         }
         if chunk.is_final {
             break;
@@ -415,14 +404,9 @@ pub(crate) fn stream_step_response(
         anyhow::bail!("empty response from streaming orchestrate step");
     }
 
-    let finalize_response = last_streamed_response
-        .as_deref()
-        .and_then(|streamed| finalize_suffix_from_streamed_prefix(streamed, &response))
-        .unwrap_or_else(|| response.clone());
-
     Ok(StreamStepResult {
-        full_response: response,
-        finalize_response,
+        full_response: response.clone(),
+        finalize_response: response,
     })
 }
 

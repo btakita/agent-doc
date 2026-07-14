@@ -1537,6 +1537,21 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
     host_supervisor_stale_warning_for_doc(file)
 }
 
+/// Detect a stale route-owned supervisor at a turn stage and unconditionally
+/// schedule its safe idle-boundary recycle.
+///
+/// A proven stale binary is an integrity condition, not a preference: the
+/// ordinary auto-recycle opt-out controls proactive recycling, but cannot leave
+/// a known-stale supervisor serving later generation/write/commit stages.
+pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Option<String> {
+    let mut message = stale_supervisor_warning_for_doc(file)?;
+    let recycle_status = schedule_stale_supervisor_pcp_recycle(file, stage);
+    message.push_str(&format!(
+        " Automatic safe-boundary recycle request status: {recycle_status}."
+    ));
+    Some(message)
+}
+
 /// `#fccsupwarn4` — preflight stale-supervisor self-heal.
 ///
 /// The warning probe above is deliberately read-only because status/doctor callers
@@ -1547,43 +1562,41 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
 /// the PCP/supervisor recycle graph. Fail-open: every refusal is logged and returned
 /// as a status string, never raised into the live cycle.
 pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> String {
-    let request_status = if !agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(file)
-    {
-        "request_skipped reason=auto_recycle_disabled".to_string()
-    } else if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
-        let project_root_display = if project_root.as_os_str().is_empty() {
-            ".".to_string()
-        } else {
-            project_root.display().to_string()
-        };
-        let reason =
-            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_PREFLIGHT;
-        match checkpoint_route_owned_document_crdt(file, "stale_supervisor_pcp_recycle") {
-            Ok(checkpoint_status) => {
-                match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
-                    file, reason,
-                ) {
-                    Ok(()) => format!(
-                        "requested project_root={} checkpoint={}",
-                        project_root_display,
-                        checkpoint_status.as_deref().unwrap_or("ok")
-                    ),
-                    Err(err) => format!(
-                        "request_failed project_root={} error={}",
-                        project_root_display,
-                        format!("{err:#}").replace('\n', "\\n")
-                    ),
+    let request_status =
+        if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
+            let project_root_display = if project_root.as_os_str().is_empty() {
+                ".".to_string()
+            } else {
+                project_root.display().to_string()
+            };
+            let reason =
+                agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE;
+            match checkpoint_route_owned_document_crdt(file, "stale_supervisor_pcp_recycle") {
+                Ok(checkpoint_status) => {
+                    match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+                        file, reason,
+                    ) {
+                        Ok(()) => format!(
+                            "requested project_root={} checkpoint={}",
+                            project_root_display,
+                            checkpoint_status.as_deref().unwrap_or("ok")
+                        ),
+                        Err(err) => format!(
+                            "request_failed project_root={} error={}",
+                            project_root_display,
+                            format!("{err:#}").replace('\n', "\\n")
+                        ),
+                    }
                 }
+                Err(err) => format!(
+                    "request_skipped project_root={} reason=crdt_checkpoint_error error={}",
+                    project_root_display,
+                    format!("{err:#}").replace('\n', "\\n")
+                ),
             }
-            Err(err) => format!(
-                "request_skipped project_root={} reason=crdt_checkpoint_error error={}",
-                project_root_display,
-                format!("{err:#}").replace('\n', "\\n")
-            ),
-        }
-    } else {
-        "request_skipped reason=no_project_root".to_string()
-    };
+        } else {
+            "request_skipped reason=no_project_root".to_string()
+        };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -14555,15 +14568,23 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
-        std::fs::write(&file, "body").unwrap();
+        std::fs::write(
+            &file,
+            "---\nagent_doc_supervisor_auto_recycle: false\n---\nbody\n",
+        )
+        .unwrap();
 
         assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
                 .is_none(),
-            "no request before preflight schedules one"
+            "no request before a stale turn stage schedules one"
         );
 
-        let status = schedule_stale_supervisor_pcp_recycle(&file, "preflight_warning");
+        assert!(
+            !agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&file),
+            "test must prove stale recycling overrides the proactive recycle opt-out"
+        );
+        let status = schedule_stale_supervisor_pcp_recycle(&file, "finalize_start");
         assert!(
             status.contains("requested project_root="),
             "schedule status should prove the request was written: {status}"
@@ -14571,16 +14592,16 @@ mod tests {
 
         let request =
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
-                .expect("recycle-request present after preflight scheduling");
+                .expect("recycle-request present after stale-stage scheduling");
         assert_eq!(
             request.reason,
-            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_PREFLIGHT
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("stale_supervisor_pcp_recycle_requested")
-                && ops_log.contains("source=preflight_warning")
+                && ops_log.contains("source=finalize_start")
                 && ops_log.contains("reason=supervisor_binary_stale"),
             "ops log should record the automatic recycle request:\n{ops_log}"
         );

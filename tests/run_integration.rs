@@ -1370,7 +1370,7 @@ fn orchestrate_handles_already_open_preflight_cycle_for_first_step() {
 }
 
 #[test]
-fn orchestrate_streams_step_patchback_before_finalize() {
+fn orchestrate_keeps_partial_step_output_out_of_document_until_finalize() {
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(&doc, template_doc_with_model()).unwrap();
@@ -1395,34 +1395,24 @@ fn orchestrate_streams_step_patchback_before_finalize() {
         .spawn()
         .unwrap();
 
-    let mut saw_partial = false;
-    for _ in 0..60 {
+    for _ in 0..10 {
         std::thread::sleep(Duration::from_millis(100));
         let content = fs::read_to_string(&doc).unwrap();
         let has_heading = content.contains("### Re: orchestrate streaming — gpt-5");
         let has_full_body = content.contains("Implemented and verified.");
-        if has_heading && !has_full_body {
-            saw_partial = true;
-            let child_state = child.try_wait().unwrap();
-            fs::write(&release_stream, b"continue").unwrap();
-            assert!(
-                child_state.is_none(),
-                "partial streamed patchback should land before orchestrate exits"
-            );
-            break;
-        }
+        assert!(
+            !has_heading && !has_full_body,
+            "non-final orchestrate output must not enter the authoritative document: {content}"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "orchestrate exited before the mock backend released its final response"
+        );
     }
-
-    if !saw_partial {
-        let _ = fs::write(&release_stream, b"continue");
-    }
+    fs::write(&release_stream, b"continue").unwrap();
 
     let status = child.wait().unwrap();
     assert!(status.success());
-    assert!(
-        saw_partial,
-        "expected partial streamed patchback before finalize"
-    );
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(content.contains(
@@ -1435,7 +1425,7 @@ fn orchestrate_streams_step_patchback_before_finalize() {
             .matches("### Re: orchestrate streaming — gpt-5")
             .count(),
         1,
-        "streamed step response should not be duplicated by finalize"
+        "the final step response must cross the document boundary exactly once"
     );
 }
 
@@ -1573,6 +1563,11 @@ fn interrupted_run_leaves_write_applied_and_preflight_finishes_commit() {
     assert!(
         content_after_abort.contains("### Re: interrupted closeout — gpt-5"),
         "response should already be in the document after the simulated abort"
+    );
+    assert_eq!(
+        content_after_abort.matches("<!-- agent:boundary:").count(),
+        1,
+        "write_applied must already satisfy the boundary singleton invariant: {content_after_abort}"
     );
     assert_eq!(read_cycle_phase(&doc), "write_applied");
 

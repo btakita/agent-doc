@@ -1273,27 +1273,17 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated,
     );
     let mut stale_supervisor_marker_mutated = false;
-    // `#staleshow` — surface "🔴 (restart/recycle your supervisor)" in the upper status area when the
-    // live route-owned supervisor/controller serving this document is mapping a STALE
-    // agent-doc binary (a newer build is installed but the running process never
-    // recycled onto it). Reuse the existing recycle-staleness signal
-    // (`stale_supervisor_warning_for_doc`, the `#fccsupwarn`/`#fccsupwarn2` IO check)
-    // so there is one source of truth for "running supervisor is older than installed".
-    // Idempotent: the marker is inserted once when stale and removed when fresh.
-    let supervisor_binary_is_stale =
-        agent_doc_controller_io::project_controller::stale_supervisor_warning_for_doc(file)
-            .is_some();
+    // Historical versions wrote an operator-facing stale-supervisor marker into
+    // the session document. Staleness now schedules an automatic safe-boundary
+    // recycle at every turn stage, so document maintenance only removes that
+    // legacy marker and never makes supervisor health part of user content.
     if let Some(reconciled) =
         agent_doc_document::status_projection::reconcile_stale_supervisor_status_content(
             &current_content,
-            supervisor_binary_is_stale,
+            false,
         )?
     {
-        if supervisor_binary_is_stale {
-            eprintln!("[preflight] status: surfaced stale-supervisor marker");
-        } else {
-            eprintln!("[preflight] status: cleared stale-supervisor marker");
-        }
+        eprintln!("[preflight] status: cleared legacy stale-supervisor marker");
         current_content = reconciled;
         mutated = true;
         stale_supervisor_marker_mutated = true;
@@ -1302,7 +1292,7 @@ fn run_pending_maintenance_with_options(
         && let Some(reconciled) =
             agent_doc_document::status_projection::reconcile_stale_supervisor_status_content(
                 snap_content,
-                supervisor_binary_is_stale,
+                false,
             )?
     {
         *snap_content = reconciled;
@@ -1370,7 +1360,7 @@ fn run_pending_maintenance_with_options(
                     ),
                 );
                 eprintln!(
-                    "[preflight] status: deferred stale-supervisor marker update for {}: {}",
+                    "[preflight] status: deferred legacy stale-supervisor marker removal for {}: {}",
                     file.display(),
                     err
                 );

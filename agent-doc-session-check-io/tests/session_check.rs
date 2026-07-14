@@ -7216,4 +7216,26 @@ Body\n\
                 .expect("prompt-prefixed corrupted duplicate must be detected");
         assert_eq!(overapplication.remediated_content, committed);
     }
+
+    #[test]
+    fn command_integrity_gate_rejects_malformed_tree_even_when_lint_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        let malformed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:notes -->\ncorrupted\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:notes -->\n",
+        );
+        fs::write(&doc, malformed).unwrap();
+
+        let err = agent_doc_session_check_io::run(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .expect_err("session-check must reject malformed component authority");
+        assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
+        assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
+    }
 }

@@ -491,7 +491,7 @@ pub enum AgentDocMode {
     Append,
     /// Template-mode: in-place component patching
     Template,
-    /// Stream-mode: real-time CRDT write-back (superset of template)
+    /// Stream-mode: recovery checkpoints plus one final CRDT write
     Stream,
 }
 

@@ -1,6 +1,7 @@
 # Commit Boundary
 
-Every appended `agent-doc` response must be committed unless the user explicitly tells you otherwise.
+Every appended `agent-doc` session response is one complete, validated write+commit
+transaction. Partial or intentionally uncommitted session responses are forbidden.
 
 A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `agent-doc <FILE>` in Codex/OpenCode/direct-exec, or an equivalent direct entry in another harness) starts the binary-owned response cycle. It is not permission to patch the document manually and stop short of closeout.
 
@@ -62,9 +63,11 @@ Crucially, a degraded-but-proven transport is **not** a reason to stall an activ
 
 ## Explicit Exceptions
 
-- Bare `agent-doc write` is acceptable only when the user explicitly wants the response left uncommitted, or when you are writing an intermediate checkpoint rather than the final response.
-- On real session documents, that path is deliberately nonterminal: the response/capture may be preserved for recovery, but the command now fails closed instead of reporting success while the cycle is still at `response_captured` / `write_applied`.
-- If you intentionally leave a response uncommitted, say so clearly and do not describe the cycle as complete.
+- There is no partial-response exception for session documents. Bare `agent-doc
+  write`, including `write --stream`, fails before reading the response or mutating
+  capture/document state.
+- Streaming backends may retain recovery-only sidecars, but those are never visible
+  response placement and never advance queue or closeout state.
 - `agent-doc write --commit` remains the documented repair path because it preserves the older CLI surface while still crossing the write/commit boundary in one invocation.
 - For real session documents (`agent_doc_session` / legacy `session`) that command now fails closed like `finalize`: non-git docs are rejected before mutation, commit errors fail the command, and success means the cycle reached `committed`. Best-effort behavior remains only for non-session docs and `--backlog-only` maintenance (legacy alias: `--pending-only`).
 - The same post-write `agent-doc session-check <FILE>` guard applies after manual repair with `agent-doc write --commit`.

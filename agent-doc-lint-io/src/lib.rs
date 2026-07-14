@@ -1,9 +1,9 @@
 //! # Module: lint_gate
 //!
-//! Finalize lint gate that invokes `tagpath lint --dialect agent-doc` on
-//! the session document before the snapshot/commit boundary. Errors fail
-//! the cycle closed; warnings surface on stderr but do not block (unless
-//! the dialect mode is `strict`).
+//! Session-document integrity and dialect gate. Every caller first validates
+//! the agent-doc component tree, then invokes `tagpath lint --dialect
+//! agent-doc` before any snapshot/commit boundary. Structural errors always
+//! fail closed, including when the configurable dialect lint mode is `off`.
 //!
 //! ## Spec
 //!
@@ -38,7 +38,7 @@
 //!   `fs_checks = false` so finalize cannot fail closed on transient
 //!   archive-target state.
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 
 use agent_doc_frontmatter::{
@@ -100,7 +100,7 @@ pub fn run_with_logger(file: &Path, cli: Option<LintCliMode>, ops_logger: OpsLog
         file,
         "lint_gate_document",
     )?;
-    run_on_content(file, &content, cli, ops_logger)
+    run_on_content_with_logger(file, &content, cli, ops_logger)
 }
 
 /// Run the finalize lint gate against explicit detached-disk authority.
@@ -113,7 +113,21 @@ pub fn run_force_disk_with_logger(
         file,
         "lint_gate_document_force_disk",
     )?;
-    run_on_content(file, &content, cli, ops_logger)
+    run_on_content_with_logger(file, &content, cli, ops_logger)
+}
+
+/// Validate explicit authoritative content without re-reading the document.
+///
+/// This entrypoint lets preflight, compact, and session-check gate the exact
+/// realtime projection they already resolved. Component-tree integrity is
+/// mandatory; `off` disables only the configurable tagpath dialect policy.
+pub fn run_on_content_with_logger(
+    file: &Path,
+    content: &str,
+    cli: Option<LintCliMode>,
+    ops_logger: OpsLogger,
+) -> Result<()> {
+    run_on_content(file, content, cli, ops_logger)
 }
 
 fn run_on_content(
@@ -122,6 +136,13 @@ fn run_on_content(
     cli: Option<LintCliMode>,
     ops_logger: OpsLogger,
 ) -> Result<()> {
+    // Queue/backlog closeout briefly passes through a state where completed
+    // backlog ids have been reaped but the matching queue directive has not
+    // yet been removed. Structural corruption is never valid at that point;
+    // cross-component orphan checks belong at authoritative transaction
+    // boundaries (preflight/session-check), after the closeout converges.
+    validate_structure_on_content(file, content)?;
+
     let (mode, source) = resolve_mode(file, content, cli);
     if mode == LintDialectMode::Off {
         ops_logger(
@@ -142,6 +163,83 @@ fn run_on_content(
     let findings = reconcile_findings_with_agent_doc_registry(lint_agent_doc(file, content, &opts));
 
     classify_and_emit(file, &findings, mode, source, ops_logger)
+}
+
+/// Validate invariants that no policy mode may disable.
+///
+/// Preflight uses this boundary before its narrow legacy normalization passes;
+/// final write/compact/session-check additionally run configurable tagpath lint.
+pub fn validate_integrity_on_content_with_logger(
+    file: &Path,
+    content: &str,
+    _ops_logger: OpsLogger,
+) -> Result<()> {
+    validate_structure_on_content(file, content)
+}
+
+/// Validate the component tree at every lint boundary, including transient
+/// states inside one atomic closeout transaction.
+pub fn validate_structure_on_content(file: &Path, content: &str) -> Result<()> {
+    agent_doc_element::element::parse(content)
+        .with_context(|| {
+            format!(
+                "[integrity-gate] INTERRUPTED: malformed agent-doc component tree in {}; repair the document structure before retrying",
+                file.display()
+            )
+        })?;
+    validate_boundary_markers(file, content)?;
+    Ok(())
+}
+
+fn validate_boundary_markers(file: &Path, content: &str) -> Result<()> {
+    const PREFIX: &str = "<!-- agent:boundary:";
+    const SUFFIX: &str = " -->";
+
+    let code_ranges = agent_doc_element::element::find_code_ranges(content);
+    let mut search_from = 0;
+    let mut count = 0;
+    while let Some(relative_start) = content[search_from..].find(PREFIX) {
+        let start = search_from + relative_start;
+        if code_ranges
+            .iter()
+            .any(|&(code_start, code_end)| start >= code_start && start < code_end)
+        {
+            search_from = start + PREFIX.len();
+            continue;
+        }
+
+        let suffix_search_start = start + PREFIX.len();
+        let Some(relative_end) = content[suffix_search_start..].find(SUFFIX) else {
+            bail!(
+                "[integrity-gate] INTERRUPTED: malformed agent boundary marker in {}; historical partial patchback must be normalized before retrying",
+                file.display()
+            );
+        };
+        let end = suffix_search_start + relative_end + SUFFIX.len();
+        let line_start = content[..start].rfind('\n').map_or(0, |pos| pos + 1);
+        let line_end = content[end..]
+            .find('\n')
+            .map_or(content.len(), |relative| end + relative);
+        let marker = &content[start..end];
+        if content[line_start..line_end].trim() != marker {
+            bail!(
+                "[integrity-gate] INTERRUPTED: inline agent boundary marker in {}; the exchange must contain one standalone boundary marker",
+                file.display()
+            );
+        }
+
+        count += 1;
+        search_from = end;
+    }
+
+    if count > 1 {
+        bail!(
+            "[integrity-gate] INTERRUPTED: {} agent boundary markers in {}; the exchange must contain at most one standalone boundary marker",
+            count,
+            file.display()
+        );
+    }
+    Ok(())
 }
 
 fn reconcile_findings_with_agent_doc_registry(findings: Vec<LintFinding>) -> Vec<LintFinding> {
@@ -288,6 +386,60 @@ mod tests {
             <!-- /agent:notes -->\n";
         let file = write_doc(&dir, "notes.md", doc);
         run(&file, None).expect("registered notes component must pass lint gate");
+    }
+
+    #[test]
+    fn malformed_component_tree_blocks_even_when_dialect_lint_is_off() {
+        let dir = TempDir::new().unwrap();
+        let doc = "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n\
+<!-- agent:exchange -->\n\
+prompt\n\
+<!-- agent:notes -->\n\
+operator-owned scratch state\n\
+<!-- /agent:exchange -->\n\
+<!-- /agent:notes -->\n";
+        let file = write_doc(&dir, "invalid-tree.md", doc);
+        let err = run(&file, None).expect_err("structural corruption must never be skippable");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("[integrity-gate] INTERRUPTED")
+                && message.contains("malformed agent-doc component tree"),
+            "unexpected integrity error: {message}"
+        );
+    }
+
+    #[test]
+    fn duplicate_or_inline_boundaries_block_even_when_dialect_lint_is_off() {
+        let dir = TempDir::new().unwrap();
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "prompt<!-- agent:boundary:inline -->\n",
+            "<!-- agent:boundary:duplicate -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let file = write_doc(&dir, "duplicate-boundaries.md", doc);
+        let err = run(&file, None).expect_err("boundary corruption must never be skippable");
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("[integrity-gate] INTERRUPTED")
+                && message.contains("inline agent boundary marker"),
+            "unexpected integrity error: {message}"
+        );
+    }
+
+    #[test]
+    fn boundary_literal_inside_fence_is_not_an_integrity_marker() {
+        let dir = TempDir::new().unwrap();
+        let doc = concat!(
+            "---\nagent_doc_session: test\nagent_doc_lint_dialect: off\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "```md\n<!-- agent:boundary:example -->\n```\n",
+            "<!-- agent:boundary:real -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        let file = write_doc(&dir, "boundary-literal.md", doc);
+        run(&file, None).expect("code-fence literals plus one real boundary must pass");
     }
 
     #[test]

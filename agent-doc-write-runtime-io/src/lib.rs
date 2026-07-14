@@ -813,45 +813,6 @@ fn guard_no_exchange_compaction_request_between(
     guard_no_exchange_compaction_request_for_diff(file, &diff_text)
 }
 
-/// `#bare-write-captured-uncommitted`: true when a bare `agent-doc write` placed
-/// or preserved an assistant response body this cycle that HEAD does not yet have.
-/// Such a write must cross the same commit boundary as `write --commit` instead of
-/// stranding the visible response outside the binary-owned closeout.
-///
-/// Two confirmations, both required:
-/// 1. The cycle is still open at `response_captured`/`write_applied` — a response
-///    placement phase reached by this write (terminal/preflight-only states are
-///    excluded). This covers both the captured path and the synthetic-cycle stream
-///    path that only marks `write_applied` without a durable capture.
-/// 2. The working tree carries an assistant response heading that HEAD does not —
-///    the content-level proof that a response is genuinely uncommitted, so a
-///    pending/status-only bare write (no response placed) is never force-committed.
-fn bare_write_placed_response_body(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(false);
-    };
-    if !state.is_open() {
-        return Ok(false);
-    }
-    if !matches!(
-        state.phase,
-        agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
-    ) {
-        return Ok(false);
-    }
-    let current = resolve_current_document(file, "bare_write_response_body_detection")?;
-    let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
-        return Ok(false);
-    };
-    Ok(
-        agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
-            &head,
-            current.content(),
-        )
-        .is_some(),
-    )
-}
-
 fn consume_queue_prompts_for_done_ids_closeout(
     file: &Path,
     done_ids: &[String],
@@ -1138,6 +1099,10 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     let file = options.file.as_path();
+    let _ = agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+        file,
+        "finalize_write_start",
+    );
 
     if let Some(ref origin) = options.origin {
         agent_doc_ops_log_io::log_op(
@@ -1223,7 +1188,7 @@ fn run_command_inner(
         options.pending_reorder.as_deref(),
     );
     let metadata_force_disk = options.force_disk || options.is_ipc;
-    let mut commit_mode = match resolve_commit_mode(
+    let commit_mode = match resolve_commit_mode(
         file,
         commit_mode,
         options.pending_only,
@@ -1259,6 +1224,24 @@ fn run_command_inner(
         }
         Err(err) => return Err(err),
     };
+    // #final-response-transaction: session responses are never allowed to enter
+    // the document through a non-committing write. Historically `write --stream`
+    // was used for incremental response checkpoints and a later invocation wrote
+    // the full response. That made a prefix authoritative, forced AlreadyApplied
+    // recovery during the same healthy turn, and could leave malformed content for
+    // unrelated maintenance to commit. Reject the operation before reading stdin,
+    // creating a capture, or mutating the document. `finalize` and `write --commit`
+    // own the one complete response+queue+backlog transaction.
+    if commit_mode == CommitMode::None
+        && !options.pending_only
+        && is_session_document_with_force_disk(file, metadata_force_disk)?
+    {
+        anyhow::bail!(
+            "partial or non-committing response writes are disabled for session documents; use `agent-doc finalize {}` (or `agent-doc write --commit {}`) once with the complete final response",
+            file.display(),
+            file.display(),
+        );
+    }
     if commit_mode == CommitMode::Required && !agent_doc_git_io::status::is_in_git_repo(file) {
         if is_session_document_with_force_disk(file, metadata_force_disk)? {
             anyhow::bail!(
@@ -1470,41 +1453,6 @@ fn run_command_inner(
             run(file, baseline.as_deref(), write_flags)
         }
     };
-
-    // #bare-write-captured-uncommitted: a bare `agent-doc write` (CommitMode::None)
-    // that placed or preserved an assistant response body on a session document must
-    // finish the same write+commit boundary as `write --commit`. IPC `already_applied`
-    // proves content placement, not closeout — the response is now visible, so escalate
-    // to the commit boundary BEFORE the commit-mode-gated phases (queue consumption,
-    // pending gates, commit) instead of stranding the cycle at `response_captured`.
-    // `recover_missing_commit_boundary` only repairs responses already in HEAD; a
-    // genuinely-uncommitted placed body has no other recovery path, so we must commit.
-    if write_result.is_ok()
-        && commit_mode == CommitMode::None
-        && is_session_document_with_force_disk(file, options.force_disk)?
-        && bare_write_placed_response_body(file)?
-    {
-        if agent_doc_git_io::status::is_in_git_repo(file) {
-            eprintln!(
-                "[write] bare write placed a response body on session document {}; escalating to the commit boundary (#bare-write-captured-uncommitted)",
-                file.display()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "bare_write_escalated_to_commit file={} reason=response_body_placed",
-                    file.display()
-                ),
-            );
-            commit_mode = CommitMode::Required;
-        } else {
-            anyhow::bail!(
-                "bare `agent-doc write` placed a response body on {} but the document is not in a git repository, so the cycle cannot reach a committed state. Move it into a git repo and rerun with `agent-doc write --commit {}`.",
-                file.display(),
-                file.display()
-            );
-        }
-    }
 
     if write_result.is_ok() {
         apply_pending_and_status_mutations(
@@ -1762,42 +1710,11 @@ fn run_command_inner(
     } else {
         Ok(())
     };
-    // A response-bearing bare write on a session document is escalated to the commit
-    // boundary above (#bare-write-captured-uncommitted), so reaching here with
-    // CommitMode::None means the write placed no response body. Any open cycle now is
-    // a pre-existing interrupted closeout, not content this write stranded.
-    let bare_session_write_result = if write_result.is_ok()
-        && commit_mode == CommitMode::None
-        && is_session_document_with_force_disk(file, options.force_disk)?
-    {
-        agent_doc_session_check_io::enforce_clean_closeout_with_force_disk(
-            file,
-            options.force_disk,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )
-        .context(
-            "bare `agent-doc write` did not place a response body, but the session \
-             document still has an open cycle outside the commit boundary",
-        )
-    } else {
-        Ok(())
-    };
-
-    match (write_result, commit_result, bare_session_write_result) {
-        (Ok(()), Ok(()), Ok(())) => Ok(()),
-        (Err(write_err), Ok(()), Ok(())) => Err(write_err),
-        (Ok(()), Err(commit_err), Ok(())) => Err(commit_err),
-        (Ok(()), Ok(()), Err(boundary_err)) => Err(boundary_err),
-        (Err(write_err), Err(commit_err), Ok(())) => Err(write_err.context(commit_err.to_string())),
-        (Err(write_err), Ok(()), Err(boundary_err)) => {
-            Err(write_err.context(boundary_err.to_string()))
-        }
-        (Ok(()), Err(commit_err), Err(boundary_err)) => {
-            Err(boundary_err.context(commit_err.to_string()))
-        }
-        (Err(write_err), Err(commit_err), Err(boundary_err)) => {
-            Err(write_err.context(format!("{commit_err}\n{boundary_err}")))
-        }
+    match (write_result, commit_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(write_err), Ok(())) => Err(write_err),
+        (Ok(()), Err(commit_err)) => Err(commit_err),
+        (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
     }
 }
 

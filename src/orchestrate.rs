@@ -74,6 +74,7 @@ use agent_doc_prompt_context::AgentPromptContext;
 use agent_doc_queue::dispatch_item::{QueueItemKind, classify};
 #[cfg(test)]
 use agent_doc_template::patchback::child_template_finalize_text as orchestrate_finalize_text_for_template;
+#[cfg(test)]
 use agent_doc_template::patchback::{
     finalize_suffix_from_streamed_prefix, should_stream_exchange_patch,
 };

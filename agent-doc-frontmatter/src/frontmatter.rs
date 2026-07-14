@@ -32,7 +32,7 @@
 //!   (format=template, write=crdt).
 //! - Deprecated `agent_doc_mode` values: `"append"` → format=Append; `"template"` or `"stream"`
 //!   → format=Template; all keep write=Crdt.
-//! - `StreamConfig` carries optional CRDT stream parameters: write-back interval, ANSI stripping,
+//! - `StreamConfig` carries optional CRDT stream parameters: polling/final-flush interval, ANSI stripping,
 //!   target component, and chain-of-thought routing.
 //! - `prompt_presets` stores reusable named prompt snippets for orchestrated tasks and round-trips
 //!   exact preset names/values, including symbolic keys such as `#1`.
@@ -240,10 +240,10 @@ impl ResolvedMode {
     }
 }
 
-/// Configuration for stream mode (real-time CRDT write-back).
+/// Configuration for stream mode (real-time generation, one final CRDT write-back).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-    /// Write-back interval in milliseconds (default: 200)
+    /// Stream polling/final-flush interval in milliseconds (default: 200)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval: Option<u64>,
     /// Strip ANSI escape codes from agent output (default: true)

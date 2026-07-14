@@ -178,20 +178,52 @@ pub fn remove(doc: &str, boundary_id: &str) -> String {
 }
 
 /// Remove all boundary markers from a document.
+///
+/// Markers are removed wherever they occur on a line, not only when the marker
+/// owns the whole line. Interrupted editor patchback used to be able to append
+/// duplicate markers directly to prompt text; leaving those inline comments in
+/// place makes every later exchange split ambiguous. Marker-looking text inside
+/// fenced code blocks is preserved.
 pub fn remove_all(doc: &str) -> String {
     let mut result = String::with_capacity(doc.len());
-    for line in doc.lines() {
-        if line.trim().starts_with(BOUNDARY_PREFIX) && line.trim().ends_with(BOUNDARY_SUFFIX) {
-            // Skip boundary marker lines
-            continue;
+    let code_ranges = element::find_code_ranges(doc);
+    let mut absolute_line_start = 0;
+
+    for line in doc.split_inclusive('\n') {
+        let mut cleaned_line = String::with_capacity(line.len());
+        let mut cursor = 0;
+        let mut removed_marker = false;
+
+        while let Some(relative_start) = line[cursor..].find(BOUNDARY_PREFIX) {
+            let marker_start = cursor + relative_start;
+            let absolute_marker_start = absolute_line_start + marker_start;
+            if code_ranges
+                .iter()
+                .any(|&(start, end)| absolute_marker_start >= start && absolute_marker_start < end)
+            {
+                let prefix_end = marker_start + BOUNDARY_PREFIX.len();
+                cleaned_line.push_str(&line[cursor..prefix_end]);
+                cursor = prefix_end;
+                continue;
+            }
+
+            let suffix_search_start = marker_start + BOUNDARY_PREFIX.len();
+            let Some(relative_end) = line[suffix_search_start..].find(BOUNDARY_SUFFIX) else {
+                break;
+            };
+            let marker_end = suffix_search_start + relative_end + BOUNDARY_SUFFIX.len();
+            cleaned_line.push_str(&line[cursor..marker_start]);
+            cursor = marker_end;
+            removed_marker = true;
         }
-        result.push_str(line);
-        result.push('\n');
+
+        cleaned_line.push_str(&line[cursor..]);
+        if !(removed_marker && cleaned_line.trim().is_empty()) {
+            result.push_str(&cleaned_line);
+        }
+        absolute_line_start += line.len();
     }
-    // Preserve trailing content without final newline if original didn't have one
-    if !doc.ends_with('\n') && result.ends_with('\n') {
-        result.pop();
-    }
+
     result
 }
 
@@ -268,6 +300,23 @@ mod tests {
         let doc = "line1\n<!-- agent:boundary:aaa -->\nline2\n<!-- agent:boundary:bbb -->\nline3\n";
         let cleaned = remove_all(doc);
         assert_eq!(cleaned, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn remove_all_boundaries_removes_inline_duplicates_but_preserves_code() {
+        let doc = concat!(
+            "prompt<!-- agent:boundary:first --><!-- agent:boundary:second -->\n",
+            "  <!-- agent:boundary:standalone -->  \n",
+            "```md\n",
+            "example<!-- agent:boundary:literal -->\n",
+            "```\n",
+            "tail"
+        );
+        let cleaned = remove_all(doc);
+        assert_eq!(
+            cleaned,
+            "prompt\n```md\nexample<!-- agent:boundary:literal -->\n```\ntail"
+        );
     }
 
     #[test]

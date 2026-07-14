@@ -1151,11 +1151,10 @@ pub fn mark_response_captured(
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
     append_phase_event_to_session_log(file, &state, file_content);
-    // NB: intentionally do NOT mirror the pipeline block here. `response_captured`
-    // can fire mid-stream (partial checkpoints), and a naive read-modify-write of
-    // the document would race the streaming write-back loop and clobber it. The
-    // mirror runs at `write_applied` instead — once the response is fully on disk
-    // — which covers the same recovery window without the race (#22a8).
+    // NB: intentionally do NOT mirror the pipeline block here. A captured response
+    // is the complete final payload, but capture durability is not visible document
+    // authority. The mirror runs at `write_applied` only after final placement is
+    // proven. Recovery-only partial checkpoints never call this transition (#22a8).
     Ok(state)
 }
 

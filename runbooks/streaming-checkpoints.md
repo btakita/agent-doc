@@ -1,39 +1,42 @@
-# Streaming Checkpoints
+# Final Response Transactions
 
-For long, multi-topic responses, flush partial content at natural breakpoints so the user sees progress in their editor without waiting for the final write.
+Streaming is a generation and recovery mechanism, never a document-persistence
+mechanism. Buffer partial model output outside the document and publish exactly one
+complete response after generation finishes.
 
-## When to checkpoint
+## Operator-visible progress
 
-- After each `### Re:` section in a multi-topic response.
-- After completing a code-implementation summary.
-- After any response block that takes >15s to generate.
+- Send concise progress through the harness console/commentary channel.
+- The runtime may save partial text to recovery-only sidecars. Those checkpoints are
+  not document authority and cannot satisfy response placement, queue consumption,
+  or closeout.
+- Never append a partial `### Re:` section, code block, patch block, or response
+  prefix to the session document.
 
-Skip checkpoints for short single-topic responses — one final write is fine.
+## Final write
 
-## How to flush
+1. Finish the complete response, including every required `### Re:` section and
+   balanced patch/component marker.
+2. Pipe the complete payload once through the binary-owned closeout boundary:
 
-1. Build the partial response as patch blocks (typically `<!-- patch:exchange -->`).
-2. Pipe through `agent-doc write` with `--stream` and the current baseline:
+```bash
+agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+```
 
-   ```bash
-   cat <<'RESPONSE' | agent-doc write <FILE> --baseline-file <baseline_tmp> --stream --origin skill
-   <partial patch blocks>
-   RESPONSE
-   ```
+3. Run `agent-doc session-check <FILE>`. A healthy turn must reach `committed`
+   without invoking `agent-doc repair`.
 
-3. **Re-save the baseline** after each flush — the document has changed:
+`agent-doc write --commit` is reserved for an explicit missed-patchback or crash
+recovery. Bare `agent-doc write`, including `write --stream`, is rejected for session
+responses before stdin, capture, or document mutation.
 
-   ```bash
-   cp <FILE> /tmp/agent-doc-baseline-$$.md
-   ```
+## Atomicity rules
 
-4. Continue responding; pass the updated baseline to the next `agent-doc write`.
-
-## Why `--stream`
-
-`--stream` uses CRDT merge — the user's concurrent edits merge without conflicts with the agent's incoming patches. All write-back in this skill uses `--stream`; there is no non-stream path for checkpoints.
-
-## Baseline rules
-
-- **First write in a cycle:** use `preflight.baseline_file` (a post-commit snapshot).
-- **Subsequent checkpoints:** re-save from the current file after each successful flush. A stale baseline means the CRDT merge re-applies old content.
+- The final response, answered queue-head removal, and backlog/done mutations are
+  one transaction. None may become authoritative before all validate.
+- `AlreadyApplied` is acceptable only as exact proof that the complete final payload
+  from the same transaction is visible. A prefix or earlier checkpoint never counts.
+- Save and reuse the immutable preflight baseline. Never re-save the document as a
+  new baseline after partial generation.
+- `compact`, `preflight`, and `session-check` must reject malformed component trees
+and repeated/inline exchange boundaries; they are not repair or commit escape hatches.

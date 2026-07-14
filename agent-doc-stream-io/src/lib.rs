@@ -9,10 +9,10 @@
 //! - Ensures a session UUID exists in frontmatter before sending; writes it back if absent.
 //! - Resolves the streaming agent from the `--agent` flag, frontmatter, or config default.
 //! - Pre-commits user changes to git before sending; final-commits after stream completes.
-//! - `stream_loop()` spawns a timer thread that flushes the accumulated text buffer to
-//!   the document on a configurable interval (default 2 s). Flush uses **replace** mode
-//!   for the target component regardless of component default, because the buffer is
-//!   cumulative (full text so far, not a delta).
+//! - `stream_loop()` buffers cumulative chunks and performs exactly one
+//!   authoritative document flush after the backend marks the response final.
+//!   Non-final chunks may update recovery-only sidecars, but never the document,
+//!   snapshot, response capture, queue state, or commit boundary.
 //! - While streaming, the first non-empty partial response and then changed
 //!   partial responses at most once every 30 seconds are saved as durable
 //!   `.partial.json` checkpoints next to the final response capture ledger.
@@ -35,8 +35,9 @@
 //!
 //! Write-back loop:
 //! ```text
-//! [Agent chunks] → [Buffer] → [Timer] → [IPC or Lock → Read → patch(replace) → Write → Unlock]
-//! [User edits]   → [File]  → [Detected by CRDT merge on next flush]
+//! [Agent chunks] → [Buffer + recovery-only checkpoints]
+//! [Final chunk]  → [IPC or Lock → Read → patch(replace) → Write → Unlock]
+//! [User edits]   → [File] → [Merged at the single final transaction]
 //! ```
 //!
 //! ## Agentic Contracts
@@ -131,6 +132,10 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
+    let _ = agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+        file,
+        "stream_generation_start",
+    );
 
     // Validate mode — requires CRDT write strategy
     let raw_content = effects.current_document_content(file, "stream_run_initial")?;
@@ -143,6 +148,19 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
             file.display()
         );
     }
+    // Refuse to generate or mutate against an invalid authoritative document.
+    // This mandatory integrity gate still runs when dialect lint is `off`.
+    agent_doc_lint_io::validate_integrity_on_content_with_logger(
+        file,
+        &raw_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    agent_doc_lint_io::run_on_content_with_logger(
+        file,
+        &raw_content,
+        lint_override,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Read stream config from frontmatter (overrides CLI args where set)
     let stream_config = fm.stream_config.clone().unwrap_or_default();
@@ -235,9 +253,12 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
             document_section: &document_section,
         });
 
-    // Pre-commit user changes
-    if !no_git && let Err(e) = effects.commit(file) {
-        eprintln!("[stream] git commit skipped: {}", e);
+    // Pre-commit user changes. A failed boundary must stop before generation;
+    // continuing would make the later response depend on an uncommitted baseline.
+    if !no_git {
+        effects
+            .commit(file)
+            .context("failed to commit the pre-stream user baseline")?;
     }
 
     eprintln!("[stream] Submitting to {} (streaming)...", agent_name);
@@ -264,7 +285,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
         None
     };
 
-    // Run the write-back loop
+    // Run the final-only write-back loop.
     let result = stream_loop(
         file,
         chunks,
@@ -292,9 +313,12 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
     // `.agent-doc/config.toml` `[lint] dialect` > default (`warn`).
     agent_doc_lint_io::run_with_logger(file, lint_override, agent_doc_ops_log_io::log_op)?;
 
-    // Final git commit
-    if !no_git && let Err(e) = effects.commit(file) {
-        eprintln!("[stream] git commit skipped: {}", e);
+    // Final git commit. Never report a healthy stream after response placement
+    // when the terminal commit failed.
+    if !no_git {
+        effects
+            .commit(file)
+            .context("failed to commit the final streamed response")?;
     }
 
     // #a010: Fire post_write hook for cross-session coordination. The append /
@@ -320,7 +344,7 @@ struct StreamResult {
     session_id: Option<String>,
 }
 
-/// The core write-back loop: accumulates chunks, periodically merges into document.
+/// The core write-back loop: accumulates chunks and merges only the final payload.
 fn stream_loop(
     file: &Path,
     chunks: Box<dyn Iterator<Item = Result<StreamChunk>>>,
@@ -335,7 +359,9 @@ fn stream_loop(
     let thinking_buffer = Arc::new(Mutex::new(String::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
 
-    // Timer thread: periodically flush buffer to document
+    // Timer thread: observe the buffers, but cross the authoritative document
+    // boundary only after the final chunk. Partial chunks are recovery evidence,
+    // never a visible response transaction.
     let timer_buffer = Arc::clone(&buffer);
     let timer_thinking = Arc::clone(&thinking_buffer);
     let file_path = file.to_path_buf();
@@ -365,8 +391,8 @@ fn stream_loop(
                 String::new()
             };
 
-            // Flush response text
-            if text != last_written && !text.is_empty() {
+            // Flush response text exactly once, after finality is proven.
+            if is_done && text != last_written && !text.is_empty() {
                 match flush_to_document(
                     &file_path,
                     &text,
@@ -376,11 +402,7 @@ fn stream_loop(
                 ) {
                     Ok(()) => {
                         last_written = text;
-                        if is_done {
-                            timer_flushed_final_clone.store(true, Ordering::Release);
-                        } else {
-                            eprint!(".");
-                        }
+                        timer_flushed_final_clone.store(true, Ordering::Release);
                     }
                     Err(e) => {
                         let label = if is_done { "final flush" } else { "flush" };
@@ -395,8 +417,12 @@ fn stream_loop(
                 }
             }
 
-            // Flush thinking text to separate component (or skip if interleaved)
-            if has_thinking && thinking_text != last_thinking && !thinking_text.is_empty() {
+            // Thinking follows the same final-only transaction rule.
+            if is_done
+                && has_thinking
+                && thinking_text != last_thinking
+                && !thinking_text.is_empty()
+            {
                 if let Some(ref tt) = thinking_target {
                     match flush_to_document(
                         &file_path,
@@ -473,7 +499,9 @@ fn stream_loop(
     }
 
     // Signal timer thread to do final flush
-    let _ = done_tx.send(());
+    done_tx
+        .send(())
+        .map_err(|_| anyhow::anyhow!("stream finality channel closed before final flush"))?;
     timer_handle
         .join()
         .map_err(|_| anyhow::anyhow!("timer thread panicked"))?;
@@ -821,7 +849,8 @@ mod tests {
         let content = "---\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\nUser prompt\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
 
-        // First flush: partial response
+        // Exercise cumulative replacement directly; production stream_loop invokes
+        // flush_to_document only for the complete final payload.
         flush_to_document(&doc, "Hello", "exchange", content, &TEST_EFFECTS).unwrap();
         // Second flush: cumulative (full text so far)
         flush_to_document(&doc, "Hello world", "exchange", content, &TEST_EFFECTS).unwrap();
@@ -965,6 +994,90 @@ mod tests {
         assert_eq!(checkpoint.checkpoint_count, 1);
         let active_capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(active_capture.response_body, "Final response");
+    }
+
+    #[test]
+    fn stream_loop_never_writes_non_final_response_to_document() {
+        struct BlockingChunks {
+            state: u8,
+            partial_ready: mpsc::Sender<()>,
+            release_final: mpsc::Receiver<()>,
+        }
+
+        impl Iterator for BlockingChunks {
+            type Item = Result<StreamChunk>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                match self.state {
+                    0 => {
+                        self.state = 1;
+                        Some(Ok(StreamChunk {
+                            text: "PARTIAL_ONLY".to_string(),
+                            thinking: None,
+                            is_final: false,
+                            session_id: None,
+                        }))
+                    }
+                    1 => {
+                        self.partial_ready.send(()).unwrap();
+                        self.release_final.recv().unwrap();
+                        self.state = 2;
+                        Some(Ok(StreamChunk {
+                            text: "FINAL_ONLY".to_string(),
+                            thinking: None,
+                            is_final: true,
+                            session_id: Some("sess-final".to_string()),
+                        }))
+                    }
+                    _ => None,
+                }
+            }
+        }
+
+        let dir = tempfile::TempDir::new().unwrap();
+        for subdir in ["snapshots", "locks", "pending", "crdt", "captures"] {
+            std::fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = dir.path().join("test.md");
+        let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let (partial_ready_tx, partial_ready_rx) = mpsc::channel();
+        let (release_final_tx, release_final_rx) = mpsc::channel();
+        let observed_doc = doc.clone();
+        let inspector = std::thread::spawn(move || {
+            partial_ready_rx.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(25));
+            let visible = std::fs::read_to_string(&observed_doc).unwrap();
+            assert!(
+                !visible.contains("PARTIAL_ONLY"),
+                "non-final output crossed the authoritative document boundary: {visible}"
+            );
+            release_final_tx.send(()).unwrap();
+        });
+
+        let result = stream_loop(
+            &doc,
+            Box::new(BlockingChunks {
+                state: 0,
+                partial_ready: partial_ready_tx,
+                release_final: release_final_rx,
+            }),
+            1,
+            "exchange",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
+        inspector.join().unwrap();
+
+        assert_eq!(result.session_id.as_deref(), Some("sess-final"));
+        let final_doc = std::fs::read_to_string(&doc).unwrap();
+        assert!(final_doc.contains("FINAL_ONLY"));
+        assert!(!final_doc.contains("PARTIAL_ONLY"));
     }
 
     #[test]

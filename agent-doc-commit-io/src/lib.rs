@@ -580,6 +580,13 @@ pub fn commit_for_authority(file: &Path, force_disk: bool) -> Result<bool> {
 }
 
 pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
+    if !controller_commit_in_progress() {
+        let _ =
+            agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+                file,
+                "commit_start",
+            );
+    }
     // `#cpc-commit`: when a live editor owns the document, delegate the git commit
     // to the CPC controller — the authoritative owner of the converged relay
     // canonical — so it commits IN-PROCESS where its canonical is authority,

@@ -316,6 +316,65 @@ mod tests {
     }
 
     #[test]
+    fn repair_normalizes_fragmented_inline_boundary_exchange() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: design review — model\n\nOriginal response.\n",
+            "I don't see the diagrams.\n",
+            "<!-- agent:boundary:turn -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: design review — model\n\nOriginal response.\n",
+            "I don't see the diagrams.\n\n",
+            "How would CAS work?<!-- agent:boundary:turn --><!-- agent:boundary:turn -->\n",
+            "- duplicated partial response line\n\n",
+            "### Re: diagrams — model\n\nUse an explicit dark theme.\n",
+            "How would CAS wo?\n",
+            "### Re: CAS — model\n\nUse a lock around compare-and-delete.\n",
+            "<!-- agent:boundary:turn -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, current_content).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::TemplateNormalized);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "{repaired}"
+        );
+        let diagrams_response = repaired.find("### Re: diagrams — model").unwrap();
+        let complete_cas_prompt = repaired.find("How would CAS work?").unwrap();
+        let cas_response = repaired.find("### Re: CAS — model").unwrap();
+        assert!(
+            diagrams_response < complete_cas_prompt && complete_cas_prompt < cas_response,
+            "the complete prompt must follow the response that was in flight and precede its own response:\n{repaired}"
+        );
+        assert!(!repaired.contains("How would CAS wo?"), "{repaired}");
+        assert!(
+            !repaired.contains("duplicated partial response line"),
+            "{repaired}"
+        );
+        assert!(
+        repaired.contains(
+            "Use a lock around compare-and-delete.\n<!-- agent:boundary:turn -->\n<!-- /agent:exchange -->"
+        ),
+        "{repaired}"
+    );
+    }
+
+    #[test]
     fn repair_reorders_response_before_prompt_tail_when_pending_response_is_visible() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

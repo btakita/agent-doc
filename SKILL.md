@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.63"
+agent-doc-version: "0.34.110"
 ---
 
 # agent-doc
@@ -42,7 +42,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **Dispatch proof language must preserve scope** — when reading route diagnostics, `proof=accepted proof_scope=accepted_only` means pane-input acceptance only. Do not describe Claude Code/OpenCode dispatch-only routes as consumed/submitted unless logs show dispatch-start proof.
 - **Starting actor reroutes are prompt-gated** — if route diagnostics mention a `starting` authoritative actor, treat dispatch as valid only after the live pane shows a harness-specific dispatch-ready prompt; otherwise the route path must fail closed before input.
 - **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work.
-- Preserve user edits; let `agent-doc write --stream` merge. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Stream useful console status.
+- Preserve user edits through the single final `agent-doc finalize --stream` transaction. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots and partial captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Stream useful progress only to the console, never into the document.
 
 ## Workflow
 

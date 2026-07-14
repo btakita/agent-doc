@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.110
+
+- **Session responses are final-only transactions.** Streaming and orchestration keep partial chunks outside the document, bare/non-committing session writes fail before input or mutation, and one complete payload owns response placement, queue/backlog changes, snapshot publication, and commit.
+- **Malformed documents can no longer look clean or be laundered through compact.** Mandatory integrity checks reject unbalanced component trees and invalid exchange-boundary shapes even when dialect lint is off; preflight, session-check, stream, and compact fail closed, while semantic no-op compact creates no tag, archive, or commit.
+- **Healthy streaming no longer depends on repair.** Partial checkpoints remain recovery-only sidecars, final stream commit failures propagate instead of printing a skipped-commit success, and exact final-response proof—not a prefix or heading—owns `AlreadyApplied` recovery.
+- **A proven-stale supervisor now recycles automatically from every turn stage.** Preflight, generation, stream, finalize/write, commit, compact, session-check, and closeout evidence all write the same idempotent safe-boundary recycle request, even when proactive auto-recycle was disabled; the old operator-facing stale marker is only removed from documents and is never inserted again.
+- **Exchange boundaries are a hard singleton invariant.** Inline and repeated `agent:boundary` markers fail the mandatory integrity gate, final placement removes every non-code marker before appending one standalone boundary, and explicit legacy recovery reconstructs the fragmented prompt/response ordering left by historical partial patchback before committing it.
+
 ## 0.34.109
 
 - **JetBrains recovery now performs atomic replica replacement and structurally safe response replay.** Forced refresh registers a distinct replacement before retiring the cached member, failed registration preserves the old forwarder, and replica membership no longer mutates reliable-sync document-open authority. CPC refusal reasons such as `detached_authority` are surfaced directly. Live-prompt recovery now uses the typed `IpcLivePromptDriftState` enum; malformed component targets are rejected or rebuilt from a structurally valid full-document target before CRDT/Lazily delivery, preventing the response double-materialization that produced File Cache Conflict, partial closeout, and ACK churn. Rust 0.34.109; JetBrains plugin 0.2.254.

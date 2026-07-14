@@ -178,6 +178,24 @@ pub fn run_with_options(
     codex_final_gate: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
+    if let Some(message) =
+        agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+            file,
+            "session_check_start",
+        )
+    {
+        eprintln!("[session-check] WARNING: {message}");
+    }
+    // `session-check` is the final proof boundary. It must not report a clean
+    // cycle for a document whose component tree cannot be parsed, regardless
+    // of lifecycle sidecar state.
+    let integrity_content =
+        crate::resolve_current_document_content(file, "session_check_integrity_gate")?;
+    agent_doc_lint_io::validate_integrity_on_content_with_logger(
+        file,
+        &integrity_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     self_heal_late_ipc_overapplication(file, effects)?;
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
@@ -705,6 +723,14 @@ pub fn enforce_clean_closeout_with_force_disk(
 }
 
 fn enforce_clean_closeout_inner(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
+    if let Some(message) =
+        agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
+            file,
+            "closeout_proof_start",
+        )
+    {
+        eprintln!("[session-check] WARNING: {message}");
+    }
     self_heal_late_ipc_overapplication(file, effects)?;
     let report = inspect_with_warnings(file, effects)?;
     for warning in report.warnings {

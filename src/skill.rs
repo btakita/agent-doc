@@ -1927,7 +1927,9 @@ mod tests {
         .unwrap();
 
         for content in [&claude, &codex, &opencode] {
-            assert!(content.contains("Every appended `agent-doc` response must be committed"));
+            assert!(content.contains(
+                "Every appended `agent-doc` session response is one complete, validated write+commit"
+            ));
             assert!(content.contains("agent-doc finalize <FILE>"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
             assert!(content.contains("agent-doc session-check <FILE>"));
@@ -2455,9 +2457,9 @@ mod tests {
     fn bundled_skill_preserves_operator_visible_document_authority() {
         assert!(SKILL_TEMPLATE.contains("Operator-visible document text is authoritative"));
         assert!(SKILL_TEMPLATE.contains("content_ours"));
-        assert!(
-            SKILL_TEMPLATE.contains("Snapshots are backup/audit state, not hot-path authority")
-        );
+        assert!(SKILL_TEMPLATE.contains(
+            "Snapshots and partial captures are backup/audit state, not hot-path authority"
+        ));
         assert!(SKILL_TEMPLATE.contains("fail closed or retry through the editor"));
     }
 
@@ -2878,7 +2880,9 @@ mod tests {
             .iter()
             .find(|(name, _)| *name == "commit.md")
             .expect("commit.md not found");
-        assert!(content.contains("Every appended `agent-doc` response must be committed"));
+        assert!(content.contains(
+            "Every appended `agent-doc` session response is one complete, validated write+commit"
+        ));
         assert!(content.contains("agent-doc finalize <FILE>"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));

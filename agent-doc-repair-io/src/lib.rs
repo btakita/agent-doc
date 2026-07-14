@@ -941,9 +941,13 @@ pub fn repair_template_doc_if_needed(
         agent_doc_template::repair_conversation_tail_outside_exchange(&duplicate_close_repaired)?
             .unwrap_or_else(|| duplicate_close_repaired.clone());
     let tail_changed = tail_repaired != duplicate_close_repaired;
-    let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &tail_repaired)?;
-    let boundary_changed = boundary_repaired.is_some();
-    let mut repaired = boundary_repaired.unwrap_or_else(|| tail_repaired.clone());
+    let inline_boundary_repaired = repair_inline_boundary_fragmentation(&tail_repaired)?;
+    let boundary_input = inline_boundary_repaired
+        .clone()
+        .unwrap_or_else(|| tail_repaired.clone());
+    let boundary_repaired = repair_answered_stale_boundary_if_safe(file, &boundary_input)?;
+    let boundary_changed = inline_boundary_repaired.is_some() || boundary_repaired.is_some();
+    let mut repaired = boundary_repaired.unwrap_or(boundary_input);
     let order_repaired =
         effects.repair_response_prompt_order_for_file(&repaired, known_response, file, None)?;
     let order_changed = order_repaired.is_some();
@@ -1193,14 +1197,21 @@ fn repair_answered_stale_boundary_if_safe(
     else {
         return Ok(None);
     };
-    let Some(boundary_id) =
-        agent_doc_element_boundary::boundary::find_boundary_id_in_component(doc_content, exchange)
-    else {
+    let boundary_markers = boundary_markers_outside_code(doc_content, exchange);
+    let Some((boundary_id, _)) = boundary_markers.first() else {
         return Ok(None);
     };
 
+    if boundary_markers.len() > 1 || boundary_markers.iter().any(|(_, standalone)| !standalone) {
+        let repaired = agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
+            doc_content,
+            Some(boundary_id.as_str()),
+        );
+        return Ok((repaired != doc_content).then_some(repaired));
+    }
+
     let exchange_body = exchange.content(doc_content);
-    let marker = agent_doc_element_boundary::boundary::format_marker(&boundary_id);
+    let marker = agent_doc_element_boundary::boundary::format_marker(boundary_id);
     let Some(marker_idx) = exchange_body.find(&marker) else {
         return Ok(None);
     };
@@ -1220,6 +1231,137 @@ fn repair_answered_stale_boundary_if_safe(
         return Ok(None);
     }
     Ok(Some(repaired))
+}
+
+/// Recover the historical partial-patchback shape where the insertion boundary
+/// was duplicated inline on a newer prompt while fragments of the in-flight
+/// response landed after it. This runs only from the explicit repair path.
+///
+/// The inline marker supplies an unambiguous transaction cut: content between
+/// that prompt and the next complete response heading is an incomplete write.
+/// Move the complete prompt after that response, discard the incomplete
+/// fragment, collapse a nearby truncated copy of the prompt, and restore one
+/// standalone boundary at exchange end.
+fn repair_inline_boundary_fragmentation(doc_content: &str) -> Result<Option<String>> {
+    let components = agent_doc_element::element::parse(doc_content)?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let exchange_body = exchange.content(doc_content);
+    let lines = exchange_body.split_inclusive('\n').collect::<Vec<_>>();
+    let boundary_markers = boundary_markers_outside_code(doc_content, exchange);
+    let Some((boundary_id, _)) = boundary_markers.iter().find(|(_, standalone)| !standalone) else {
+        return Ok(None);
+    };
+    let marker = agent_doc_element_boundary::boundary::format_marker(boundary_id);
+    let Some(inline_idx) = lines
+        .iter()
+        .position(|line| line.contains(&marker) && line.trim() != marker)
+    else {
+        return Ok(None);
+    };
+    let prompt_line = agent_doc_element_boundary::boundary::remove_all(lines[inline_idx]);
+    let prompt = prompt_line.trim();
+    if prompt.is_empty() || prompt.starts_with("### Re:") || prompt.starts_with("<!--") {
+        return Ok(None);
+    }
+
+    let Some(response_start) = lines
+        .iter()
+        .enumerate()
+        .skip(inline_idx + 1)
+        .find_map(|(idx, line)| line.trim_start().starts_with("### Re:").then_some(idx))
+    else {
+        return Ok(None);
+    };
+    let Some(next_response_start) = lines
+        .iter()
+        .enumerate()
+        .skip(response_start + 1)
+        .find_map(|(idx, line)| line.trim_start().starts_with("### Re:").then_some(idx))
+    else {
+        return Ok(None);
+    };
+
+    let truncated_prompt_idx = (response_start + 1..next_response_start)
+        .rev()
+        .find(|&idx| prompt_lines_are_prefix_variants(prompt, lines[idx].trim()));
+    let response_end = truncated_prompt_idx.unwrap_or(next_response_start);
+
+    let mut rebuilt_exchange = String::with_capacity(exchange_body.len());
+    rebuilt_exchange.push_str(&lines[..inline_idx].concat());
+    rebuilt_exchange.push_str(&lines[response_start..response_end].concat());
+    if !rebuilt_exchange.ends_with('\n') {
+        rebuilt_exchange.push('\n');
+    }
+    rebuilt_exchange.push_str(prompt);
+    rebuilt_exchange.push('\n');
+    rebuilt_exchange.push_str(&lines[next_response_start..].concat());
+
+    let rebuilt_doc = exchange.replace_content(doc_content, &rebuilt_exchange);
+    let repaired = agent_doc_template::reposition_boundary_to_end_preserve_head_with_id(
+        &rebuilt_doc,
+        Some(boundary_id),
+    );
+    Ok((repaired != doc_content).then_some(repaired))
+}
+
+fn boundary_markers_outside_code(
+    doc_content: &str,
+    exchange: &agent_doc_element::element::Component,
+) -> Vec<(String, bool)> {
+    const PREFIX: &str = "<!-- agent:boundary:";
+    const SUFFIX: &str = " -->";
+
+    let code_ranges = agent_doc_element::element::find_code_ranges(doc_content);
+    let exchange_body = exchange.content(doc_content);
+    let mut markers = Vec::new();
+    let mut line_offset = 0;
+    for line in exchange_body.split_inclusive('\n') {
+        let mut cursor = 0;
+        while let Some(relative_start) = line[cursor..].find(PREFIX) {
+            let start = cursor + relative_start;
+            let absolute = exchange.open_end + line_offset + start;
+            if code_ranges
+                .iter()
+                .any(|&(code_start, code_end)| absolute >= code_start && absolute < code_end)
+            {
+                cursor = start + PREFIX.len();
+                continue;
+            }
+            let id_start = start + PREFIX.len();
+            let Some(relative_end) = line[id_start..].find(SUFFIX) else {
+                break;
+            };
+            let end = id_start + relative_end + SUFFIX.len();
+            let marker = &line[start..end];
+            markers.push((
+                line[id_start..id_start + relative_end].trim().to_string(),
+                line.trim() == marker,
+            ));
+            cursor = end;
+        }
+        line_offset += line.len();
+    }
+    markers
+}
+
+fn prompt_lines_are_prefix_variants(complete: &str, candidate: &str) -> bool {
+    if candidate.is_empty() || candidate.starts_with("###") || candidate.starts_with("<!--") {
+        return false;
+    }
+    let complete = complete.trim_start_matches('❯').trim();
+    let candidate = candidate.trim_start_matches('❯').trim();
+    let common = complete
+        .chars()
+        .zip(candidate.chars())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let shorter = complete.chars().count().min(candidate.chars().count());
+    common >= 16 && common * 4 >= shorter * 3
 }
 
 pub fn historical_committed_capture_replay(

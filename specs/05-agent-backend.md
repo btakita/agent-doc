@@ -88,6 +88,8 @@ the same ranked miss causes used by session-cost diagnostics.
 - Partial checkpoints live beside final response captures at `.agent-doc/captures/<doc-hash>/<cycle-id>.partial.json`.
 - Partial checkpoints are recovery evidence only: they must not advance the document cycle to `response_captured`, and automatic replay still requires a final validated response capture or an already-visible response in the document.
 - Partial checkpoint writers are bound to the cycle ID observed at writer creation. If the document cycle is later committed, abandoned, or replaced by another cycle, the writer must stop checkpointing and log `partial_response_checkpoint_stopped` instead of mutating stale partial ledgers from an older response. This includes stale `preflight_started` repair that abandons an empty prompt-bearing cycle while the unresolved prompt remains visible for the next fresh preflight.
+- Streaming chunks must not invoke document write-back. The runtime buffers them until `is_final`, then submits the complete final response exactly once. Console progress and `.partial.json` recovery evidence are the only permitted partial-output surfaces.
+- A healthy streamed turn must reach committed closeout without `repair`. Repair remains an exceptional crash/restart recovery path and must never be required merely because the same turn first wrote a response prefix and later produced the full body.
 
 ## Direct Run Heartbeats
 

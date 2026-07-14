@@ -22,8 +22,8 @@ pub const RECYCLE_REQUEST_TTL_SECS_ENV: &str = "AGENT_DOC_RECYCLE_REQUEST_TTL_SE
 
 /// Canonical reason for an install-driven cross-supervisor recycle request.
 pub const RECYCLE_REQUEST_INSTALL_FANOUT: &str = "install_fanout";
-/// Canonical reason for a preflight-observed stale supervisor recycle request.
-pub const RECYCLE_REQUEST_STALE_SUPERVISOR_PREFLIGHT: &str = "stale_supervisor_preflight";
+/// Canonical reason for a stale supervisor observed at any turn stage.
+pub const RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE: &str = "stale_supervisor_turn_stage";
 
 /// Persisted recycle-request body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -136,11 +136,11 @@ fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
 /// snapshot do not yet have (an IPC/editor partial patchback written straight to
 /// disk), with no cycle_state.
 ///
-/// Bare `agent-doc write` no longer strands a placed response — it escalates to
-/// the commit boundary (#bare-write-captured-uncommitted) — so this setup places
-/// the response on disk directly instead of via a bare write that used to leave
-/// the cycle open. `committed` is the content currently at HEAD; the response is
-/// inserted at the exchange tail and the snapshot is written without it (drift).
+/// Bare `agent-doc write` now fails before response/capture/document mutation
+/// (#final-response-transaction), so this setup places the response on disk
+/// directly to model a legacy/manual patchback. `committed` is the content at
+/// HEAD; the response is inserted at the exchange tail while the snapshot omits
+/// it (drift).
 fn place_uncommitted_visible_response(
     root: &Path,
     doc: &Path,
@@ -424,7 +424,7 @@ fn write_commit_empty_stdin_does_not_commit_live_prompt_drift() {
 }
 
 #[test]
-fn stream_editor_absent_skips_ipc_and_writes_directly() {
+fn finalize_stream_editor_absent_skips_ipc_and_writes_directly() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -434,7 +434,7 @@ fn stream_editor_absent_skips_ipc_and_writes_directly() {
     agent_doc()
         .current_dir(tmp.path())
         .args([
-            "write",
+            "finalize",
             doc.to_str().unwrap(),
             "--stream",
             "--baseline-file",
@@ -958,13 +958,19 @@ fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
 }
 
 #[test]
-fn bare_write_stream_on_session_doc_escalates_to_commit_when_response_placed() {
-    // #bare-write-captured-uncommitted: a bare `agent-doc write` that places a
-    // response body on a session document must not strand the visible response
-    // outside the commit boundary. It escalates to the same write+commit boundary
-    // as `write --commit` instead of failing with the cycle left open.
+fn bare_write_stream_on_session_doc_fails_before_mutating_the_document() {
+    // #final-response-transaction: a response prefix must never become
+    // authoritative. Session response writes require an explicit final commit
+    // boundary and fail before capture/document/queue mutation otherwise.
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
+    let before = fs::read_to_string(&doc).unwrap();
+    let head_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap()
+        .stdout;
 
     let assert_result = agent_doc()
         .current_dir(tmp.path())
@@ -973,46 +979,23 @@ fn bare_write_stream_on_session_doc_escalates_to_commit_when_response_placed() {
             "<!-- patch:exchange -->\n### Re: repair — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
-        .success();
+        .failure();
 
     let stderr = String::from_utf8_lossy(&assert_result.get_output().stderr);
     assert!(
-        stderr.contains("escalating to the commit boundary")
-            && stderr.contains("#bare-write-captured-uncommitted"),
-        "stderr should explain the bare-write commit escalation, got: {stderr}"
+        stderr.contains("partial or non-committing response writes are disabled")
+            && stderr.contains("agent-doc finalize"),
+        "stderr should explain the final-only response boundary, got: {stderr}"
     );
-
-    // The response is committed to HEAD, not stranded in the working tree.
-    let head = ProcessCommand::new("git")
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+    let head_after = ProcessCommand::new("git")
         .current_dir(tmp.path())
-        .args(["show", "HEAD:session.md"])
+        .args(["rev-parse", "HEAD"])
         .output()
-        .unwrap();
-    let head_blob = String::from_utf8_lossy(&head.stdout);
-    assert!(
-        head_blob.contains("### Re: repair — gpt-5"),
-        "the placed response should be committed to HEAD, got: {head_blob}"
-    );
-
-    let cycles_dir = tmp.path().join(".agent-doc/state/cycles");
-    let cycle_path = fs::read_dir(&cycles_dir)
         .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let cycle_json = fs::read_to_string(&cycle_path).unwrap();
-    assert!(
-        cycle_json.contains("\"phase\": \"committed\""),
-        "cycle should reach committed after the escalated bare write, got: {cycle_json}"
-    );
-
-    // session-check is clean with no further manual commit needed.
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .success();
+        .stdout;
+    assert_eq!(head_after, head_before);
+    assert!(!tmp.path().join(".agent-doc/active-response").exists());
 }
 
 #[test]

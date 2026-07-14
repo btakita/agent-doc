@@ -148,6 +148,9 @@ pub fn recover_empty_response_for_strict_closeout<
             return Ok(true);
         }
         if outcome.repaired() {
+            if outcome == RepairOutcome::AlreadyApplied {
+                (effects.complete_required_closeout)(file)?;
+            }
             eprintln!(
                 "[write] empty response stdin; recovered existing agent-doc response state with {:?}",
                 outcome
@@ -216,15 +219,18 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     } else {
         None
     };
+    let live_editor_authority = force_disk_override != Some(true)
+        && agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
+    let active_codex_session = agent_doc_codex_hook_io::load_active_session_for_current_file(file)
+        .ok()
+        .flatten()
+        .is_some();
     let visible_response_recovery = if !has_pending_response
         && capture.is_none()
         && historical_capture.is_none()
         && visible_response_recovery_is_adoptable(
             cycle_state.as_ref().map(|state| state.phase),
-            agent_doc_codex_hook_io::load_active_session_for_current_file(file)
-                .ok()
-                .flatten()
-                .is_some(),
+            live_editor_authority || active_codex_session,
         )
         && agent_doc_git_io::status::is_in_git_repo(file)
         && !head_already_matches_current_doc(file, &doc_content)?

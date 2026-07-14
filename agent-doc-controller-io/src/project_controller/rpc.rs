@@ -9889,7 +9889,8 @@ pub(crate) fn handle_dispatch(
     let conn = open_state_db(&bootstrap.project_root)?;
     let in_flight =
         state_store::has_open_in_flight_dispatch(&conn, &document_id, record.generation)?;
-    if dispatch_should_coalesce_in_flight(in_flight, false) {
+    let operator_driven = dispatch_command_kind_is_operator_reopen(&command_kind);
+    if dispatch_should_coalesce_in_flight(in_flight, operator_driven) {
         let receipt = insert_dispatch_attempt_record(
             &bootstrap.project_root,
             ControllerDispatchReceiptInsert {
@@ -14101,7 +14102,7 @@ mod tests {
             reason: None,
             supervisor_pid: None,
             supervisor_socket: None,
-            command_kind: Some("managed_reopen".to_string()),
+            command_kind: Some("projection_repair".to_string()),
             diagnostic_payload: Some("qflood test".to_string()),
         };
 
@@ -14133,7 +14134,29 @@ mod tests {
             "projection drift must not consume the controller-owned receipt"
         );
 
-        // Re-fire while the receipt is in flight ⇒ coalesced (bail), even though
+        // An explicit operator reopen is never swallowed by stale same-generation
+        // backpressure. This is the JetBrains `Run Agent Doc` path: the click must
+        // reach the pane even while an older receipt remains open.
+        let operator_dispatch = || ControllerRequest {
+            command: "dispatch".to_string(),
+            file: Some(doc.clone()),
+            session_id: Some("session-qf".to_string()),
+            pane_id: Some("%41".to_string()),
+            window_id: None,
+            generation: Some(1),
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: Some("dispatch_only_reopen".to_string()),
+            diagnostic_payload: Some("operator Run Agent Doc".to_string()),
+        };
+        handle_dispatch(&bootstrap, None, operator_dispatch())
+            .expect("operator reopen must bypass stale in-flight coalescing");
+
+        // A non-operator re-fire while the receipt is in flight ⇒ coalesced
+        // (bail), even though
         // the actor projection says Ready. It cannot pile another trigger into
         // the pane.
         let err = handle_dispatch(&bootstrap, None, dispatch()).unwrap_err();

@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.105
+
+- **JetBrains `Run Agent Doc` operator reopens no longer disappear behind stale dispatch backpressure.** The production Project Controller now classifies `managed_reopen` / `dispatch_only_reopen` with the same operator policy already covered by SimWorld, so an explicit editor run bypasses an older same-generation in-flight receipt while automatic redispatches remain coalesced. Controller regression coverage reproduces the `waiting_input` + open-receipt route that previously settled exit 0 without submitting anything.
+- **Strict empty closeout now adopts and commits a live editor's last response across harnesses.** Visible-response recovery recognizes durable editor/CRDT authority instead of relying on a Codex-only hook session, including an already-`committed` cycle whose snapshot/`HEAD` image was compacted while JetBrains still held the expanded response. The recovered `AlreadyApplied` response now crosses the ordinary converged commit/session-check boundary exactly once; the binary does not restore the editor buffer to `HEAD`, ask the agent to choose a restore, or create another response turn. A live-controller integration test covers a Claude Code document, registered JetBrains replica, delivery ACK pump, stale compacted snapshot/HEAD, empty `write --commit`, and the single recovery commit.
+
 ## 0.34.104
 
 - **JetBrains `File Cache Conflict` recovery now preserves editor authority.** Socket `already_applied` recovery waits on one shared lazily deadline for the editor's visible-write receipt; it never reconstructs a response from stale disk or writes that document behind an attached editor. Missing or inconsistent receipts retain the response operation for CPC/CRDT replay, and the same bounded receipt budget is shared by socket, file-watcher, normalization, and convergence paths to coalesce retry pressure. File-IPC also no longer treats disk equality as an editor ACK; an unconsumed response operation remains queued without mutating the document. Prompt-shaped divergence is reported as user typing only after that authoritative cut also proves the response is present.

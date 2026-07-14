@@ -363,6 +363,99 @@ fn snapshot_path(root: &Path, doc: &Path) -> PathBuf {
 }
 
 #[test]
+fn write_commit_adopts_live_non_codex_editor_response_after_committed_snapshot_drift() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let compacted = session_stream_doc_content().replace("agent: codex", "agent: claude-code");
+    fs::write(&doc, &compacted).unwrap();
+    init_git_repo(tmp.path(), &doc);
+
+    // Establish a committed response, then model compaction landing a
+    // response-free HEAD/snapshot while JetBrains still holds the expanded,
+    // authoritative buffer. There is intentionally no Codex hook session.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: editor-authoritative recovery — opus-4-7\nlast response body\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    let editor_buffer = fs::read_to_string(&doc).unwrap();
+
+    fs::write(&doc, &compacted).unwrap();
+    fs::write(snapshot_path(tmp.path(), &doc), &compacted).unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["add", "session.md"])
+        .status()
+        .unwrap();
+    ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["commit", "-m", "compact exchange", "--no-verify"])
+        .status()
+        .unwrap();
+    assert!(
+        !head_blob(tmp.path()).contains("### Re: editor-authoritative recovery"),
+        "test precondition: compacted HEAD must omit the editor's last response"
+    );
+
+    fs::write(&doc, &editor_buffer).unwrap();
+    seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
+    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
+    record_operator_buffer(&doc, &editor_buffer);
+    let mut controller = start_project_controller(tmp.path());
+    let editor_replica = register_editor_replica_via_project_controller(&doc);
+    let editor_replica_state =
+        publish_editor_text_via_project_controller(&doc, &editor_replica, &editor_buffer);
+    start_project_controller_delivery_pump(&doc, &editor_replica, editor_replica_state);
+
+    let commits_before = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    let commits_before: u64 = String::from_utf8_lossy(&commits_before.stdout)
+        .trim()
+        .parse()
+        .unwrap();
+    let recovery = agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .output()
+        .unwrap();
+    stop_project_controller(tmp.path(), &mut controller);
+    assert!(
+        recovery.status.success(),
+        "editor-authoritative recovery failed: {}",
+        String::from_utf8_lossy(&recovery.stderr)
+    );
+
+    let recovered_head = head_blob(tmp.path());
+    assert!(
+        recovered_head.contains("### Re: editor-authoritative recovery — opus-4-7")
+            && recovered_head.contains("last response body"),
+        "empty strict closeout must adopt and commit the editor buffer, never restore compacted HEAD:\n{recovered_head}"
+    );
+    let commits_after = ProcessCommand::new("git")
+        .current_dir(tmp.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    let commits_after: u64 = String::from_utf8_lossy(&commits_after.stdout)
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        commits_after,
+        commits_before + 1,
+        "recovery must close out in one commit without turn churn"
+    );
+}
+
+#[test]
 fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue_drift() {
     let tmp = TempDir::new().unwrap();
     let agent_doc_dir = tmp.path().join(".agent-doc");

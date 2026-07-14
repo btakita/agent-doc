@@ -182,6 +182,68 @@ pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content:
     )
     .expect("test editor should publish through CRDT relay")
     .expect("test editor relay update should be accepted under plugin-owner authority");
+    let _ = spawn_crdt_delivery_pump(canonical, identity, replica);
+}
+
+/// Run the editor half of CRDT delivery for integration fixtures that model a
+/// live replica. The worker applies each remote delta before acknowledging it,
+/// matching the production plugin contract closely enough for write-through
+/// tests to exercise real delivery backpressure instead of a fake instant ACK.
+pub fn start_crdt_delivery_pump(file: &Path, identity: &str) -> std::thread::JoinHandle<()> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let (client_id, bootstrap) =
+        agent_doc_crdt_relay_io::register_replica_for_file(&canonical, identity)
+            .expect("test editor delivery pump should register through CRDT relay")
+            .expect("test editor delivery pump should remain attached");
+    let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+        .expect("test editor delivery pump should decode relay bootstrap");
+    spawn_crdt_delivery_pump(canonical, identity.to_string(), replica)
+}
+
+fn spawn_crdt_delivery_pump(
+    canonical: std::path::PathBuf,
+    identity: String,
+    replica: agent_doc_merge::crdt_sync::ReplicaState,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline && canonical.exists() {
+            match agent_doc_crdt_relay_io::pull_replica_updates_for_file(&canonical, &identity) {
+                Ok(Some(pull)) => {
+                    for update in pull.updates {
+                        if let Err(err) = replica.apply_update(&update.update) {
+                            eprintln!(
+                                "test CRDT delivery pump failed to apply {}: {err:#}",
+                                canonical.display()
+                            );
+                            return;
+                        }
+                        if let Err(err) = agent_doc_crdt_relay_io::ack_replica_update_for_file(
+                            &canonical,
+                            &identity,
+                            &update.patch_id,
+                            update.generation,
+                        ) {
+                            eprintln!(
+                                "test CRDT delivery pump failed to ACK {}: {err:#}",
+                                canonical.display()
+                            );
+                            return;
+                        }
+                    }
+                }
+                Ok(None) => return,
+                Err(err) => {
+                    eprintln!(
+                        "test CRDT delivery pump failed to pull {}: {err:#}",
+                        canonical.display()
+                    );
+                    return;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    })
 }
 
 fn mark_test_local_crdt_relay(file: &Path) {

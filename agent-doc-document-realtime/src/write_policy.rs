@@ -47,6 +47,24 @@ pub enum VisibleWriteDecision {
     DeferActiveTyping,
 }
 
+/// Admission for a CPC-authored CRDT write while a previous canonical frontier
+/// may still be in flight to editor replicas. A new write is backpressured until
+/// all live editors ACK the visible frontier; callers may coalesce queued intent
+/// to the latest target while waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrdtWriteAdmission {
+    ApplyLatest,
+    WaitForDeliveryAck,
+}
+
+pub const fn decide_crdt_write_admission(delivery_converged: bool) -> CrdtWriteAdmission {
+    if delivery_converged {
+        CrdtWriteAdmission::ApplyLatest
+    } else {
+        CrdtWriteAdmission::WaitForDeliveryAck
+    }
+}
+
 /// Admission policy for legacy editor patch transports under reliable document
 /// liveness. Payload delivery is allowed only when both authorities agree that
 /// an editor is live. A disagreement is fail-closed; an agreed detached state
@@ -4472,6 +4490,18 @@ Working.
             |_, _, _| Some("<<<<<<< conflict\n>>>>>>>".to_string())
         ));
     }
+}
+
+#[test]
+fn crdt_write_admission_backpressures_until_visible_ack() {
+    assert_eq!(
+        decide_crdt_write_admission(false),
+        CrdtWriteAdmission::WaitForDeliveryAck,
+    );
+    assert_eq!(
+        decide_crdt_write_admission(true),
+        CrdtWriteAdmission::ApplyLatest,
+    );
 }
 
 #[test]

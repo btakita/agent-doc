@@ -8102,6 +8102,73 @@ mod crdt_relay_sim {
     }
 
     #[test]
+    fn file_cache_conflict_backpressure_applies_coalesced_latest_once_after_ack() {
+        use agent_doc_document_realtime::write_policy::{
+            CrdtWriteAdmission, decide_crdt_write_admission,
+        };
+
+        let baseline = "# Session\n\nCurrent.\n";
+        let first = "# Session\n\nCurrent.\n\n### Re: once\n\nApplied.\n";
+        let latest = "# Session\n\nCurrent.\n\n### Re: once\n\nApplied and normalized.\n";
+        let mut world = RelaySimWorld::new(1);
+        let editor = world.attach("intellij:file-cache-conflict");
+        world.edit_now(editor, 0, 0, baseline);
+
+        world
+            .hub
+            .apply_canonical_replace(baseline, first)
+            .expect("first canonical write");
+        assert_eq!(
+            decide_crdt_write_admission(world.hub.delivery_converged()),
+            CrdtWriteAdmission::WaitForDeliveryAck,
+            "a second write must not stack behind an unacknowledged editor delivery",
+        );
+        assert_eq!(
+            world.hub.pending_updates(editor).unwrap().len(),
+            1,
+            "the editor-visible ACK frontier still has one delivery in flight",
+        );
+
+        // While the first frontier is in flight, newer intent replaces the
+        // queued target in the caller. It is not replayed through a second
+        // mutation plane and is not applied until the first visible ACK.
+        let coalesced_latest = latest;
+        let first_delivery = world.hub.pending_updates(editor).unwrap().pop().unwrap();
+        world.hub.deliver(editor, &first_delivery.update).unwrap();
+        world
+            .hub
+            .ack_delivery(editor, &first_delivery.patch_id, first_delivery.generation)
+            .unwrap();
+        assert_eq!(
+            decide_crdt_write_admission(world.hub.delivery_converged()),
+            CrdtWriteAdmission::ApplyLatest,
+        );
+
+        world
+            .hub
+            .apply_canonical_replace(first, coalesced_latest)
+            .expect("coalesced latest write");
+        let latest_delivery = world.hub.pending_updates(editor).unwrap().pop().unwrap();
+        world.hub.deliver(editor, &latest_delivery.update).unwrap();
+        world
+            .hub
+            .ack_delivery(
+                editor,
+                &latest_delivery.patch_id,
+                latest_delivery.generation,
+            )
+            .unwrap();
+
+        assert!(world.hub.delivery_converged());
+        assert_eq!(world.hub.canonical_text(), coalesced_latest);
+        assert_eq!(world.hub.member_text(editor).unwrap(), coalesced_latest);
+        assert_eq!(
+            world.hub.canonical_text().matches("### Re: once").count(),
+            1
+        );
+    }
+
+    #[test]
     fn disk_projection_recovers_canonical_and_in_memory_wins() {
         // Coverage (phase 6): the disk projection is a recovery input; a restart
         // rebuilds the canonical replica from it, and a stale projection never

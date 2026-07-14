@@ -1,6 +1,20 @@
 # JetBrains File Cache Conflict
 
-When IntelliJ has a session document open and the binary writes through IPC, the IDE occasionally surfaces a **File Cache Conflict** dialog because its cache disagrees with what is about to land on disk. The dialog gives the user two paths.
+When IntelliJ has a session document open, an older or degraded write path can surface a **File Cache Conflict** dialog because the editor cache disagrees with a competing disk or legacy IPC mutation. The current attached-document path prevents that race by treating CRDT delivery as the only visible-document mutation plane.
+
+## Quiescent CRDT Delivery
+
+For a document with an attached CRDT replica, every ordinary binary-owned write follows this contract. The explicit operator-authorized `--force-disk` recovery remains the documented escape hatch and keeps actor serialization while intentionally bypassing CRDT delivery.
+
+1. Wait for the shared typing signal to remain idle for 500 ms. The wait happens outside the Project Controller RPC loop so the editor can continue publishing local changes and acknowledgements.
+2. Observe the latest canonical CRDT text. If the operator edited while the agent was working, rebase the original agent change over that settled operator cut with the component-aware CRDT merge.
+3. If an earlier canonical frontier is still awaiting visible-editor acknowledgement, apply backpressure: do not enqueue another replacement. Re-observe and coalesce to the latest operator text and agent target while waiting for the outstanding acknowledgement.
+4. Submit exactly one CRDT replacement once admitted. Never follow an accepted CRDT write with the legacy component/full-content editor IPC path; that second mutation is interpreted as local typing and can duplicate the document.
+5. Wait until canonical text equals the target and every attached replica has acknowledged the delivery frontier. Only then may the exact proven canonical text be projected to disk. If canonical text advances before projection, return to the merge step instead of overwriting it.
+
+The retry is responsive and bounded: it uses 25–250 ms exponential backoff, reports progress every two seconds, and fails closed after 60 seconds with the agent change retained for retry. It never falls back to a competing disk write while an editor-owned replica remains attached. Deterministic coverage is `file_cache_conflict_backpressure_applies_coalesced_latest_once_after_ack` in `src/sim_world.rs` plus the document-realtime IO acknowledgement/rebase tests.
+
+The dialog contract below remains the recovery path for older plugins, already-open legacy conflicts, or writes that began before this contract was installed.
 
 ## Dialog Contract
 
@@ -29,10 +43,10 @@ In those cases the documented manual repair is `agent-doc write --commit <FILE>`
 
 ## Compact Exchange
 
-`agent-doc compact <FILE> --component exchange --commit` uses a different closeout path from normal response IPC:
+`agent-doc compact <FILE> --component exchange --commit` uses the shared convergence authority rather than a whole-document response payload:
 
 - Compact Exchange does not emit editor IPC `fullContent` or ask JetBrains to replace the whole visible buffer.
-- The binary computes the compacted document, then tries component `op:replace` editor IPC when a listener is active. The guarded direct-write path (`source=compact_exchange_direct_write`) is only the no-listener fallback, so the session document is replaced behind the editor only when no plugin is running and disk still matches the expected source content.
+- The binary computes the compacted document, then uses the quiescent CRDT delivery contract above when a replica is attached. A reliable legacy endpoint without an attached model may still receive a component `op:replace`; the guarded direct-write path (`source=compact_exchange_direct_write`) is only the detached fallback, so the session document is replaced behind the editor only when no plugin is running and disk still matches the expected source content.
 - When the JetBrains sidecar reports a stale live buffer/stale file cache, or an active listener cannot prove the editor patch via ack-content, compact fails closed before replacing the document or advancing the snapshot. Expected ops-log signatures include `visible_write_deferred_live_buffer_changed source=compact_exchange_direct_write` and `compact_writeback ... transport=blocked reason=... action=refuse_external_disk_write`.
 - Recovery is to resolve the IDE buffer first: save, discard, or reload the document so JetBrains and disk agree, then rerun `agent-doc compact <FILE> --component exchange --commit`.
 

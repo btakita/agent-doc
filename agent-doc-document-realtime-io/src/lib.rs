@@ -70,12 +70,28 @@ use agent_doc_crdt_relay_io::deregister_replica_for_file as test_support_deregis
 use agent_doc_crdt_relay_io::ensure_document_model as test_support_ensure_document_model;
 #[cfg(test)]
 use agent_doc_crdt_relay_io::register_replica_for_file as test_support_register_replica_for_file;
+#[cfg(test)]
+use agent_doc_crdt_relay_io::{
+    ack_replica_update_for_file as test_support_ack_replica_update_for_file,
+    pull_replica_updates_for_file as test_support_pull_replica_updates_for_file,
+};
 
 static DOCUMENT_AUTHORITY_EPOCH: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
     Mutex<HashMap<PathBuf, DocumentAuthorityObservation>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 const CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS: u64 = 500;
+
+#[cfg(test)]
+const CRDT_WRITE_SETTLE_MS: u64 = 10;
+#[cfg(not(test))]
+const CRDT_WRITE_SETTLE_MS: u64 = 500;
+#[cfg(test)]
+const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_000;
+#[cfg(not(test))]
+const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
+const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
+const CRDT_WRITE_BACKOFF_MAX_MS: u64 = 250;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DocumentAuthorityObservation {
@@ -292,9 +308,8 @@ impl agent_doc_cycle_state_io::pipeline_frontmatter::PipelineFrontmatterEffects
 }
 
 pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> {
-    if agent_doc_document_realtime::write_authority::is_visible_document(path)
-        && !agent_doc_document_realtime::write_authority::within_owner_scope()
-    {
+    let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
+    if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
         log_fence_count_drop_if_any(path, content);
         let base_dir = agent_doc_project_root_io::project_root_containing(path)
             .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -312,6 +327,82 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                 path,
                 &format!(
                     "write_authority action=routed transport=write_queue len={} hash={}",
+                    content.len(),
+                    agent_doc_hash::content_hash(content)
+                ),
+            );
+        }
+        return result;
+    }
+
+    if visible_document {
+        // Inside the per-document write actor, make the CRDT canonical the
+        // mutation plane and materialize disk only after every live editor has
+        // ACKed the same canonical frontier. The existing disk projection is
+        // the best available merge base for this legacy no-CAS API; the CRDT
+        // convergence path rebases `content` over a newer operator cut.
+        let projection_base = std::fs::read_to_string(path).unwrap_or_default();
+        if let Some(relay_write) = apply_canonical_replace_if_attached(
+            path,
+            &projection_base,
+            content,
+            "serialized_atomic_write",
+        )? {
+            let canonical = match observe_live_editor_authority_after_model_ensure(
+                path,
+                "serialized_atomic_write_projection",
+            )? {
+                agent_doc_crdt_relay_io::CurrentText::Current {
+                    text,
+                    delivery_converged: true,
+                    ..
+                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => text,
+                current => {
+                    anyhow::bail!(
+                        "refusing disk projection for {}: CRDT canonical advanced after its delivery proof ({current:?}); retry through the document actor",
+                        path.display(),
+                    );
+                }
+            };
+            atomic_write_authority_raw(path, &canonical)?;
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "write_authority action=materialized transport=crdt_then_disk_projection len={} hash={} delivery_converged=true",
+                    canonical.len(),
+                    relay_write.content_hash,
+                ),
+            );
+            return Ok(());
+        }
+    }
+
+    atomic_write_authority_raw(path, content)
+}
+
+/// Explicit operator-authorized disk escape hatch. It preserves the same
+/// per-document actor serialization as ordinary writes but intentionally does
+/// not enter the attached CRDT convergence loop.
+pub fn atomic_write_force_disk_through_authority(path: &Path, content: &str) -> Result<()> {
+    let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
+    if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
+        log_fence_count_drop_if_any(path, content);
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            atomic_write_force_disk_through_authority,
+        );
+        if result.is_ok() {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "write_authority action=routed transport=write_queue mode=force_disk len={} hash={}",
                     content.len(),
                     agent_doc_hash::content_hash(content)
                 ),
@@ -390,22 +481,212 @@ pub fn apply_canonical_replace_if_attached(
     content: &str,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
-    let relay_write =
-        apply_cpc_write_through_relay_authority(file, expected_current, content, source)?;
-    if let Some(relay_write) = relay_write.as_ref() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
+    let started = std::time::Instant::now();
+    let deadline = started + std::time::Duration::from_millis(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(expected_current).encode_state();
+    let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+    let mut pending_target: Option<String> = None;
+    let mut pending_write: Option<agent_doc_crdt_relay_io::CpcRelayWrite> = None;
+    let mut wait_reason = "typing_quiescence";
+    let mut last_notice = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap_or_else(std::time::Instant::now);
+
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_convergence_timeout file={} reason={} timeout_ms={} recovery=retry_crdt_merge_no_legacy_replay",
+                    file.display(),
+                    wait_reason,
+                    CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
+                ),
+            );
+            anyhow::bail!(
+                "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); pending change retained for retry",
                 file.display(),
-                relay_write.content_hash,
-                relay_write.update_bytes,
-                relay_write.targets,
-                relay_write.delivery_converged,
-            ),
-        );
+                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
+                wait_reason,
+            );
+        }
+
+        // A CPC write is issued only from a quiescent editor cut. Waiting here
+        // happens in the caller, outside the controller RPC loop, so editor
+        // deltas and delivery ACKs remain responsive while typing settles.
+        if pending_target.is_none() {
+            let remaining_ms = deadline
+                .saturating_duration_since(now)
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64;
+            guard_visible_write_idle_with_budget(
+                file,
+                source,
+                CRDT_WRITE_SETTLE_MS,
+                remaining_ms.max(1),
+            )
+            .with_context(|| {
+                format!(
+                    "{source}: waiting for editor typing to settle before CRDT write for {}",
+                    file.display()
+                )
+            })?;
+        }
+
+        match observe_live_editor_authority_after_model_ensure(file, source)? {
+            agent_doc_crdt_relay_io::CurrentText::Detached => return Ok(None),
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+                wait_reason = "editor_attached_model_missing";
+            }
+            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+                wait_reason = "editor_sync_pending";
+            }
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text: relay_text,
+                live_editors,
+                delivery_converged,
+            } => {
+                if let Some(applied_target) = pending_target.as_ref() {
+                    if delivery_converged && relay_text == *applied_target {
+                        let mut relay_write = pending_write
+                            .take()
+                            .expect("pending CRDT target must retain its write receipt");
+                        relay_write.delivery_converged = true;
+                        relay_write.live_editors = live_editors;
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
+                                file.display(),
+                                relay_write.content_hash,
+                                relay_write.update_bytes,
+                                relay_write.targets,
+                                live_editors,
+                                started.elapsed().as_millis(),
+                            ),
+                        );
+                        return Ok(Some(relay_write));
+                    }
+                    if write_policy::decide_crdt_write_admission(delivery_converged)
+                        == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
+                    {
+                        // Do not stack a second write behind an unacknowledged
+                        // one. The editor pulls a coalesced canonical frontier;
+                        // this poll applies backpressure until that frontier is
+                        // visible and ACKed.
+                        wait_reason = "delivery_ack_pending";
+                    } else {
+                        // Operator text arrived after our write. Recompute from
+                        // the original base/agent candidate against the newest
+                        // converged operator cut, then issue one new CRDT delta.
+                        pending_target = None;
+                        pending_write = None;
+                        backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                        wait_reason = "operator_advanced_after_apply";
+                        continue;
+                    }
+                } else if write_policy::decide_crdt_write_admission(delivery_converged)
+                    == write_policy::CrdtWriteAdmission::WaitForDeliveryAck
+                {
+                    wait_reason = "prior_delivery_ack_pending";
+                } else {
+                    let effective_target =
+                        if relay_text == expected_current || relay_text == content {
+                            content.to_string()
+                        } else {
+                            agent_doc_merge::crdt::merge_by_component(
+                            Some(&base_state),
+                            content,
+                            &relay_text,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "{source}: failed to CRDT-merge the settled editor version for {}",
+                                file.display()
+                            )
+                        })?
+                        };
+
+                    match apply_cpc_write_through_relay_authority(
+                        file,
+                        &relay_text,
+                        &effective_target,
+                        source,
+                    ) {
+                        Ok(None) => return Ok(None),
+                        Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
+                            relay_write.live_editors = live_editors;
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
+                                    file.display(),
+                                    relay_write.content_hash,
+                                    relay_write.update_bytes,
+                                    relay_write.targets,
+                                    live_editors,
+                                    started.elapsed().as_millis(),
+                                ),
+                            );
+                            return Ok(Some(relay_write));
+                        }
+                        Ok(Some(relay_write)) => {
+                            wait_reason = "delivery_ack_pending";
+                            pending_target = Some(effective_target);
+                            pending_write = Some(relay_write);
+                            backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+                        }
+                        Err(err) => {
+                            let detail = format!("{err:#}");
+                            if detail.contains("recovery=retry_crdt_merge")
+                                || detail.contains("editor_sync_pending")
+                            {
+                                wait_reason = "compare_and_swap_raced";
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_write_coalesced_retry file={} reason={} backoff_ms={} recovery=wait_settle_remerge",
+                                        file.display(),
+                                        wait_reason,
+                                        backoff_ms,
+                                    ),
+                                );
+                            } else {
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if last_notice.elapsed() >= std::time::Duration::from_secs(2) {
+            eprintln!(
+                "[write] Waiting for typing/CRDT versions to settle for {} (reason={}, elapsed={}ms)",
+                file.display(),
+                wait_reason,
+                started.elapsed().as_millis(),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_convergence_wait file={} reason={} elapsed_ms={} backoff_ms={} strategy=coalesced_latest_frontier",
+                    file.display(),
+                    wait_reason,
+                    started.elapsed().as_millis(),
+                    backoff_ms,
+                ),
+            );
+            last_notice = std::time::Instant::now();
+        }
+        let sleep_for = std::time::Duration::from_millis(backoff_ms)
+            .min(deadline.saturating_duration_since(std::time::Instant::now()));
+        if !sleep_for.is_zero() {
+            std::thread::sleep(sleep_for);
+        }
+        backoff_ms = backoff_ms.saturating_mul(2).min(CRDT_WRITE_BACKOFF_MAX_MS);
     }
-    Ok(relay_write)
 }
 
 fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
@@ -1768,6 +2049,138 @@ mod tests {
                 pid: std::process::id().into(),
                 observed_tags: vec![tag.to_string()],
             }]);
+    }
+
+    fn ack_next_crdt_delivery(
+        file: std::path::PathBuf,
+        identity: &'static str,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            loop {
+                let pull = test_support_pull_replica_updates_for_file(&file, identity)
+                    .expect("pull CRDT delivery")
+                    .expect("test editor remains attached");
+                if let Some(update) = pull.updates.last() {
+                    assert_eq!(
+                        test_support_ack_replica_update_for_file(
+                            &file,
+                            identity,
+                            &update.patch_id,
+                            update.generation,
+                        )
+                        .expect("ACK CRDT delivery"),
+                        Some(true),
+                    );
+                    return;
+                }
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(2),
+                    "timed out waiting for CRDT delivery"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        })
+    }
+
+    #[test]
+    fn canonical_replace_waits_for_visible_replica_ack() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: settled\n\nDone.\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-visible-ack";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+
+        let write =
+            apply_canonical_replace_if_attached(&file, baseline, target, "test_crdt_visible_ack")
+                .unwrap()
+                .expect("attached CRDT write");
+        ack.join().unwrap();
+
+        assert!(write.delivery_converged);
+        assert_eq!(write.content_hash, agent_doc_hash::content_hash(target));
+        assert!(
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                .unwrap()
+                .contains("transport=crdt_only")
+        );
+    }
+
+    #[test]
+    fn canonical_replace_crdt_rebases_over_settled_operator_text_once() {
+        let baseline = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n- baseline\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nReady.\n<!-- /agent:exchange -->\n",
+        );
+        let operator = baseline.replace("- baseline\n", "- baseline\n- operator edit\n");
+        let agent = baseline.replace(
+            "Ready.\n<!-- /agent:exchange -->",
+            "Ready.\n\n### Re: agent\n\nApplied once.\n<!-- /agent:exchange -->",
+        );
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-rebase";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(client_id, 0, baseline.chars().count() as u32, &operator)
+                .unwrap();
+        })
+        .unwrap();
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+
+        let write =
+            apply_canonical_replace_if_attached(&file, baseline, &agent, "test_crdt_rebase")
+                .unwrap()
+                .expect("attached CRDT write");
+        ack.join().unwrap();
+        let current = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("expected current CRDT text, got {other:?}"),
+        };
+
+        assert!(write.delivery_converged);
+        assert!(current.contains("- operator edit"));
+        assert_eq!(current.matches("### Re: agent").count(), 1);
+        assert_eq!(current.matches("Applied once.").count(), 1);
+    }
+
+    #[test]
+    fn serialized_atomic_write_uses_crdt_before_disk_projection() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody normalized\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-atomic-projection";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+
+        atomic_write_through_authority(&file, target).unwrap();
+        ack.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        let current = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                delivery_converged,
+                ..
+            } => {
+                assert!(delivery_converged);
+                text
+            }
+            other => panic!("expected current CRDT text, got {other:?}"),
+        };
+        assert_eq!(current, target);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("transport=crdt_then_disk_projection"));
     }
 
     fn wait_for_active_typing_indicator(file: &str) {

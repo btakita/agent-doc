@@ -100,6 +100,14 @@ exercised by the live-tmux `send_command_checked_*` and
 `test_mtime_granularity_100ms_rapid_edits`, `test_mtime_granularity_1s_coarse_system`.
 See `src/route/tests.rs` and `tests/debounce_gaps_test_plan.rs`.
 
+## Visible-write quiescence and CRDT convergence
+
+Route debounce governs prompt submission; attached-document write convergence is a separate gate. Before a binary-owned CRDT replacement, the document realtime IO layer waits for 500 ms of typing quiescence outside the Project Controller RPC loop. It then observes the newest canonical CRDT cut and component-merges the original agent target over any operator text that arrived during the wait.
+
+An unacknowledged delivery frontier is backpressure, not permission to add another write. The retry loop coalesces repeated observations to the latest target, waits with 25–250 ms exponential backoff, and submits at most one replacement after acknowledgement. Once a CRDT replacement is accepted, the same candidate must not be replayed through legacy editor IPC. Disk materialization is deferred until the canonical target and visible-replica acknowledgement agree; a later canonical advance restarts the merge instead of being overwritten. The whole convergence wait is bounded to 60 seconds, with progress logged every two seconds, and times out fail-closed while retaining the agent change.
+
+This prevents CRDT-plus-IPC double application from appearing as local typing, temporarily duplicating the file, and provoking JetBrains File Cache Conflict. See `runbooks/jb-cache-conflict.md` and the SimWorld scenario `file_cache_conflict_backpressure_applies_coalesced_latest_once_after_ack`.
+
 ## Untracked File Edge Case
 
 **Gap:** Files passed to `document_changed()` are tracked in the in-process `LAST_CHANGE` map. Files never passed to `document_changed()` return `idle=true` immediately (design choice to prevent `await_idle` blocking forever on unknown files).

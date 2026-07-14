@@ -305,7 +305,7 @@ impl QueueConsumeWriteEffects for ForceDiskQueueConsumeWritebackEffects {
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
     }
 
     fn converge_document_or_disk(

@@ -53,7 +53,8 @@ fn record_visible_write_receipt(
             agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
         ],
     );
-    publish_editor_text_via_project_controller(file, replica, content);
+    let live_replica = publish_editor_text_via_project_controller(file, replica, content);
+    start_project_controller_delivery_pump(file, replica, live_replica);
     let _ =
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file,
@@ -187,7 +188,7 @@ fn publish_editor_text_via_project_controller(
     doc: &Path,
     registered: &ProjectControllerReplica,
     content: &str,
-) {
+) -> agent_doc_merge::crdt_sync::ReplicaState {
     let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(
         registered.client_id,
         &registered.bootstrap,
@@ -213,6 +214,84 @@ fn publish_editor_text_via_project_controller(
             .is_some(),
         "project controller should accept test editor update: {updated}"
     );
+    replica
+}
+
+fn start_project_controller_delivery_pump(
+    doc: &Path,
+    registered: &ProjectControllerReplica,
+    replica: agent_doc_merge::crdt_sync::ReplicaState,
+) {
+    let doc = doc.to_path_buf();
+    let project_root = registered.project_root.clone();
+    let identity = registered.identity.clone();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline && doc.exists() {
+            let pull =
+                match agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+                    &project_root,
+                    &doc,
+                    serde_json::json!({
+                        "method": "replica_pull",
+                        "identity": identity,
+                        "source": "live_ipc_race_integration_test"
+                    }),
+                ) {
+                    Ok(pull) => pull,
+                    Err(_) => return,
+                };
+            match pull.get("kind").and_then(Value::as_str) {
+                Some("replace") => {
+                    let Some(replacement) = pull.get("replace").and_then(Value::as_str) else {
+                        return;
+                    };
+                    let current = replica.text();
+                    replica.apply_local_edit(0, current.len() as u32, replacement);
+                }
+                Some("delta") => {
+                    let Some(updates) = pull.get("updates").and_then(Value::as_array) else {
+                        return;
+                    };
+                    for update in updates {
+                        let Some(patch_id) = update.get("patch_id").and_then(Value::as_str) else {
+                            return;
+                        };
+                        let Some(generation) = update.get("generation").and_then(Value::as_u64)
+                        else {
+                            return;
+                        };
+                        let Some(update_b64) = update.get("update_b64").and_then(Value::as_str)
+                        else {
+                            return;
+                        };
+                        let Ok(encoded) = BASE64_STANDARD.decode(update_b64) else {
+                            return;
+                        };
+                        if replica.apply_update(&encoded).is_err() {
+                            return;
+                        }
+                        let acknowledged = agent_doc_controller_io::project_controller::request_crdt_replica_for_test(
+                            &project_root,
+                            &doc,
+                            serde_json::json!({
+                                "method": "replica_ack",
+                                "identity": identity,
+                                "source": "live_ipc_race_integration_test",
+                                "patch_id": patch_id,
+                                "generation": generation
+                            }),
+                        );
+                        if acknowledged.is_err() {
+                            return;
+                        }
+                    }
+                }
+                _ => return,
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
 }
 
 fn apply_first_component_patch(current: &str, payload: &Value) -> Option<String> {

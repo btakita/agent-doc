@@ -3807,7 +3807,27 @@ pub fn try_editor_converge(
     // relay resolved to disk authority. Durable reliable-sync liveness, rather
     // than relay membership or a plugin-owner lease, decides whether an editor
     // endpoint must still be protected below.
-    effects.apply_canonical_replace_if_attached(file, current_content, target, source)?;
+    if let Some(relay_write) =
+        effects.apply_canonical_replace_if_attached(file, current_content, target, source)?
+    {
+        // An attached CRDT replica is the sole mutation plane. The runtime
+        // effect returns only after the canonical target (rebased with any
+        // settled operator edits) is visible and ACKed by every live editor.
+        // Replaying the same change through legacy component IPC would make
+        // the editor's DocumentListener publish it as fresh local typing and
+        // can double the document / trigger a JetBrains file-cache conflict.
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_writeback file={} transport=crdt_relay content_hash={} live_editors={} delivery_converged={} legacy_ipc=skipped",
+                file.display(),
+                relay_write.content_hash,
+                relay_write.live_editors,
+                relay_write.delivery_converged,
+            ),
+        );
+        return Ok(true);
+    }
     if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
         &canonical_file,
         current_content,
@@ -4652,6 +4672,103 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    struct CrdtOnlyConvergenceEffects;
+
+    impl EditorConvergenceEffects for CrdtOnlyConvergenceEffects {
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            panic!("CRDT convergence must not fall through to a disk write")
+        }
+
+        fn apply_canonical_replace_if_attached(
+            &self,
+            _file: &Path,
+            _expected_current: &str,
+            content: &str,
+            _source: &str,
+        ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+            Ok(Some(agent_doc_crdt_relay_io::CpcRelayWrite {
+                applied: true,
+                content_len: content.len(),
+                content_hash: agent_doc_hash::content_hash(content),
+                update_bytes: 1,
+                targets: 1,
+                live_editors: 1,
+                delivery_converged: true,
+            }))
+        }
+
+        fn guard_visible_write_idle_and_current(
+            &self,
+            _file: &Path,
+            _source: &str,
+            _expected_current: &str,
+        ) -> Result<()> {
+            panic!("CRDT convergence must not enter the legacy write path")
+        }
+
+        fn atomic_write_if_current(
+            &self,
+            _file: &Path,
+            _content: &str,
+            _expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            panic!("CRDT convergence must not enter the legacy write path")
+        }
+
+        fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
+            None
+        }
+
+        fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {
+            panic!("CRDT convergence must not enter file IPC")
+        }
+
+        fn cleanup_fallback_patch_files(&self, _file: &Path) {
+            panic!("CRDT convergence must not enter file IPC")
+        }
+
+        fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
+            panic!("CRDT convergence must not enter file IPC")
+        }
+
+        fn log_file_ipc_proof_failure(
+            &self,
+            _file: &Path,
+            _patch_id: Option<&str>,
+            _invariant: &str,
+            _recovery: &str,
+            _detail: &str,
+        ) {
+            panic!("CRDT convergence must not enter file IPC")
+        }
+    }
+
+    #[test]
+    fn attached_crdt_write_skips_legacy_ipc_replay() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("test.md");
+        let current = "# Session\n\nCurrent.\n";
+        let target = "# Session\n\nCurrent.\n\n### Re: once\n\nOne mutation plane.\n";
+        fs::write(&doc, current).unwrap();
+
+        assert!(
+            try_editor_converge(
+                &CrdtOnlyConvergenceEffects,
+                &doc,
+                target,
+                current,
+                "test_crdt_only",
+            )
+            .unwrap()
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("transport=crdt_relay"));
+        assert!(log.contains("legacy_ipc=skipped"));
+        assert!(!log.contains("editor_convergence_attempt"));
+    }
 
     #[test]
     fn write_converge_payload_cycle_id_prefers_latest_projection_over_stale_sidecar() {

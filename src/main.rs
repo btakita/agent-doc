@@ -432,6 +432,10 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
+    fn force_disk_atomic_write(&self, file: &Path, content: &str) -> anyhow::Result<()> {
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
+    }
+
     fn try_editor_converge(
         &self,
         file: &Path,

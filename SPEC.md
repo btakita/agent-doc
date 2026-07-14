@@ -22,6 +22,13 @@ Notable invariants:
   way to make live documents parse. `agent-doc-document` remains the pure
   document model/projection crate. CRDT merge and document realtime
   apply/verify do not commit; the document turn lifecycle owns commit decisions.
+  An attached-document write waits for typing quiescence, rebases the agent target
+  over the latest canonical CRDT cut, and applies backpressure while any prior
+  delivery frontier lacks visible-replica acknowledgement. Repeated intent is
+  coalesced to the latest target; an accepted CRDT replacement is never replayed
+  through legacy editor IPC, and disk is only a post-acknowledgement projection
+  of exact canonical text. Bounded convergence failure retains the change and
+  fails closed instead of issuing a competing disk write.
   Editor delivery must target the live plugin-owner `editor_id` when an owner
   lease exists; untargeted file-IPC fallback is not delivery proof for an
   editor-owned document.

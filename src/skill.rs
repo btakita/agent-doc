@@ -186,6 +186,10 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
     ),
     ("commit.md", include_str!("../runbooks/commit.md")),
     (
+        "jb-cache-conflict.md",
+        include_str!("../runbooks/jb-cache-conflict.md"),
+    ),
+    (
         "code-enforced-directives.md",
         include_str!("../runbooks/code-enforced-directives.md"),
     ),
@@ -2731,6 +2735,20 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "commit.md"),
             "commit.md should be in BUNDLED_RUNBOOKS"
+        );
+    }
+
+    #[test]
+    fn bundled_runbooks_include_jb_cache_conflict_runbook() {
+        assert!(
+            BUNDLED_RUNBOOKS.iter().any(|(name, content)| {
+                *name == "jb-cache-conflict.md" && content.contains("## Quiescent CRDT Delivery")
+            }),
+            "jb-cache-conflict.md and its CRDT convergence contract should be bundled"
+        );
+        assert!(
+            SKILL_TEMPLATE.contains("jb-cache-conflict"),
+            "SKILL.md should list jb-cache-conflict in the runbook catalog"
         );
     }
 

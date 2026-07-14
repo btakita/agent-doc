@@ -123,6 +123,7 @@ pub trait CompactRuntimeEffects: Sync {
     fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>;
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome>;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn force_disk_atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn try_editor_converge(
         &self,
         file: &Path,
@@ -186,6 +187,10 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+    }
+
+    fn force_disk_atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
     }
 
     fn try_editor_converge(
@@ -915,7 +920,7 @@ fn apply_compacted_document(
     assert_non_exchange_markers_preserved(file, source_content, compacted, "apply")?;
 
     if force_disk {
-        runtime_effects()?.atomic_write(file, compacted)?;
+        runtime_effects()?.force_disk_atomic_write(file, compacted)?;
         if let Some(outcome) = agent_doc_crdt_relay_io::apply_disk_change_for_file(file, compacted)?
         {
             agent_doc_ops_log_io::log_op(
@@ -1351,6 +1356,9 @@ mod tests {
             unimplemented!("not exercised by converge-retry tests")
         }
         fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            unimplemented!("not exercised by converge-retry tests")
+        }
+        fn force_disk_atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
             unimplemented!("not exercised by converge-retry tests")
         }
         fn try_editor_converge(
@@ -3247,8 +3255,10 @@ mod tests {
 
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("compact_writeback") && ops_log.contains("transport=editor_ipc"),
-            "fixture should prove the Compact Exchange editor-IPC path:\n{ops_log}"
+            ops_log.contains("compact_writeback")
+                && ops_log.contains("transport=crdt_relay")
+                && ops_log.contains("legacy_ipc=skipped"),
+            "fixture should prove the Compact Exchange CRDT-only path:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("commit_blocked_committed_historical_patchback")
@@ -3380,6 +3390,8 @@ mod tests {
             if editor.content != seed {
                 editor.publish(file, seed)?;
             }
+            let _ =
+                agent_doc_test_support::start_crdt_delivery_pump(file, &editor.replica_identity);
             Ok(editor)
         }
 
@@ -3433,6 +3445,26 @@ mod tests {
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
+                if payload.get("type").and_then(|value| value.as_str()) == Some("save_document") {
+                    let file_path = payload.get("file").and_then(|value| value.as_str())?;
+                    let content =
+                        match agent_doc_crdt_relay_io::current_text_for_file(Path::new(file_path))
+                            .ok()?
+                        {
+                            agent_doc_crdt_relay_io::CurrentText::Current {
+                                text,
+                                delivery_converged: true,
+                                ..
+                            } => text,
+                            _ => std::fs::read_to_string(file_path).ok()?,
+                        };
+                    std::fs::write(file_path, &content).ok()?;
+                    record_compact_lazily_receipt(Path::new(file_path), patch_id, &content)?;
+                    return Some(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
+                            .to_string(),
+                    );
+                }
                 let baseline = payload.get("baseline")?.as_str()?;
                 let mut content = baseline.to_string();
                 if let Some(frontmatter) = payload.get("frontmatter").and_then(|v| v.as_str()) {
@@ -3500,12 +3532,23 @@ mod tests {
                         // Flush the in-memory buffer to disk, exactly like the real
                         // plugin's `saveDocumentViaDocument`.
                         let file_path = payload.get("file").and_then(|value| value.as_str())?;
-                        let content = buffers
-                            .lock()
-                            .unwrap()
-                            .get(file_path)
-                            .map(|buffer| buffer.content.clone())
-                            .or_else(|| std::fs::read_to_string(file_path).ok())?;
+                        let content = match agent_doc_crdt_relay_io::current_text_for_file(
+                            Path::new(file_path),
+                        )
+                        .ok()?
+                        {
+                            agent_doc_crdt_relay_io::CurrentText::Current {
+                                text,
+                                delivery_converged: true,
+                                ..
+                            } => text,
+                            _ => buffers
+                                .lock()
+                                .unwrap()
+                                .get(file_path)
+                                .map(|buffer| buffer.content.clone())
+                                .or_else(|| std::fs::read_to_string(file_path).ok())?,
+                        };
                         std::fs::write(file_path, &content).ok()?;
                         let receipt_file = Path::new(file_path).to_path_buf();
                         let receipt_patch_id = patch_id.to_string();

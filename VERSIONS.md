@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.98
+
+- **Attached editor writes settle and converge through one CRDT mutation plane.** Binary-owned writes wait for typing quiescence, apply acknowledgement-driven backpressure while a delivery frontier is in flight, coalesce repeated intent to the newest operator cut plus the original agent target, and rebase with the component-aware CRDT merge before retrying. An accepted CRDT replacement is never replayed through legacy editor IPC, and disk materialization occurs only after exact canonical text is visibly acknowledged; bounded failure retains the change and fails closed instead of provoking a JetBrains File Cache Conflict.
+- **The installed agent-doc skill now bundles the JetBrains File Cache Conflict runbook.** Fresh and in-place harness installations receive the quiescent CRDT delivery, legacy-dialog recovery, and deterministic SimWorld guidance already named by the skill catalog.
+
 ## 0.34.97
 
 - **Codex skill updates reload in place instead of interrupting the active conversation (`#codex-skill-reload-in-place`).** The Codex auto-update path installs without a reload request, re-reads the installed skill completely, and continues the same turn; it no longer stops and replaces the live child through `restart-supervisor`.

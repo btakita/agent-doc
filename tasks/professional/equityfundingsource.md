@@ -107,7 +107,23 @@ So `<img src="https://efs.../dp/<token>/photos/<doc_id>">` in the email body **i
 **Recommendation:** mint/reuse a per-deal `loan_package_link` token at send time for both emails, pull the first 1–3 photos from `borrower_property_photos_R_`, and render them as an `<img>` block in the shared `render_` template — capped in count and size so the email stays light for mail-client rendering limits.
 
 Want me to implement that? It touches `render_` (new images block), both email builders, and the two send sites. Queued as `#lender-email-photos` either way.
-<!-- agent:boundary:4553fbd0 -->
+
+Yes, wire it up. #spec-test-commit-push-deploy
+
+### Re: Wire property photos into the lender emails (#lender-email-photos) — opus-4-8
+
+Done, shipped, and live. Both deal-lender notification emails now embed borrower property photos inline.
+
+**What changed**
+- **`deal_lender_notification_email_input_T`** gains a `photos?: { url; alt }[]` field, and both builders (`deal_lender_documents_request_email_`, `deal_funding_package_ready_email_`) now render it through the existing shared `loan_package_photos_html_` block — same up-to-three, URL-referenced (never base64) block the loan-package email already uses, so the message HTML stays under Gmail's clip threshold.
+- **`deal_lender_email_photos_`** (new helper in `investor_management`) mints a fresh, deal-scoped `loan_package_link` and builds `/dp/<token>/photos/<id>` URLs for the first three `borrower_property_photos_R_` on the deal. `deal_lender_notification_email_send_` calls it once and passes `photos` to whichever builder fires — so both the **auto-send on lender-select** and the two **Deal-modal "Notify lender…" buttons** carry photos.
+- **Token scheme reused, not reinvented.** The `/dp/<token>/photos/<id>` route only requires the photo to belong to the deal's loan and doesn't consume the link's use cap, so the emailed images render without a login while the financial documents stay behind the packet link. Security rests on the unguessable, revocable token — the inherent ceiling of any image in any email, exactly the "semi-secure" expectation.
+- **Best-effort:** the photo lookup + link mint are wrapped so any failure yields no photo block and never blocks the notification.
+
+**Verification:** `make check` green — **1615 pass, 0 fail** (added a source-assertion test pinning the helper, the send-site wiring, and both templates' photo block). Spec updated: new "Lender-notify emails and inline property photos" section in `prds/deal-lender-documents.md`.
+
+**Shipped `#spec-test-commit-push-deploy`:** EFS `main` `7966f62`, deployed worker-only (`deploy:worker:no-migrate` — no new migration; reuses the existing `loan_package_links` / photo schema). Version `c189f2a8-7f48-496a-a047-359b6154f09d` at https://equityfundingsource.brian-takita.workers.dev (home 200, admin endpoint guarded 401). The email HTML is server-side and only fires on admin-gated actions, so it can't be curled anonymously — the green source-assertion test is the wiring proof.
+<!-- agent:boundary:1e3160fd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

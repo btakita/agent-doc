@@ -2433,6 +2433,17 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 21% used
     }
 
     #[test]
+    fn protected_prompt_input_reason_ignores_unlisted_dim_codex_suggestion() {
+        let h = HarnessConfig::codex();
+        let output = "\
+\x1b[1m›\x1b[0m \x1b[2mSummarize recent commits\x1b[0m
+gpt-5.6-sol xhigh · ~/work/btakita/agent-loop · Context 0% used
+";
+        assert_eq!(h.protected_prompt_input_reason(output), None);
+        assert!(!h.is_dispatch_ready_prompt_line("› Summarize recent commits"));
+    }
+
+    #[test]
     fn protected_prompt_input_reason_detects_queue_state() {
         let h = HarnessConfig::codex();
         let output = "\

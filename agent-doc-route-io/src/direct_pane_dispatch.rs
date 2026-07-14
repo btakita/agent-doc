@@ -485,8 +485,14 @@ pub fn send_command_unchecked(
     }
     let mut existing_draft_diagnostic_path = None;
     let mut protected_prompt_input = None;
-    let existing_draft_visible = match agent_doc_tmux_io::capture_pane(tmux, pane) {
-        Ok(content) => {
+    let existing_draft_visible = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane))
+    {
+        Ok(captured) => {
+            // Keep SGR attributes for protected-input classification: Codex uses
+            // DIM to distinguish generated composer suggestions from operator
+            // drafts. Diagnostics and trigger matching use the plain projection.
+            let content = agent_doc_turn_executor_tmux::prompt::strip_ansi(&captured);
             let visible = route_trigger_visible_in_current_draft(&content, &trigger, |line| {
                 harness.is_prompt_line(line)
             });
@@ -499,7 +505,7 @@ pub fn send_command_unchecked(
                     &content,
                 )
                 .path;
-            } else if let Some(reason) = harness.protected_prompt_input_reason(&content) {
+            } else if let Some(reason) = harness.protected_prompt_input_reason(&captured) {
                 let diagnostic_path = preserve_route_pane_snapshot(
                     file,
                     pane,
@@ -508,7 +514,7 @@ pub fn send_command_unchecked(
                     &content,
                 )
                 .path;
-                let draft_preview = protected_prompt_draft_preview(harness, &content);
+                let draft_preview = protected_prompt_draft_preview(harness, &captured);
                 protected_prompt_input = Some((reason, diagnostic_path, draft_preview));
             }
             visible
@@ -950,5 +956,24 @@ brian@host repo%
             exited_shell,
             &harness
         ));
+    }
+
+    #[test]
+    fn codex_dim_suggestion_is_not_protected_but_identical_operator_draft_is() {
+        let harness = HarnessConfig::codex();
+        let suggestion = concat!(
+            "\x1b[1m›\x1b[0m \x1b[2mSummarize recent commits\x1b[0m\n",
+            "gpt-5.6-sol xhigh · ~/work · Context 0% used\n",
+        );
+        assert_eq!(harness.protected_prompt_input_reason(suggestion), None);
+
+        let draft = concat!(
+            "\x1b[1m›\x1b[0m Summarize recent commits\n",
+            "gpt-5.6-sol xhigh · ~/work · Context 0% used\n",
+        );
+        assert_eq!(
+            harness.protected_prompt_input_reason(draft).as_deref(),
+            Some("drafted prompt input"),
+        );
     }
 }

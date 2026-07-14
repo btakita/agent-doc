@@ -11,9 +11,12 @@ import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
+import io.github.lazily.IngressOutcome
+import io.github.lazily.MergePolicy
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -35,6 +38,41 @@ private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 // otherwise-idle doc sees up to 30s of extra latency.
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
 
+private data class PendingRemoteAck(
+    val forwarder: CrdtReplicaForwarder,
+    val update: ReplicaRemoteUpdate,
+)
+
+private data class PendingRemoteEditorApply(
+    val filePath: String,
+    val expectedText: String,
+    val targetText: String,
+    val acknowledgements: List<PendingRemoteAck>,
+)
+
+private data class RemoteEditorApplyOutcome(
+    val applied: Boolean,
+    val editorText: String?,
+)
+
+/**
+ * Oldest baseline + newest converged text + acknowledgement union. This merge
+ * is associative, so RelayCell can conflate any producer/drain schedule without
+ * losing the durable acknowledgements covered by the final visible state.
+ */
+private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
+    name = "RemoteEditorApply",
+    merge = { old: PendingRemoteEditorApply, latest: PendingRemoteEditorApply ->
+        latest.copy(
+            expectedText = old.expectedText,
+            acknowledgements = (old.acknowledgements + latest.acknowledgements)
+                .distinctBy { it.update.patchId },
+        )
+    },
+    commutative = false,
+    idempotent = true,
+)
+
 /**
  * Production editor-as-CRDT-replica wiring (`#crdtauth5`, realtime phase 3).
  *
@@ -45,7 +83,7 @@ private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
  */
 class CrdtReplicaManager(private val project: Project) : Disposable, DocumentListener {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java)
-    private val executor = Executors.newSingleThreadExecutor { r ->
+    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "agent-doc-crdt-replica-events").apply { isDaemon = true }
     }
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
@@ -58,12 +96,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val registerFailureCounts = ConcurrentHashMap<String, Int>()
     private val registerRetryAfterMs = ConcurrentHashMap<String, Long>()
     private val consecutiveNoOpReschedules = AtomicInteger(0)
+    private val remoteDrainBackoffScheduled = AtomicBoolean(false)
+    private val remoteEditorApplies =
+        KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)
+    private val remoteEditorApplyScheduled = AtomicBoolean(false)
+    private val remoteEditorApplyPaths = ConcurrentHashMap.newKeySet<String>()
+    private val disposed = AtomicBoolean(false)
 
     fun start() {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
     }
 
     override fun dispose() {
+        disposed.set(true)
+        remoteEditorApplies.clear()
+        remoteEditorApplyPaths.clear()
         drainRequestedPaths.clear()
         registerFailureCounts.clear()
         registerRetryAfterMs.clear()
@@ -231,15 +278,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (appliedTotal == 0) {
                         val delayMs = nextNoOpRescheduleBackoffMs()
                         log.debug("[crdt-replica] no-op drain cycle; backing off reschedule by ${delayMs}ms (consecutive=${consecutiveNoOpReschedules.get()})")
-                        try {
-                            Thread.sleep(delayMs)
-                        } catch (_: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                        }
+                        scheduleRemoteDrainAfterBackoff(delayMs, reason)
                     } else {
                         consecutiveNoOpReschedules.set(0)
+                        requestRemoteDrain(reason = "rescheduled")
                     }
-                    requestRemoteDrain(reason = "rescheduled")
                 } else {
                     consecutiveNoOpReschedules.set(0)
                 }
@@ -284,6 +327,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         )
     }
 
+    private fun scheduleRemoteDrainAfterBackoff(delayMs: Long, reason: String) {
+        if (!remoteDrainBackoffScheduled.compareAndSet(false, true)) return
+        executor.schedule(
+            {
+                remoteDrainBackoffScheduled.set(false)
+                if (!disposed.get()) requestRemoteDrain(reason = "$reason-backoff")
+            },
+            delayMs,
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
     private fun drainRemoteUpdates(reason: String): Int {
         val started = System.nanoTime()
         val drainAll = drainAllRequested.getAndSet(false)
@@ -311,10 +366,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         var selfEchoCount = 0
         var peerUpdateCount = 0
         var ackCount = 0
-        var appliedToEditor = false
+        var queuedForEditor = false
         var deliveryKind = "deltas"
         var usefulWork = 0
-        if (hasPendingLocal(filePath)) return 0
+        if (hasPendingLocal(filePath) || remoteEditorApplyPaths.contains(filePath)) return 0
         try {
             val expectedText = shadows[filePath] ?: return 0
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
@@ -324,8 +379,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val delivery = forwarder.pullRemoteDelivery()
             if (delivery is ReplicaPullDelivery.Replace) {
                 deliveryKind = "replace"
-                appliedToEditor = applyReplaceDelivery(filePath, forwarder, expectedText, delivery.text)
-                usefulWork = if (appliedToEditor) 1 else 0
+            queuedForEditor = applyReplaceDelivery(filePath, forwarder, expectedText, delivery.text)
+            usefulWork = if (queuedForEditor) 1 else 0
                 return usefulWork
             }
             val updates = (delivery as ReplicaPullDelivery.Deltas).updates
@@ -350,12 +405,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
             val targetText = converged
             if (targetText != null && appliedRemoteUpdates.isNotEmpty() && !hasPendingLocal(filePath)) {
-                if (applyRemoteText(filePath, expectedText, targetText)) {
-                    appliedToEditor = true
-                    for (update in appliedRemoteUpdates) {
-                        if (forwarder.ackRemoteUpdate(update)) ackCount++
-                    }
-                } else {
+            if (queueRemoteTextApply(filePath, expectedText, targetText, forwarder, appliedRemoteUpdates)) {
+                queuedForEditor = true
+            } else {
                     editorBufferText(filePath)?.let { current ->
                         shadows[filePath] = current
                         forwarder.ensureEditorText(current)
@@ -369,7 +421,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "remote-drain-file",
                 filePath,
                 started,
-                details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount acked=$ackCount applied=$appliedToEditor",
+                details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount acked=$ackCount queued=$queuedForEditor",
             )
         }
         return usefulWork
@@ -451,49 +503,130 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         return installed
     }
 
-    private fun applyRemoteText(filePath: String, expectedText: String, converged: String): Boolean {
+    private fun queueRemoteTextApply(
+        filePath: String,
+        expectedText: String,
+        converged: String,
+        forwarder: CrdtReplicaForwarder,
+        updates: List<ReplicaRemoteUpdate>,
+    ): Boolean {
         val normalized = normalizeRemoteText(filePath, converged) ?: return false
         if (normalized != converged) {
             log.warn("[crdt-replica] remote update requires template-structure repair for $filePath; rejecting to keep replica state coherent")
             return false
         }
-        val started = System.nanoTime()
-        var applied = false
+        remoteEditorApplyPaths.add(filePath)
+        val outcome = remoteEditorApplies.ingress(
+            filePath,
+            PendingRemoteEditorApply(
+                filePath = filePath,
+                expectedText = expectedText,
+                targetText = converged,
+                acknowledgements = updates.map { PendingRemoteAck(forwarder, it) },
+            ),
+        )
+        log.debug(
+            "[crdt-replica] remote editor apply ${outcome.name.lowercase()} for ${File(filePath).name}; " +
+                "pending_keys=${remoteEditorApplies.pendingKeyCount()} updates=${updates.size}",
+        )
+        scheduleRemoteEditorApply()
+        return outcome != IngressOutcome.Blocked && outcome != IngressOutcome.Dropped
+    }
+
+    private fun scheduleRemoteEditorApply() {
+        if (disposed.get() || project.isDisposed) return
+        if (!remoteEditorApplyScheduled.compareAndSet(false, true)) return
         try {
-            ApplicationManager.getApplication().invokeAndWait {
-                val edtStarted = System.nanoTime()
+            ApplicationManager.getApplication().invokeLater {
                 try {
-                    val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
-                    val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeAndWait
-                    val before = document.text
-                    if (before == converged) {
-                        shadows[filePath] = converged
-                        applied = true
-                        return@invokeAndWait
-                    }
-                    if (hasPendingLocal(filePath)) return@invokeAndWait
-                    if (!remoteCrdtApplyStillCurrentUtil(expectedText, before, converged)) {
-                        log.warn("[crdt-replica] stale remote update rejected for $filePath; editor text advanced before apply")
-                        return@invokeAndWait
-                    }
-                    applyingRemote.add(filePath)
-                    try {
-                        runUndoableRemoteUpdateCommand(document) {
-                            applyMinimalDocumentEditUtil(document, before, converged)
-                            shadows[filePath] = converged
-                            applied = true
-                        }
-                    } finally {
-                        applyingRemote.remove(filePath)
+                    if (disposed.get() || project.isDisposed) {
+                        remoteEditorApplies.clear()
+                    } else {
+                        remoteEditorApplies.drainOne()?.second?.let(::applyRemoteTextOnEdt)
                     }
                 } finally {
-                    logSlow("remote-apply-edt", filePath, edtStarted, warnMs = CRDT_EDT_WARN_MS, details = "target_chars=${converged.length}")
+                    remoteEditorApplyScheduled.set(false)
+                    if (remoteEditorApplies.hasPending()) scheduleRemoteEditorApply()
                 }
             }
-        } finally {
-            logSlow("remote-apply-total", filePath, started, details = "target_chars=${converged.length} applied=$applied")
+        } catch (e: RuntimeException) {
+            remoteEditorApplyScheduled.set(false)
+            throw e
         }
-        return applied
+    }
+
+    private fun applyRemoteTextOnEdt(pending: PendingRemoteEditorApply) {
+        val started = System.nanoTime()
+        val outcome = try {
+            val targetFile = LocalFileSystem.getInstance().findFileByPath(pending.filePath)
+                ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
+            val document = FileDocumentManager.getInstance().getDocument(targetFile)
+                ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
+            val before = document.text
+            if (before == pending.targetText) {
+                shadows[pending.filePath] = pending.targetText
+                RemoteEditorApplyOutcome(true, before)
+            } else if (hasPendingLocal(pending.filePath)) {
+                RemoteEditorApplyOutcome(false, before)
+            } else if (!remoteCrdtApplyStillCurrentUtil(pending.expectedText, before, pending.targetText)) {
+                log.warn("[crdt-replica] stale coalesced remote update rejected for ${pending.filePath}; editor text advanced before apply")
+                RemoteEditorApplyOutcome(false, before)
+            } else {
+                applyingRemote.add(pending.filePath)
+                try {
+                    runUndoableRemoteUpdateCommand(document) {
+                        applyMinimalDocumentEditUtil(document, before, pending.targetText)
+                        shadows[pending.filePath] = pending.targetText
+                    }
+                    RemoteEditorApplyOutcome(true, pending.targetText)
+                } finally {
+                    applyingRemote.remove(pending.filePath)
+                }
+            }
+        } catch (e: RuntimeException) {
+            log.warn("[crdt-replica] coalesced remote editor apply failed for ${pending.filePath}", e)
+            RemoteEditorApplyOutcome(false, null)
+        }
+        completeRemoteEditorApply(pending, outcome, started)
+    }
+
+    private fun completeRemoteEditorApply(
+        pending: PendingRemoteEditorApply,
+        outcome: RemoteEditorApplyOutcome,
+        started: Long,
+    ) {
+        logSlow(
+            "remote-apply-edt",
+            pending.filePath,
+            started,
+            warnMs = CRDT_EDT_WARN_MS,
+            details = "target_chars=${pending.targetText.length} applied=${outcome.applied} coalesced_updates=${pending.acknowledgements.size}",
+        )
+        if (disposed.get()) return
+        try {
+            executor.execute {
+                try {
+                    var acked = 0
+                    if (outcome.applied) {
+                        for (ack in pending.acknowledgements) {
+                            if (ack.forwarder.ackRemoteUpdate(ack.update)) acked++
+                        }
+                    } else if (outcome.editorText != null) {
+                        shadows[pending.filePath] = outcome.editorText
+                        pending.acknowledgements.lastOrNull()?.forwarder?.ensureEditorText(outcome.editorText)
+                    }
+                    log.debug(
+                        "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
+                            "applied=${outcome.applied} acked=$acked coalesced_updates=${pending.acknowledgements.size}",
+                    )
+                } finally {
+                    remoteEditorApplyPaths.remove(pending.filePath)
+                    requestRemoteDrain(pending.filePath, "remote-editor-apply-complete")
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            remoteEditorApplyPaths.remove(pending.filePath)
+        }
     }
 
     private fun editorReplicaBaselineMatches(

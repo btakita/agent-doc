@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.97
+
+- **Codex skill updates reload in place instead of interrupting the active conversation (`#codex-skill-reload-in-place`).** The Codex auto-update path installs without a reload request, re-reads the installed skill completely, and continues the same turn; it no longer stops and replaces the live child through `restart-supervisor`.
+- **JetBrains CRDT editor delivery uses keyed RelayCell backpressure (`#jb-crdt-relay-backpressure`).** Remote bursts retain the oldest guarded baseline, newest converged text, and acknowledgement union in one coalesced hot head per document. One `invokeLater` mutation is admitted per EDT turn, so a blocked UI cannot grow an unbounded apply FIFO or leave the replica worker synchronously parked in `invokeAndWait`; no-op retry backoff is scheduled and coalesced instead of parking that worker for up to 30 seconds. Plugin `0.2.247` consumes lazily-kt `0.28.0` for the relay algebra.
+- **Direct-pane routing preserves Codex DIM styling while protecting drafts (`#codex-route-dim-suggestion`).** The route preflight captures ANSI for composer classification and uses a stripped projection only for trigger matching and diagnostics, so generated suggestions such as `Summarize recent commits` no longer block JetBrains `Run Agent Doc`, while identical non-dim operator text remains protected.
+
 ## 0.34.96
 
 - **The printed preserve-session baseline recovery now actually unblocks retained-response replay.** `reset --from-current --preserve-session` continues to preserve the response payload, capture state, cycle, and visible document, but explicitly rebases the active capture's file/snapshot hashes to the operator-approved current markdown. A following `write --commit` no longer loops forever on the same stale-baseline refusal.

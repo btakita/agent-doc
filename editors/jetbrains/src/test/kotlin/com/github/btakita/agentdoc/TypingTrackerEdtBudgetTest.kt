@@ -287,9 +287,9 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "remote CRDT update bursts should be merged before one editor apply instead of one invokeAndWait per update",
             remoteDrainBody.contains("appliedRemoteUpdates") &&
-                remoteDrainBody.contains("applyRemoteText(filePath, expectedText, targetText)"),
+                remoteDrainBody.contains("queueRemoteTextApply(filePath, expectedText, targetText"),
         )
-        val remoteApplyBody = source.substringAfter("private fun applyRemoteText")
+        val remoteApplyBody = source.substringAfter("private fun queueRemoteTextApply")
             .substringBefore("private fun normalizeRemoteText")
         assertFalse(
             "remote CRDT editor apply must not call native template normalization inside invokeAndWait",
@@ -299,6 +299,25 @@ class TypingTrackerEdtBudgetTest {
             "remote CRDT template normalization should run on the replica worker before the EDT apply",
             source.contains("private fun normalizeRemoteText(") &&
                 source.substringAfter("private fun normalizeRemoteText(").contains("NativePatching.normalizeTemplateStructure(converged)"),
+        )
+        assertTrue(
+            "remote CRDT editor apply should use RelayCell backpressure and schedule bounded EDT work",
+            source.contains("KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)") &&
+                remoteApplyBody.contains("scheduleRemoteEditorApply()") &&
+                source.contains("ApplicationManager.getApplication().invokeLater"),
+        )
+        assertFalse(
+            "ordinary remote CRDT editor apply must never synchronously wait on the EDT",
+            remoteApplyBody.contains("invokeAndWait"),
+        )
+        assertFalse(
+            "remote-drain backoff must schedule a later drain instead of parking the single replica worker",
+            source.contains("Thread.sleep(delayMs)"),
+        )
+        assertTrue(
+            "remote-drain backoff should coalesce one scheduled retry while local deltas remain runnable",
+            source.contains("remoteDrainBackoffScheduled.compareAndSet(false, true)") &&
+                source.contains("executor.schedule("),
         )
         assertTrue(
             "CRDT timing logs should identify slow native/socket/EDT operations",

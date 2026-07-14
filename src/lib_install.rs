@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Well-known filename of the global cdylib reload-broadcast file. It lives as a
 /// sibling of the installed `libagent_doc` cdylib (in the running binary's
@@ -8,6 +9,8 @@ use std::path::{Path, PathBuf};
 /// plugin can derive from the library path it already resolves via
 /// `agent-doc lib-path`.
 pub const RELOAD_BROADCAST_FILENAME: &str = "agent-doc-reload-broadcast.json";
+
+static BINARY_INSTALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Payload of the global cdylib reload-broadcast file. An install (or
 /// `agent-doc admin reload-lib`) writes this so editor plugins force the existing
@@ -154,6 +157,91 @@ pub fn install_versioned(source: &Path, target_dir: &Path, version: &str) -> Res
         .with_context(|| format!("rename {} -> {}", tmp_symlink.display(), symlink.display()))?;
 
     Ok(dst)
+}
+
+/// Resolve Cargo's binary install directory without consulting the currently
+/// executing binary. The caller may be a just-built staging executable, so
+/// `current_exe().parent()` would point at `target/`, not the live install.
+pub fn default_binary_target_dir() -> Result<PathBuf> {
+    if let Some(root) = std::env::var_os("CARGO_INSTALL_ROOT") {
+        return Ok(PathBuf::from(root).join("bin"));
+    }
+    if let Some(home) = std::env::var_os("CARGO_HOME") {
+        return Ok(PathBuf::from(home).join("bin"));
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .context("cannot resolve Cargo binary directory: HOME/USERPROFILE is unset")?;
+    Ok(PathBuf::from(home).join(".cargo").join("bin"))
+}
+
+fn platform_binary_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "agent-doc.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "agent-doc"
+    }
+}
+
+/// Install an already-built agent-doc executable with a same-directory atomic
+/// rename. Existing supervisors keep their old inode alive while new exec/spawn
+/// calls see either the complete old binary or the complete new binary; there is
+/// never a missing-path handoff window.
+pub fn install_binary_atomic(source: &Path, target_dir: &Path) -> Result<PathBuf> {
+    let metadata = std::fs::metadata(source)
+        .with_context(|| format!("read built binary metadata {}", source.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!("built binary source is not a file: {}", source.display());
+    }
+
+    std::fs::create_dir_all(target_dir)
+        .with_context(|| format!("create binary install directory {}", target_dir.display()))?;
+    let destination = target_dir.join(platform_binary_name());
+    let sequence = BINARY_INSTALL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = target_dir.join(format!(
+        ".{}.install-{}-{sequence}",
+        platform_binary_name(),
+        std::process::id()
+    ));
+
+    let install_result = (|| -> Result<()> {
+        std::fs::copy(source, &temporary).with_context(|| {
+            format!(
+                "copy staged binary {} -> {}",
+                source.display(),
+                temporary.display()
+            )
+        })?;
+        std::fs::set_permissions(&temporary, metadata.permissions()).with_context(|| {
+            format!("preserve executable permissions on {}", temporary.display())
+        })?;
+        std::fs::File::open(&temporary)
+            .with_context(|| format!("open staged binary {} for sync", temporary.display()))?
+            .sync_all()
+            .with_context(|| format!("sync staged binary {}", temporary.display()))?;
+        std::fs::rename(&temporary, &destination).with_context(|| {
+            format!(
+                "atomically replace installed binary {} -> {}",
+                temporary.display(),
+                destination.display()
+            )
+        })?;
+        Ok(())
+    })();
+
+    if install_result.is_err() && temporary.exists() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    install_result?;
+    eprintln!(
+        "[binary-install] {} -> {} (atomic rename; live process inodes preserved)",
+        source.display(),
+        destination.display()
+    );
+    Ok(destination)
 }
 
 pub fn run(source: Option<&str>, target_dir: Option<&str>, profile: &str) -> Result<()> {
@@ -374,23 +462,9 @@ fn auto_recycle_after_install() {
         );
         return;
     }
-    match agent_doc_controller_io::project_controller::recycle_controllers_all_projects() {
-        Ok((recycled, skipped)) => {
-            eprintln!(
-                "[lib-install] auto-recycle: {recycled} controller(s) marked to recycle at next idle boundary, {skipped} skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)"
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "[lib-install] warning: auto-recycle failed ({e}) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
-            );
-        }
-    }
-    // `#turnsaferecycle` Goal 1 — controllers (PCPs) are only half the fleet. The
-    // long-lived `agent-doc start --route-owned` supervisors that actually write
-    // documents must also be marked to recycle onto the freshly-installed binary,
-    // otherwise they keep serving the prior build until each independently
-    // self-detects staleness.
+    // `#installhandoff`: mark the document-owning supervisors first. Their
+    // durable per-document recycle requests are the recovery journal if a
+    // controller happens to cross its own exec boundary immediately afterward.
     match agent_doc_controller_io::project_controller::recycle_supervisors_all_projects() {
         Ok((marked, skipped)) => {
             eprintln!(
@@ -403,12 +477,62 @@ fn auto_recycle_after_install() {
             );
         }
     }
+    match agent_doc_controller_io::project_controller::recycle_controllers_all_projects() {
+        Ok((recycled, skipped)) => {
+            eprintln!(
+                "[lib-install] auto-recycle: {recycled} controller(s) marked after supervisor handoff, {skipped} skipped (set AGENT_DOC_RECYCLE_ON_INSTALL=0 to disable)"
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[lib-install] warning: auto-recycle failed ({e}) — running controllers still serve the prior binary; run `agent-doc admin recycle --all-projects` (or restart sessions) to promote the new build"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn binary_install_atomically_replaces_existing_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("new-agent-doc");
+        let target_dir = tmp.path().join("bin");
+        fs::create_dir_all(&target_dir).unwrap();
+        let destination = target_dir.join(platform_binary_name());
+        fs::write(&destination, b"old complete binary").unwrap();
+        fs::write(&source, b"new complete binary").unwrap();
+
+        let installed = install_binary_atomic(&source, &target_dir).unwrap();
+
+        assert_eq!(installed, destination);
+        assert_eq!(fs::read(&installed).unwrap(), b"new complete binary");
+        assert!(
+            fs::read_dir(&target_dir).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".install-")),
+            "successful swap must not leave staging files"
+        );
+    }
+
+    #[test]
+    fn binary_install_failure_preserves_existing_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target_dir = tmp.path().join("bin");
+        fs::create_dir_all(&target_dir).unwrap();
+        let destination = target_dir.join(platform_binary_name());
+        fs::write(&destination, b"old complete binary").unwrap();
+
+        let error = install_binary_atomic(&tmp.path().join("missing"), &target_dir).unwrap_err();
+
+        assert!(error.to_string().contains("read built binary metadata"));
+        assert_eq!(fs::read(destination).unwrap(), b"old complete binary");
+    }
 
     #[test]
     fn reload_broadcast_round_trips_through_writer_and_reader() {

@@ -411,7 +411,7 @@ mod tests {
         git_in(root, &["init", "-q"]);
         git_in(root, &["config", "user.email", "t@t.t"]);
         git_in(root, &["config", "user.name", "t"]);
-        let doc_path = root.join("equityfundingsource.md");
+        let doc_path = root.join("sampleportal.md");
         std::fs::write(&doc_path, "---\nsession: test\n---\n").unwrap();
         git_in(root, &["add", "."]);
         git_in(root, &["commit", "-q", "-m", "init"]);
@@ -421,22 +421,19 @@ mod tests {
         for n in 2..=24 {
             git_in(
                 root,
-                &[
-                    "tag",
-                    &format!("agent-doc/equityfundingsource/pre-compact-{n}"),
-                ],
+                &["tag", &format!("agent-doc/sampleportal/pre-compact-{n}")],
             );
         }
 
         create_pre_mutation_tag(&doc_path, "pre-compact", None).unwrap();
 
         assert_eq!(
-            tag_count(root, "agent-doc/equityfundingsource/pre-compact-25"),
+            tag_count(root, "agent-doc/sampleportal/pre-compact-25"),
             1,
             "next checkpoint must be pre-compact-25 (max+1), not a collision on -24"
         );
         assert_eq!(
-            tag_count(root, "agent-doc/equityfundingsource/pre-compact-*"),
+            tag_count(root, "agent-doc/sampleportal/pre-compact-*"),
             24,
             "the 23 surviving tags plus the newly created -25"
         );

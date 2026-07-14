@@ -1224,7 +1224,7 @@ mod tests {
     fn start_registry_publication_uses_project_root_after_controller_acceptance() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(
             &doc,

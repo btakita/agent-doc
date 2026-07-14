@@ -30,7 +30,7 @@ class TurnStateBridgeTest {
     fun `route failure presentation explains start-session pane crash`() {
         val presentation = TurnStateBridge.routeFailurePresentation(
             """
-                Error: project controller command start_session failed: refusing start_session cross-document actor pane alias: pane %4 is already claimed by /repo/tasks/professional/equityfundingsource.md session=62fe1f41 generation=1131 state=ready
+                Error: project controller command start_session failed: refusing start_session cross-document actor pane alias: pane %4 is already claimed by /repo/tasks/professional/sampleportal.md session=62fe1f41 generation=1131 state=ready
             """.trimIndent(),
         )!!
 

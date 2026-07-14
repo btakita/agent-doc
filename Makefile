@@ -164,14 +164,20 @@ timings:
 	$(LOCAL_CARGO_ENV) cargo build --timings
 
 # Fast local install: reusable incremental target dir + local release profile.
+# Build first, then let the freshly-built binary atomically replace the installed
+# executable. `cargo install --force` unlinks the old executable before persisting
+# the new one, creating a short ENOENT window that can strand controller/supervisor
+# execve handoffs.
 install:
-	$(LOCAL_CARGO_ENV) cargo install --path . --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --force
+	$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --bin agent-doc
+	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 
 # Full optimized local install for pre-release parity.
 install-full:
-	cargo install --path . --force
+	cargo build --release --bin agent-doc
+	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@cargo build --release --lib
 	@agent-doc lib-install
 

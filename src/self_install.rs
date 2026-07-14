@@ -21,13 +21,16 @@ pub fn run(
     let worktree = IsolatedWorktree::create(&repo_root, keep_worktree)?;
     eprintln!("[self-install] worktree: {}", worktree.path().display());
 
-    let install_label = format!("cargo install --path . --profile {profile}");
+    let install_label = format!("cargo build --profile {profile} --bin agent-doc");
     run_command(
         worktree.path(),
         "cargo",
-        &["install", "--path", ".", "--profile", profile],
+        &["build", "--profile", profile, "--bin", "agent-doc"],
         &install_label,
     )?;
+    let binary_source = profile_binary_path(worktree.path(), profile);
+    let binary_target_dir = crate::lib_install::default_binary_target_dir()?;
+    crate::lib_install::install_binary_atomic(&binary_source, &binary_target_dir)?;
     let lib_build_label = format!("cargo build --profile {profile} --lib");
     run_command(
         worktree.path(),
@@ -203,6 +206,19 @@ fn profile_lib_path(worktree: &Path, profile: &str) -> PathBuf {
     crate::lib_install::profile_lib_path(worktree, None, profile)
 }
 
+fn profile_binary_path(worktree: &Path, profile: &str) -> PathBuf {
+    let name = if cfg!(windows) {
+        "agent-doc.exe"
+    } else {
+        "agent-doc"
+    };
+    let profile = match profile.trim() {
+        "" => "release",
+        value => value,
+    };
+    worktree.join("target").join(profile).join(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +246,29 @@ mod tests {
             root.join("target")
                 .join("release-local")
                 .join(crate::lib_install::platform_lib_name())
+        );
+    }
+
+    #[test]
+    fn profile_binary_path_points_at_complete_staged_executable() {
+        let root = PathBuf::from("/tmp/worktree");
+        assert_eq!(
+            profile_binary_path(&root, "release-local"),
+            root.join("target")
+                .join("release-local")
+                .join(if cfg!(windows) {
+                    "agent-doc.exe"
+                } else {
+                    "agent-doc"
+                })
+        );
+        assert_eq!(
+            profile_binary_path(&root, " "),
+            root.join("target").join("release").join(if cfg!(windows) {
+                "agent-doc.exe"
+            } else {
+                "agent-doc"
+            })
         );
     }
 

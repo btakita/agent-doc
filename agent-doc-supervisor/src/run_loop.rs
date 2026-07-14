@@ -2,7 +2,11 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChildLaunchPlan {
-    pub use_continue_args: bool,
+    /// The supervisor is launching a replacement child. Managed document
+    /// owners must treat this as a fresh launch plus document re-trigger: CLI
+    /// conveniences such as Claude `--continue` and Codex `resume --last` are
+    /// process-global and can attach this pane to another document's session.
+    pub restart_requested: bool,
     pub auto_trigger: bool,
     /// `#stale-ctrl-d-arm` — every fresh child launch (first run, restart, and
     /// recycle-`execve` adopt) must arm stale-Ctrl+D suppression until the child prints
@@ -19,7 +23,7 @@ pub struct ChildLaunchPlan {
 
 pub fn child_launch_plan(first_run: bool, auto_trigger_next_launch: bool) -> ChildLaunchPlan {
     ChildLaunchPlan {
-        use_continue_args: !first_run,
+        restart_requested: !first_run,
         auto_trigger: auto_trigger_next_launch || !first_run,
         // A pre-first-prompt Ctrl+D is stale on EVERY launch, so this is unconditional.
         arm_stale_ctrl_d_suppression: true,
@@ -70,7 +74,7 @@ mod tests {
         assert_eq!(
             child_launch_plan(true, false),
             ChildLaunchPlan {
-                use_continue_args: false,
+                restart_requested: false,
                 auto_trigger: false,
                 arm_stale_ctrl_d_suppression: true,
             },
@@ -79,16 +83,16 @@ mod tests {
         assert_eq!(
             child_launch_plan(false, false),
             ChildLaunchPlan {
-                use_continue_args: true,
+                restart_requested: true,
                 auto_trigger: true,
                 arm_stale_ctrl_d_suppression: true,
             },
-            "continue-mode restart should resume and re-submit agent-doc"
+            "replacement launch must re-submit the owning document"
         );
         assert_eq!(
             child_launch_plan(true, true),
             ChildLaunchPlan {
-                use_continue_args: false,
+                restart_requested: false,
                 auto_trigger: true,
                 arm_stale_ctrl_d_suppression: true,
             },

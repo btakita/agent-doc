@@ -1241,7 +1241,7 @@ mod tests {
 
     #[test]
     fn drainable_head_count_excludes_id_head_absent_from_open_backlog() {
-        // `#orphanqhead` stall-stop (equityfundingsource `#sy71` repro): an
+        // `#orphanqhead` stall-stop (sampleportal `#sy71` repro): an
         // id-backed head whose id is NOT an open backlog item is not drainable, so
         // the in-session auto-loop AND the supervisor idle-watch (which share this
         // `drainable_head_count` / `has_drainable_head` signal) STOP instead of

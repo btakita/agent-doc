@@ -2521,6 +2521,16 @@ enum Commands {
         #[arg(long)]
         target_dir: Option<String>,
     },
+    /// Atomically install an already-built agent-doc executable (internal build handoff)
+    #[command(name = "binary-install", hide = true)]
+    BinaryInstall {
+        /// Path to the complete, already-built agent-doc executable
+        #[arg(long)]
+        source: PathBuf,
+        /// Destination directory (default: Cargo's bin directory)
+        #[arg(long)]
+        target_dir: Option<PathBuf>,
+    },
     /// Show the reliable-sync shadow liveness plane vs the sidecar open-set (dual-run
     /// `[operator-verify]` parity read — sidecar-retirement Phase 3C)
     #[command(name = "reliable-sync-status")]
@@ -4526,6 +4536,13 @@ fn try_main() -> anyhow::Result<()> {
             profile,
             target_dir,
         } => lib_install::run(source.as_deref(), target_dir.as_deref(), &profile),
+        Commands::BinaryInstall { source, target_dir } => {
+            let target_dir = match target_dir {
+                Some(path) => path,
+                None => lib_install::default_binary_target_dir()?,
+            };
+            lib_install::install_binary_atomic(&source, &target_dir).map(|_| ())
+        }
         Commands::ReliableSyncStatus { json, project_root } => {
             let root = match project_root {
                 Some(root) => root,

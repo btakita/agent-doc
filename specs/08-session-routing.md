@@ -228,7 +228,7 @@ Nearest-`.agent-doc` resolution alone does **not** isolate sibling repositories 
 nested git submodule carries no local `.agent-doc/`. `find_project_root` walks up to the
 nearest ancestor that contains `.agent-doc/`, so a document under a submodule such as
 `src/lazily-rs/` (no `.agent-doc/` of its own) collapses up to the **superproject** root —
-the same root as a superproject document like `tasks/professional/equityfundingsource.md`.
+the same root as a superproject document like `tasks/professional/sampleportal.md`.
 The submodule and superproject then share one `.agent-doc/` keyspace (registry, controller
 store, supervisor sockets, session logs), and every `.agent-doc`-root equality check
 (`pane_assignment_matches_document_root`, `registry_entry_matches_document_root`) compares

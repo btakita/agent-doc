@@ -1644,6 +1644,37 @@ pub fn run_supervisor_auto_install(crate_root: &Path) -> Result<()> {
     )
 }
 
+/// Auto-install promotion is allowed only from a stable committed checkout.
+/// Manual `make install` remains available for deliberate dirty-tree dogfooding,
+/// but the background supervisor must not publish half-edited source and recycle
+/// the live fleet while an author is still typing.
+pub fn supervisor_auto_install_worktree_clean(crate_root: &Path) -> Result<bool> {
+    let output = std::process::Command::new("git")
+        .args([
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--",
+            ".",
+        ])
+        .current_dir(crate_root)
+        .output()
+        .with_context(|| {
+            format!(
+                "spawn git status for supervisor auto-install source {}",
+                crate_root.display()
+            )
+        })?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git status failed for supervisor auto-install source {}: {}",
+            crate_root.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.stdout.iter().all(u8::is_ascii_whitespace))
+}
+
 /// `#autoinstallretry` — number of times to attempt the auto-install step sequence
 /// before falling back to operator refresh, and the backoff between attempts. The
 /// `make install` build step is most failures' culprit and is almost always
@@ -1727,6 +1758,11 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
         let status = std::process::Command::new(program)
             .args(args)
             .current_dir(crate_root)
+            // `make install` normally owns the one fleet-wide recycle wave.
+            // A supervisor auto-install coordinates that wave below so it can
+            // mark supervisors before controllers and avoid marking the fleet
+            // twice (the live crash/relaunch storm reproduced this double fanout).
+            .env("AGENT_DOC_RECYCLE_ON_INSTALL", "0")
             .stdin(stdin)
             .stdout(stdout)
             .stderr(stderr)
@@ -1739,22 +1775,35 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
             );
         }
     }
-    // `#turnsaferecycle` Goal 1 — a supervisor auto-install refreshes THIS process's
-    // binary (it self-detects staleness on the next tick), but every OTHER route-owned
-    // supervisor across all projects is now serving the prior build too. Fan the recycle
-    // request out to them so the whole fleet promotes the fresh binary at the next idle
-    // boundary. Best-effort: a fan-out failure must never fail the install.
+    // `#installhandoff`: exactly one coordinated recycle wave. Mark supervisors
+    // first so every document has a durable handoff request before controllers
+    // begin recycling. The initiating supervisor is included and self-execves at
+    // its idle boundary; live harness children remain attached to their PTYs.
     match recycle_supervisors_all_projects() {
         Ok((marked, skipped)) => {
             if marked > 0 || skipped > 0 {
                 eprintln!(
-                    "[agent-doc] supervisor auto-install: marked {marked} route-owned supervisor(s) to recycle onto the fresh binary ({skipped} skipped)"
+                    "[agent-doc] supervisor auto-install handoff: {marked} route-owned supervisor(s) marked before controller recycle ({skipped} skipped)"
                 );
             }
         }
         Err(err) => {
             eprintln!(
                 "[agent-doc] warning: supervisor recycle fan-out after auto-install failed: {err:#}"
+            );
+        }
+    }
+    match recycle_controllers_all_projects() {
+        Ok((marked, skipped)) => {
+            if marked > 0 || skipped > 0 {
+                eprintln!(
+                    "[agent-doc] supervisor auto-install handoff: {marked} controller(s) marked after supervisor handoff ({skipped} skipped)"
+                );
+            }
+        }
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: controller recycle fan-out after supervisor auto-install failed: {err:#}"
             );
         }
     }
@@ -11805,6 +11854,38 @@ mod tests {
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
 
+    #[test]
+    fn supervisor_auto_install_waits_for_clean_committed_checkout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "agent-doc-test@example.invalid"]);
+        git(&["config", "user.name", "agent-doc test"]);
+        std::fs::write(dir.path().join("source.rs"), "stable\n").unwrap();
+        git(&["add", "source.rs"]);
+        git(&["commit", "-m", "stable"]);
+
+        assert!(supervisor_auto_install_worktree_clean(dir.path()).unwrap());
+
+        std::fs::write(dir.path().join("source.rs"), "typing\n").unwrap();
+        assert!(!supervisor_auto_install_worktree_clean(dir.path()).unwrap());
+
+        git(&["restore", "source.rs"]);
+        std::fs::write(dir.path().join("new-source.rs"), "uncommitted\n").unwrap();
+        assert!(!supervisor_auto_install_worktree_clean(dir.path()).unwrap());
+    }
+
     fn test_controller_binary_identity() -> ControllerBinaryIdentity {
         ControllerBinaryIdentity {
             path: PathBuf::from("/tmp/agent-doc"),
@@ -15077,7 +15158,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
-        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
         std::fs::write(
             &doc,
             "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
@@ -15088,7 +15169,7 @@ mod tests {
             &bootstrap.project_root,
             &doc.to_string_lossy(),
         );
-        let legacy_doc_id = "tasks/professional/equityfundingsource.md".to_string();
+        let legacy_doc_id = "tasks/professional/sampleportal.md".to_string();
 
         let legacy_actor = agent_doc_sqlite::state_store::ActorRecord {
             document_id: legacy_doc_id.clone(),
@@ -15165,7 +15246,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
-        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
         std::fs::write(
             &doc,
             "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",
@@ -15223,7 +15304,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks/professional")).unwrap();
-        let doc = dir.path().join("tasks/professional/equityfundingsource.md");
+        let doc = dir.path().join("tasks/professional/sampleportal.md");
         std::fs::write(
             &doc,
             "---\nagent_doc_session: efs\nagent: codex\n---\nBody\n",

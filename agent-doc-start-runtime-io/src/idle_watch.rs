@@ -613,6 +613,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             };
             let mut install_stale_since: Option<std::time::Instant> = None;
             let mut install_detected_logged = false;
+            let mut install_dirty_logged = false;
             // `#supautoinstall` — one-shot latch: a failed build must not be re-attempted
             // every idle boundary (it would block the watch on a hopeless multi-minute
             // build each tick). After one failure the supervisor logs once and leaves the
@@ -1382,8 +1383,59 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             // Fail-open: any unreadable source/binary → not newer.
                             _ => false,
                         };
+                        // An auto-install is a promotion boundary, not a build
+                        // scratchpad. Installing from an in-progress dirty
+                        // worktree can publish a half-edited binary and recycle
+                        // every live session while its author is still typing.
+                        // Wait for the source commit, then promote that stable
+                        // checkout on the next idle boundary.
+                        let source_ready = if source_newer {
+                            match agent_doc_controller_io::project_controller::supervisor_auto_install_worktree_clean(crate_root) {
+                                Ok(true) => {
+                                    install_dirty_logged = false;
+                                    true
+                                }
+                                Ok(false) => {
+                                    if !install_dirty_logged {
+                                        install_dirty_logged = true;
+                                        log_event(
+                                            &mut session_log,
+                                            &format!(
+                                                "supervisor_auto_install_deferred reason=source_worktree_dirty crate_root={}",
+                                                crate_root.display()
+                                            ),
+                                        );
+                                        eprintln!(
+                                            "[agent-doc] supervisor auto-install deferred: {} has uncommitted changes; waiting for the source commit before promoting a binary",
+                                            crate_root.display()
+                                        );
+                                    }
+                                    false
+                                }
+                                Err(err) => {
+                                    if !install_dirty_logged {
+                                        install_dirty_logged = true;
+                                        log_event(
+                                            &mut session_log,
+                                            &format!(
+                                                "supervisor_auto_install_deferred reason=source_cleanliness_unproven crate_root={} error={err}",
+                                                crate_root.display()
+                                            ),
+                                        );
+                                        eprintln!(
+                                            "[agent-doc] supervisor auto-install deferred: could not prove {} is a clean committed checkout ({err:#})",
+                                            crate_root.display()
+                                        );
+                                    }
+                                    false
+                                }
+                            }
+                        } else {
+                            install_dirty_logged = false;
+                            false
+                        };
                         let install_action = supervisor_install_action(
-                            source_newer,
+                            source_ready,
                             auto_install_enabled,
                             turn_boundary,
                         );

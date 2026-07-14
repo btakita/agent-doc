@@ -2,7 +2,7 @@
 name: supervisor
 status: living
 date: 2026-04-13
-updated: 2026-06-24
+updated: 2026-07-14
 ---
 
 # agent-doc Supervisor Spec
@@ -42,6 +42,8 @@ from the session-actor contract rather than from the old phased rollout notes.
 - Not a tmux replacement. Supervisor still runs inside a tmux pane; tmux still owns the visual terminal the user sees.
 - Not a sandbox. Supervisor does not restrict what claude can do — it just owns its lifecycle.
 - Not a daemon for multiple sessions. **One supervisor = one claude = one session document.** Per-session daemons are easier to reason about than a global one.
+- That boundary includes harness conversation identity. A replacement child must not use global "last conversation" selectors such as Claude `--continue`, Codex `resume --last`, or OpenCode `--continue`; those can attach an otherwise-correct pane/actor to another document's recent session. Without an exact durable harness-session binding, restart fresh and re-submit this supervisor's document trigger.
+- Install/recycle is an ordered document handoff, not a kill-and-relaunch broadcast. The executable path is replaced by same-directory atomic rename so controller and supervisor exec calls always see a complete old or new binary. Background auto-install waits for a clean committed source tree, disables the nested `lib-install` recycle broadcast, marks every route-owned supervisor first, then marks controllers, exactly once. A supervisor with a live child adopts the existing PTY across `execve`; a supervisor without a live child starts one fresh document-bound replacement and auto-triggers its own file.
 - Not a replacement for `ipc_socket.rs` — that socket handles write-path IPC between the binary and editor plugins. Supervisor IPC is a different socket, scoped to claude lifecycle control.
 
 ## Architecture

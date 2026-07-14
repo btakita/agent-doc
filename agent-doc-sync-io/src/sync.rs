@@ -1923,7 +1923,7 @@ fn canonical_sync_project_root(project_root: &Path) -> PathBuf {
 /// `.agent-doc` ancestor is that same root (`#sync-cross-root-autostart`).
 ///
 /// A document under a nested/submodule project root (its own `.agent-doc/`,
-/// e.g. `src/boost-client/tasks/...`) is owned by that root's own controller
+/// e.g. `src/sample-app/tasks/...`) is owned by that root's own controller
 /// and sync. Auto-starting or remembering it from the superproject provisions a
 /// mis-rooted pane: `agent-doc start` runs against the wrong root, the pane is
 /// slow to prove ownership, and it dies on start — the operator-visible "slow
@@ -2102,7 +2102,7 @@ fn run_with_options_internal_at_root(
 
     // Cross-root guard (`#sync-cross-root-autostart`): remembered layout state can
     // accumulate documents that live under a nested/submodule project root with
-    // its own `.agent-doc/` (e.g. `src/boost-client/tasks/...`). Restoring or
+    // its own `.agent-doc/` (e.g. `src/sample-app/tasks/...`). Restoring or
     // auto-starting them from this root provisions a mis-rooted pane that dies on
     // start. Sanitize the remembered layout at load so the cross-root document is
     // neither restored into a column nor re-persisted; this self-heals memory that
@@ -3021,7 +3021,7 @@ fn run_with_options_internal_at_root(
             // forced false under `skip_autostart_diagnostics`) and early-returned at
             // the layout-preservation guard before the `tmux_router` reconcile — so a
             // focused document whose owned pane is merely stashed never got swapped
-            // into view (observed: focusing `equityfundingsource.md` left another
+            // into view (observed: focusing `sampleportal.md` left another
             // document's pane in the visible column). Resolve a proven-live registered
             // owner (including a stashed pane) so it enters the reconcile and the
             // `tmux_router` SWAP fast path brings it into the exact-visible columns.
@@ -5020,12 +5020,12 @@ mod tests {
         // Superproject root + a same-root doc.
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks/research")).unwrap();
-        let same_root_doc = root.join("tasks/research/monsterrodholders.md");
+        let same_root_doc = root.join("tasks/research/sampleorders.md");
         std::fs::write(&same_root_doc, "---\n---\n").unwrap();
         // Nested submodule root (its own `.agent-doc`) + a cross-root doc.
-        std::fs::create_dir_all(root.join("src/boost-client/.agent-doc")).unwrap();
-        std::fs::create_dir_all(root.join("src/boost-client/tasks")).unwrap();
-        let cross_root_doc = root.join("src/boost-client/tasks/monsterrodholders.md");
+        std::fs::create_dir_all(root.join("src/sample-app/.agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("src/sample-app/tasks")).unwrap();
+        let cross_root_doc = root.join("src/sample-app/tasks/sampleorders.md");
         std::fs::write(&cross_root_doc, "---\n---\n").unwrap();
 
         let sync_root = canonical_sync_project_root(&root);
@@ -5047,9 +5047,9 @@ mod tests {
         std::fs::create_dir_all(root.join("tasks/agent-doc")).unwrap();
         let same_root_doc = root.join("tasks/agent-doc/agent-doc-bugs2.md");
         std::fs::write(&same_root_doc, "---\n---\n").unwrap();
-        std::fs::create_dir_all(root.join("src/boost-client/.agent-doc")).unwrap();
-        std::fs::create_dir_all(root.join("src/boost-client/tasks")).unwrap();
-        let cross_root_doc = root.join("src/boost-client/tasks/monsterrodholders.md");
+        std::fs::create_dir_all(root.join("src/sample-app/.agent-doc")).unwrap();
+        std::fs::create_dir_all(root.join("src/sample-app/tasks")).unwrap();
+        let cross_root_doc = root.join("src/sample-app/tasks/sampleorders.md");
         std::fs::write(&cross_root_doc, "---\n---\n").unwrap();
 
         let sync_root = canonical_sync_project_root(&root);
@@ -5060,7 +5060,7 @@ mod tests {
         ];
         let (sanitized, dropped) = sanitize_cross_root_layout(saved_layout, &sync_root);
         assert_eq!(dropped.len(), 1, "exactly the submodule doc is dropped");
-        assert!(dropped[0].contains("boost-client"));
+        assert!(dropped[0].contains("sample-app"));
         // Same-root column preserved; cross-root column blanked to hold its slot.
         assert_eq!(sanitized.len(), 2);
         assert_eq!(sanitized[0], same_root_doc.to_string_lossy());
@@ -5526,7 +5526,7 @@ mod tests {
         // Superproject: git repo + `.agent-doc/` + a tracked document.
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::fs::create_dir_all(root.join("tasks/professional")).unwrap();
-        let super_doc = root.join("tasks/professional/equityfundingsource.md");
+        let super_doc = root.join("tasks/professional/sampleportal.md");
         std::fs::write(&super_doc, "# efs\n").unwrap();
         init_git_repo(&root, &super_doc);
 

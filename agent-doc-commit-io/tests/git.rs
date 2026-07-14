@@ -4489,7 +4489,7 @@ Duplicate replay should stay live.
     // snapshot as stale exchange drift and reverts it back to the pre-compact HEAD,
     // so the commit no-ops ("staged snapshot already matches HEAD") and the
     // compaction closeout's `verify_compact_head_landed` reports uncommitted
-    // compaction drift — the live `equityfundingsource.md` incident. The
+    // compaction drift — the live `sampleportal.md` incident. The
     // authoritative-compaction scope must suppress that repair so the compacted
     // snapshot lands in HEAD.
     #[test]

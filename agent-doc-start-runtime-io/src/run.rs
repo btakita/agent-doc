@@ -592,17 +592,23 @@ pub fn run_with_reap_policy(
         let launch_plan = child_launch_plan(first_run, auto_trigger_next_launch);
         auto_trigger_next_launch = false;
         let auto_trigger = launch_plan.auto_trigger;
-        let args = if launch_plan.use_continue_args {
-            let restart_args = harness.restart_args(&base_args)?;
+        let args = if launch_plan.restart_requested {
+            // A managed supervisor owns one document. Harness shortcuts such as
+            // Claude `--continue`, Codex `resume --last`, and OpenCode
+            // `--continue` select process-global history and can therefore
+            // hijack another document's live conversation after a CPC recycle.
+            // Until a harness-specific session id is durably bound to this
+            // document, restart fresh and re-submit only this document's trigger.
+            let restart_args = base_args.clone();
             start_console_status(
                 &mut session_log,
                 route_owned,
-                format!("Restarting {} (continue)...", harness.binary),
+                format!("Restarting {} (fresh, document-bound)...", harness.binary),
             );
             log_event(
                 &mut session_log,
                 &format!(
-                    "{}_restart mode=continue restart_count={}",
+                    "{}_restart requested_mode=continue effective_mode=fresh reason=unscoped_global_resume_disabled restart_count={}",
                     harness.binary, restart_count
                 ),
             );

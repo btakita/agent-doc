@@ -122,7 +122,7 @@ class TmuxPaneFocusSyncTest {
             false,
             TmuxPaneFocusSync.shouldMirrorTmuxFocusToEditor(
                 tmuxFocusedDocRoot = "/repo",
-                editorFocusedDocRoot = "/repo/src/boost-client",
+                editorFocusedDocRoot = "/repo/src/sample-app",
             ),
         )
     }

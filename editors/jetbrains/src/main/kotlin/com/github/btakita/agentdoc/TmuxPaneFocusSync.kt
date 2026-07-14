@@ -95,7 +95,7 @@ class TmuxPaneFocusSync private constructor(
         // #tmuxmirrorcrossroot: never yank the editor selection across project
         // roots. When the operator is actively focused on a markdown doc owned by a
         // different agent-doc project than the tmux-focused session (observed: a
-        // submodule's monsterrodholders.md while the superproject's agent-doc window
+        // submodule's sampleorders.md while the superproject's agent-doc window
         // has agent-doc-bugs2.md active), mirroring the foreign window's focus would
         // steal their selection. Record the tmux focus so a later same-root change
         // still mirrors, but do not move the editor now.

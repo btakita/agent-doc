@@ -1142,8 +1142,8 @@ mod tests {
         let nested = dir.path().join("tasks/professional");
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
-        let doc = nested.join("equityfundingsource.md");
-        std::fs::write(&doc, "# EFS\n").unwrap();
+        let doc = nested.join("sampleportal.md");
+        std::fs::write(&doc, "# SP\n").unwrap();
         let cwd = nested.to_string_lossy().to_string();
         let file = doc.to_string_lossy().to_string();
 
@@ -1181,7 +1181,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        let old_doc = dir.path().join("tasks/equityfundingsource.md");
+        let old_doc = dir.path().join("tasks/sampleportal.md");
         let new_doc = dir.path().join("tasks/agent-doc-bugs2.md");
         std::fs::write(&old_doc, "# old\n").unwrap();
         std::fs::write(&new_doc, "# new\n").unwrap();

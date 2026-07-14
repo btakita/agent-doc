@@ -2,7 +2,7 @@
 
 ## Symptom (operator report, 2026-07-12)
 
-During an `equityfundingsource.md` turn, `agent-doc tasks/equityfundingsource.md`
+During an `sampleportal.md` turn, `agent-doc tasks/sampleportal.md`
 is **periodically re-added to the pane input while the turn is still running**.
 The supervisor idle-queue watch dispatches the file drain trigger into a busy
 pane, repeatedly.
@@ -50,7 +50,7 @@ supervisor idle-detection that many invariants depend on. The fix needs the
 
 ## Next step (forensic)
 
-From an `equityfundingsource.md` incident, capture:
+From an `sampleportal.md` incident, capture:
 
 ```
 tsift --envelope digest-runner --kind log --path . \

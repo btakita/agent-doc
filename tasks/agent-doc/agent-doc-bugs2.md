@@ -148,7 +148,20 @@ agent-doc **0.34.100** fixes that split:
 The agent still never needs to invoke document repair. Exact legacy whole-document replay is coalesced automatically by normal preflight through CRDT; ambiguous or non-identical operator edits remain fail-closed and operator-owned.
 
 Verification passed twice at **7,554/7,554 tests**, plus focused zero-live materialization, delayed-ACK, strict clippy, deterministic SimWorld, and `make tmux-ci`. The installed CLI/native library is **0.34.100**; the JetBrains plugin remains **0.2.247**. Commit `5b193fc3`, tag `v0.34.100`, and parent pin `c13086958` are pushed/prepared; the new CI and Release workflows were in progress at closeout.
-<!-- agent:boundary:417480cc -->
+### Re: CPC-owned realtime convergence, coalesced backpressure, and editor parity — codex
+
+Implemented and installed the agent-doc reliability set.
+
+- Document authority is now origin-scoped: JetBrains and VS Code admit only genuine operator deltas. Clean cache reloads, whole-buffer refreshes, CPC projections, and stale queued callbacks cannot masquerade as typing or overwrite canonical CRDT state. The deepest owning JetBrains project alone may claim a path, preventing cross-project/session hijacks and pane/document focus drift.
+- Run Agent Doc is single-admission across the editor, controller, supervisor, and pane. Route attempts share an idempotency key; protected composer drafts remain protected; duplicate clicks/prompts and duplicate Markdown tail residue coalesce instead of dispatching twice.
+- Finalize and Compact Exchange use bounded lazily backpressure and one CPC-owned mutation transaction. The CPC computes and applies canonical CRDT changes in-process, waits for visible convergence, and commits without controller self-RPC, manual document repair, or treating response delivery as user activity.
+- Atomic binary/lib promotion now preserves supervisor/controller handoff across installs. A concurrent dirty source tree was deliberately excluded by building the committed head in an isolated sibling worktree.
+- Plugin parity is shipped: JetBrains 0.2.252 and VS Code/VSCodium 0.2.50 share operator-origin fencing, projection epochs, coalesced CRDT delivery, and visible-hash ACK semantics. Local VS Code install now rejects stale VSIX artifacts; JetBrains discovery now targets real versioned IDE data roots and reports the installed JAR version.
+
+Verification: repository `make check` passed 7,590 tests (240 skipped); VS Code passed 151 tests; JetBrains `test buildPlugin` passed; targeted Rust controller/compact/realtime/turn suites passed. The installed CLI is 0.34.104. A live CPC Compact Exchange on `equityfundingsource.md` completed in 2.7 seconds and `session-check` confirmed a committed cycle with `ui_outcome=no_drainable_work`—no typing wait, file-cache conflict, duplicate residue failure, or controller timeout.
+
+Commits: agent-doc `d62382ef`, `2ea5a631`, `7896a492`; parent checkpoints `102ca8899`, `bfd0aa650`, `dbc8885fd`. VSCodium is active at 0.2.50. IntelliJ IDEA 2026.1 has 0.2.252 staged in its actual `idea.plugins.path`; because Kotlin class structure changed, it activates on the next IDE restart.
+<!-- agent:boundary:44115dbd -->
 <!-- /agent:exchange -->
 ## Queue
 

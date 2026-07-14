@@ -133,7 +133,19 @@ Verification completed:
 - Parent workspace commit `fbf345ebc` was prepared and is pushed immediately after this required session closeout.
 
 IntelliJ must be restarted once to load the new plugin classes. The live restart + exact equityfundingsource placeholder/freeze check is retained as operator verification `#jbrelaylive`.
-<!-- agent:boundary:adcdd035 -->
+
+### Re: File Cache Conflict and turn churn — gpt-5
+
+Fixed across agent-doc 0.34.97–0.34.99.
+
+- **JetBrains dispatch:** 0.34.97 stops a DIM suggestion such as `Summarize recent commits` from being classified as protected drafted prompt input, so **Run Agent Doc** can dispatch `equityfundingsource.md`. It also coalesces RelayCell updates and reloads the Codex skill in place.
+- **Backpressure and coalescence:** 0.34.98 makes attached-document mutation CRDT-authoritative. It waits for 500 ms of typing quiescence, keeps only the latest coalesced intent, applies bounded 25–250 ms retry backpressure, waits for the visible-replica ACK, and writes the disk projection only after that ACK. Once CRDT accepts a write, legacy editor IPC is skipped; the binary never races it with a fallback disk write.
+- **No agent repair:** 0.34.99 moves legacy whole-document replay convergence into ordinary preflight. The detector is deliberately narrow—only two or a power-of-two number of byte-identical complete agent-doc projections qualify. Preflight waits for typing/version sync, replaces the replay through CRDT, observes the ACK, and then parses the canonical document. Non-identical operator edits are never collapsed. This prevents the prior giant diff and bogus orchestration cascade without asking the agent to run `repair`.
+
+Live dogfood used normal `agent-doc preflight`, not repair. It converged this document from **101,272 bytes / 2 session projections** to **50,636 bytes / 1 projection**. The operations log records `preflight_exact_document_replay action=coalesce transport=crdt` followed by `action=converged transport=crdt`, with the canonical hash unchanged.
+
+Verification passed: **7,552/7,552 tests**, focused CRDT/preflight integration tests, deterministic SimWorld coverage, strict clippy, and `make tmux-ci`. The installed CLI/native library is **0.34.99**; the JetBrains plugin remains **0.2.247** because 0.34.98–0.34.99 required no further Kotlin change, and native reload was broadcast. Commits are `99be1867`, `73d9ad95`, and `f5356358`; releases `v0.34.97`, `v0.34.98`, and `v0.34.99` are pushed. Parent pins are `752960c3b` and `cd8a8e6da`. The new 0.34.99 CI and Release workflows were in progress at closeout; local verification is complete.
+<!-- agent:boundary:0ad51265 -->
 <!-- /agent:exchange -->
 ## Queue
 

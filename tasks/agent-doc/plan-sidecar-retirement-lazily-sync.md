@@ -22,20 +22,34 @@ reaping 1007 dead-pid files un-wedged the controller and confirmed the diagnosis
   `live_buffer_sidecar_in_scope` (= `is_agent_doc_document_for_file`), so a sidecar is
   written only for agent-doc **session documents**, matching the plane's scope. Stops
   sidecars accruing for `node_modules/**/README.md`, plain specs, and source tabs.
+- **Sync-in-flight plane foundation (`f7c3e619`)** — the plane can now answer the divergence
+  question the sidecar's `edit_epoch`/`last_synced_epoch` fields carry. Added
+  `LivenessOp::Sync{edit_epoch, synced_epoch}` folded into a per-`(doc,pid)` lazily
+  `WireLwwRegister<(u64,u64)>` on `LivenessProjection`, plus `document_in_flight()` /
+  `sync_epochs()` derived reads. Highest-stamp-wins LWW ⇒ order-independent + redelivery-noop;
+  a dead/closed editor's unsynced edits drop (whole-editor-death cascade). Round-trips through
+  the CrdtSync liveness carriage. **Purely additive — no consumer cutover yet.**
 
-Both verified green (`make check` 7588 tests) in an **isolated worktree** — a concurrent
-session was mid-edit in the shared tree (its `compact_document` trait addition broke the
-in-place build), so commits were made via temp-index compare-and-swap against a green HEAD
-to avoid entangling that session's work.
+All verified green in an **isolated worktree** (`make check`: 7588 for the first two slices,
+7596 with the sync-in-flight tests) — a concurrent session was churning the convergence path in
+the shared tree, so every commit went in via temp-index compare-and-swap against a green HEAD to
+avoid entangling that session's work.
 
-**Remaining for full retirement** (unchanged from the handoff below, minus the two GC/scoping
-follow-ups now done): the hard piece is **sync-in-flight on the plane** — `editor_sync_statuses`
-/ `await_editor_sync_barrier` still read sidecars to detect unsaved editor drift before a disk
-write, and the plane tracks open-set + pid-alive but **not** per-editor edit-epoch vs synced-epoch,
-so it cannot yet answer "is this editor's edit in flight." That signal must move onto the plane
-(a per-editor epoch/frontier cursor) before the sidecar **writers** + reaper can be deleted. The
-durable store is already lazily-owned (`SqliteOutbox` = lazily `DurableOutbox`). Then: delete the
-writers, then delete the reaper, keeping the outbox/ledger as the recycle-recovery source.
+**Remaining for full retirement:**
+1. **Sync-in-flight cutover** — the plane foundation exists (`f7c3e619`); now the plugins (kt/js)
+   must emit `LivenessOp::Sync` on each edit/sync-ack, and the consumers
+   (`editor_sync_statuses` / `await_editor_sync_barrier` in `crdt-relay-io`, `write-runtime-io`,
+   `supervisor-io`, `preflight`) must read `plane.document_in_flight()` (plane-first, sidecar
+   cold-miss fallback — the proven `plane_editor_live_for_path` pattern). **Gated on the concurrent
+   convergence-hardening work settling** — these are the exact files it is editing.
+2. **Open-set close hook** (`ffi.rs` `agent_doc_document_closed_for_editor`) — the
+   `live_buffer_snapshots(path).is_empty()` → `mark_closed` read moves to `plane.open_docs()`.
+3. **Delete the writers + reaper** — once 1–2 land and parity holds: delete `record_live_buffer_*`,
+   the lease write, and both reapers (`reap_dead_live_buffer_sidecars`, `reap_stale_jetbrains_live_buffers`
+   — note these now **duplicate**; consolidate or delete together). Keep the `SqliteOutbox`/ledger as
+   the recycle-recovery source (already lazily-owned).
+- The routing read (`ipc-io::editor_target`) stays on the sidecar (deferred — inside the
+  `reliable-sync-io → ipc-io` dep cycle; routing, not authority).
 
 ## Goal
 

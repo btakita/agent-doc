@@ -44,6 +44,7 @@ from the session-actor contract rather than from the old phased rollout notes.
 - Not a daemon for multiple sessions. **One supervisor = one claude = one session document.** Per-session daemons are easier to reason about than a global one.
 - That boundary includes harness conversation identity. A replacement child must not use global "last conversation" selectors such as Claude `--continue`, Codex `resume --last`, or OpenCode `--continue`; those can attach an otherwise-correct pane/actor to another document's recent session. Without an exact durable harness-session binding, restart fresh and re-submit this supervisor's document trigger.
 - Install/recycle is an ordered document handoff, not a kill-and-relaunch broadcast. The executable path is replaced by same-directory atomic rename so controller and supervisor exec calls always see a complete old or new binary. Background auto-install waits for a clean committed source tree, disables the nested `lib-install` recycle broadcast, marks every route-owned supervisor first, then marks controllers, exactly once. A supervisor with a live child adopts the existing PTY across `execve`; a supervisor without a live child starts one fresh document-bound replacement and auto-triggers its own file.
+- Route-owned lifecycle is explicit at creation. Editor-origin Run Agent Doc and selected-document layout provisioning use `keep-alive`, so an idle prompt after commit or install remains the selected document's interactive owner. Controller/watchdog recovery uses `auto` and may reap a proven idle one-shot generation. Focus reconciliation must never recreate a keep-alive pane merely because a stale actor projection temporarily made it unfocusable.
 - Not a replacement for `ipc_socket.rs` — that socket handles write-path IPC between the binary and editor plugins. Supervisor IPC is a different socket, scoped to claude lifecycle control.
 
 ## Architecture
@@ -281,23 +282,20 @@ on claude exit with code c:
                          stdin cannot close the pane during keepalive recovery
                          AND non-empty non-`q` input is rejected with a
                          re-prompt instead of silently restarting fresh
-                         AND resume auto-trigger only accepts a prompt line that
-                         appears as the latest non-empty line in the current
-                         resumed child's filtered pty output; stale tmux history
-                         is not enough
-                         AND when the resumed child never re-establishes a prompt
-                         (`auto_trigger_timeout` / child-pty trigger failure), treat the
-                         handoff as failed provenance. The 30s
-                         `auto_trigger_timeout` log is provisional telemetry:
-                         the watcher keeps polling after that point, and the
-                         timeout only remains terminal if the child exits
-                         without a later prompt/send success:
-                         - first failure in the 15-minute window → restart fresh
-                           instead of chaining another blind `resume --last`
-                         - second failure in the 15-minute window → stop the
-                           blind loop and prompt the user (Enter fresh / q exit)
-        Transient: sleep 2s, restart with --continue, state Healthy
-        Flapping:  sleep 30s, restart with --continue, state Degraded
+AND resume auto-trigger primarily accepts a prompt line that
+appears in the current resumed child's filtered pty output;
+when the child-owned terminal renderer misses a prompt that the
+owned tmux pane can see, it may fall back only after the current
+child has emitted output, the actor independently reconciles to
+ready, and the pane remains dispatch-ready for two consecutive
+polls; stale tmux history alone is never enough
+AND when the replacement child never re-establishes a prompt
+(`auto_trigger_timeout` / trigger delivery failure), treat the
+handoff as failed provenance. The watcher fails closed after 60s,
+records `startup_miss`, and never types into an unproven child;
+a later explicit route may recover once the owned pane becomes ready
+Transient: sleep 2s, restart fresh and document-bound, state Healthy
+Flapping:  sleep 30s, restart fresh and document-bound, state Degraded
                    on 5th consecutive failure → state Halted
         Halted:   do not restart. Print "supervisor halted — run 'agent-doc
                   supervisor resume <session>' to retry"
@@ -378,7 +376,7 @@ Example:
 [1713041390] [supervisor] restart_eval pane=%12 harness=codex exit_code=129 exit_kind=signal exit_signal="Hangup" exit_status="Terminated by Hangup" auto_trigger_outcome=sent ctrl_d=false state=healthy action=restart_after
 [1713041390] [supervisor] auto_restart delay=2s with_continue=true restart_count=1
 [1713041391] [supervisor] codex_spawn pid=54444 mode=continue
-[1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_30s
+[1713041421] [supervisor] auto_trigger_timeout pane=%12 harness=codex reason=no_prompt_after_60s
 [1713041425] [supervisor] resume_restart_failed pane=%12 harness=codex outcome=timeout recent_failures=1 window_secs=900 restart_count=1
 [1713041450] [supervisor] supervisor_exit reason=user_quit_clean_exit pane=%12 restart_count=1
 [1713041450] session_end

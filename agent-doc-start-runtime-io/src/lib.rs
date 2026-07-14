@@ -32,7 +32,8 @@
 //!   panes; multi-turn documents with live backlog, queue, dirty edits, or an
 //!   unresolved exchange-tail prompt stay alive for continued interaction.
 //! - On non-zero exit (context exhaustion, crash, etc.): auto-restarts after a
-//!   2-second delay using `--continue` to resume the previous conversation.
+//!   bounded delay with a fresh document-bound child. Process-global history
+//!   selectors are never used for managed replacements.
 //! - On clean exit (code 0): honors the active harness policy.
 //!   Claude prompts on stderr and waits for Enter (fresh restart) or `q` + Enter (exit).
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
@@ -60,17 +61,18 @@
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,
 //!   user quit, and session end.
-//! - On `--continue` restarts, spawns a background thread that waits for the
-//!   harness prompt to appear in the current child process's filtered pty
-//!   output before injecting the harness-specific trigger command back through
-//!   the claimed tmux pane input path to auto-trigger the skill workflow in
-//!   the resumed conversation.
+//! - On managed restarts, spawns a background thread that waits for the harness
+//!   prompt to appear in the current child process's filtered pty output before
+//!   injecting the harness-specific trigger command back through the claimed
+//!   tmux pane input path. If the child-owned renderer misses that prompt, a
+//!   fallback requires current-generation output plus independently reconciled,
+//!   stable dispatch-ready evidence from the owned pane.
 //!   This avoids the race where DSR (Device Status Report) escape sequences
 //!   interleave with the injected command, corrupting Claude Code's input
 //!   state, while also ensuring stale tmux scrollback cannot be mistaken for
 //!   the new child's prompt and a stale worker cannot later type into the
 //!   supervisor prompt or a replacement process in the tmux pane. If the
-//!   prompt still has not appeared after a hard 30-second deadline
+//!   prompt still has not appeared after a hard 60-second deadline
 //!   (`AUTO_TRIGGER_TIMEOUT`), the thread fails closed (`#startupdeadline`):
 //!   it records a `startup_miss` marker against the owned pane and surfaces an
 //!   actionable "session did not become dispatch-ready in Ns" diagnostic on
@@ -155,6 +157,9 @@ use agent_doc_supervisor::crash_policy::{
     supervisor_clean_exit_before_prompt_seen, supervisor_clean_exit_resolution,
     supervisor_policy_exit_code, supervisor_resume_handoff_failed,
 };
+use agent_doc_supervisor::detection::{
+    AutoTriggerPromptDecision, AutoTriggerPromptSource, auto_trigger_prompt_decision,
+};
 use agent_doc_supervisor::input::prompt_input_summary;
 use agent_doc_supervisor::ipc_protocol::submit_bytes;
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
@@ -187,6 +192,7 @@ fn exit_provenance_fields(status: &portable_pty::ExitStatus) -> String {
 
 const AUTO_TRIGGER_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const AUTO_TRIGGER_LIVE_PANE_READY_CONFIRM_TICKS: u32 = 2;
 /// Auto-trigger no-prompt dispatch-ready deadline (`#startupdeadline` /
 /// `#waitmachine2` / `#contrestartdispatch`).
 ///
@@ -198,8 +204,8 @@ const AUTO_TRIGGER_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// shell prompt), but waiting on a cold-(re)starting harness *process* is a
 /// legitimately slow startup wait. A `claude --continue` resuming a large session
 /// plus heavy SessionStart hooks routinely needs well over 10s to reach its first
-/// prompt, so clamping to 10s made every continue-mode `restart-supervisor` time
-/// out before the prompt appeared: the re-dispatch never fired and the relaunched
+/// prompt, so clamping to 10s made every managed `restart-supervisor` replacement
+/// time out before the prompt appeared: the re-dispatch never fired and the relaunched
 /// operator came up unclaimed, leaving the controller parked at `operator_ready`
 /// (`#contrestartdispatch`). Like the bounded [`agent_doc_turn::wait_machine::REINSTALL_BUDGET`]
 /// exemption, this stays bounded — a child that never becomes dispatch-ready
@@ -859,6 +865,7 @@ fn spawn_auto_trigger_thread(
             let path = PathBuf::from(&file);
             let mut clear_cooldown_logged = false;
             let mut monitor = AutoTriggerMonitor::new(Instant::now(), AUTO_TRIGGER_TIMEOUT);
+            let mut live_pane_ready_ticks = 0;
             for attempt in 0.. {
                 let delay = if attempt == 0 {
                     AUTO_TRIGGER_INITIAL_DELAY
@@ -906,7 +913,22 @@ fn spawn_auto_trigger_thread(
                         }
                     }
                 }
-                if current_child_prompt_visible(&shared, &harness) {
+                let prompt_decision = auto_trigger_prompt_decision(
+                    current_child_prompt_visible(&shared, &harness),
+                    current_child_output_observed(&shared),
+                    actor_state_is_ready(&shared),
+                    supervisor_pane_dispatch_ready(&shared, &harness),
+                    live_pane_ready_ticks,
+                    AUTO_TRIGGER_LIVE_PANE_READY_CONFIRM_TICKS,
+                    is_help_screen_visible(&shared, &harness),
+                );
+                if let AutoTriggerPromptDecision::Wait {
+                    live_pane_ready_ticks: next_ticks,
+                } = prompt_decision
+                {
+                    live_pane_ready_ticks = next_ticks;
+                }
+                if let AutoTriggerPromptDecision::Dispatch(readiness_source) = prompt_decision {
                     // `#capproofbg`: do NOT stall the auto-trigger waiting for the
                     // managed-capability proof to finish. Dispatch proceeds as soon
                     // as the child prompt is visible; the proof runs in the
@@ -914,6 +936,10 @@ fn spawn_auto_trigger_thread(
                     // session log + tmux `display-message`) gates subsequent
                     // dispatch through `auto_trigger_inject_command` →
                     // `capability_dispatch_blocker`.
+                    shared.prompt_visible_once.store(true, Ordering::Relaxed);
+                    shared
+                        .suppress_stale_ctrl_d_until_prompt
+                        .store(false, Ordering::Relaxed);
                     let trigger_cmd = harness.trigger_command(&file);
                     match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
                         AutoTriggerOutcome::Sent => {
@@ -923,8 +949,17 @@ fn spawn_auto_trigger_thread(
                             log_event(
                                 &mut session_log,
                                 &format!(
-                                    "auto_trigger_sent harness={} cmd=\"{}\"",
-                                    harness.binary, trigger_cmd
+                                    "auto_trigger_sent harness={} readiness_source={} cmd=\"{}\"",
+                                    harness.binary,
+                                    match readiness_source {
+                                        AutoTriggerPromptSource::CurrentChildPty => {
+                                            "current_child_pty"
+                                        }
+                                        AutoTriggerPromptSource::StableOwnedPane => {
+                                            "stable_owned_pane"
+                                        }
+                                    },
+                                    trigger_cmd
                                 ),
                             );
                             // Already in session_log; gate stderr so repeated
@@ -963,7 +998,7 @@ fn spawn_auto_trigger_thread(
                     }
                     return;
                 }
-                if is_help_screen_visible(&shared, &harness) {
+                if prompt_decision == AutoTriggerPromptDecision::CancelHelpScreen {
                     shared
                         .auto_trigger_outcome
                         .store(AutoTriggerOutcome::Cancelled as u8, Ordering::Relaxed);

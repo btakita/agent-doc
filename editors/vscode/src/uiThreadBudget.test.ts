@@ -24,6 +24,15 @@ describe('editor UI thread budget', () => {
         assert.strictEqual(listener.includes('handleLocalChangeDelta('), false);
     });
 
+    it('VS Code coalesces full-buffer reporting through lazily KeepLatest debounce', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        assert.ok(source.includes("import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';"));
+        assert.ok(source.includes('new DebounceCore<string>(LIVE_BUFFER_REPORT_DELAY_MS)'));
+        assert.ok(source.includes('state.debounce.input(monotonicMillis(), fsPath)'));
+        assert.ok(source.includes('state.debounce.tick(monotonicMillis())'));
+        assert.ok(source.includes('this.liveBufferReports.get(fsPath) !== state'));
+    });
+
     it('VS Code CRDT local-change hot path updates shadows from deltas', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'crdtReplica.ts'), 'utf-8');
         const start = source.indexOf('async handleLocalChangeDelta');

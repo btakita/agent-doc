@@ -752,6 +752,13 @@ projection context. The projection is exposed through the existing lazily-spec
 snapshot/delta graph so JetBrains (`lazily-kt`) and VS Code (`@lazily/js`) can
 mirror the same realtime state without reparsing raw logs or session files.
 
+Transient collaborator awareness is an ephemeral plane, not document state:
+the relay stores it in lazily-rs `EphemeralMapCore`, excludes it from durable
+CRDT serialization, and evicts it when a replica deregisters. Readiness that
+admits an install-handoff auto-trigger is likewise an explicit lazily-rs
+`ReadinessCore` composition of current-child output, actor readiness, and exact
+owned-pane dispatch readiness; no single stale projection is sufficient.
+
 Durable storage may keep append-only facts, checkpoints, and backup snapshots,
 but the hot path reads the lazily-backed projection when deciding:
 

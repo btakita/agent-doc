@@ -54,6 +54,7 @@ import {
 } from './editorCommandState';
 import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
 import { registerReliableSyncLiveness } from './reliableSyncLiveness';
+import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -67,6 +68,10 @@ const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
 const LIVE_BUFFER_REPORT_DELAY_MS = 75;
 const PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS = 30_000;
 
+function monotonicMillis(): number {
+    return Number(process.hrtime.bigint() / 1_000_000n);
+}
+
 // #qnodemerge4wire Phase 4: per-document text shadow (the previous full text).
 // VS Code's onDidChangeTextDocument carries only rangeLength (UTF-16) for the
 // deleted span, not the old fragment text, so we keep the prior text to compute
@@ -78,6 +83,11 @@ interface PendingEditorOpReport {
     oldText: string;
     change: ReplicaTextChange;
     projectRoot?: string;
+}
+
+interface LiveBufferReportState {
+    debounce: DebounceCore<string>;
+    timer: ReturnType<typeof setTimeout> | undefined;
 }
 
 function applyTextDocumentChange(
@@ -2224,8 +2234,8 @@ class PatchWatcher implements vscode.Disposable {
      * failing closed. Absent from the set = no unsaved operator edits.
      */
     private unsyncedLocalEditDocs = new Set<string>();
-    /** Coalesced full-buffer live reports; never run from onDidChangeTextDocument. */
-    private liveBufferReportTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Lazily KeepLatest debounce state; full-buffer reads stay off the change listener. */
+    private liveBufferReports = new Map<string, LiveBufferReportState>();
     /** Native typing markers are queued off the text-change listener path. */
     private nativeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** CRDT local forwards are queued off the text-change listener path. */
@@ -2890,23 +2900,48 @@ class PatchWatcher implements vscode.Disposable {
 
     private scheduleLiveBufferReport(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
-        const previous = this.liveBufferReportTimers.get(fsPath);
-        if (previous) clearTimeout(previous);
-        const timer = setTimeout(() => {
-            this.liveBufferReportTimers.delete(fsPath);
-            const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === fsPath);
-            if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
-            this.publishLiveBufferNow(latest, projectRoot);
-        }, LIVE_BUFFER_REPORT_DELAY_MS);
-        this.liveBufferReportTimers.set(fsPath, timer);
+        const state = this.liveBufferReports.get(fsPath) ?? {
+            debounce: new DebounceCore<string>(LIVE_BUFFER_REPORT_DELAY_MS),
+            timer: undefined,
+        };
+        this.liveBufferReports.set(fsPath, state);
+        state.debounce.input(monotonicMillis(), fsPath);
+        if (state.timer) clearTimeout(state.timer);
+        state.timer = setTimeout(
+            () => this.drainLiveBufferReport(fsPath, state, projectRoot),
+            LIVE_BUFFER_REPORT_DELAY_MS,
+        );
+    }
+
+    private drainLiveBufferReport(
+        fsPath: string,
+        state: LiveBufferReportState,
+        projectRoot: string | undefined,
+    ): void {
+        if (this.liveBufferReports.get(fsPath) !== state) return;
+        const emittedPath = state.debounce.tick(monotonicMillis());
+        if (emittedPath === null) {
+            // A timer may wake just before the monotone quiet boundary. Preserve
+            // one driver for the current generation instead of dropping work.
+            state.timer = setTimeout(
+                () => this.drainLiveBufferReport(fsPath, state, projectRoot),
+                LIVE_BUFFER_REPORT_DELAY_MS,
+            );
+            return;
+        }
+        state.timer = undefined;
+        this.liveBufferReports.delete(fsPath);
+        const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === emittedPath);
+        if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
+        this.publishLiveBufferNow(latest, projectRoot);
     }
 
     private publishLiveBufferNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
-        const timer = this.liveBufferReportTimers.get(fsPath);
-        if (timer) {
-            clearTimeout(timer);
-            this.liveBufferReportTimers.delete(fsPath);
+        const state = this.liveBufferReports.get(fsPath);
+        if (state) {
+            if (state.timer) clearTimeout(state.timer);
+            this.liveBufferReports.delete(fsPath);
         }
         const text = document.getText();
         seedEditorOpShadow(fsPath, text);
@@ -2951,9 +2986,9 @@ class PatchWatcher implements vscode.Disposable {
     handleDocumentClosed(filePath: string): void {
         native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         this.ownedDocs.delete(filePath);
-        const timer = this.liveBufferReportTimers.get(filePath);
-        if (timer) clearTimeout(timer);
-        this.liveBufferReportTimers.delete(filePath);
+        const state = this.liveBufferReports.get(filePath);
+        if (state?.timer) clearTimeout(state.timer);
+        this.liveBufferReports.delete(filePath);
         const nativeTimer = this.nativeChangeTimers.get(filePath);
         if (nativeTimer) clearTimeout(nativeTimer);
         this.nativeChangeTimers.delete(filePath);
@@ -3365,10 +3400,10 @@ class PatchWatcher implements vscode.Disposable {
             native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         }
         this.ownedDocs.clear();
-        for (const timer of this.liveBufferReportTimers.values()) {
-            clearTimeout(timer);
+        for (const state of this.liveBufferReports.values()) {
+            if (state.timer) clearTimeout(state.timer);
         }
-        this.liveBufferReportTimers.clear();
+        this.liveBufferReports.clear();
         for (const timer of this.nativeChangeTimers.values()) {
             clearTimeout(timer);
         }

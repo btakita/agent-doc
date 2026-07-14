@@ -113,6 +113,15 @@ where
     harness.output_prompt_visible(&child_output_for_detection(state))
 }
 
+/// True only after the current child generation has emitted filtered PTY output.
+/// The generation buffer is cleared immediately before every fresh spawn.
+pub fn current_child_output_observed<S>(state: &S) -> bool
+where
+    S: SupervisorDetectionState + ?Sized,
+{
+    !child_output_for_detection(state).trim().is_empty()
+}
+
 pub fn idle_queue_prompt_visible<S>(state: &S, harness: &HarnessConfig) -> bool
 where
     S: SupervisorDetectionState + ?Sized,

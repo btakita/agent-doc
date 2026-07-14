@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.103
+
+- **Fresh document-bound replacements resume without a second editor click.** The one-shot auto-trigger still prefers the current child's private PTY prompt, but now coalesces a renderer-miss fallback from the owned tmux pane only after the current generation emits output, its actor independently reaches `ready`, and the pane remains dispatch-ready for two consecutive polls. Stale pane history, unstable readiness, missing ownership, and help screens continue to fail closed; accepted fallback proof also retires stale Ctrl+D suppression and records the prompt latch for the current child.
+- **Editor-created sessions remain interactive across successful commits and atomic installs.** Run Agent Doc and layout/focus provisioning now start route-owned supervisors with an explicit `keep-alive` policy, while controller recovery keeps bounded one-shot `auto` reaping. Install handoff readiness accepts only the replacement child plus actor and owned-pane proof, preventing cross-document history resume and false crash/recreate churn.
+- **Realtime pressure is shaped by the released lazily distributed primitives.** Rust supervisor readiness composes through lazily-rs `ReadinessCore`, awareness is an ephemeral lazily-rs presence map rather than durable document state, and JetBrains `0.2.250` / VS Code `0.2.48` use lazily-kt/js `DebounceCore` KeepLatest generations for full-buffer reporting. Close, dispose, and superseding input atomically cancel the exact generation, so typing bursts coalesce without stale cleanup dropping new work.
+
 ## 0.34.102
 
 - **Managed restarts cannot hijack another document's harness conversation.** The supervisor no longer uses process-global history selectors (`claude --continue`, `codex resume --last`, or `opencode --continue`) when replacing a document-owned child. A replacement starts a fresh harness and re-submits only that supervisor's document trigger. This fixes the live failure where equity pane `%83` remained registered to `sampleportal.md` but CPC recycle launched Claude with `--continue`, attached session `cb1415be…`, and began lazily-kt work from another session.

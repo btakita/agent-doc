@@ -39,7 +39,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{CellHandle, EphemeralMapCore, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 
 use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_commit_barrier};
@@ -1135,52 +1135,51 @@ pub struct AwarenessState {
 /// not persisted and not committed.
 #[derive(Default)]
 pub struct AwarenessChannel {
-    presence: HashMap<u64, AwarenessState>,
+    /// lazily's explicitly-ephemeral, last-writer-per-peer compute core. The
+    /// channel drives eviction from editor membership and is therefore never
+    /// eligible for the durable document outbox.
+    presence: EphemeralMapCore<u64, AwarenessState>,
 }
 
 impl AwarenessChannel {
     /// A fresh empty channel.
     pub fn new() -> Self {
         Self {
-            presence: HashMap::new(),
+            presence: EphemeralMapCore::new(),
         }
     }
 
     /// Set the local awareness for `client_id` (overwrites any prior state).
     pub fn set_local(&mut self, client_id: u64, state: AwarenessState) {
-        self.presence.insert(client_id, state);
+        self.presence.set(client_id, state, 0, u64::MAX);
     }
 
     /// The current presence for `client_id`, if any.
-    pub fn get(&self, client_id: u64) -> Option<&AwarenessState> {
-        self.presence.get(&client_id)
+    pub fn get(&self, client_id: u64) -> Option<AwarenessState> {
+        self.presence.get(&client_id, 0)
     }
 
     /// A deterministic (client-id-ordered) snapshot of all presence — the payload
     /// a hub broadcasts to peers.
     pub fn broadcast(&self) -> Vec<(u64, AwarenessState)> {
-        let mut out: Vec<(u64, AwarenessState)> = self
-            .presence
-            .iter()
-            .map(|(id, s)| (*id, s.clone()))
-            .collect();
-        out.sort_by_key(|(id, _)| *id);
-        out
+        self.presence.present(0).into_iter().collect()
     }
 
     /// Expire / remove a client's presence (called on deregister / disconnect).
     pub fn remove(&mut self, client_id: u64) -> bool {
-        self.presence.remove(&client_id).is_some()
+        let existed = self.presence.get(&client_id, 0).is_some();
+        self.presence.evict(&client_id);
+        existed
     }
 
     /// The number of clients with live presence.
     pub fn len(&self) -> usize {
-        self.presence.len()
+        self.presence.present(0).len()
     }
 
     /// Whether any presence is tracked.
     pub fn is_empty(&self) -> bool {
-        self.presence.is_empty()
+        self.presence.present(0).is_empty()
     }
 }
 

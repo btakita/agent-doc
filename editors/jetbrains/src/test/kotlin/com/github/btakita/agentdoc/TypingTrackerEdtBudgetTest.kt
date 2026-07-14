@@ -82,6 +82,17 @@ class TypingTrackerEdtBudgetTest {
             "full-buffer report should drain the accumulated op burst",
             source.contains("drainPendingEditorOps(filePath)"),
         )
+        assertTrue(
+            "full-buffer reports should use lazily KeepLatest debounce state",
+            source.contains("DebounceCore<Document>") &&
+                source.contains("state.debounce.input") &&
+                source.contains("state.debounce.tick"),
+        )
+        assertTrue(
+            "debounce generation removal must be atomic with new input",
+            source.contains("pendingContentReports.compute(filePath)") &&
+                source.contains("if (current !== state) return@compute current"),
+        )
         assertFalse(
             "coalescing must not overwrite the previous editor op with only the newest event",
             source.contains("scheduleFullContentReport(lib, filePath, event.document, op)"),

@@ -23,6 +23,7 @@ use agent_doc_controller::dispatch::{
     RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_start_ack_timeout,
 };
 use agent_doc_harness::HarnessConfig;
+use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
 use agent_doc_tmux::is_first_column;
 use tmux_router::Tmux;
 
@@ -74,6 +75,21 @@ fn decide_existing_startup_registration<'a>(
 /// blocker-streak semantics; only the ceiling changes.
 const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
     agent_doc_turn::wait_machine::clamp_to_ceiling(Duration::from_secs(30));
+
+/// Editor-origin provisioning creates an interactive document session, not a
+/// one-shot route worker. Layout reconciliation is identified by `skip_wait`;
+/// direct Run Agent Doc requests carry the controller's editor-route attempt id.
+/// Controller/watchdog recovery has neither signal and retains auto-reap.
+fn route_owned_reap_policy_for_start(
+    skip_wait: bool,
+    editor_route_attempt_id: Option<&str>,
+) -> RouteOwnedReapPolicy {
+    if skip_wait || editor_route_attempt_id.is_some_and(|id| !id.trim().is_empty()) {
+        RouteOwnedReapPolicy::KeepAlive
+    } else {
+        RouteOwnedReapPolicy::Auto
+    }
+}
 
 /// Auto-start a new agent session in tmux using the default session name.
 /// Public so `sync.rs` can call it for unresolved files.
@@ -421,8 +437,29 @@ pub fn auto_start_in_session_with_lock_mode(
     // original `file_path` (preserves behavior for non-submodule docs).
     let start_path = agent_doc_fs::rewrite_start_path(file, &cwd, file_path);
 
-    // Start agent-doc start in the new pane
-    let start_cmd = format!("{} start --route-owned {}", agent_doc_bin, start_path);
+    // Start agent-doc in the new pane. Editor-selected documents are durable
+    // interactive sessions; controller/watchdog recovery remains one-shot/auto.
+    let reap_policy = route_owned_reap_policy_for_start(
+        skip_wait,
+        agent_doc_controller_io::route_snapshot::editor_route_attempt_id().as_deref(),
+    );
+    let start_cmd =
+        agent_doc_supervisor_process::start_command::route_owned_start_command_with_reap_policy(
+            &agent_doc_bin,
+            Path::new(&start_path),
+            reap_policy,
+        );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_owned_start_policy file={} pane={} policy={} editor_origin={} skip_wait={}",
+            file.display(),
+            new_pane,
+            reap_policy.as_str(),
+            reap_policy == RouteOwnedReapPolicy::KeepAlive,
+            skip_wait,
+        ),
+    );
     agent_doc_tmux_io::input_diag::log_text_submit(
         agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
         "route.auto_start",
@@ -814,6 +851,30 @@ fn resubmit_stranded_fresh_start_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_origin_startup_is_keep_alive() {
+        assert_eq!(
+            route_owned_reap_policy_for_start(false, Some("editor-attempt")),
+            RouteOwnedReapPolicy::KeepAlive
+        );
+        assert_eq!(
+            route_owned_reap_policy_for_start(true, None),
+            RouteOwnedReapPolicy::KeepAlive
+        );
+    }
+
+    #[test]
+    fn controller_recovery_startup_retains_auto_reap() {
+        assert_eq!(
+            route_owned_reap_policy_for_start(false, None),
+            RouteOwnedReapPolicy::Auto
+        );
+        assert_eq!(
+            route_owned_reap_policy_for_start(false, Some("  ")),
+            RouteOwnedReapPolicy::Auto
+        );
+    }
 
     #[test]
     fn startup_registration_decision_reuses_matching_live_owner() {

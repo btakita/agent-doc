@@ -2,11 +2,13 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import io.github.lazily.DebounceCore
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -133,7 +135,17 @@ object TypingTracker : DocumentListener {
     private val contentReportExecutor = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "agent-doc-live-buffer-report").apply { isDaemon = true }
     }
-    private val pendingContentReports = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    /**
+     * Per-document lazily rate-shape state. The compute core owns latest-value
+     * coalescence; the scheduled future is only the logical-clock driver. This
+     * prevents an older task's cleanup from deleting a newer report generation.
+     */
+    private class ContentReportState {
+        val debounce = DebounceCore<Document>(CONTENT_REPORT_DELAY_MS)
+        var future: ScheduledFuture<*>? = null
+    }
+
+    private val pendingContentReports = ConcurrentHashMap<String, ContentReportState>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
     private val pendingNativeChangeMarkers = ConcurrentHashMap.newKeySet<String>()
     private val nativeChangeDrainQueued = AtomicBoolean(false)
@@ -264,6 +276,13 @@ object TypingTracker : DocumentListener {
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         val filePath = file.path
+        pendingContentReports.computeIfPresent(filePath) { _, state ->
+            synchronized(state) {
+                state.future?.cancel(false)
+                state.future = null
+            }
+            null
+        }
         // #falsetyping-guard: a closed document has no unsaved operator edits to
         // protect; drop any stale local-edit marker so a reopened buffer starts
         // from the conservative-but-current provenance.
@@ -306,31 +325,66 @@ object TypingTracker : DocumentListener {
 
     private fun scheduleFullContentReport(
         filePath: String,
-        document: com.intellij.openapi.editor.Document,
+        document: Document,
     ) {
-        pendingContentReports.remove(filePath)?.cancel(false)
-        val task = contentReportExecutor.schedule({
-            try {
-                val lib = AgentDocLib.get() ?: return@schedule
-                reportFullContentNow(
-                    lib = lib,
-                    filePath = filePath,
-                    document = document,
-                    drainEditorOps = true,
-                    requireAuthority = false,
+        pendingContentReports.compute(filePath) { _, existing ->
+            val state = existing ?: ContentReportState()
+            synchronized(state) {
+                state.debounce.input(monotonicMillis(), document)
+                state.future?.cancel(false)
+                state.future = contentReportExecutor.schedule(
+                    { drainFullContentReport(filePath, state) },
+                    CONTENT_REPORT_DELAY_MS,
+                    TimeUnit.MILLISECONDS,
                 )
-            } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without the compatibility content-report ABI; skip
-            } catch (_: NoSuchMethodError) {
-                // older cdylib without the compatibility content-report ABI; skip
-            } catch (e: Throwable) {
-                LOG.debug("[native] content report skipped: ${e.message}")
-            } finally {
-                pendingContentReports.remove(filePath)
             }
-        }, CONTENT_REPORT_DELAY_MS, TimeUnit.MILLISECONDS)
-        pendingContentReports[filePath] = task
+            state
+        }
     }
+
+    private fun drainFullContentReport(filePath: String, state: ContentReportState) {
+        var document: Document? = null
+        pendingContentReports.compute(filePath) { _, current ->
+            if (current !== state) return@compute current
+            synchronized(state) {
+                val emitted = state.debounce.tick(monotonicMillis())
+                if (emitted == null) {
+                    // Scheduled executors may wake slightly before the logical quiet
+                    // boundary. Keep one coalesced driver rather than dropping work.
+                    state.future = contentReportExecutor.schedule(
+                        { drainFullContentReport(filePath, state) },
+                        CONTENT_REPORT_DELAY_MS,
+                        TimeUnit.MILLISECONDS,
+                    )
+                    state
+                } else {
+                    state.future = null
+                    document = emitted
+                    null
+                }
+            }
+        }
+        val emittedDocument = document ?: return
+
+        try {
+            val lib = AgentDocLib.get() ?: return
+            reportFullContentNow(
+                lib = lib,
+                filePath = filePath,
+                document = emittedDocument,
+                drainEditorOps = true,
+                requireAuthority = false,
+            )
+        } catch (_: UnsatisfiedLinkError) {
+            // older cdylib without the compatibility content-report ABI; skip
+        } catch (_: NoSuchMethodError) {
+            // older cdylib without the compatibility content-report ABI; skip
+        } catch (e: Throwable) {
+            LOG.debug("[native] content report skipped: ${e.message}")
+        }
+    }
+
+    private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000L
 
     private fun reportFullContentNow(
         lib: AgentDocLib,

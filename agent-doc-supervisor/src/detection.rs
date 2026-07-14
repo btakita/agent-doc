@@ -5,6 +5,7 @@
 //! mutate latch state, or dispatch work.
 
 use agent_doc_harness::HarnessConfig;
+use lazily::ReadinessCore;
 
 use crate::idle_reconcile::recoverable_ready_busy_blocker_reason;
 
@@ -13,6 +14,69 @@ pub enum IdleQueuePromptVisibility {
     Visible,
     Hidden,
     NeedsLivePaneDispatchReady,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTriggerPromptSource {
+    CurrentChildPty,
+    StableOwnedPane,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTriggerPromptDecision {
+    Dispatch(AutoTriggerPromptSource),
+    CancelHelpScreen,
+    Wait { live_pane_ready_ticks: u32 },
+}
+
+/// Decide whether a replacement child is ready for its one-shot document trigger.
+///
+/// The child-owned PTY prompt remains the primary proof. A managed tmux pane is a
+/// fallback only after this child generation has emitted output, the actor has
+/// independently reconciled to ready, and the pane has remained dispatch-ready
+/// for a bounded number of consecutive polls. This coalesces duplicate readiness
+/// signals without allowing stale pane history to trigger a newly spawned child.
+pub fn auto_trigger_prompt_decision(
+    current_child_prompt_visible: bool,
+    current_child_output_observed: bool,
+    actor_ready: bool,
+    live_pane_dispatch_ready: Option<bool>,
+    live_pane_ready_ticks: u32,
+    required_live_pane_ready_ticks: u32,
+    help_screen_visible: bool,
+) -> AutoTriggerPromptDecision {
+    if help_screen_visible {
+        return AutoTriggerPromptDecision::CancelHelpScreen;
+    }
+    if current_child_prompt_visible {
+        return AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::CurrentChildPty);
+    }
+
+    // Compose independent generation/readiness proofs through lazily's service
+    // readiness primitive. All conditions are explicit so an empty probe set can
+    // never accidentally authorize dispatch.
+    let mut fallback_readiness = ReadinessCore::new();
+    fallback_readiness.set("current_child_output", current_child_output_observed);
+    fallback_readiness.set("actor_ready", actor_ready);
+    fallback_readiness.set(
+        "owned_pane_dispatch_ready",
+        live_pane_dispatch_ready == Some(true),
+    );
+    let fallback_ready = fallback_readiness.ready();
+    if !fallback_ready {
+        return AutoTriggerPromptDecision::Wait {
+            live_pane_ready_ticks: 0,
+        };
+    }
+
+    let next_ticks = live_pane_ready_ticks.saturating_add(1);
+    if next_ticks >= required_live_pane_ready_ticks.max(1) {
+        AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::StableOwnedPane)
+    } else {
+        AutoTriggerPromptDecision::Wait {
+            live_pane_ready_ticks: next_ticks,
+        }
+    }
 }
 
 pub fn prompt_visible_requires_ready_transition(
@@ -74,6 +138,53 @@ mod tests {
         assert!(prompt_visible_requires_ready_transition(true, true));
         assert!(prompt_visible_requires_ready_transition(false, true));
         assert!(!prompt_visible_requires_ready_transition(false, false));
+    }
+
+    #[test]
+    fn auto_trigger_prompt_dispatches_immediately_from_current_child_pty() {
+        assert_eq!(
+            auto_trigger_prompt_decision(true, true, false, None, 0, 2, false),
+            AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::CurrentChildPty)
+        );
+    }
+
+    #[test]
+    fn auto_trigger_prompt_coalesces_stable_owned_pane_readiness() {
+        assert_eq!(
+            auto_trigger_prompt_decision(false, true, true, Some(true), 0, 2, false),
+            AutoTriggerPromptDecision::Wait {
+                live_pane_ready_ticks: 1
+            }
+        );
+        assert_eq!(
+            auto_trigger_prompt_decision(false, true, true, Some(true), 1, 2, false),
+            AutoTriggerPromptDecision::Dispatch(AutoTriggerPromptSource::StableOwnedPane)
+        );
+    }
+
+    #[test]
+    fn auto_trigger_prompt_rejects_stale_or_unstable_pane_evidence() {
+        for decision in [
+            auto_trigger_prompt_decision(false, false, true, Some(true), 1, 2, false),
+            auto_trigger_prompt_decision(false, true, false, Some(true), 1, 2, false),
+            auto_trigger_prompt_decision(false, true, true, Some(false), 1, 2, false),
+            auto_trigger_prompt_decision(false, true, true, None, 1, 2, false),
+        ] {
+            assert_eq!(
+                decision,
+                AutoTriggerPromptDecision::Wait {
+                    live_pane_ready_ticks: 0
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn auto_trigger_prompt_help_screen_fails_closed_over_other_ready_signals() {
+        assert_eq!(
+            auto_trigger_prompt_decision(true, true, true, Some(true), 2, 2, true),
+            AutoTriggerPromptDecision::CancelHelpScreen
+        );
     }
 
     #[test]

@@ -70,6 +70,51 @@ class TmuxPaneFocusSyncTest {
     }
 
     @Test
+    fun `fresh editor focus intent suppresses the previously focused tmux document`() {
+        assertEquals(
+            EditorFocusIntentDecision.SuppressStaleTmux,
+            TmuxPaneFocusSync.decideEditorFocusIntent(
+                tmuxDocumentPath = "/repo/tasks/old.md",
+                intent = EditorFocusIntent(
+                    documentPath = "/repo/tasks/selected.md",
+                    expiresAtNanos = 2_000,
+                ),
+                nowNanos = 1_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `tmux arrival at the editor intent is acknowledged without selection echo`() {
+        assertEquals(
+            EditorFocusIntentDecision.Acknowledge,
+            TmuxPaneFocusSync.decideEditorFocusIntent(
+                tmuxDocumentPath = "/repo/tasks/selected.md",
+                intent = EditorFocusIntent(
+                    documentPath = "/repo/tasks/selected.md",
+                    expiresAtNanos = 2_000,
+                ),
+                nowNanos = 1_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `expired editor focus intent restores tmux to editor following`() {
+        assertEquals(
+            EditorFocusIntentDecision.Expired,
+            TmuxPaneFocusSync.decideEditorFocusIntent(
+                tmuxDocumentPath = "/repo/tasks/other.md",
+                intent = EditorFocusIntent(
+                    documentPath = "/repo/tasks/selected.md",
+                    expiresAtNanos = 2_000,
+                ),
+                nowNanos = 2_000,
+            ),
+        )
+    }
+
+    @Test
     fun `tmux focus mirror is suppressed across project roots`() {
         // Operator focused on a submodule doc while the superproject's agent-doc
         // window is active must NOT have the editor yanked across roots.

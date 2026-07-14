@@ -148,6 +148,14 @@ pub fn owner_document_from_cmdline(cmdline: &str) -> Option<String> {
         .map(|token| token.to_string())
 }
 
+/// First markdown document bound by a command line that is itself recognized
+/// as an agent-doc/harness owner session. This is stricter than
+/// [`owner_document_from_cmdline`]: transient tools such as `rg SPEC.md` may
+/// mention markdown while running below a harness, but they do not own it.
+pub fn agent_doc_owner_document_from_cmdline(cmdline: &str) -> Option<String> {
+    cmdline_is_agent_doc_owner_session(cmdline).then(|| owner_document_from_cmdline(cmdline))?
+}
+
 pub fn path_has_component_suffix(path: &Path, suffix: &Path) -> bool {
     let path_components: Vec<_> = path
         .components()
@@ -480,6 +488,18 @@ mod tests {
             Some("tasks/agent-doc/agent-doc-bugs2.md".to_string())
         );
         assert_eq!(owner_document_from_cmdline("-zsh"), None);
+    }
+
+    #[test]
+    fn agent_doc_owner_document_ignores_transient_markdown_tools() {
+        assert_eq!(
+            agent_doc_owner_document_from_cmdline(
+                "agent-doc start --route-owned /repo/tasks/selected.md"
+            )
+            .as_deref(),
+            Some("/repo/tasks/selected.md"),
+        );
+        assert_eq!(agent_doc_owner_document_from_cmdline("rg SPEC.md"), None);
     }
 
     #[test]

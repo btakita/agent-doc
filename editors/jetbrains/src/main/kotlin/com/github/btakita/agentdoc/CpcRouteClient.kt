@@ -328,7 +328,11 @@ internal object CpcRouteClient {
             name = "focus_document_pane",
             payloadType = "agent-doc.focus_document_pane.v1",
             payload = payload,
-            idempotencyKey = "$projectRoot:$documentPath:focus",
+            // Selection focus is one latest-wins intent per project. A
+            // document-specific key lets rapid A -> B -> C navigation queue
+            // three independent pane selections and an older command can land
+            // after the operator has moved on.
+            idempotencyKey = "$projectRoot:selected-document-focus",
             commandId = commandId,
             deadlineMs = 2_000,
             supersede = true,

@@ -133,7 +133,7 @@ class CpcRouteClientCommandPlaneTest {
         val submit = message.getAsJsonObject("CommandSubmit")
         assertEquals("focus_document_pane", submit.get("name").asString)
         assertEquals("agent-doc.focus_document_pane.v1", submit.get("payload_type").asString)
-        assertEquals("/proj:/proj/tasks/one.md:focus", submit.get("idempotency_key").asString)
+        assertEquals("/proj:selected-document-focus", submit.get("idempotency_key").asString)
         assertEquals(true, submit.getAsJsonObject("policy").get("supersede").asBoolean)
 
         val payload = inlinePayload(submit)
@@ -157,6 +157,27 @@ class CpcRouteClientCommandPlaneTest {
         val submit = message.getAsJsonObject("CommandSubmit")
         assertEquals("focus_document_pane", submit.get("name").asString)
         assertEquals("agent-doc.focus_document_pane.v1", submit.get("payload_type").asString)
+    }
+
+    @Test
+    fun `focus submissions for different tabs coalesce as one latest project intent`() {
+        val first = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+            projectRoot = "/proj",
+            documentPath = "/proj/tasks/one.md",
+            commandId = "cmd-focus-one",
+        )
+        val second = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+            projectRoot = "/proj",
+            documentPath = "/proj/tasks/two.md",
+            commandId = "cmd-focus-two",
+        )
+
+        val firstSubmit = JsonParser.parseString(first.get("diagnostic_payload").asString)
+            .asJsonObject.getAsJsonObject("CommandSubmit")
+        val secondSubmit = JsonParser.parseString(second.get("diagnostic_payload").asString)
+            .asJsonObject.getAsJsonObject("CommandSubmit")
+        assertEquals(firstSubmit.get("idempotency_key"), secondSubmit.get("idempotency_key"))
+        assertEquals(true, secondSubmit.getAsJsonObject("policy").get("supersede").asBoolean)
     }
 
     private fun projectionData(status: String, terminal: Boolean, output: String, reason: String? = null): com.google.gson.JsonObject {

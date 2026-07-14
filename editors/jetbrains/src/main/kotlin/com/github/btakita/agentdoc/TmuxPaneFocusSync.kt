@@ -13,8 +13,20 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
+internal data class EditorFocusIntent(
+    val documentPath: String,
+    val expiresAtNanos: Long,
+)
+
+internal enum class EditorFocusIntentDecision {
+    None,
+    SuppressStaleTmux,
+    Acknowledge,
+    Expired,
+}
+
 /**
- * Mirrors tmux pane focus back into JetBrains editor selection.
+* Mirrors tmux pane focus back into JetBrains editor selection.
  *
  * This is intentionally gated on the configured tmux session's current window
  * being `agent-doc`. If the operator moves to another tmux window, the stale
@@ -30,6 +42,9 @@ class TmuxPaneFocusSync private constructor(
 
     @Volatile
     private var lastDocumentPath: String? = null
+
+    @Volatile
+    private var editorFocusIntent: EditorFocusIntent? = null
 
     init {
         executor.scheduleWithFixedDelay(
@@ -57,6 +72,23 @@ class TmuxPaneFocusSync private constructor(
         if (documentPath == null) {
             lastDocumentPath = null
             return
+        }
+        when (
+            decideEditorFocusIntent(
+                tmuxDocumentPath = documentPath,
+                intent = editorFocusIntent,
+                nowNanos = System.nanoTime(),
+            )
+        ) {
+            EditorFocusIntentDecision.Acknowledge -> {
+                editorFocusIntent = null
+                lastDocumentPath = documentPath
+                return
+            }
+
+            EditorFocusIntentDecision.SuppressStaleTmux -> return
+            EditorFocusIntentDecision.Expired -> editorFocusIntent = null
+            EditorFocusIntentDecision.None -> Unit
         }
         if (!shouldSelectTmuxDocument(documentPath, lastDocumentPath)) return
 
@@ -91,6 +123,13 @@ class TmuxPaneFocusSync private constructor(
         lastDocumentPath = focusedDocumentPath(projectRoots)
     }
 
+    private fun recordEditorFocusIntent(documentPath: String) {
+        editorFocusIntent = EditorFocusIntent(
+            documentPath = documentPath,
+            expiresAtNanos = System.nanoTime() + EDITOR_FOCUS_INTENT_TTL_NANOS,
+        )
+    }
+
     private fun selectEditorDocument(documentPath: String) {
         val canonical = try {
             File(documentPath).canonicalFile
@@ -116,6 +155,7 @@ class TmuxPaneFocusSync private constructor(
 
     companion object {
         private const val POLL_MS = 500L
+        private val EDITOR_FOCUS_INTENT_TTL_NANOS = TimeUnit.SECONDS.toNanos(3)
         private val instances = ConcurrentHashMap<Project, TmuxPaneFocusSync>()
 
         fun install(project: Project) {
@@ -127,6 +167,17 @@ class TmuxPaneFocusSync private constructor(
                 .recordCurrentTmuxFocus()
         }
 
+        /**
+         * Give a fresh editor selection temporary authority while its coalesced
+         * focus command crosses the controller. Without this handoff lease, the
+         * tmux poll can observe the previous pane and reopen its document,
+         * creating an editor -> tmux -> editor feedback loop.
+         */
+        fun recordEditorFocusIntent(project: Project, documentPath: String) {
+            instances.computeIfAbsent(project) { TmuxPaneFocusSync(project) }
+                .recordEditorFocusIntent(documentPath)
+        }
+
         fun disposeProject(project: Project) {
             instances.remove(project)?.let { Disposer.dispose(it) }
         }
@@ -135,6 +186,22 @@ class TmuxPaneFocusSync private constructor(
             documentPath: String?,
             lastDocumentPath: String?,
         ): Boolean = documentPath != null && documentPath != lastDocumentPath
+
+        internal fun decideEditorFocusIntent(
+            tmuxDocumentPath: String,
+            intent: EditorFocusIntent?,
+            nowNanos: Long,
+        ): EditorFocusIntentDecision {
+            if (intent == null) return EditorFocusIntentDecision.None
+            if (tmuxDocumentPath == intent.documentPath) {
+                return EditorFocusIntentDecision.Acknowledge
+            }
+            return if (nowNanos < intent.expiresAtNanos) {
+                EditorFocusIntentDecision.SuppressStaleTmux
+            } else {
+                EditorFocusIntentDecision.Expired
+            }
+        }
 
         /**
          * #tmuxmirrorcrossroot: whether a tmux-focused agent-doc document may move

@@ -653,6 +653,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
+        TmuxPaneFocusSync.recordEditorFocusIntent(event.manager.project, file.path)
         val snapshot = captureSnapshot(event.manager.project, file, forceReconcile = true) ?: return
         requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
     }
@@ -682,6 +683,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         if (visibleMdFiles.isEmpty()) return
         lastFocusRequestedFile = file.path
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
+        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         val snapshot = captureSnapshot(project, file, forceReconcile = false) ?: return
         requestAutomaticSync(project, snapshot, immediateFocus = true)
     }

@@ -4,7 +4,8 @@
 //! observations with pure controller command-line ownership policy.
 
 use agent_doc_controller::command_line::{
-    agent_doc_cmdline_is_owner, cmdline_owns_other_document, owner_document_from_cmdline,
+    agent_doc_cmdline_is_owner, agent_doc_owner_document_from_cmdline, cmdline_owns_other_document,
+    owner_document_from_cmdline,
 };
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -221,6 +222,32 @@ pub fn process_tree_agent_doc_owner_pid_for_file(
     })
 }
 
+/// Return the document bound by the first agent-doc owner process in a pane's
+/// process tree. The pane root is visited before its descendants, so the
+/// route-owned `agent-doc start --route-owned <document>` wrapper remains the
+/// authoritative binding even when the harness below it has a less specific
+/// command line.
+pub fn process_tree_agent_doc_owner_document(root_pid: &str) -> Option<String> {
+    process_tree_pids(root_pid).into_iter().find_map(|pid| {
+        let cmdline = process_command(&pid)?;
+        agent_doc_owner_document_from_cmdline(&cmdline)
+    })
+}
+
+#[cfg(test)]
+fn process_tree_agent_doc_owner_document_with(
+    root_pid: &str,
+    child_pids_for: impl FnMut(&str) -> Vec<String>,
+    mut process_command_for: impl FnMut(&str) -> Option<String>,
+) -> Option<String> {
+    process_tree_pids_with(root_pid, child_pids_for)
+        .into_iter()
+        .find_map(|pid| {
+            let cmdline = process_command_for(&pid)?;
+            agent_doc_owner_document_from_cmdline(&cmdline)
+        })
+}
+
 #[cfg(test)]
 fn process_tree_agent_doc_owner_pid_for_file_with(
     root_pid: &str,
@@ -358,6 +385,30 @@ mod tests {
                 |pid| commands.get(pid).cloned(),
             ),
             Some("20".to_string())
+        );
+    }
+
+    #[test]
+    fn process_tree_owner_document_prefers_route_owned_wrapper() {
+        let commands = BTreeMap::from([
+            (
+                "10",
+                "agent-doc start --route-owned /repo/tasks/selected.md".to_string(),
+            ),
+            ("20", "codex resume --last".to_string()),
+        ]);
+
+        assert_eq!(
+            process_tree_agent_doc_owner_document_with(
+                "10",
+                |pid| match pid {
+                    "10" => vec!["20".to_string()],
+                    _ => Vec::new(),
+                },
+                |pid| commands.get(pid).cloned(),
+            )
+            .as_deref(),
+            Some("/repo/tasks/selected.md"),
         );
     }
 

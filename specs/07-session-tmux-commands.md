@@ -132,10 +132,30 @@ This file covers the session-bound command surface: pane ownership, routing, syn
   and legitimate reuse are unchanged. This is the focus/sync sibling of the
   `claim` one-live-pane-per-document guard.
 - Focus must also recover instead of failing closed when the registered pane is
-  dead, or no registry entry exists, but the document is still served by a live
-  owner in another pane.
+dead, or no registry entry exists, but the document is still served by a live
+owner in another pane.
+- Editor command-plane focus must apply the same live-owner precedence when the
+actor projection is `closed`/`blocked` or has already been pruned. Its narrow
+fallback may use the latest open session-log pane only when the pane is alive,
+its foreground still owns a live agent, and its process tree exactly names the
+selected document. A bare-shell remnant or a pane reused by another document
+must fail closed; focus never mutates the actor or registry to make the proof
+pass.
+- Editor-to-tmux focus and tmux-to-editor recall must not feed back into each
+  other. A fresh editor selection owns a bounded intent lease while the
+  project-scoped latest-wins command is pending: the reverse poll ignores the
+  previous pane, consumes the lease when tmux reaches the intended document,
+  and lets tmux regain authority only after the lease expires.
+- The command-plane `tmux_focus_state` read projection must recover the active
+route-owned document from exact process-tree ownership when the active pane's
+actor row is missing. The recovered path must resolve inside that controller's
+project root; a foreign-root owner remains unbound for that controller.
+- Editor selection focus is a single latest-wins intent per project. All tab
+targets share one focus idempotency key with supersession enabled, so a burst of
+selection events coalesces to the newest document instead of replaying older
+pane selections after it.
 - Default focus defers stash promotion (`#jb-nav-3pane-promote-swap`): `agent-doc
-  focus <FILE>` selects the resolved pane when it is already visible, but skips
+focus <FILE>` selects the resolved pane when it is already visible, but skips
   additive `join-pane` promotion when the pane is parked in a `stash` window.
   Stash reparenting is left to the debounced `sync` reconcile that follows
   editor navigation. Without this, the focus-path promote and the reconcile race

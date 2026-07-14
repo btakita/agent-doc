@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.101
+
+- **Editor-selected documents stay synchronized with tmux focus across stale actor projections.** Project Controller focus now reconciles closed or missing actor/registry state against the latest open session-log pane only when that pane is alive, still runs an agent, and its process tree exactly owns the selected document. Cross-document pane reuse and bare-shell remnants fail closed. The reverse `tmux_focus_state` projection also identifies a live route-owned document from the active pane's process tree when the actor row has already been pruned. Editor focus commands use one project-scoped latest-wins idempotency key, so rapid tab changes coalesce instead of replaying stale pane selections. A short editor-focus intent lease prevents the tmux-to-editor poll from echoing the previous pane back into the editor while the latest selection crosses the controller, breaking the observed equity `%83` / bugs `%87` feedback loop. JetBrains plugin `0.2.249` carries the coalesced focus intent and echo suppression.
+
 ## 0.34.100
 
 - **Response-cell finalize now reaches visible and disk convergence before commit.** The semantic CRDT response fast path no longer treats durable `ResponseCellAdded` state as permission to commit ahead of outbound editor ACKs. It applies the ordinary quiescence/backpressure barrier, waits for the visible frontier, and materializes the acknowledged canonical cut before snapshot/commit. Retained attached authority with zero registered relay members still projects its canonical response to disk, preventing a committed response from coexisting with a stale pre-response working tree.

@@ -846,7 +846,7 @@ pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<Controlle
                 Some(file.to_path_buf()),
                 "focus_document_pane",
                 "agent-doc.focus_document_pane.v1",
-                &format!("{}:{}:focus", project_root.display(), file.display()),
+                &format!("{}:selected-document-focus", project_root.display()),
                 CONTROLLER_RPC_TIMEOUT,
                 &payload,
             );
@@ -10311,13 +10311,29 @@ pub(crate) fn handle_tmux_focus_state(
     let conn = open_state_db(&bootstrap.project_root)?;
     let record = load_actor_store_from_db(&conn)?
         .values()
-        .find(|record| record.pane_id == pane_id_value)
+        .find(|record| {
+            record.pane_id == pane_id_value
+                && !matches!(
+                    record.state,
+                    agent_doc_sqlite::state_store::ActorState::Blocked
+                        | agent_doc_sqlite::state_store::ActorState::Closed
+                )
+        })
         .cloned();
-    let document_id = record.as_ref().map(|record| record.document_id.clone());
+    let process_owner_document = record
+        .is_none()
+        .then(|| active_pane_process_owner_document(&tmux, &pane_id_value, &bootstrap.project_root))
+        .flatten();
+    let document_id = record
+        .as_ref()
+        .map(|record| record.document_id.clone())
+        .or(process_owner_document);
     Ok(ControllerTmuxFocusState {
-        active: record.is_some(),
+        active: document_id.is_some(),
         reason: if record.is_some() {
             "focused_agent_doc_actor".to_string()
+        } else if document_id.is_some() {
+            "focused_live_process_owner".to_string()
         } else {
             "active_pane_unbound".to_string()
         },
@@ -10328,6 +10344,157 @@ pub(crate) fn handle_tmux_focus_state(
         document_id,
         record,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusPaneCandidateDecision<'a> {
+    Candidate {
+        pane_id: &'a str,
+        focused_reason: &'static str,
+        not_alive_reason: &'static str,
+    },
+    Reject {
+        reason: &'static str,
+        pane_id: Option<&'a str>,
+    },
+}
+
+/// Reconcile the durable actor/registry projections against a pane whose
+/// current process tree proves ownership of the selected document. Focus is a
+/// non-mutating UI handoff, so a closed/blocked projection must not hide a
+/// still-running route-owned agent. The proof wins only when it is exact; the
+/// I/O adapter below rejects dead, bare-shell, and cross-document pane reuse.
+fn decide_focus_pane_candidate<'a>(
+    actor: Option<(&'a str, bool)>,
+    registry_pane: Option<&'a str>,
+    proven_live_owner: Option<&'a str>,
+) -> FocusPaneCandidateDecision<'a> {
+    if let Some(owner) = proven_live_owner {
+        if actor.is_some_and(|(pane, focusable)| focusable && pane == owner) {
+            return FocusPaneCandidateDecision::Candidate {
+                pane_id: owner,
+                focused_reason: "focused_agent_doc_actor",
+                not_alive_reason: "actor_pane_not_alive",
+            };
+        }
+        return FocusPaneCandidateDecision::Candidate {
+            pane_id: owner,
+            focused_reason: "focused_live_process_owner",
+            not_alive_reason: "live_owner_pane_not_alive",
+        };
+    }
+
+    if let Some((pane_id, focusable)) = actor {
+        if !focusable {
+            return FocusPaneCandidateDecision::Reject {
+                reason: "actor_not_focusable",
+                pane_id: Some(pane_id),
+            };
+        }
+        return FocusPaneCandidateDecision::Candidate {
+            pane_id,
+            focused_reason: "focused_agent_doc_actor",
+            not_alive_reason: "actor_pane_not_alive",
+        };
+    }
+
+    if let Some(pane_id) = registry_pane {
+        return FocusPaneCandidateDecision::Candidate {
+            pane_id,
+            focused_reason: "focused_durable_registry",
+            not_alive_reason: "registry_pane_not_alive",
+        };
+    }
+
+    FocusPaneCandidateDecision::Reject {
+        reason: "missing_actor_record",
+        pane_id: None,
+    }
+}
+
+fn current_document_session_id(
+    canonical: &Path,
+    actor_record: Option<&agent_doc_sqlite::state_store::ActorRecord>,
+    registry_entry: Option<&tmux_router::RegistryEntry>,
+) -> Option<String> {
+    let frontmatter_session = std::fs::read_to_string(canonical).ok().and_then(|content| {
+        let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&content).ok()?;
+        frontmatter.session
+    });
+    frontmatter_session
+        .or_else(|| registry_entry.map(|entry| entry.session_id.clone()))
+        .or_else(|| actor_record.map(|record| record.session_id.clone()))
+        .filter(|session_id| !session_id.trim().is_empty())
+}
+
+fn process_tree_exactly_owns_document(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    file: &Path,
+) -> bool {
+    let Some(pane_pid) = agent_doc_tmux_io::pane_pid(tmux, pane_id) else {
+        return false;
+    };
+    agent_doc_process_owner_io::process_tree_has_agent_doc_owner_for_file(
+        &pane_pid.to_string(),
+        &file.to_string_lossy(),
+    )
+}
+
+fn session_log_owner_signals_prove_focus(
+    latest_session_open: bool,
+    pane_owns_live_agent: bool,
+    process_tree_exactly_owns_document: bool,
+) -> bool {
+    latest_session_open && pane_owns_live_agent && process_tree_exactly_owns_document
+}
+
+fn proven_session_log_focus_owner(
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    session_id: &str,
+) -> Option<String> {
+    let status = agent_doc_supervisor_io::startup_miss::session_log_status(file, session_id)
+        .ok()
+        .flatten()?;
+    let latest_session_open = status.latest_session_open();
+    let pane_id = status.latest_start_pane?;
+    if !session_log_owner_signals_prove_focus(
+        latest_session_open,
+        agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, &pane_id),
+        process_tree_exactly_owns_document(tmux, &pane_id, file),
+    ) {
+        return None;
+    }
+    Some(pane_id)
+}
+
+fn active_pane_process_owner_document(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    project_root: &Path,
+) -> Option<String> {
+    if !agent_doc_supervisor_process::session_liveness::pane_owns_live_agent(tmux, pane_id) {
+        return None;
+    }
+    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane_id)?;
+    let raw_document =
+        agent_doc_process_owner_io::process_tree_agent_doc_owner_document(&pane_pid.to_string())?;
+    let raw_path = PathBuf::from(raw_document);
+    let candidate = if raw_path.is_absolute() {
+        raw_path
+    } else {
+        project_root.join(raw_path)
+    };
+    let canonical = candidate.canonicalize().ok()?;
+    let owner_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    if owner_root != project_root {
+        return None;
+    }
+    Some(agent_doc_session_actor_io::canonical_document_id_in(
+        project_root,
+        &canonical.to_string_lossy(),
+    ))
 }
 
 pub(crate) fn handle_focus_document_pane(
@@ -10342,47 +10509,45 @@ pub(crate) fn handle_focus_document_pane(
     );
     let conn = open_state_db(&bootstrap.project_root)?;
     let actor_record = load_actor_record_from_db(&conn, &document_id)?;
-    let (pane_id, focused_reason, not_alive_reason) = if let Some(record) = actor_record {
-        if matches!(
+    let registry_entry =
+        agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?;
+    let tmux = tmux_router::Tmux::default_server();
+    let session_id =
+        current_document_session_id(&canonical, actor_record.as_ref(), registry_entry.as_ref());
+    let proven_live_owner = session_id
+        .as_deref()
+        .and_then(|session_id| proven_session_log_focus_owner(&tmux, &canonical, session_id));
+    let actor = actor_record.as_ref().map(|record| {
+        let focusable = !matches!(
             record.state,
             agent_doc_sqlite::state_store::ActorState::Blocked
                 | agent_doc_sqlite::state_store::ActorState::Closed
-        ) {
+        );
+        (record.pane_id.as_str(), focusable)
+    });
+    let decision = decide_focus_pane_candidate(
+        actor,
+        registry_entry.as_ref().map(|entry| entry.pane.as_str()),
+        proven_live_owner.as_deref(),
+    );
+    let (pane_id, focused_reason, not_alive_reason) = match decision {
+        FocusPaneCandidateDecision::Candidate {
+            pane_id,
+            focused_reason,
+            not_alive_reason,
+        } => (pane_id.to_string(), focused_reason, not_alive_reason),
+        FocusPaneCandidateDecision::Reject { reason, pane_id } => {
             return Ok(tmux_focus_receipt(
                 false,
-                "actor_not_focusable",
+                reason,
                 Some(document_id),
-                Some(record.pane_id),
+                pane_id.map(ToOwned::to_owned),
                 None,
                 None,
                 None,
             ));
         }
-        (
-            record.pane_id,
-            "focused_agent_doc_actor",
-            "actor_pane_not_alive",
-        )
-    } else if let Some(entry) =
-        agent_doc_session_registry_io::lookup_file_entry_in(&bootstrap.project_root, &canonical)?
-    {
-        (
-            entry.pane,
-            "focused_durable_registry",
-            "registry_pane_not_alive",
-        )
-    } else {
-        return Ok(tmux_focus_receipt(
-            false,
-            "missing_actor_record",
-            Some(document_id),
-            None,
-            None,
-            None,
-            None,
-        ));
     };
-    let tmux = tmux_router::Tmux::default_server();
     if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
         return Ok(tmux_focus_receipt(
             false,
@@ -11830,6 +11995,61 @@ mod tests {
         assert_eq!(response["payload"]["focused"], false);
         assert_eq!(response["payload"]["reason"], "missing_actor_record");
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
+    }
+
+    #[test]
+    fn focus_candidate_uses_exact_live_owner_when_actor_projection_is_closed() {
+        assert_eq!(
+            decide_focus_pane_candidate(Some(("%stale", false)), None, Some("%live")),
+            FocusPaneCandidateDecision::Candidate {
+                pane_id: "%live",
+                focused_reason: "focused_live_process_owner",
+                not_alive_reason: "live_owner_pane_not_alive",
+            },
+        );
+    }
+
+    #[test]
+    fn focus_candidate_uses_exact_live_owner_when_actor_and_registry_are_missing() {
+        assert_eq!(
+            decide_focus_pane_candidate(None, None, Some("%busy-live")),
+            FocusPaneCandidateDecision::Candidate {
+                pane_id: "%busy-live",
+                focused_reason: "focused_live_process_owner",
+                not_alive_reason: "live_owner_pane_not_alive",
+            },
+        );
+    }
+
+    #[test]
+    fn focus_candidate_reconciles_stale_active_actor_to_new_live_owner() {
+        assert_eq!(
+            decide_focus_pane_candidate(Some(("%old", true)), Some("%old"), Some("%new")),
+            FocusPaneCandidateDecision::Candidate {
+                pane_id: "%new",
+                focused_reason: "focused_live_process_owner",
+                not_alive_reason: "live_owner_pane_not_alive",
+            },
+        );
+    }
+
+    #[test]
+    fn focus_candidate_still_refuses_closed_actor_without_exact_live_proof() {
+        assert_eq!(
+            decide_focus_pane_candidate(Some(("%closed", false)), Some("%stale"), None),
+            FocusPaneCandidateDecision::Reject {
+                reason: "actor_not_focusable",
+                pane_id: Some("%closed"),
+            },
+        );
+    }
+
+    #[test]
+    fn session_log_focus_proof_rejects_bare_shell_and_cross_document_reuse() {
+        assert!(!session_log_owner_signals_prove_focus(true, false, true));
+        assert!(!session_log_owner_signals_prove_focus(true, true, false));
+        assert!(!session_log_owner_signals_prove_focus(false, true, true));
+        assert!(session_log_owner_signals_prove_focus(true, true, true));
     }
 
     #[test]

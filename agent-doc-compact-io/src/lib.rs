@@ -48,13 +48,11 @@
 //! - `commit: true` uses `git::commit_with_outcome` after a successful mutation. If the commit
 //!   path reports that a VCS refresh signal target existed but writing it failed, compact fails
 //!   closed instead of silently accepting the closeout.
-//! - `commit: true` stages the AUTHORITATIVE in-memory compacted content, not a re-loaded snapshot
-//!   or the working-tree re-read: a stale-supervisor CRDT overlay replay can revert the snapshot,
-//!   and an editor-IPC convergence can leave the working tree lagging, either of which would leave
-//!   HEAD at the pre-compact content (`#jb-compact-commit-left-uncommitted`). `commit_compacted_authoritative`
-//!   re-asserts the compacted snapshot immediately before the commit and then FAILS CLOSED (with a
-//!   `reset --from-current` recovery command) if the post-commit HEAD did not actually land the
-//!   compacted content, so `--commit` can never silently leave uncommitted compaction drift.
+//! - `commit: true` carries separate live and committed targets when unresolved post-boundary input
+//!   exists. Editor flush/relay convergence uses the live target; snapshot staging and HEAD
+//!   verification use the committed target. A converged live relay is never reset to the
+//!   committed-only projection (`#jb-compact-two-target-lineage`). A stale zero-editor relay fallback
+//!   is repaired to the live target, and concurrent live-editor drift fails closed.
 //! - Before an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
 //!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
 //!   converges to the compacted content. The plugin applies convergence patches to the in-memory
@@ -116,6 +114,26 @@ use agent_doc_topic::parse_topic_sections_with_tail;
 pub struct CompactCommitOutcome {
     pub did_commit: bool,
     pub vcs_refresh_signaled: Option<bool>,
+}
+
+/// The two intentional projections produced by Compact Exchange.
+///
+/// An unresolved prompt after the exchange boundary remains in the live editor,
+/// but is omitted from the committed snapshot so compaction cannot mark it as
+/// answered. Most compactions have identical projections.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompactDocumentTargets {
+    live: String,
+    committed: String,
+}
+
+impl CompactDocumentTargets {
+    fn same(content: String) -> Self {
+        Self {
+            live: content.clone(),
+            committed: content,
+        }
+    }
 }
 
 pub trait CompactRuntimeEffects: Sync {
@@ -355,12 +373,12 @@ pub fn run_in_controller(
     let (fm, body) = frontmatter::parse(&content)?;
 
     let resolved = fm.resolve_mode();
-    // `authoritative` is the compacted snapshot content the compaction just
-    // produced. It is the single source of truth for the `--commit` closeout —
-    // never a re-loaded snapshot (a concurrent stale-supervisor CRDT overlay
-    // replay can revert it, `#compact-overlay-crdt-staleness`) nor the working-tree
-    // re-read (it lags an editor-IPC convergence, `#jb-compact-commit-editor-ipc-async`).
-    let authoritative: String = if resolved.is_template() {
+    // Compact Exchange intentionally has two targets when an unresolved prompt
+    // follows the exchange boundary: the live target preserves that prompt, while
+    // the committed target omits it. Keep both through flush + commit closeout so
+    // the HEAD-only projection can never reset the converged editor lineage
+    // (`#jb-compact-two-target-lineage`).
+    let targets = if resolved.is_template() {
         // NOTE (#compact-overlay-crdt-staleness): the legacy CRDT/overlay refresh
         // is deferred to `apply_compacted_document(..., refresh_crdt=true)`, which
         // is the single authoritative CRDT writer. An earlier
@@ -435,7 +453,7 @@ pub fn run_in_controller(
             to_keep.len(),
             file.display()
         );
-        compacted
+        CompactDocumentTargets::same(compacted)
     };
 
     // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence in
@@ -454,7 +472,7 @@ pub fn run_in_controller(
             .map(|disk| disk == content)
             .unwrap_or(false);
         if disk_is_pre_compact {
-            flush_editor_buffer_to_disk_after_compact(file, &authoritative, effects);
+            flush_editor_buffer_to_disk_after_compact(file, &targets.live, effects);
         }
     }
 
@@ -486,7 +504,7 @@ pub fn run_in_controller(
     let dirty = compact_dirty(changed, &snapshot_status);
     if commit {
         if dirty {
-            commit_compacted_authoritative(file, &authoritative)?;
+            commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
         }
     } else if dirty {
         // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
@@ -548,7 +566,11 @@ fn compact_dirty(
 /// before the commit (inside the commit lock window), then FAIL CLOSED if HEAD did
 /// not actually land the compacted content — turning a silent "left uncommitted
 /// changes" into a loud, recoverable error with the exact recovery command.
-fn commit_compacted_authoritative(file: &Path, authoritative_snapshot: &str) -> Result<()> {
+fn commit_compacted_authoritative(
+    file: &Path,
+    authoritative_snapshot: &str,
+    live_target: &str,
+) -> Result<()> {
     // Re-assert the authoritative snapshot so a replay/lag between
     // `apply_compacted_document` and here cannot leave a pre-compact snapshot for
     // the selective commit to stage.
@@ -564,16 +586,60 @@ fn commit_compacted_authoritative(file: &Path, authoritative_snapshot: &str) -> 
     // open-docs projection still report the editor open — keeps editor authority
     // and returns that frozen pre-compact canonical, so the commit lands
     // pre-compact content in HEAD (`compact_commit_head_mismatch`, observed live on
-    // agent-doc-bugs2.md). Converge the lazily canonical to the authoritative
-    // compacted content BEFORE the commit reads it. Reliable-sync plane is
+    // agent-doc-bugs2.md). Converge a genuinely stale zero-editor canonical to
+    // the LIVE compacted target BEFORE the commit reads it. Reliable-sync plane is
     // authority; disk/snapshot are durability sidecars, so the authoritative
     // content must reach the plane, not only disk. Authority-gated + fail-open:
     // `Ok(None)` (headless / missing relay model) leaves the disk+snapshot write
     // authoritative, and `verify_compact_head_landed` still fails closed if HEAD
     // does not land the compacted content.
-    agent_doc_crdt_relay_io::adopt_authoritative_text_for_file(file, authoritative_snapshot)?;
+    ensure_compact_live_relay_target(file, live_target)?;
     closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)
+}
+
+/// Preserve a converged live editor and repair only the stale relay fallback.
+///
+/// A prior unconditional adopt used the committed target here. For exchanges with
+/// unresolved input that target intentionally differs from the live editor, so the
+/// adopt scheduled a whole-buffer rebootstrap and JetBrains replayed delayed events
+/// from the pre-compact buffer. If a live replica drifted after compaction, fail
+/// closed rather than overwriting concurrent operator input.
+fn ensure_compact_live_relay_target(file: &Path, live_target: &str) -> Result<()> {
+    match agent_doc_crdt_relay_io::current_text_for_file(file)? {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } if text == live_target => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_live_relay_target file={} action=already_converged len={} hash={}",
+                    file.display(),
+                    live_target.len(),
+                    agent_doc_hash::content_hash(live_target),
+                ),
+            );
+            Ok(())
+        }
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors, text, ..
+        } if live_editors > 0 => anyhow::bail!(
+            "compact: live editor changed after compaction (expected hash {}, found hash {}); refusing to reset concurrent operator input",
+            agent_doc_hash::content_hash(live_target),
+            agent_doc_hash::content_hash(&text),
+        ),
+        current => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_live_relay_target file={} action=repair_stale_fallback current={current:?} len={} hash={}",
+                    file.display(),
+                    live_target.len(),
+                    agent_doc_hash::content_hash(live_target),
+                ),
+            );
+            agent_doc_crdt_relay_io::adopt_authoritative_text_for_file(file, live_target)?;
+            Ok(())
+        }
+    }
 }
 
 /// Fail closed if the post-commit HEAD does not hold the compacted content.
@@ -1013,6 +1079,7 @@ fn run_component_compact(
     is_crdt: bool,
 ) -> Result<String> {
     run_component_compact_with_options(file, content, target, message, is_crdt, false)
+        .map(|targets| targets.committed)
 }
 
 #[cfg(test)]
@@ -1024,12 +1091,11 @@ fn run_component_compact_force_disk(
     is_crdt: bool,
 ) -> Result<String> {
     run_component_compact_with_options(file, content, target, message, is_crdt, true)
+        .map(|targets| targets.committed)
 }
 
-/// Returns the authoritative compacted snapshot content that was written, so the
-/// `--commit` closeout can stage it directly instead of re-loading a snapshot that
-/// a concurrent CRDT replay may have reverted. When the component is already empty
-/// (nothing to compact), returns the original `content` unchanged.
+/// Returns both the live compacted document and the committed snapshot. They differ
+/// only when unresolved input follows the exchange boundary.
 fn run_component_compact_with_options(
     file: &Path,
     content: &str,
@@ -1037,7 +1103,7 @@ fn run_component_compact_with_options(
     message: Option<&str>,
     is_crdt: bool,
     force_disk: bool,
-) -> Result<String> {
+) -> Result<CompactDocumentTargets> {
     let components = element::parse(content)?;
     let comp = components
         .iter()
@@ -1054,7 +1120,7 @@ fn run_component_compact_with_options(
 
     if trimmed.is_empty() {
         eprintln!("[compact] Component '{}' is already empty", target);
-        return Ok(content.to_string());
+        return Ok(CompactDocumentTargets::same(content.to_string()));
     }
 
     // Archive old content
@@ -1125,7 +1191,10 @@ fn run_component_compact_with_options(
         archive_path.display()
     );
 
-    Ok(snapshot_compacted)
+    Ok(CompactDocumentTargets {
+        live: compacted,
+        committed: snapshot_compacted,
+    })
 }
 
 /// Partial compact a named component in a template/stream-mode document.
@@ -1140,7 +1209,7 @@ fn run_component_compact_partial(
     message: Option<&str>,
     is_crdt: bool,
     force_disk: bool,
-) -> Result<String> {
+) -> Result<CompactDocumentTargets> {
     let components = element::parse(content)?;
     let comp = components
         .iter()
@@ -1160,7 +1229,7 @@ fn run_component_compact_partial(
             sections.len(),
             keep
         );
-        return Ok(content.to_string());
+        return Ok(CompactDocumentTargets::same(content.to_string()));
     }
 
     let to_archive = &sections[..sections.len() - keep];
@@ -1267,7 +1336,10 @@ fn run_component_compact_partial(
         file.display()
     );
 
-    Ok(snapshot_compacted)
+    Ok(CompactDocumentTargets {
+        live: compacted,
+        committed: snapshot_compacted,
+    })
 }
 
 /// Build archive content from a component.
@@ -3102,6 +3174,48 @@ mod tests {
     );
 
     #[test]
+    fn compact_stale_zero_editor_relay_is_repaired_to_live_not_committed_target() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::write(root.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+        let file = root.join("session.md");
+        fs::write(&file, PRECOMPACT_DOC).unwrap();
+
+        // Preserve durable editor ownership while removing the relay member. This
+        // models the frozen phantom-lease fallback that motivated the original
+        // authoritative adopt.
+        let editor =
+            CompactTestEditorBuffer::attach(&file, "compact-stale-zero-editor", PRECOMPACT_DOC)
+                .unwrap();
+        assert!(
+            agent_doc_crdt_relay_io::deregister_replica_for_file(&file, &editor.replica_identity,)
+                .unwrap()
+        );
+
+        let committed = COMPACTED_DOC;
+        let live = COMPACTED_DOC.replace(
+            "<!-- /agent:exchange -->\n",
+            "unresolved operator prompt\n<!-- /agent:exchange -->\n",
+        );
+        ensure_compact_live_relay_target(&file, &live).unwrap();
+
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        match current {
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text, live_editors, ..
+            } => {
+                assert_eq!(live_editors, 0);
+                assert_eq!(text, live);
+                assert_ne!(text, committed);
+            }
+            other => panic!("expected repaired zero-editor relay target, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn compact_commit_lands_head_when_snapshot_replayed_stale() {
         use std::fs;
         // `#jb-compact-commit-left-uncommitted`, real incident: a stale-supervisor
@@ -3125,7 +3239,7 @@ mod tests {
         agent_doc_snapshot_io::save(&file, PRECOMPACT_DOC, agent_doc_ops_log_io::log_op).unwrap();
 
         // Authoritative content is known in run() from the compaction itself.
-        commit_compacted_authoritative(&file, COMPACTED_DOC).unwrap();
+        commit_compacted_authoritative(&file, COMPACTED_DOC, COMPACTED_DOC).unwrap();
 
         let committed = agent_doc_git_io::revision::show_head(&file)
             .unwrap()
@@ -3189,7 +3303,7 @@ mod tests {
         // Disk still lags (editor holds the compacted buffer, no flush yet).
         assert_eq!(fs::read_to_string(&file).unwrap(), PRECOMPACT_DOC);
 
-        commit_compacted_authoritative(&file, COMPACTED_DOC)
+        commit_compacted_authoritative(&file, COMPACTED_DOC, COMPACTED_DOC)
             .expect("authoritative compaction must land the compacted content in HEAD");
         let committed = agent_doc_git_io::revision::show_head(&file)
             .unwrap()
@@ -3724,6 +3838,122 @@ mod tests {
                 && (ops_log.contains("transport=save_document")
                     || ops_log.contains("transport=already_disk")),
             "compact --commit must converge the editor buffer to disk:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn compact_commit_preserves_only_unresolved_prompt_in_live_editor() {
+        // #jb-compact-two-target-lineage: Compact Exchange has two intentional
+        // projections when operator input follows the exchange boundary:
+        // HEAD/snapshot omit that unresolved prompt, while the live editor keeps
+        // it on top of the compacted history. The commit must not reset the live
+        // relay to the HEAD-only projection and force a whole-buffer rebootstrap;
+        // that reset lets delayed JetBrains document events replay the old editor
+        // lineage and resurrect archived exchange content.
+        use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
+        fs::create_dir_all(root.join(".agent-doc/plugin-owner")).unwrap();
+        fs::write(root.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+
+        git(root, &["init", "-q"]);
+        git(root, &["config", "user.email", "test@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+
+        let file = root.join("session.md");
+        let committed = concat!(
+            "---\nagent_doc_session: test-two-target\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: archived-one — gpt-5\n\nOld response one.\n\n",
+            "### Re: archived-two — gpt-5\n\nOld response two.\n",
+            "<!-- agent:boundary:before-compact -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let prompt = "Fix the next binary issue without restoring git HEAD.";
+        let live = committed.replace(
+            "<!-- agent:boundary:before-compact -->\n",
+            &format!("<!-- agent:boundary:before-compact -->\n{prompt}\n"),
+        );
+
+        fs::write(&file, committed).unwrap();
+        agent_doc_snapshot_io::save(&file, committed, agent_doc_ops_log_io::log_op).unwrap();
+        git(root, &["add", "session.md"]);
+        git(root, &["commit", "-q", "-m", "seed"]);
+
+        // Model a JetBrains buffer with a newly typed, unresolved prompt. The
+        // prompt is live editor drift and therefore absent from HEAD/snapshot.
+        fs::write(&file, &live).unwrap();
+        let _editor = CompactTestEditorBuffer::attach(&file, COMPACT_TEST_EDITOR_ID, &live)
+            .expect("attach live editor replica");
+        let _listener = start_buffer_only_patch_listener(root);
+        crate::test_support::wait_for_live_prompt_drift_listener(root);
+
+        run(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            true,
+            false,
+        )
+        .expect("two-target Compact Exchange commit must succeed");
+
+        let head = agent_doc_git_io::revision::show_head(&file)
+            .unwrap()
+            .expect("compacted HEAD");
+        assert!(head.contains("Compacted summary."), "{head}");
+        assert!(
+            !head.contains(prompt),
+            "unresolved prompt must not enter HEAD:\n{head}"
+        );
+        assert!(
+            !head.contains("Old response one."),
+            "archived history remained in HEAD:\n{head}"
+        );
+
+        let live_after = match agent_doc_crdt_relay_io::current_text_for_file(&file)
+            .expect("resolve live relay after compact")
+        {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("live relay must remain attached after compact: {other:?}"),
+        };
+        assert!(
+            live_after.contains(prompt),
+            "the unresolved prompt must remain in the live compacted editor:\n{live_after}"
+        );
+        assert!(
+            !live_after.contains("Old response one.") && !live_after.contains("Old response two."),
+            "archived history must not survive in the live editor:\n{live_after}"
+        );
+
+        let overlay = agent_doc_snapshot_io::load_overlay_crdt(&file)
+            .unwrap()
+            .expect("post-compact overlay sidecar");
+        let overlay_markdown = agent_doc_markdown_ast::crdt::OverlayCrdtDoc::decode_state(&overlay)
+            .unwrap()
+            .to_markdown()
+            .unwrap();
+        assert_eq!(
+            normalize_transient_agent_doc_markers(&overlay_markdown),
+            normalize_transient_agent_doc_markers(&live_after),
+            "overlay lineage must match the live compacted editor"
+        );
+
+        let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !ops_log
+                .lines()
+                .any(|line| line.contains("crdt_adopt_authoritative_text")
+                    && line.contains("changed=true")),
+            "compact commit must not reset a converged live editor to the HEAD-only projection:\n{ops_log}"
         );
     }
 

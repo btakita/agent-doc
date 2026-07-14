@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.106
+
+- **JetBrains `Compact Exchange` preserves the compacted editor lineage after commit.** The controller now carries the intentional live/committed split through buffer flush, relay convergence, snapshot staging, and HEAD verification. An unresolved post-boundary prompt remains live but uncommitted; closeout no longer resets the editor to the prompt-free HEAD projection and therefore cannot replay delayed pre-compact JetBrains events into uncommitted text. The stale zero-editor relay fallback is repaired to the live target, while concurrent live-editor drift fails closed.
+
 ## 0.34.105
 
 - **JetBrains `Run Agent Doc` operator reopens no longer disappear behind stale dispatch backpressure.** The production Project Controller now classifies `managed_reopen` / `dispatch_only_reopen` with the same operator policy already covered by SimWorld, so an explicit editor run bypasses an older same-generation in-flight receipt while automatic redispatches remain coalesced. Controller regression coverage reproduces the `waiting_input` + open-receipt route that previously settled exit 0 without submitting anything.

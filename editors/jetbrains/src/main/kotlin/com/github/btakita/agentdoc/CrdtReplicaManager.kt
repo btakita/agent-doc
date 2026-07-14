@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
@@ -128,7 +129,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (!file.name.endsWith(".md")) return
             val filePath = file.path
             loggedFilePath = filePath
-            if (CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)) return
+            if (managerForFilePath(filePath) !== this) return
+            if (!CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)) {
+                requestRemoteDrain(filePath, "non-operator-editor-event")
+                return
+            }
+            val projectionEpoch = nonOperatorMutationEpoch(filePath)
             val newFragment = event.newFragment.toString()
             val oldFragment = event.oldFragment.toString()
             if (newFragment.isEmpty() && oldFragment.isEmpty()) return
@@ -146,6 +152,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         event.offset,
                         oldFragment,
                         newFragment,
+                        projectionEpoch,
                     )
                 } finally {
                     clearLocalPending(filePath)
@@ -167,7 +174,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val text = ApplicationManager.getApplication().runReadAction<String> { document.text }
                 chars = text.length
                 shadows[filePath] = text
-                forwarderFor(filePath, text, alignExisting = true)
+                forwarderFor(filePath, text)
                 requestRemoteDrain(filePath, "seed")
             } catch (e: Exception) {
                 log.debug("[crdt-replica] seed skipped for $filePath: ${e.message}")
@@ -195,7 +202,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val forwarder = forwarderFor(
                     filePath,
                     text,
-                    alignExisting = forceRefresh,
                     bypassRegisterBackoff = forceRefresh,
                 )
                 (forwarder != null).also { attached ->
@@ -230,8 +236,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         eventOffset: Int,
         oldFragment: String,
         newFragment: String,
+        projectionEpoch: Long,
     ) {
         val started = System.nanoTime()
+        if (projectionEpoch != nonOperatorMutationEpoch(filePath)) {
+            log.debug(
+                "[crdt-replica] dropped stale operator event for $filePath after a newer CPC projection",
+            )
+            requestRemoteDrain(filePath, "stale-operator-event-fenced")
+            return
+        }
         val beforeText = shadows[filePath] ?: run {
             seedAndAttachFromDocument(filePath, document)
             return
@@ -298,6 +312,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      */
     fun requestTextAdopt(filePath: String) {
         executor.execute {
+            if (!TypingTracker.hasUnsyncedOperatorEdits(filePath)) {
+                log.info(
+                    "[reattach-adopt] refused full editor text adopt for ${File(filePath).name}; " +
+                        "no unsynced operator edit proves editor-origin content",
+                )
+                requestRemoteDrain(filePath, "reattach-cpc-projection-only")
+                return@execute
+            }
             val forwarder = forwarders[filePath] ?: return@execute
             val editorText = shadows[filePath] ?: return@execute
             if (!forwarder.pushTextAdopt(editorText)) return@execute
@@ -306,7 +328,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val reattached = forwarderFor(
                     filePath,
                     editorText,
-                    alignExisting = false,
                     bypassRegisterBackoff = true,
                 )
                 log.info(
@@ -414,7 +435,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } else {
                     editorBufferText(filePath)?.let { current ->
                         shadows[filePath] = current
-                        forwarder.ensureEditorText(current)
                         requestRemoteDrain(filePath, "editor-buffer-after-apply-failure")
                     }
                 }
@@ -468,12 +488,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         val expectedHash = contentHash(expectedText)
                         val replicaHash = replicaText?.let(::contentHash) ?: "missing"
                         log.warn(
-                            "[crdt-replica] replace delivery deferred because editor buffer is authoritative for $filePath: " +
+                            "[crdt-replica] replace delivery observed non-operator editor divergence for $filePath: " +
                                 "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash canonical_hash=${contentHash(canonical)}"
                         )
                         deferredEditorText = before
                         return@invokeAndWait
                     }
+                    advanceNonOperatorMutationEpoch(filePath)
                     applyingRemote.add(filePath)
                     try {
                         runUndoableRemoteUpdateCommand(document) {
@@ -493,9 +514,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             logSlow("replace-apply-total", filePath, started, details = "target_chars=${canonical.length} installed=$installed deferred=${deferredEditorText != null}")
         }
         deferredEditorText?.let { editorText ->
-            shadows[filePath] = editorText
-            forwarder.ensureEditorText(editorText)
-            requestRemoteDrain(filePath, "editor-buffer-authoritative-replace")
+            log.warn(
+                "[crdt-replica] ignored non-operator editor divergence while applying CPC replace for $filePath; " +
+                    "editor_hash=${contentHash(editorText)} canonical_hash=${contentHash(canonical)}",
+            )
+            queueCanonicalProjection(filePath, editorText, canonical)
             return false
         }
         if (installed) {
@@ -509,7 +532,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val reattached = forwarderFor(
                     filePath,
                     canonical,
-                    alignExisting = false,
                     bypassRegisterBackoff = true,
                 )
                 if (reattached == null) {
@@ -545,6 +567,25 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         log.debug(
             "[crdt-replica] remote editor apply ${outcome.name.lowercase()} for ${File(filePath).name}; " +
                 "pending_keys=${remoteEditorApplies.pendingKeyCount()} updates=${updates.size}",
+        )
+        scheduleRemoteEditorApply()
+        return outcome != IngressOutcome.Blocked && outcome != IngressOutcome.Dropped
+    }
+
+    private fun queueCanonicalProjection(
+        filePath: String,
+        expectedEditorText: String,
+        canonical: String,
+    ): Boolean {
+        remoteEditorApplyPaths.add(filePath)
+        val outcome = remoteEditorApplies.ingress(
+            filePath,
+            PendingRemoteEditorApply(
+                filePath = filePath,
+                expectedText = expectedEditorText,
+                targetText = canonical,
+                acknowledgements = emptyList(),
+            ),
         )
         scheduleRemoteEditorApply()
         return outcome != IngressOutcome.Blocked && outcome != IngressOutcome.Dropped
@@ -589,6 +630,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 log.warn("[crdt-replica] stale coalesced remote update rejected for ${pending.filePath}; editor text advanced before apply")
                 RemoteEditorApplyOutcome(false, before)
             } else {
+                advanceNonOperatorMutationEpoch(pending.filePath)
                 applyingRemote.add(pending.filePath)
                 try {
                     runUndoableRemoteUpdateCommand(document) {
@@ -629,8 +671,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             if (ack.forwarder.ackRemoteUpdate(ack.update, outcome.editorText)) acked++
                         }
                     } else if (outcome.editorText != null) {
-                        shadows[pending.filePath] = outcome.editorText
-                        pending.acknowledgements.lastOrNull()?.forwarder?.ensureEditorText(outcome.editorText)
+                        requestRemoteDrain(pending.filePath, "remote-editor-apply-raced")
                     }
                     log.debug(
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
@@ -662,9 +703,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "[crdt-replica] incoming update deferred while editor buffer is published first for $filePath: " +
                     "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash"
             )
-            shadows[filePath] = editorText
-            forwarder.ensureEditorText(editorText)
-            requestRemoteDrain(filePath, "editor-buffer-ahead")
+            queueCanonicalProjection(filePath, editorText, expectedText)
             return false
         }
         if (replicaText == editorText) {
@@ -680,9 +719,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             "[crdt-replica] incoming update deferred because local replica baseline differs from the authoritative editor buffer for $filePath: " +
                 "editor_hash=$editorHash expected_hash=$expectedHash replica_hash=$replicaHash"
         )
-        shadows[filePath] = editorText
-        forwarder.ensureEditorText(editorText)
-        requestRemoteDrain(filePath, "editor-buffer-authoritative")
+        val canonical = replicaText ?: expectedText
+        queueCanonicalProjection(filePath, editorText, canonical)
         return false
     }
 
@@ -728,15 +766,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun forwarderFor(
         filePath: String,
         initialEditorText: String? = null,
-        alignExisting: Boolean = false,
         bypassRegisterBackoff: Boolean = false,
     ): CrdtReplicaForwarder? {
-        forwarders[filePath]?.let {
-            if (alignExisting && initialEditorText != null) {
-                it.ensureEditorText(initialEditorText)
-            }
-            return it
-        }
+        forwarders[filePath]?.let { return it }
         if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return null
         val root = resolveProjectRoot(filePath) ?: return null
         val identity = "${EditorIdentity.id}:$filePath"
@@ -852,6 +884,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     companion object {
         private val instances = ConcurrentHashMap<Project, CrdtReplicaManager>()
         private val applyingAgentMutations = ConcurrentHashMap.newKeySet<String>()
+        private val nonOperatorMutationEpochs = ConcurrentHashMap<String, AtomicLong>()
 
         fun getInstance(project: Project): CrdtReplicaManager =
             instances.getOrPut(project) {
@@ -871,6 +904,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
 
         fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {
+            advanceNonOperatorMutationEpoch(filePath)
             applyingAgentMutations.add(filePath)
             return try {
                 block()
@@ -886,8 +920,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             await: Boolean = false,
             forceRefresh: Boolean = false,
         ): Boolean {
-            val manager = instances.values.firstOrNull { it.ownsFilePath(filePath) }
-                ?: instances.values.firstOrNull()
+            val manager = managerForFilePath(filePath)
                 ?: return false
             return manager.ensureOpenDocumentReplica(filePath, document, editorText, await, forceRefresh)
         }
@@ -897,6 +930,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun isApplyingNonOperatorMutation(filePath: String): Boolean =
             applyingAgentMutations.contains(filePath) || isApplyingRemote(filePath)
+
+        fun isOperatorDocumentEvent(filePath: String, event: DocumentEvent): Boolean =
+            isOperatorDocumentEventUtil(
+                nonOperatorMutation = isApplyingNonOperatorMutation(filePath),
+                wholeTextReplaced = event.isWholeTextReplaced,
+            )
+
+        private fun managerForFilePath(filePath: String): CrdtReplicaManager? =
+            instances.values
+                .filter { it.ownsFilePath(filePath) }
+                .maxWithOrNull(
+                    compareBy<CrdtReplicaManager> { it.project.basePath?.length ?: 0 }
+                        .thenBy { it.project.basePath.orEmpty() },
+                )
+
+        private fun nonOperatorMutationEpoch(filePath: String): Long =
+            nonOperatorMutationEpochs[filePath]?.get() ?: 0L
+
+        private fun advanceNonOperatorMutationEpoch(filePath: String): Long =
+            nonOperatorMutationEpochs.computeIfAbsent(filePath) { AtomicLong(0L) }.incrementAndGet()
     }
 
     private fun ownsFilePath(filePath: String): Boolean {
@@ -911,6 +964,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
 internal fun shouldApplyRemoteCrdtUpdateUtil(update: ReplicaRemoteUpdate, clientId: Long): Boolean =
     update.origin != clientId
+
+internal fun isOperatorDocumentEventUtil(
+    nonOperatorMutation: Boolean,
+    wholeTextReplaced: Boolean,
+): Boolean = !nonOperatorMutation && !wholeTextReplaced
 
 internal fun remoteCrdtApplyStillCurrentUtil(
     expectedText: String,

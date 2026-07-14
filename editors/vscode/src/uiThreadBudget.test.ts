@@ -14,8 +14,10 @@ describe('editor UI thread budget', () => {
 
         assert.ok(listener.includes('this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);'));
         assert.ok(listener.includes('this.scheduleLiveBufferReport(e.document, eventProjectRoot);'));
-        assert.ok(listener.includes('this.scheduleCrdtLocalChangeDelta(fsPath, changes);'));
-        assert.ok(listener.includes('this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);'));
+    assert.ok(listener.includes('this.scheduleCrdtLocalChangeDelta(fsPath, changes, admission);'));
+    assert.ok(listener.includes('this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);'));
+    assert.ok(listener.includes('const operatorEdit = !remoteCrdtApply && (e.document.isDirty || e.reason !== undefined);'));
+    assert.ok(listener.includes('const admission = this.crdtReplicas?.captureLocalChange(fsPath, operatorEdit);'));
         assert.strictEqual(listener.includes('e.document.getText()'), false);
         assert.strictEqual(listener.includes('native.documentChanged('), false);
         assert.strictEqual(listener.includes('documentChangedDigestContent'), false);
@@ -102,7 +104,7 @@ describe('editor UI thread budget', () => {
         const scheduler = source.slice(start, end);
 
         assert.ok(scheduler.includes('setTimeout(() => {'));
-        assert.ok(scheduler.includes('handleLocalChangeDelta(fsPath, changes)'));
+    assert.ok(scheduler.includes('handleLocalChangeDelta(fsPath, changes, admission)'));
     });
 
     it('VS Code visual highlighter defers non-markdown documents before scheduling refresh', () => {

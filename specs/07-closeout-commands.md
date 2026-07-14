@@ -44,6 +44,13 @@ or prove capabilities, but it may not change the closeout semantics.
 `agent-doc compact <FILE> [--component NAME] [--message TEXT] [--tag NAME] [--commit]`
 
 - Rewrites exchange or another component into a compacted summary/archive-pointer state.
+- The CLI and editor actions are command submitters only. The CPC owns the full
+  Compact Exchange transaction: authoritative read, archive/summary computation,
+  CRDT mutation, visible projection proof, and optional commit. Its in-process
+  mutation scope must not issue document or commit RPCs back into its own socket.
+- A stale caller/controller binary mismatch fails before mutation and performs at
+  most one reconnect/promotion retry. The command uses a compact-operation
+  deadline, not the short generic controller-response timeout.
 - After writing the archive markdown, compact best-effort upserts that archive into `.agent-doc/archive-index.db`; indexing failure warns but must not roll back archive creation.
 - For exchange compaction without an explicit message, the default summary must include an archive pointer plus a digest of the compacted exchange content. It must not duplicate live `agent:backlog`, `agent:queue`, or `agent:icebox` component content into `agent:exchange`.
 - When compacting an exchange that already begins with a compacted `### Session Summary`, the default digest must summarize only that prior summary's compact metadata. It must not recursively embed the previous `Prior summary/context` payload or replay detailed ordered-list response lines into the new live summary.

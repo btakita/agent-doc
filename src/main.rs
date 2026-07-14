@@ -300,6 +300,24 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             },
         )
     }
+
+    fn compact_document(
+        &self,
+        file: &Path,
+        invocation: agent_doc_controller_io::project_controller::ControllerCompactDocumentInvocation,
+    ) -> anyhow::Result<()> {
+        agent_doc_document_realtime_io::with_controller_document_mutation(|| {
+            agent_doc_compact_io::run_in_controller(
+                file,
+                invocation.keep,
+                invocation.component_name.as_deref(),
+                invocation.message.as_deref(),
+                invocation.tag.as_deref(),
+                invocation.commit,
+                invocation.force_disk,
+            )
+        })
+    }
 }
 
 static PROJECT_CONTROLLER_RUNTIME_EFFECTS: CliProjectControllerRuntimeEffects =
@@ -421,7 +439,7 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         // never engaged in the real binary. Correctness stays enforced by
         // `verify_compact_head_landed` afterward. Keep this in lockstep with the
         // test double.
-        let outcome = agent_doc_commit_io::commit_with_authoritative_compaction(file)?;
+        let outcome = agent_doc_commit_io::commit_document_in_controller(file, true)?;
         Ok(agent_doc_compact_io::CompactCommitOutcome {
             did_commit: outcome.did_commit,
             vcs_refresh_signaled: outcome.vcs_refresh_signaled,

@@ -289,10 +289,6 @@ pub fn run(
     commit: bool,
     force_disk: bool,
 ) -> Result<()> {
-    if !file.exists() {
-        anyhow::bail!("file not found: {}", file.display());
-    }
-
     let stdin_message;
     let message = if message == Some("-") {
         use std::io::Read;
@@ -305,6 +301,39 @@ pub fn run(
     } else {
         message
     };
+
+    #[cfg(test)]
+    {
+        return run_in_controller(file, keep, component_name, message, tag, commit, force_disk);
+    }
+    #[cfg(not(test))]
+    agent_doc_controller_io::project_controller::compact_document_via_controller(
+        file,
+        agent_doc_controller_io::project_controller::ControllerCompactDocumentInvocation {
+            keep,
+            component_name: component_name.map(str::to_string),
+            message: message.map(str::to_string),
+            tag: tag.map(str::to_string),
+            commit,
+            force_disk,
+        },
+    )
+}
+
+/// Execute compaction inside the CPC process. This entrypoint is wired only by
+/// the project-controller runtime effect; editor/CLI callers use [`run`].
+pub fn run_in_controller(
+    file: &Path,
+    keep: Option<usize>,
+    component_name: Option<&str>,
+    message: Option<&str>,
+    tag: Option<&str>,
+    commit: bool,
+    force_disk: bool,
+) -> Result<()> {
+    if !file.exists() {
+        anyhow::bail!("file not found: {}", file.display());
+    }
 
     // Create a pre-compact git tag at HEAD before modifying the document.
     // Skipped if tag == Some("skip").
@@ -707,7 +736,8 @@ fn closeout_compact_with_commit(file: &Path) -> Result<()> {
         );
     }
     eprintln!(
-        "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`"
+        "{}",
+        agent_doc_controller_io::project_controller::COMPACT_COMMIT_SCOPE_NOTE
     );
     Ok(())
 }

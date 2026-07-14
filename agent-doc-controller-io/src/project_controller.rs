@@ -129,6 +129,21 @@ pub struct ControllerCommitDocumentOutcome {
     pub vcs_refresh_signaled: Option<bool>,
 }
 
+/// Complete Compact Exchange invocation executed inside the CPC process. The
+/// editor/CLI is only a command submitter; all reads, CRDT mutation, archive,
+/// commit, and delivery acknowledgement remain under controller ownership.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerCompactDocumentInvocation {
+    pub keep: Option<usize>,
+    pub component_name: Option<String>,
+    pub message: Option<String>,
+    pub tag: Option<String>,
+    pub commit: bool,
+    pub force_disk: bool,
+}
+
+pub const COMPACT_COMMIT_SCOPE_NOTE: &str = "[compact] note: --commit persists only the compacted document state now in HEAD; any later console explanation still needs its own `agent-doc finalize` or `agent-doc write --commit` cycle to land in `exchange`";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControllerTmuxLayoutSyncInvocation {
     pub columns: Vec<String>,
@@ -217,6 +232,12 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         file: &Path,
         authoritative_compaction: bool,
     ) -> Result<ControllerCommitDocumentOutcome>;
+
+    fn compact_document(
+        &self,
+        file: &Path,
+        invocation: ControllerCompactDocumentInvocation,
+    ) -> Result<()>;
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();
@@ -312,6 +333,14 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _authoritative_compaction: bool,
     ) -> Result<ControllerCommitDocumentOutcome> {
         anyhow::bail!("project controller test runtime does not commit documents")
+    }
+
+    fn compact_document(
+        &self,
+        _file: &Path,
+        _invocation: ControllerCompactDocumentInvocation,
+    ) -> Result<()> {
+        anyhow::bail!("project controller test runtime does not compact documents")
     }
 
     fn sync_tmux_layout(

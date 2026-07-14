@@ -190,11 +190,12 @@ describe('crdt replica manager', () => {
         }]);
     });
 
-    it('passes expected editor text so stale CRDT remote targets are not ACKed over typing', async () => {
-        const node = new FakeNode('base');
-        const transport = new FakeTransport();
-        const filePath = '/work/plan.md';
-        let editorText = 'base';
+it('reprojects CPC state over unproven buffer divergence before ACKing', async () => {
+  const node = new FakeNode('base');
+  const transport = new FakeTransport();
+  const filePath = '/work/plan.md';
+  let editorText = 'base';
+  const projections: Array<{ text: string; expectedText: string | undefined }> = [];
         transport.pending = [{
             patchId: 'crdt:1:42:8',
             origin: 1,
@@ -207,24 +208,32 @@ describe('crdt replica manager', () => {
             identity: 'vscode-test',
             transport,
             nodeFactory: () => node,
-            listDocuments: () => [],
-            currentText: () => editorText,
-            applyText: async (_file, targetText, expectedText) => {
-                assert.strictEqual(expectedText, 'base');
-                editorText = 'base typed';
-                if (editorText !== expectedText) return false;
-                editorText = targetText;
-                return true;
+    listDocuments: () => [],
+    currentText: () => editorText,
+    applyText: async (_file, targetText, expectedText) => {
+      projections.push({ text: targetText, expectedText });
+      if (expectedText === 'base') editorText = 'stale cache projection';
+      if (editorText !== expectedText) return false;
+      editorText = targetText;
+      return true;
             },
         });
 
-        assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
-        await manager.drainRemoteUpdates();
+  assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
+  await manager.drainRemoteUpdates();
 
-        assert.strictEqual(editorText, 'base typed');
-        assert.deepStrictEqual(transport.acked, []);
-        manager.dispose();
-    });
+  assert.strictEqual(editorText, 'remote text');
+  assert.deepStrictEqual(projections, [
+    { text: 'remote text', expectedText: 'base' },
+    { text: 'remote text', expectedText: 'stale cache projection' },
+  ]);
+  assert.deepStrictEqual(transport.acked, [{
+    patchId: 'crdt:1:42:8',
+    generation: 8,
+    contentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+  }]);
+  manager.dispose();
+});
 
     it('ACKs self-echo remote updates without applying text', async () => {
         const node = new FakeNode('base');
@@ -381,7 +390,7 @@ describe('crdt replica manager', () => {
         }]);
     });
 
-    it('force-refresh republishes editor text through the cached replica', async () => {
+it('force-refresh never republishes an unproven full editor snapshot', async () => {
         const nodes: FakeNode[] = [];
         const transport = new FakeTransport();
         const filePath = '/work/plan.md';
@@ -405,9 +414,41 @@ describe('crdt replica manager', () => {
         assert.strictEqual(transport.registerCount, 1);
         assert.deepStrictEqual(transport.deregistered, []);
         assert.deepStrictEqual(nodes.map((node) => node.opened), [42]);
-        assert.deepStrictEqual(nodes[0].locals.map((local) => local.insert), ['base', 'base updated']);
-        assert.strictEqual(transport.broadcasts.length, 2);
+    assert.deepStrictEqual(nodes[0].locals.map((local) => local.insert), ['base']);
+    assert.strictEqual(transport.broadcasts.length, 1);
+});
+
+it('non-operator editor events fence queued deltas and never mutate canonical', async () => {
+    const node = new FakeNode('base');
+    const transport = new FakeTransport();
+    const filePath = '/work/plan.md';
+    const manager = new CrdtReplicaManager({
+        projectRoot: '/work',
+        identity: 'vscode-test',
+        transport,
+        nodeFactory: () => node,
+        listDocuments: () => [],
+        currentText: () => 'stale cache projection',
+        applyText: async () => true,
     });
+
+    assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+    const queuedUserEdit = manager.captureLocalChange(filePath, true);
+    const cacheReload = manager.captureLocalChange(filePath, false);
+    await manager.handleLocalChangeDelta(
+        filePath,
+        [{ rangeOffset: 4, rangeLength: 0, text: ' typed' }],
+        queuedUserEdit,
+    );
+    await manager.handleLocalChangeDelta(
+        filePath,
+        [{ rangeOffset: 0, rangeLength: 4, text: 'stale cache projection' }],
+        cacheReload,
+    );
+
+    assert.deepStrictEqual(node.locals, []);
+    assert.deepStrictEqual(transport.broadcasts, []);
+});
 });
 
 describe('crdt replica IPC response parsing', () => {

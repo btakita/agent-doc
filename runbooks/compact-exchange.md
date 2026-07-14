@@ -30,6 +30,13 @@ Steps to compact an agent-doc exchange component when it grows too large.
    - Discard verbose back-and-forth, code snippets already committed, exploratory dead-ends
 
 4. **Run `agent-doc compact <FILE> --component exchange --commit`**
+- The CLI, JetBrains action, and VS Code action submit one operation to the CPC;
+  they never compute or apply compaction themselves. The CPC performs the read,
+  archive, CRDT replacement, projection ACK, and commit in one controller-owned
+  mutation scope.
+- Inside that scope, relay reads/writes and the commit use in-process controller
+  state rather than recursively requesting the controller socket. This removes
+  the short generic RPC timeout and self-queue deadlock from Compact Exchange.
    - Archives the original content to `.agent-doc/archives/`
    - Replaces exchange content with the supplied summary, or when no custom `--message` is provided, with a default session summary that includes archive pointer plus live backlog/queue/icebox context
    - Updates snapshot atomically

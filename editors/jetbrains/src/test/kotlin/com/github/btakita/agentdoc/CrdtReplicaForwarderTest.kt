@@ -221,6 +221,28 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `only incremental user events may originate editor deltas`() {
+        assertTrue(
+            isOperatorDocumentEventUtil(
+                nonOperatorMutation = false,
+                wholeTextReplaced = false,
+            ),
+        )
+        assertFalse(
+            isOperatorDocumentEventUtil(
+                nonOperatorMutation = true,
+                wholeTextReplaced = false,
+            ),
+        )
+        assertFalse(
+            isOperatorDocumentEventUtil(
+                nonOperatorMutation = false,
+                wholeTextReplaced = true,
+            ),
+        )
+    }
+
+    @Test
     fun `a refused register leaves the forwarder detached and no-ops local deltas`() {
         // The Detached / headless path: the supervisor refuses register, so the
         // plugin must fall back (attached=false) and never ship deltas.

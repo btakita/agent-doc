@@ -20,6 +20,7 @@
 //! - `durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk`
 //! - `durable_buffer_state_none_when_no_editor_feed`
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -42,6 +43,27 @@ pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 /// paying the full read timeout on every poll and saturating it further
 /// (`#idlewatchctrlbackoff`). 0 means "no failure observed yet".
 static LAST_CONTROLLER_DEGRADED_SECS: AtomicI64 = AtomicI64::new(0);
+
+thread_local! {
+    /// True only while a CPC runtime effect is executing a document mutation.
+    /// Controller-owned operations must use the in-process relay rather than
+    /// enqueueing RPCs back through the same controller socket.
+    static CONTROLLER_DOCUMENT_MUTATION: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn with_controller_document_mutation<T>(f: impl FnOnce() -> T) -> T {
+    CONTROLLER_DOCUMENT_MUTATION.with(|slot| {
+        let previous = slot.replace(true);
+        let _owner = agent_doc_document_realtime::write_authority::owner_scope_guard();
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+fn controller_document_mutation_in_progress() -> bool {
+    CONTROLLER_DOCUMENT_MUTATION.with(Cell::get)
+}
 
 fn unix_secs() -> i64 {
     SystemTime::now()
@@ -465,7 +487,7 @@ pub fn apply_cpc_write_through_relay_authority(
     content: &str,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
-    if test_local_crdt_relay_enabled(file) {
+    if controller_document_mutation_in_progress() || test_local_crdt_relay_enabled(file) {
         return agent_doc_crdt_relay_io::apply_cpc_write_for_file(
             file,
             expected_current,
@@ -913,6 +935,9 @@ fn query_live_editor_authority(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    if controller_document_mutation_in_progress() {
+        return agent_doc_crdt_relay_io::current_text_for_file(file);
+    }
     if let Some(current) = query_test_local_crdt_relay(file, source)? {
         return Ok(current);
     }
@@ -1129,6 +1154,9 @@ fn ensure_document_model_through_controller_authority(
     file: &std::path::Path,
     source: &str,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    if controller_document_mutation_in_progress() {
+        return agent_doc_crdt_relay_io::ensure_document_model(file, source);
+    }
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
         file, source,
     )? {
@@ -2036,6 +2064,22 @@ fn resolve_disk_only_current_doc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn controller_document_mutation_scope_is_nested_and_restored() {
+        assert!(!controller_document_mutation_in_progress());
+        assert!(!agent_doc_document_realtime::write_authority::within_owner_scope());
+        with_controller_document_mutation(|| {
+            assert!(controller_document_mutation_in_progress());
+            assert!(agent_doc_document_realtime::write_authority::within_owner_scope());
+            with_controller_document_mutation(|| {
+                assert!(controller_document_mutation_in_progress());
+                assert!(agent_doc_document_realtime::write_authority::within_owner_scope());
+            });
+        });
+        assert!(!controller_document_mutation_in_progress());
+        assert!(!agent_doc_document_realtime::write_authority::within_owner_scope());
+    }
 
     /// `#idlewatchctrlbackoff` — recording controller degradation must flip
     /// [`controller_failed_within`] true so the idle-queue watch backs off.

@@ -24,7 +24,7 @@ internal data class PendingEditorOp(
     val offset: Int,
     val oldFragment: String,
     val newFragment: String,
-    val remoteCrdtApply: Boolean,
+    val nonOperatorMutation: Boolean,
 )
 
 internal data class PreparedEditorOp(
@@ -76,7 +76,7 @@ internal fun prepareEditorOpReports(
             .size
             .toLong()
 
-        if (!op.remoteCrdtApply) {
+        if (!op.nonOperatorMutation) {
             if (op.oldFragment.isNotEmpty()) {
                 reports.add(
                     PreparedEditorOp(
@@ -151,7 +151,7 @@ object TypingTracker : DocumentListener {
     private val nativeChangeDrainQueued = AtomicBoolean(false)
 
     // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
-    // disk. Set when a non-remoteCrdtApply document change lands; cleared whenever
+    // disk. Set only when an operator-attributable document change lands; cleared whenever
     // the document is observed clean (fully flushed to disk) or closed. The CLI
     // visible-write guard re-merges on replica churn only when the reporting
     // editor proves there is no unsaved operator text — otherwise it fails closed
@@ -163,29 +163,29 @@ object TypingTracker : DocumentListener {
         if (!vFile.name.endsWith(".md")) return
         val filePath = vFile.path
 
-        // A remote CRDT-replica apply or an agent-doc patch apply is not operator
-        // typing. Report the changed buffer, but do not mark it as an unsynced
-        // local edit.
-        val remoteCrdtApply = CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)
-        if (!remoteCrdtApply) {
+        // CPC/agent projections and whole-buffer file-cache reloads are not
+        // operator typing. They may be reported as visibility observations, but
+        // they must never originate editor -> CPC document operations.
+        val operatorEdit = CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)
+        val nonOperatorMutation = !operatorEdit
+        if (operatorEdit) {
             // #falsetyping-guard: a genuine local operator edit is now ahead of
-            // disk until saved. A remoteCrdtApply is replica churn, not operator
-            // text, so it must NOT set this flag.
+            // disk until saved. CPC projection/cache churn must NOT set this flag.
             unsyncedLocalEditPaths.add(filePath)
         }
 
-        if (!remoteCrdtApply) {
+        if (operatorEdit) {
             requestNativeDocumentChanged(filePath)
         }
         val op = PendingEditorOp(
             offset = event.offset,
             oldFragment = event.oldFragment.toString(),
             newFragment = event.newFragment.toString(),
-            remoteCrdtApply = remoteCrdtApply,
+            nonOperatorMutation = nonOperatorMutation,
         )
         recordPendingEditorOp(filePath, op)
         scheduleFullContentReport(filePath, event.document)
-        LOG.debug("[native] document_changed queued content report: ${vFile.name} (remoteCrdtApply=$remoteCrdtApply)")
+        LOG.debug("[native] document_changed queued content report: ${vFile.name} (operatorEdit=$operatorEdit)")
     }
 
     private fun requestNativeDocumentChanged(filePath: String) {
@@ -323,6 +323,9 @@ object TypingTracker : DocumentListener {
         )
     }
 
+    fun hasUnsyncedOperatorEdits(filePath: String): Boolean =
+        filePath in unsyncedLocalEditPaths
+
     private fun scheduleFullContentReport(
         filePath: String,
         document: Document,
@@ -402,7 +405,7 @@ object TypingTracker : DocumentListener {
             // #falsetyping-guard: derive replica-churn provenance. A document that
             // is fully flushed to disk has no unsaved edits at all, so clear any
             // stale local-edit marker. Otherwise the buffer is unsaved: the edits
-            // are operator text only if a local (non-remoteCrdtApply) change landed
+            // are operator text only if an operator-attributable change landed
             // since the last clean observation.
             val unsaved = FileDocumentManager.getInstance().isDocumentUnsaved(document)
             if (!unsaved) {

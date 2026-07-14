@@ -59,6 +59,12 @@ export interface ReplicaTextChange {
     text: string;
 }
 
+export interface ReplicaLocalChangeAdmission {
+    operatorEdit: boolean;
+    projectionEpoch: number;
+    pendingReserved: boolean;
+}
+
 export interface ReplicaDocumentSnapshot {
     filePath: string;
     text: string;
@@ -440,6 +446,7 @@ export class CrdtReplicaManager {
     private readonly applyingRemote = new Set<string>();
     private readonly reattachRecovering = new Set<string>();
     private readonly pendingLocalEdits = new Map<string, number>();
+    private readonly nonOperatorProjectionEpochs = new Map<string, number>();
     private readonly drainRequestedPaths = new Set<string>();
     private drainAllRequested = false;
     private drainQueued = false;
@@ -482,13 +489,27 @@ export class CrdtReplicaManager {
     async attachDocument(filePath: string, text?: string, forceRefresh = false): Promise<boolean> {
         if (text !== undefined) this.seedDocument(filePath, text);
         const forwarder = await this.forwarderFor(filePath);
-        if (forceRefresh && forwarder && text !== undefined) await forwarder.ensureEditorText(text);
+        // `forceRefresh` bypasses only attachment timing. An existing replica is
+        // never rewritten from an unproven full editor snapshot; user edits are
+        // already carried by incremental admitted changes.
+        void forceRefresh;
         if (forwarder) this.requestRemoteDrain(filePath);
         return forwarder != null;
     }
 
     isApplyingRemote(filePath: string): boolean {
         return this.applyingRemote.has(filePath);
+    }
+
+    captureLocalChange(filePath: string, operatorEdit: boolean): ReplicaLocalChangeAdmission {
+        if (!operatorEdit) this.advanceNonOperatorProjectionEpoch(filePath);
+        const admission = {
+            operatorEdit,
+            projectionEpoch: this.nonOperatorProjectionEpochs.get(filePath) ?? 0,
+            pendingReserved: operatorEdit,
+        };
+        if (operatorEdit) this.markLocalPending(filePath);
+        return admission;
     }
 
     async handleDocumentClosed(filePath: string): Promise<void> {
@@ -531,17 +552,32 @@ export class CrdtReplicaManager {
     async handleLocalChangeDelta(
         filePath: string,
         changes: readonly ReplicaTextChange[],
+        admission?: ReplicaLocalChangeAdmission,
     ): Promise<void> {
-        if (this.applyingRemote.has(filePath)) {
+        const admitted = admission ?? this.captureLocalChange(filePath, true);
+        const finish = () => {
+            if (admitted.pendingReserved) this.clearLocalPending(filePath);
+            this.requestRemoteDrain(filePath);
+        };
+        if (
+            !admitted.operatorEdit ||
+            this.applyingRemote.has(filePath) ||
+            admitted.projectionEpoch !== (this.nonOperatorProjectionEpochs.get(filePath) ?? 0)
+        ) {
+            finish();
             return;
         }
         const oldText = this.shadows.get(filePath);
-        if (oldText === undefined || changes.length !== 1) return;
+        if (oldText === undefined || changes.length !== 1) {
+            finish();
+            return;
+        }
 
         const change = changes[0];
         const newText = applyReplicaTextChange(oldText, change);
         if (newText == null) {
-            this.shadows.delete(filePath);
+            this.requestRemoteDrain(filePath);
+            finish();
             return;
         }
         this.shadows.set(filePath, newText);
@@ -550,13 +586,11 @@ export class CrdtReplicaManager {
             change.rangeOffset,
             change.rangeLength,
         );
-        this.markLocalPending(filePath);
         try {
             const forwarder = await this.forwarderFor(filePath);
             await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
         } finally {
-            this.clearLocalPending(filePath);
-            this.requestRemoteDrain(filePath);
+            finish();
         }
     }
 
@@ -573,6 +607,7 @@ export class CrdtReplicaManager {
     ): Promise<void> {
         if (this.hasPendingLocal(filePath)) return;
         const expectedText = this.shadows.get(filePath) ?? '';
+        this.advanceNonOperatorProjectionEpoch(filePath);
         this.applyingRemote.add(filePath);
         let installed = false;
         try {
@@ -580,6 +615,12 @@ export class CrdtReplicaManager {
             if (installed) this.shadows.set(filePath, canonical);
         } finally {
             this.applyingRemote.delete(filePath);
+        }
+        if (!installed) {
+            const current = this.currentEditorText(filePath);
+            if (current != null) {
+                installed = await this.applyCanonicalProjection(filePath, canonical, current);
+            }
         }
         if (installed) {
             // Re-bootstrap from canonical state instead of locally editing a
@@ -610,9 +651,14 @@ export class CrdtReplicaManager {
         }, 0);
     }
 
-    /** Controller-proven genuine reattach: bounded text adopt, then re-bootstrap. */
-    async handleReattachRequest(filePath: string): Promise<void> {
+    /** Full text adopt is allowed only to recover a proven unsynced user edit. */
+    async handleReattachRequest(filePath: string, hasUnsyncedOperatorEdit = false): Promise<void> {
         if (this.reattachRecovering.has(filePath)) return;
+        if (!hasUnsyncedOperatorEdit) {
+            this.logger.warn(`[crdt-replica] refused full editor text adopt for ${filePath}; no unsynced operator edit proves editor-origin content`);
+            this.requestRemoteDrain(filePath);
+            return;
+        }
         this.reattachRecovering.add(filePath);
         try {
         const forwarder = this.forwarders.get(filePath);
@@ -690,20 +736,20 @@ export class CrdtReplicaManager {
                 const converged = forwarder.applyRemoteUpdate(update.update);
                 if (converged == null) continue;
                 if (this.hasPendingLocal(filePath)) continue;
+                this.advanceNonOperatorProjectionEpoch(filePath);
                 this.applyingRemote.add(filePath);
                 try {
                     const applied = await this.options.applyText(filePath, converged, expectedText);
                     if (applied) {
                         this.shadows.set(filePath, converged);
                         await forwarder.ackRemoteUpdate(update, converged);
-                    } else {
-                        const current = this.currentEditorText(filePath);
-                        if (current != null) {
-                            this.shadows.set(filePath, current);
-                            await forwarder.ensureEditorText(current);
-                            this.requestRemoteDrain(filePath);
-                        }
-                    }
+          } else {
+            const current = this.currentEditorText(filePath);
+            if (current != null) {
+              const projected = await this.applyCanonicalProjection(filePath, converged, current);
+              if (projected) await forwarder.ackRemoteUpdate(update, converged);
+            }
+          }
                 } finally {
                     this.applyingRemote.delete(filePath);
                 }
@@ -731,9 +777,7 @@ export class CrdtReplicaManager {
                 `[crdt-replica] incoming update deferred while editor buffer is published first for ${filePath}: ` +
                 `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} replica_hash=${sha256(replicaText)}`,
             );
-            this.shadows.set(filePath, editorText);
-            await forwarder.ensureEditorText(editorText);
-            this.requestRemoteDrain(filePath);
+            await this.applyCanonicalProjection(filePath, expectedText, editorText);
             return false;
         }
         if (replicaText === editorText) {
@@ -750,10 +794,34 @@ export class CrdtReplicaManager {
             `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
             `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
         );
-        this.shadows.set(filePath, editorText);
-        await forwarder.ensureEditorText(editorText);
-        this.requestRemoteDrain(filePath);
+        await this.applyCanonicalProjection(filePath, replicaText ?? expectedText, editorText);
         return false;
+    }
+
+    private async applyCanonicalProjection(
+        filePath: string,
+        canonical: string,
+        expectedEditorText: string,
+    ): Promise<boolean> {
+        if (this.hasPendingLocal(filePath)) return false;
+        this.advanceNonOperatorProjectionEpoch(filePath);
+        this.applyingRemote.add(filePath);
+        try {
+            if (await this.options.applyText(filePath, canonical, expectedEditorText)) {
+                this.shadows.set(filePath, canonical);
+                return true;
+            }
+            return false;
+        } finally {
+            this.applyingRemote.delete(filePath);
+            this.requestRemoteDrain(filePath);
+        }
+    }
+
+    private advanceNonOperatorProjectionEpoch(filePath: string): number {
+        const next = (this.nonOperatorProjectionEpochs.get(filePath) ?? 0) + 1;
+        this.nonOperatorProjectionEpochs.set(filePath, next);
+        return next;
     }
 
     private currentEditorText(filePath: string): string | null {

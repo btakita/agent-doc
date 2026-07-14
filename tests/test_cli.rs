@@ -19158,7 +19158,6 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ];
     for relative in [
         "agent-doc-commit-io/src/lib.rs",
-        "agent-doc-document-realtime-io/src/lib.rs",
         "agent-doc-flow-io/src/closeout.rs",
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-start-io/src/lib.rs",
@@ -19175,6 +19174,24 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             );
         }
     }
+    let realtime_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "with_controller_document_mutation",
+        "controller_document_mutation_in_progress() || test_local_crdt_relay_enabled(file)",
+        "if controller_document_mutation_in_progress() {\n        return agent_doc_crdt_relay_io::current_text_for_file(file);",
+        "if controller_document_mutation_in_progress() {\n        return agent_doc_crdt_relay_io::ensure_document_model(file, source);",
+    ] {
+        assert!(
+            realtime_io.contains(required_snippet),
+            "document realtime must allow direct relay access only inside the CPC-owned document mutation scope: {required_snippet}"
+        );
+    }
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    assert!(
+        main_source.contains("with_controller_document_mutation(||"),
+        "Compact Exchange CPC runtime effect must enter the in-process document mutation scope"
+    );
     for (editor_name, source) in [
         ("JetBrains", &jetbrains_crdt_forwarder),
         ("VS Code", &vscode_crdt_replica),
@@ -28861,7 +28878,8 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
     for required_snippet in [
         "forwarders.remove(filePath, forwarder)",
         "forwarder.deregister()",
-        "canonical,\n                    alignExisting = false,\n                    bypassRegisterBackoff = true,",
+        "canonical,\n                    bypassRegisterBackoff = true,",
+        "queueCanonicalProjection(filePath, editorText, canonical)",
     ] {
         assert!(
             jetbrains_crdt_replica_manager.contains(required_snippet),

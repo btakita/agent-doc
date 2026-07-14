@@ -52,7 +52,11 @@ import {
     EditorCommandKind,
     EditorCommandRegistry,
 } from './editorCommandState';
-import { CrdtReplicaManager, type ReplicaTextChange } from './crdtReplica';
+import {
+    CrdtReplicaManager,
+    type ReplicaLocalChangeAdmission,
+    type ReplicaTextChange,
+} from './crdtReplica';
 import { registerReliableSyncLiveness } from './reliableSyncLiveness';
 import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';
 
@@ -2323,7 +2327,12 @@ class PatchWatcher implements vscode.Disposable {
             if (e.document.languageId === 'markdown' && e.contentChanges.length > 0) {
                 const fsPath = e.document.uri.fsPath;
                 const remoteCrdtApply = this.crdtReplicas?.isApplyingRemote(fsPath) ?? false;
-                if (!remoteCrdtApply) {
+                // A genuine user edit makes the document dirty (or carries an
+                // explicit undo/redo reason). A clean whole-buffer/cache reload
+                // is a visibility event, not an editor-origin mutation.
+                const operatorEdit = !remoteCrdtApply && (e.document.isDirty || e.reason !== undefined);
+                const admission = this.crdtReplicas?.captureLocalChange(fsPath, operatorEdit);
+                if (operatorEdit) {
                     this.lastTypingTime.set(fsPath, Date.now());
                     // #falsetyping-guard: a genuine local operator edit is now
                     // ahead of disk until saved. A remoteCrdtApply is replica
@@ -2333,17 +2342,17 @@ class PatchWatcher implements vscode.Disposable {
                 const eventProjectRoot = this.patchesDir
                     ? path.dirname(path.dirname(this.patchesDir))
                     : undefined;
-                this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);
+                if (operatorEdit) this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);
                 this.scheduleLiveBufferReport(e.document, eventProjectRoot);
                 const changes: ReplicaTextChange[] = e.contentChanges.map((change) => ({
                     rangeOffset: change.rangeOffset,
                     rangeLength: change.rangeLength,
                     text: change.text,
                 }));
-                this.scheduleCrdtLocalChangeDelta(fsPath, changes);
+                this.scheduleCrdtLocalChangeDelta(fsPath, changes, admission);
                 // #qnodemerge4wire Phase 4: report the real editor op so a concurrent
                 // agent merge aligns to the user's actual edit boundaries.
-                if (!remoteCrdtApply) {
+                if (operatorEdit) {
                     this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);
                 }
             }
@@ -2547,12 +2556,16 @@ class PatchWatcher implements vscode.Disposable {
         }
     }
 
-    private scheduleCrdtLocalChangeDelta(fsPath: string, changes: readonly ReplicaTextChange[]): void {
+    private scheduleCrdtLocalChangeDelta(
+        fsPath: string,
+        changes: readonly ReplicaTextChange[],
+        admission?: ReplicaLocalChangeAdmission,
+    ): void {
         const timer = setTimeout(() => {
             const timers = this.crdtLocalChangeTimers.get(fsPath);
             timers?.delete(timer);
             if (timers?.size === 0) this.crdtLocalChangeTimers.delete(fsPath);
-            const crdtForward = this.crdtReplicas?.handleLocalChangeDelta(fsPath, changes);
+            const crdtForward = this.crdtReplicas?.handleLocalChangeDelta(fsPath, changes, admission);
             crdtForward?.catch((err: any) => {
                 this.outputChannel.appendLine(`crdt-replica: local change skipped for ${fsPath}: ${err?.message ?? err}`);
             });
@@ -3322,7 +3335,10 @@ class PatchWatcher implements vscode.Disposable {
                 if (signaledAtMs > 0 && signaledAtMs <= previous) return;
                 if (signaledAtMs > 0) this.processedCrdtEventMs.set(event.file, signaledAtMs);
                 if (event.reason === 'request_full_state') {
-                    void this.crdtReplicas?.handleReattachRequest(event.file);
+                    void this.crdtReplicas?.handleReattachRequest(
+                        event.file,
+                        this.unsyncedLocalEditDocs.has(event.file),
+                    );
                 }
                 this.crdtReplicas?.requestRemoteDrain(event.file);
             } else {

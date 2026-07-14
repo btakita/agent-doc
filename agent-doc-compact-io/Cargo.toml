@@ -26,6 +26,7 @@ agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.104" }
 agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.104" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.104" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.104" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.104" }
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.34.104" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.104" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.104" }
@@ -35,7 +36,6 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.104" }
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.34.104", features = ["test-support"] }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.104" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.104", features = ["test-support"] }

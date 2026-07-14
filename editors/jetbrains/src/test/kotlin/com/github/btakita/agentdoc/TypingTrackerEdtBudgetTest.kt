@@ -24,7 +24,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "agent-applied editor patches must share the non-operator provenance path with remote CRDT applies",
-            listenerBody.contains("CrdtReplicaManager.isApplyingNonOperatorMutation(filePath)"),
+            listenerBody.contains("CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)"),
         )
         assertTrue(
             "documentChanged should enqueue the full editor buffer report for a coalesced worker",
@@ -227,9 +227,9 @@ class TypingTrackerEdtBudgetTest {
         val reports = prepareEditorOpReports(
             finalText = "x",
             ops = listOf(
-                PendingEditorOp(offset = 0, oldFragment = "", newFragment = "é", remoteCrdtApply = false),
-                PendingEditorOp(offset = 1, oldFragment = "", newFragment = "x", remoteCrdtApply = false),
-                PendingEditorOp(offset = 0, oldFragment = "é", newFragment = "", remoteCrdtApply = false),
+                PendingEditorOp(offset = 0, oldFragment = "", newFragment = "é", nonOperatorMutation = false),
+                PendingEditorOp(offset = 1, oldFragment = "", newFragment = "x", nonOperatorMutation = false),
+                PendingEditorOp(offset = 0, oldFragment = "é", newFragment = "", nonOperatorMutation = false),
             ),
         )
 
@@ -285,8 +285,19 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("executor.submit<Boolean> { attach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
-                source.contains("executor.execute { attach() }") &&
-                source.contains("it.ensureEditorText(initialEditorText)"),
+            source.contains("executor.execute { attach() }") &&
+                source.contains("forwarder.ensureEditorText(initialEditorText)"),
+        )
+        assertFalse(
+            "an existing CRDT replica must never be overwritten from an unproven full editor snapshot",
+            source.contains("it.ensureEditorText(initialEditorText)"),
+        )
+        assertTrue(
+            "only user-attributable incremental editor events may originate CRDT deltas",
+            listenerBody.contains("isOperatorDocumentEvent(filePath, event)") &&
+                listenerBody.contains("non-operator-editor-event") &&
+                source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
+                source.contains("stale-operator-event-fenced"),
         )
         assertFalse(
             "authority-bearing publish must not reregister an existing CRDT replica; the editor buffer is republished through the cached replica",

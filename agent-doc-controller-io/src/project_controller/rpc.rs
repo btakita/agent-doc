@@ -26,6 +26,7 @@ const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
+const CONTROLLER_COMPACT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(300);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
@@ -4066,6 +4067,58 @@ pub fn commit_document_via_controller(
     Ok(Some(outcome))
 }
 
+/// Submit Compact Exchange to the CPC. The caller never computes or applies a
+/// document rewrite; it waits for the controller-owned operation to complete.
+pub fn compact_document_via_controller(
+    doc: &Path,
+    invocation: ControllerCompactDocumentInvocation,
+) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        anyhow::bail!(
+            "cannot execute Compact Exchange for {} through the CPC: no project root",
+            canonical.display(),
+        );
+    };
+    let commit = invocation.commit;
+    let payload = serde_json::to_string(&invocation)
+        .context("failed to serialize compact_document payload")?;
+    let request = ControllerRequest {
+        command: "compact_document".to_string(),
+        file: Some(canonical),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: None,
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(payload),
+    };
+    let submit = |request| {
+        request_controller_with_timeout::<serde_json::Value>(
+            &project_root,
+            request,
+            CONTROLLER_COMPACT_DOCUMENT_TIMEOUT,
+        )
+    };
+    match submit(request.clone()) {
+        Err(err) if err.to_string().contains("controller_binary_stale") => {
+            submit(request)?;
+        }
+        other => {
+            other?;
+        }
+    }
+    if commit {
+        eprintln!("{COMPACT_COMMIT_SCOPE_NOTE}");
+    }
+    Ok(())
+}
+
 pub fn record_committed_baseline_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
@@ -4317,6 +4370,30 @@ fn handle_commit_document_rpc(
         ),
     );
     runtime_effects()?.commit_document(&canonical, payload.authoritative_compaction)
+}
+
+fn handle_compact_document_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let invocation: ControllerCompactDocumentInvocation =
+        serde_json::from_str(&payload_json).context("failed to parse compact_document payload")?;
+    let barrier_ready = commit_barrier_for_closeout(&canonical)?;
+    agent_doc_ops_log_io::log_op(
+        &canonical,
+        &format!(
+            "controller_compact_document file={} component={} commit={} barrier_ready={}",
+            canonical.display(),
+            invocation.component_name.as_deref().unwrap_or("exchange"),
+            invocation.commit,
+            barrier_ready,
+        ),
+    );
+    runtime_effects()?.compact_document(&canonical, invocation)?;
+    Ok(serde_json::json!({ "executed_by": "cpc" }))
 }
 
 fn handle_crdt_record_committed_baseline_rpc(
@@ -7207,8 +7284,8 @@ pub(crate) fn handle_request_locked(
             // and `connect_or_launch` promotes the freshly-installed binary. This is
             // the wire-authoritative complement to the mtime-based check in
             // `handle_dispatch` (fires even when mtime/inode is ambiguous).
-            if let Some(client_version) = client_binary_version.as_deref()
-                && client_version != identity_version()
+            if let Some(client_version) =
+                stale_mutating_client_binary(client_binary_version.as_deref())
             {
                 agent_doc_ops_log_io::log_op(
                     &bootstrap_snapshot.project_root,
@@ -7309,6 +7386,18 @@ pub(crate) fn handle_request_locked(
         "commit_document" => {
             controller_envelope(handle_commit_document_rpc(&bootstrap_snapshot, request))
         }
+        "compact_document" => {
+            if let Some(client_version) =
+                stale_mutating_client_binary(client_binary_version.as_deref())
+            {
+                anyhow::bail!(
+                    "Compact Exchange refused: controller_binary_stale (running controller binary {} differs from caller {}; reconnect to promote the fresh binary)",
+                    identity_version(),
+                    client_version,
+                );
+            }
+            controller_envelope(handle_compact_document_rpc(&bootstrap_snapshot, request))
+        }
         "crdt_record_committed_baseline" => controller_envelope(
             handle_crdt_record_committed_baseline_rpc(&bootstrap_snapshot, request),
         ),
@@ -7326,6 +7415,10 @@ pub(crate) fn handle_request_locked(
                 "error": format!("unknown controller command: {other}")
         }))?),
     }
+}
+
+fn stale_mutating_client_binary(client_version: Option<&str>) -> Option<&str> {
+    client_version.filter(|version| *version != identity_version())
 }
 
 pub(crate) fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<String> {
@@ -11851,6 +11944,17 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    #[test]
+    fn mutating_rpc_binary_guard_covers_dispatch_and_compact_callers() {
+        let current = identity_version();
+        assert_eq!(stale_mutating_client_binary(None), None);
+        assert_eq!(stale_mutating_client_binary(Some(&current)), None);
+        assert_eq!(
+            stale_mutating_client_binary(Some("definitely-stale")),
+            Some("definitely-stale")
+        );
+    }
 
     #[test]
     fn supervisor_auto_install_waits_for_clean_committed_checkout() {

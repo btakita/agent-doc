@@ -31,6 +31,12 @@ be load-bearing for deciding what operator-visible state should survive.
 
 When a live editor owner owns the document, the CRDT relay/editor buffer is the
 source of truth for operator changes. Disk is only a projection of that buffer.
+Editor-buffer authority is origin-scoped: only a genuine incremental user edit
+may originate editor-to-CPC document state. A whole-buffer reload, file-cache
+refresh, force-refresh attachment, or mutation performed while applying a CPC
+projection is non-operator state and must never be adopted into the canonical
+document. When such a projection differs, the CPC canonical is re-applied to the
+editor and acknowledged only after the visible text hash converges.
 If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
 write as an automatic recovery behind the editor. The legacy live-buffer sidecar
@@ -69,6 +75,12 @@ The editor text-change callback is a capture boundary, not a convergence worker.
 `onDidChangeTextDocument` callbacks, and equivalent future editor hooks must
 capture only the small event fields needed to identify the document, mark the
 document dirty/typing-active, and enqueue later work. They must not perform full-buffer reads, CRDT merge, code-point offset conversion, socket I/O, native sidecar writes, patch application, or document saves on the editor UI thread or extension-host text-change callback.
+
+Dirty/typing attribution is reserved for proven operator events. JetBrains
+admits incremental events outside its CPC-apply guard; VS Code admits dirty
+incremental events plus explicit undo/redo. Clean reloads and whole-document
+replacements fence stale queued deltas, request a CPC drain, and never set typing
+or unsynced-user state. Both plugins must implement the same admission contract.
 
 Any work that can scale with document size, block on native code, block on IPC,
 or mutate the document must be queued onto cancellable background work. That

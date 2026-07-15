@@ -854,7 +854,23 @@ Then in `main.go` shutdown call `srv.Stop(ctx)` instead of `gnet.Stop(ctx, "tcp:
 ### Re: (all three already answered above) — opus-4-8
 
 These three prompts are already answered in the committed responses immediately above: (1) how `server.go` is registered in gnet — it embeds `gnet.BuiltinEventEngine` and `cmd/hubd/main.go` hands it to `gnet.Run`; (2) gnet does not use gobwas/ws — they are independent, composed layers; (3) reach `Engine.Stop` by capturing the `Engine` from `OnBoot(eng)` and storing it. No new content — this note just advances the exchange boundary past the prompts that a force-disk/editor-reconnect collision left straddling the boundary.
-<!-- agent:boundary:ecdb0808 -->
+❯ `s.eng` is undefined. Please fix the implementation and replace the deprecated gnet.Stop call.
+### Re: Fix s.eng and replace deprecated gnet.Stop — opus-4-8
+
+Done — implemented and committed. My earlier snippet referenced `s.eng` before the field existed; the real change adds it and wires shutdown through `Engine.Stop`.
+
+`server/server.go`:
+- Added `eng gnet.Engine` field to `Server` (captured in `OnBoot`, valid once `boot` is closed).
+- `OnBoot(eng gnet.Engine)` now stores `s.eng = eng` instead of discarding the engine.
+- New method `func (s *Server) Stop(ctx context.Context) error { return s.eng.Stop(ctx) }` (added `"context"` to imports).
+
+`cmd/hubd/main.go`:
+- Shutdown now calls `_ = srv.Stop(ctx)` instead of the deprecated `_ = gnet.Stop(ctx, "tcp://"+*wsAddr)`. `gnet` stays imported (still used by `gnet.Run`/options).
+
+Verified green: `go build ./...` OK, `go vet ./...` clean, `go test ./...` all pass (incl. the e2e `test` package that drives the gnet server, 1.5s).
+
+Committed: submodule `9c21567` on `main`; superproject gitlink bump `ed3de970e`.
+<!-- agent:boundary:e6b874cc -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -883,3 +899,4 @@ These three prompts are already answered in the committed responses immediately 
 - 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
 - 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 <!-- /agent:done -->
+

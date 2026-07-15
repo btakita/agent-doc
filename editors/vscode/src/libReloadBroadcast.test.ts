@@ -46,6 +46,11 @@ describe('cdylib reload broadcast wiring', () => {
         assert.ok(handler.includes('native.reloadBroadcastFile('), 'handler must resolve the broadcast file');
         assert.ok(handler.includes('native.forceReloadLib('), 'handler must force the native reload on change');
         assert.ok(
+            handler.includes('this.currentProjectMarkdownSnapshots(projectRoot)') &&
+                handler.includes('this.crdtReplicas?.attachDocument(filePath, text, true)'),
+            'handler must force-refresh every open markdown replica after the reload',
+        );
+        assert.ok(
             source.includes('this.libReloadBroadcastWatcher?.dispose()'),
             'dispose must dispose the broadcast watcher',
         );
@@ -111,6 +116,13 @@ describe('cdylib reload broadcast wiring', () => {
         assert.ok(
             patchWatcher.includes('AgentDocLib.forceReload()'),
             'PatchWatcher.kt must force the native reload',
+        );
+        const broadcastStart = patchWatcher.indexOf('private fun handleLibReloadBroadcastChanged()');
+        const broadcastEnd = patchWatcher.indexOf('private fun repositionBoundaryToEnd', broadcastStart);
+        const broadcastHandler = patchWatcher.slice(broadcastStart, broadcastEnd);
+        assert.ok(
+            broadcastHandler.includes('CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project'),
+            'JetBrains broadcast handler must re-register every open markdown replica',
         );
         // The reload_lib socket message must map to the same forced reload.
         const start = patchWatcher.indexOf('"reload_lib" ->');

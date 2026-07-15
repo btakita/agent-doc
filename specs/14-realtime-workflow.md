@@ -47,7 +47,9 @@ Reliable-sync liveness remains the authority proof for deciding whether disk
 convergence must fail closed behind an editor.
 When a controller recycle removes server-side membership but the editor still
 holds a cached client, refresh must retire that cached client and issue a new
-registration. Native-library reload broadcasts refresh all open document
+registration. Every stale supervisor/controller recycle request emits that
+forced-refresh event centrally, no matter which turn stage scheduled it. Native-library reload
+broadcasts also refresh all open document
 replicas. Re-registration restores a Lazily-retained deferred target into an
 unchanged buffer or component-merges later unsaved operator edits over the
 retained base.
@@ -919,9 +921,14 @@ Implementations must keep tests for these cases:
 - an editor ACK persists its full visible content in Lazily, and a legacy
   hash-only `already_applied` receipt is upgraded by one bounded live-buffer
   publication without file-IPC fallback;
-- an editor-owned write with zero registered replicas retains its full target
-  as a Lazily deferred-write intent, returns promptly, and does not project to
-  disk; later replica bootstrap/publication restores and proves that target;
+- an editor-owned write with zero registered replicas in either pre-delivery
+  timing window retains its full target
+as a Lazily deferred-write intent, returns promptly, and does not project to
+disk; the central stale-recycle operation emits an
+`ack_recovery_force_refresh` event for every turn-stage caller, editor
+  reload/controller-replacement handlers rebuild cached open-document
+  forwarders, and later replica bootstrap/publication restores and proves that
+  target;
 - an applied relay mutation with an empty target set is not delivery
   convergence;
 - harness Stop-hook recovery cannot commit transcript-shaped or direct-patched

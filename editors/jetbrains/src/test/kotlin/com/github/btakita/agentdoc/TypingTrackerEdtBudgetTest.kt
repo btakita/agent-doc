@@ -164,11 +164,13 @@ class TypingTrackerEdtBudgetTest {
             watcher.contains("\"publish_live_buffer\" -> {") &&
                 watcher.contains("TypingTracker.publishLiveBufferNow(file)"),
         )
+        val broadcastReloadBody = watcher
+            .substringAfter("private fun handleLibReloadBroadcastChanged()")
+            .substringBefore("private fun repositionBoundaryToEnd")
         assertTrue(
             "a native reload broadcast must re-register every open markdown replica",
-            watcher.contains("\"reload_lib\" -> {") &&
-                watcher.contains("AgentDocLib.forceReload()") &&
-                watcher.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
+            broadcastReloadBody.contains("AgentDocLib.forceReload()") &&
+                broadcastReloadBody.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
         )
 
         val publishBody = tracker.substringAfter("fun publishLiveBufferNow")

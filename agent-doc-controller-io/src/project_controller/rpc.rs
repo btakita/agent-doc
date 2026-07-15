@@ -1652,16 +1652,25 @@ fn schedule_supervisor_pcp_recycle(
         } else {
             "request_skipped reason=no_project_root".to_string()
         };
+    let reregister_status = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+        file,
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+        0,
+    ) {
+        Ok(()) => "requested".to_string(),
+        Err(err) => format!("failed:{err}"),
+    };
+    let recovery_status = format!("{request_status} editor_replica_reregister={reregister_status}");
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
             "{event} file={} source={} action=request_recycle_through_owner request_status={} reason={log_reason}",
             file.display(),
             source,
-            request_status
+            recovery_status
         ),
     );
-    request_status
+    recovery_status
 }
 
 /// `#ctlrecycle` — idle grace before a stale/recycle-requested process actually
@@ -14721,6 +14730,10 @@ mod tests {
             status.contains("requested project_root="),
             "schedule status should prove the request was written: {status}"
         );
+        assert!(
+            status.contains("editor_replica_reregister=requested"),
+            "schedule status should prove editor replica re-registration was requested: {status}"
+        );
 
         let request =
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
@@ -14759,6 +14772,11 @@ mod tests {
             request.reason,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
         );
+        let replica_event_path = agent_doc_fs::crdt_replica_event_path_for(&file).unwrap();
+        let replica_event: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(replica_event_path).unwrap()).unwrap();
+        assert_eq!(replica_event["reason"], "ack_recovery_force_refresh");
+        assert_eq!(replica_event["targets"], 0);
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("stale_editor_replica_pcp_recycle_requested")

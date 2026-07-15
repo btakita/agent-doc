@@ -1075,9 +1075,9 @@ pub fn apply_canonical_replace_if_attached(
                                     &effective_target,
                                     source,
                                     DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
-                                )?;
+                )?;
                                 let recycle_status = agent_doc_controller_io::project_controller::
-                                    schedule_stale_editor_replica_pcp_recycle(file, source);
+                    schedule_stale_editor_replica_pcp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_retry_finalize",
                                     file.display(),
@@ -3159,6 +3159,10 @@ mod tests {
             format!("{err:#}").contains("await_editor_replica_no_disk_write"),
             "unexpected error: {err:#}"
         );
+        assert!(
+            format!("{err:#}").contains("editor_replica_reregister=requested"),
+            "zero-replica recovery must request editor replica re-registration: {err:#}"
+        );
         let recycle_request =
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
                 .expect("zero-replica write must request automatic supervisor recovery");
@@ -3166,6 +3170,11 @@ mod tests {
             recycle_request.reason,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
         );
+        let replica_event_path = agent_doc_fs::crdt_replica_event_path_for(&file).unwrap();
+        let replica_event: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(replica_event_path).unwrap()).unwrap();
+        assert_eq!(replica_event["reason"], "ack_recovery_force_refresh");
+        assert_eq!(replica_event["targets"], 0);
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             baseline,

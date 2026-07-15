@@ -1981,6 +1981,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         lastLibReloadBroadcastMtime = mtime
         LOG.info("[lib-reload] broadcast changed (mtime=$mtime); forcing cdylib reload")
         AgentDocLib.forceReload()
+        CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "lib-reload-broadcast")
     }
 
     private fun repositionBoundaryToEnd(

@@ -3334,10 +3334,10 @@ class PatchWatcher implements vscode.Disposable {
                 const previous = this.processedCrdtEventMs.get(event.file) ?? -1;
                 if (signaledAtMs > 0 && signaledAtMs <= previous) return;
                 if (signaledAtMs > 0) this.processedCrdtEventMs.set(event.file, signaledAtMs);
-                if (event.reason === 'request_full_state') {
-                    void this.crdtReplicas?.handleReattachRequest(
-                        event.file,
-                        this.unsyncedLocalEditDocs.has(event.file),
+            if (event.reason === 'request_full_state' || event.reason === 'ack_recovery_force_refresh') {
+                void this.crdtReplicas?.handleReattachRequest(
+                    event.file,
+                    this.unsyncedLocalEditDocs.has(event.file),
                     );
                 }
                 this.crdtReplicas?.requestRemoteDrain(event.file);
@@ -3396,6 +3396,9 @@ class PatchWatcher implements vscode.Disposable {
             this.lastLibReloadBroadcastMtime = mtime;
             this.outputChannel.appendLine(`[lib-reload] broadcast changed (mtime=${mtime}); forcing cdylib reload`);
             native.forceReloadLib(projectRoot);
+            for (const { filePath, text } of this.currentProjectMarkdownSnapshots(projectRoot)) {
+                void this.crdtReplicas?.attachDocument(filePath, text, true);
+            }
         }
     }
 

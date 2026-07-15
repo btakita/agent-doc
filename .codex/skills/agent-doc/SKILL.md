@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.103"
+agent-doc-version: "0.34.132"
 ---
 
 # agent-doc
@@ -45,7 +45,7 @@ Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim
 - **Dispatch proof language must preserve scope** — when reading route diagnostics, `proof=accepted proof_scope=accepted_only` means pane-input acceptance only. Do not describe Claude Code/OpenCode dispatch-only routes as consumed/submitted unless logs show dispatch-start proof.
 - **Starting actor reroutes are prompt-gated** — if route diagnostics mention a `starting` authoritative actor, treat dispatch as valid only after the live pane shows a harness-specific dispatch-ready prompt; otherwise the route path must fail closed before input.
 - **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work.
-- Preserve user edits; let `agent-doc write --stream` merge. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Stream useful console status.
+- Preserve user edits through the single final `agent-doc finalize --stream` transaction. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots and partial captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Stream useful progress only to the console, never into the document.
 
 ## Workflow
 
@@ -125,7 +125,7 @@ RESPONSE
 
 `finalize` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `write --commit` shares that fail-closed boundary for repair writes.
 
-**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists.
+**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists. **Backpressure / pending-ACK recovery rule (all harnesses):** `controller_model_backpressure`, an outstanding delivery ACK, or a retained response already visible in the live editor is a settle-and-retry state, not a prompt to alternate `finalize` and `write --commit`. The complete target is retained and exact response cells are idempotent. Stop issuing concurrent closeout commands, leave the live editor authoritative, wait for the binary's cooldown/reconnect path, then retry the same closeout once. Do not kill/restart the project controller merely to clear backpressure or a queue strike, and do not use `--force-disk` while a live editor owns the document; both can turn a transient barrier into replica loss or duplicate-response reconciliation.
 
 Full detail (ordering, full-suite + tmux-CI review, session-doc staging rule): [runbooks/persist-closeout.md](runbooks/persist-closeout.md), [runbooks/commit.md](runbooks/commit.md).
 

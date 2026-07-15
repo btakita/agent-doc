@@ -72,9 +72,10 @@ em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use
 model identity. Never use the harness label (`codex`, `claude`) as the suffix, and
 never omit it.
 
-**Streaming checkpoints:** for long responses, flush partial content at natural
-breakpoints; see [streaming-checkpoints.md](streaming-checkpoints.md). Prefer
-`<!-- patch:exchange -->`.
+**Final-response atomicity:** stream progress only to the harness console. Never
+write partial response text to the document. Buffer until every patch block is
+complete, then persist the full response once; see
+[streaming-checkpoints.md](streaming-checkpoints.md).
 
 **`#agent-doc-bug` plan proof:** if the prompt contract requires a plan, create
 the plan file before closeout and cite every plan path. If

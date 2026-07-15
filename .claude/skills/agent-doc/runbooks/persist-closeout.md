@@ -66,6 +66,11 @@ repair writes. If `finalize`, `write --commit`, or `repair` surfaces a
 [commit.md](commit.md) and [harness-invocation.md](harness-invocation.md) for the
 full closeout contract.
 
+Terminal success also proves current canonical CRDT authority equals the disk
+projection byte-for-byte. A zero-replica or authority/disk mismatch schedules
+automatic supervisor recovery and requires retrying the same finalize path after
+reconnect; it is not a reason to run response repair or force disk.
+
 ## Manual repair / missed patchback rule (all harnesses)
 
 If the user's prompt is already present in the document, do **not** patch the

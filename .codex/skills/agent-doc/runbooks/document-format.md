@@ -23,7 +23,9 @@ agent_doc_model_tier: <low | med | high> # optional; feeds model tier gate
 
 The body alternates `## User` and `## Assistant` blocks. Inline annotations within any block — blockquotes, HTML comments, edits to previous responses — are valid prompts and show up in the next diff.
 
-`agent-doc write --stream` appends `## Assistant\n\n<response>\n\n## User\n\n` on each cycle.
+`agent-doc finalize --stream` appends one complete
+`## Assistant\n\n<response>\n\n## User\n\n` block per committed cycle. Bare
+`write --stream` is rejected for session responses.
 
 ## Template mode
 

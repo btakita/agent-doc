@@ -12,6 +12,15 @@ rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Realtime steering (`#realtime-steering-verbatim`):** a document is realtime —
+  the operator may add a prompt WHILE your turn is running. Every item the
+  operator adds must be addressed and worked on, never committed-and-ignored. If
+  `session-check` reports a committed cycle plus a fresh operator prompt, that is
+  realtime steering, **not** a failed closeout: your prior response is already in
+  HEAD. Address the surfaced prompt (the binary hands it to you **verbatim**) in
+  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run finalize on
+  the prior response, do NOT `--force-disk` (it clobbers the operator's live
+  edits), and do NOT re-answer a prompt already committed in HEAD.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay
@@ -63,9 +72,10 @@ em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use
 model identity. Never use the harness label (`codex`, `claude`) as the suffix, and
 never omit it.
 
-**Streaming checkpoints:** for long responses, flush partial content at natural
-breakpoints; see [streaming-checkpoints.md](streaming-checkpoints.md). Prefer
-`<!-- patch:exchange -->`.
+**Final-response atomicity:** stream progress only to the harness console. Never
+write partial response text to the document. Buffer until every patch block is
+complete, then persist the full response once; see
+[streaming-checkpoints.md](streaming-checkpoints.md).
 
 **`#agent-doc-bug` plan proof:** if the prompt contract requires a plan, create
 the plan file before closeout and cite every plan path. If

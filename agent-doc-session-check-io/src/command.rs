@@ -66,6 +66,7 @@
 //! - `session_check_missing_log_exits_zero`
 //! - `session_check_snapshot_committed_guard_fails_when_snapshot_differs`
 //! - `session_check_snapshot_committed_guard_passes_when_committed`
+//! - `session_check_rejects_crdt_disk_divergence_after_committed_closeout`
 
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::CyclePhase;
@@ -165,6 +166,28 @@ fn log_supervisor_drain_handoff(file: &Path, head: &str, outcome_fields: &str) {
     );
 }
 
+fn ensure_terminal_authority_disk_convergence(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+) -> Result<()> {
+    if authority_content == disk_content {
+        return Ok(());
+    }
+    let recycle_status =
+        agent_doc_controller_io::project_controller::schedule_stale_editor_replica_pcp_recycle(
+            file,
+            "session_check_terminal_convergence",
+        );
+    anyhow::bail!(
+        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic supervisor recycle status: {}. Retry the binary-owned finalize/session-check path after the editor replica reconnects; do not repair or force-disk the response.",
+        file.display(),
+        agent_doc_hash::content_hash(authority_content),
+        agent_doc_hash::content_hash(disk_content),
+        recycle_status,
+    );
+}
+
 /// `session-check` with the optional Codex final-gate.
 ///
 /// Default (`codex_final_gate = false`): keeps exit 0 for a clean document and
@@ -197,6 +220,11 @@ pub fn run_with_options(
         agent_doc_ops_log_io::log_op,
     )?;
     self_heal_late_ipc_overapplication(file, effects)?;
+    let authority_content =
+        crate::resolve_current_document_content(file, "session_check_terminal_convergence")?;
+    let disk_content =
+        crate::resolve_disk_document_content(file, "session_check_terminal_convergence")?;
+    ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content)?;
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
@@ -1324,4 +1352,34 @@ fn blocked_closeout_editor_authority_note(
 fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
     let content = crate::resolve_current_document_content(file, "duplicate_response_patchback")?;
     Ok(agent_doc_turn::response_replay::first_duplicate_response_heading(&content))
+}
+
+#[cfg(test)]
+mod terminal_convergence_tests {
+    use super::*;
+
+    #[test]
+    fn session_check_rejects_crdt_disk_divergence_after_committed_closeout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "canonical response\n<!-- agent:boundary:new -->\n").unwrap();
+
+        let err = ensure_terminal_authority_disk_convergence(
+            &file,
+            "canonical response\n<!-- agent:boundary:new -->\n",
+            "canonical response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n",
+        )
+        .expect_err("session-check must fail when authority and disk differ");
+        let message = format!("{err:#}");
+        assert!(message.contains("refusing a false successful closeout"));
+        assert!(message.contains("do not repair or force-disk the response"));
+        let request =
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .expect("session-check divergence must request supervisor recovery");
+        assert_eq!(
+            request.reason,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+        );
+    }
 }

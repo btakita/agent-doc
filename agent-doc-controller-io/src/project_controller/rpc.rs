@@ -1550,8 +1550,29 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
 /// ordinary auto-recycle opt-out controls proactive recycling, but cannot leave
 /// a known-stale supervisor serving later generation/write/commit stages.
 pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Option<String> {
-    let mut message = stale_supervisor_warning_for_doc(file)?;
-    let recycle_status = schedule_stale_supervisor_pcp_recycle(file, stage);
+    let (mut message, recycle_status) = if let Some(message) =
+        stale_supervisor_warning_for_doc(file)
+    {
+        (message, schedule_stale_supervisor_pcp_recycle(file, stage))
+    } else if reliable_sync_editor_live_for_file(file)
+        && matches!(
+            agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file),
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                live_editors: 0,
+                ..
+            })
+        )
+    {
+        (
+            format!(
+                "route-owned editor authority for {} has zero registered relay replicas; the serving supervisor/editor bridge is stale",
+                file.display()
+            ),
+            schedule_stale_editor_replica_pcp_recycle(file, stage),
+        )
+    } else {
+        return None;
+    };
     message.push_str(&format!(
         " Automatic safe-boundary recycle request status: {recycle_status}."
     ));
@@ -1568,6 +1589,36 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
 /// the PCP/supervisor recycle graph. Fail-open: every refusal is logged and returned
 /// as a status string, never raised into the live cycle.
 pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> String {
+    schedule_supervisor_pcp_recycle(
+        file,
+        source,
+        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE,
+        "stale_supervisor_pcp_recycle_requested",
+        "supervisor_binary_stale",
+    )
+}
+
+/// Schedule recovery when an editor-owned document has lost its relay member or
+/// when the canonical document and its disk projection diverge after closeout.
+/// This is the editor-authority equivalent of a stale-binary recycle and is
+/// intentionally independent of the proactive auto-recycle preference.
+pub fn schedule_stale_editor_replica_pcp_recycle(file: &Path, source: &str) -> String {
+    schedule_supervisor_pcp_recycle(
+        file,
+        source,
+        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+        "stale_editor_replica_pcp_recycle_requested",
+        "editor_authority_unavailable_or_diverged",
+    )
+}
+
+fn schedule_supervisor_pcp_recycle(
+    file: &Path,
+    source: &str,
+    reason: &str,
+    event: &str,
+    log_reason: &str,
+) -> String {
     let request_status =
         if let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) {
             let project_root_display = if project_root.as_os_str().is_empty() {
@@ -1575,8 +1626,6 @@ pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> Strin
             } else {
                 project_root.display().to_string()
             };
-            let reason =
-                agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE;
             match checkpoint_route_owned_document_crdt(file, "stale_supervisor_pcp_recycle") {
                 Ok(checkpoint_status) => {
                     match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
@@ -1606,7 +1655,7 @@ pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> Strin
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "stale_supervisor_pcp_recycle_requested file={} source={} action=request_recycle_through_owner request_status={} reason=supervisor_binary_stale",
+            "{event} file={} source={} action=request_recycle_through_owner request_status={} reason={log_reason}",
             file.display(),
             source,
             request_status
@@ -14687,6 +14736,35 @@ mod tests {
                 && ops_log.contains("source=finalize_start")
                 && ops_log.contains("reason=supervisor_binary_stale"),
             "ops log should record the automatic recycle request:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn schedule_stale_editor_replica_pcp_recycle_marks_doc_for_idle_recycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "body\n").unwrap();
+
+        let status =
+            schedule_stale_editor_replica_pcp_recycle(&file, "session_check_terminal_convergence");
+        assert!(
+            status.contains("requested project_root="),
+            "schedule status should prove the request was written: {status}"
+        );
+        let request =
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .expect("stale editor replica request must be durable");
+        assert_eq!(
+            request.reason,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("stale_editor_replica_pcp_recycle_requested")
+                && ops_log.contains("source=session_check_terminal_convergence")
+                && ops_log.contains("reason=editor_authority_unavailable_or_diverged"),
+            "ops log should record editor authority recovery:\n{ops_log}"
         );
     }
 

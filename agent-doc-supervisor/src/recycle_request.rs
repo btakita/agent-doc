@@ -24,6 +24,9 @@ pub const RECYCLE_REQUEST_TTL_SECS_ENV: &str = "AGENT_DOC_RECYCLE_REQUEST_TTL_SE
 pub const RECYCLE_REQUEST_INSTALL_FANOUT: &str = "install_fanout";
 /// Canonical reason for a stale supervisor observed at any turn stage.
 pub const RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE: &str = "stale_supervisor_turn_stage";
+/// Canonical reason for a route-owned editor authority whose relay replica is
+/// missing or whose disk projection no longer matches canonical state.
+pub const RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE: &str = "stale_editor_replica_turn_stage";
 
 /// Persisted recycle-request body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

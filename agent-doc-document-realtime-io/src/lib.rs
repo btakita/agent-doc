@@ -669,7 +669,20 @@ pub fn atomic_repair_write_if_current_through_authority(
     source: &str,
 ) -> Result<()> {
     match atomic_write_if_current_through_authority(path, content, expected_current, source) {
-        Ok(()) => return Ok(()),
+        Ok(()) => {
+            let canonical = try_resolve_current_document_content(path, source)?;
+            let disk = resolve_disk_current_document_content(path, source)?;
+            anyhow::ensure!(
+                canonical == content && disk == content,
+                "{source}: successful repair write for {} did not converge exactly before settling deferred lineage (expected_hash={}, canonical_hash={}, disk_hash={})",
+                path.display(),
+                agent_doc_hash::content_hash(content),
+                agent_doc_hash::content_hash(&canonical),
+                agent_doc_hash::content_hash(&disk),
+            );
+            clear_all_deferred_document_write_intents(path, source)?;
+            return Ok(());
+        }
         Err(err)
             if err
                 .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
@@ -689,6 +702,13 @@ pub fn atomic_repair_write_if_current_through_authority(
         agent_doc_hash::content_hash(&canonical),
     );
     let pre_force_disk = resolve_disk_current_document_content(path, source)?;
+    let reconnect_base = pending_document_write(path)
+        .and_then(|pending| {
+            pending.expected_content.filter(|expected| {
+                agent_doc_hash::content_hash(expected).eq_ignore_ascii_case(&pending.expected_hash)
+            })
+        })
+        .unwrap_or_else(|| pre_force_disk.clone());
     atomic_write_force_disk_through_authority(path, content)?;
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
@@ -698,12 +718,11 @@ pub fn atomic_repair_write_if_current_through_authority(
         agent_doc_hash::content_hash(content),
         agent_doc_hash::content_hash(&disk),
     );
-    let target_hash = agent_doc_hash::content_hash(content);
-    clear_deferred_document_write_intent(path, &target_hash, source)?;
-    if pre_force_disk != content {
+    clear_all_deferred_document_write_intents(path, source)?;
+    if reconnect_base != content {
         ensure_deferred_document_write_intent(
             path,
-            &pre_force_disk,
+            &reconnect_base,
             content,
             "repair_force_disk",
             DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
@@ -939,8 +958,10 @@ pub fn apply_canonical_replace_if_attached(
                                     source,
                                     DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
                                 )?;
+                                let recycle_status = agent_doc_controller_io::project_controller::
+                                    schedule_stale_editor_replica_pcp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; recovery=await_editor_replica_no_disk_write",
+                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_retry_finalize",
                                     file.display(),
                                 )));
                             }
@@ -992,8 +1013,10 @@ pub fn apply_canonical_replace_if_attached(
                                         relay_write.content_hash,
                                     ),
                                 );
+                                let recycle_status = agent_doc_controller_io::project_controller::
+                                    schedule_stale_editor_replica_pcp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; recovery=await_editor_replica_no_disk_write",
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_retry_finalize",
                                     file.display(),
                                 )));
                             }
@@ -1522,6 +1545,33 @@ fn clear_deferred_document_write_intent(
             )
         })?;
     Ok(())
+}
+
+/// Settle every older deferred target after an exact repair projection. Deferred
+/// intents form a newest-first event stack; settling only the current target can
+/// uncover an older intermediate repair target and replay it after the final
+/// boundary/marker normalization. Exact canonical+disk proof at the caller makes
+/// every older intent obsolete.
+fn clear_all_deferred_document_write_intents(file: &Path, source: &str) -> Result<()> {
+    for _ in 0..256 {
+        let Some(pending) = pending_document_write(file) else {
+            return Ok(());
+        };
+        let intent_id = pending.intent_id.clone();
+        clear_deferred_document_write_intent(file, &pending.target_hash, source)?;
+        anyhow::ensure!(
+            pending_document_write(file)
+                .as_ref()
+                .is_none_or(|next| next.intent_id != intent_id),
+            "{source}: settling deferred document write {} for {} made no progress",
+            intent_id,
+            file.display(),
+        );
+    }
+    anyhow::bail!(
+        "{source}: refusing to settle more than 256 deferred document writes for {}",
+        file.display()
+    )
 }
 
 /// Record that disk is the current document replica because no live editor owns
@@ -2991,6 +3041,13 @@ mod tests {
             format!("{err:#}").contains("await_editor_replica_no_disk_write"),
             "unexpected error: {err:#}"
         );
+        let recycle_request =
+            agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
+                .expect("zero-replica write must request automatic supervisor recovery");
+        assert_eq!(
+            recycle_request.reason,
+            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+        );
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             baseline,
@@ -3028,7 +3085,8 @@ mod tests {
     #[test]
     fn repair_cas_projects_retained_target_when_editor_owner_has_zero_replicas() {
         let baseline = "# Session\n\nfragmented response\n<!-- agent:boundary:old --><!-- agent:boundary:old -->\n";
-        let target = "# Session\n\ncomplete response\n<!-- agent:boundary:old -->\n";
+        let first_target = "# Session\n\ncomplete response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n";
+        let final_target = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-repair-zero-replica-projection";
         seed_reliable_sync_open(&file, identity);
@@ -3039,16 +3097,23 @@ mod tests {
 
         atomic_repair_write_if_current_through_authority(
             &file,
-            target,
+            first_target,
             baseline,
             "repair_zero_replica_test",
         )
         .unwrap();
+        atomic_repair_write_if_current_through_authority(
+            &file,
+            final_target,
+            first_target,
+            "repair_zero_replica_final_normalization_test",
+        )
+        .unwrap();
 
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), final_target);
         assert_eq!(
             try_resolve_current_document_content(&file, "repair_zero_replica_verify").unwrap(),
-            target,
+            final_target,
         );
         let projection =
             agent_doc_controller_io::project_controller::load_state_backbone_projection(
@@ -3060,10 +3125,28 @@ mod tests {
             .document(&document_hash)
             .and_then(|document| document.document.pending_write.as_ref())
             .expect("force-disk repair must preserve editor reconnect lineage");
-        assert_eq!(pending.target_content, target);
+        assert_eq!(pending.target_content, final_target);
         assert_eq!(
             pending.reason,
             DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection
+        );
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, baseline)
+                .unwrap()
+                .as_deref(),
+            Some(final_target),
+            "a stale editor must receive only the final normalized repair target",
+        );
+
+        clear_deferred_document_write_intent(
+            &file,
+            &agent_doc_hash::content_hash(final_target),
+            "repair_zero_replica_delivery_ack_test",
+        )
+        .unwrap();
+        assert!(
+            pending_document_write(&file).is_none(),
+            "settling the final reconnect target must not uncover an older intermediate repair"
         );
     }
 

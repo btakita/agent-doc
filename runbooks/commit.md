@@ -29,6 +29,8 @@ A `finalize` / `write --commit` that reached `committed` with `session-check` OK
 
 Console lines like `IPC timeout — response saved as patch`, `IPC proof insufficient … recovery=retry_without_disk_write`, `IPC proof insufficient … recovery=direct_write_fallback`, `missing_response_probe`, or `no_ack` are different: they mean the editor path did not prove delivery. Do not treat that as a successful response closeout for an active editor buffer, do not continue the queue past it, and do not choose an automatic direct session-document disk write. Retry through the editor/CRDT path so the editor buffer remains authoritative. Use `--force-disk` only when the operator explicitly asks for that escape hatch or no live editor owns the file.
 
+`recovery=await_editor_replica_no_disk_write_then_retry_finalize` is the zero-replica form of that retry-only state. The binary has already retained the complete target and requested a safe owner-scoped supervisor recycle. Let the recycle/reconnect complete, then retry the same `finalize` transaction (or let the harness recovery loop do so); do not run `agent-doc repair`, reconstruct the response, or choose `--force-disk`.
+
 A `session-check` interruption with `editor_convergence_required` or missing
 `operator_text_authority_v1` is the same class of retry-only failure. It means
 the live editor buffer is still authoritative, but the harness lacks proof that

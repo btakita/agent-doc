@@ -93,6 +93,13 @@ pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Res
     Ok(resolve_current_document(file, source)?.into_content())
 }
 
+pub(crate) fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String> {
+    agent_doc_document_realtime_io::resolve_disk_current_document_content(
+        file,
+        &format!("session-check {source}"),
+    )
+}
+
 pub(crate) fn resolve_current_document_content_with_force_disk(
     file: &Path,
     source: &str,

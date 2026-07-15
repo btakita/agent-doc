@@ -35,7 +35,7 @@ the dynamic file that owns its details:
 
 **Runbooks:** [runbooks/](runbooks/) — dynamic-context, harness-invocation, commit, planning-dispatch, pending-ops, model-tier-gate, compact-exchange, streaming-checkpoints, document-format, code-enforced-directives, architecture-first (agent-doc development/dogfooding only), and more.
 
-<!-- tsift:code-navigation v=0.1.74 -->
+<!-- tsift:code-navigation v=0.1.77 -->
 ## Code Navigation
 
 Keep this block self-contained for Codex/OpenCode prompt reuse. If this repository also ships current `.claude/skills/tsift/SKILL.md` or `runbooks/code-navigation.md`, use those deeper runbooks for command detail instead of expanding this block.
@@ -60,7 +60,7 @@ Prefer bounded digest commands over raw transcript, diff, and verbose-log reads:
 - If RTK is installed, digest-runner delegates supported generic command families through `rtk rewrite` and records the chosen compact filter in `report.filter` while preserving tsift artifact handles.
 - Codex, OpenCode, and other harnesses without Claude-style `PreToolUse` hooks should run `tsift rewrite --run '<command>'` before broad `rg`/recursive grep, raw transcript/session/log reads, `git diff`/`git show`/single-patch `git log`, `cargo test`/`pytest`, and cargo build/check/clippy/install commands so the same search, session-digest, diff-digest, and digest-runner rewrites apply manually. OpenCode can install this path as `/tsift-rewrite-run` with `tsift init --opencode`.
 
-For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1`. Treat queued/in-progress CI and other external async signals as record-only unless the user explicitly asks you to wait. If the latest CI is already failed, investigate and fix it only when the failure belongs to the current change or reproduces locally; otherwise record it as an external baseline. End turns with minimal blockers: once requested work is implemented, local verification is sufficient, and required closeout checks have passed, close out instead of extending the turn for nonessential waiting.
+For local verification, run `make check` before committing. After local changes, check the latest GitHub Actions CI run with `gh run list --workflow CI --limit 1` and fix any failing tests before calling the work complete.
 
 Only read full source files when tsift results are insufficient.
 <!-- /tsift:code-navigation -->

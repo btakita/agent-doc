@@ -5,7 +5,6 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: start
 ---
 
 ## Status
@@ -800,19 +799,46 @@ Neither changes the headline win: **the goroutine-per-connection cost is elimina
 ### Re: #haivenws marked complete — opus-4-8
 
 Confirmed — closing `#haivenws` (the gobwas/ws + gnet event-loop transport migration for haiven-websocket-hub). Moving it out of the backlog into `agent:done` dated 2026-07-15. Follow-on work stays tracked: `#haivenwsopt` (O(1)-scale refinements — antlabs/timer per-conn wheel, ants dispatch pool, fragmented-handshake hardening) and `#tnpa` (Track C unreliable-network load-test harness).
-<!-- agent:boundary:77a3a903 -->
+❯ How does is the server.go module registered in gnet?
+
+### Re: How is server.go registered in gnet? — opus-4-8
+
+Registration is two parts: `server.go` *becomes* a gnet handler by satisfying gnet's interface, and `cmd/hubd/main.go` hands that handler to `gnet.Run`. There's no registration call inside `server.go` itself.
+
+**1. `Server` IS the gnet event handler.** In `server/server.go`, `Server` embeds `gnet.BuiltinEventEngine` (line 31), which satisfies gnet's `EventHandler` interface with default no-ops. `Server` then overrides only the callbacks it needs — `OnBoot`, `OnOpen`, `OnTraffic`, `OnClose`, `OnTick`. gnet drives all connection I/O by invoking these from its poller, so there's no goroutine per connection.
+
+**2. `gnet.Run` is the actual registration**, in `cmd/hubd/main.go:64`:
+
+```go
+srv := server.New(h, authn)              // build the handler (main.go:46)
+err := gnet.Run(srv, "tcp://"+*wsAddr,   // register + start the loop (main.go:64)
+    gnet.WithMulticore(*multicore),
+    gnet.WithReuseAddr(true),
+    gnet.WithTicker(true),
+)
+```
+
+`gnet.Run(handler, protoAddr, opts...)` takes the `*Server` as the `EventHandler`, opens the listener at `tcp://:8080`, spins up the poller(s), and calls `srv`'s callbacks for every socket event. It blocks until the loop stops, so it runs in its own goroutine (`go func(){ … }()`) while `main` separately starts the net/http `/healthz`+`/metrics` server and then blocks on SIGINT/SIGTERM.
+
+**3. Options that matter:**
+- `WithMulticore(true)` — one event loop per CPU core (shards connections across pollers).
+- `WithReuseAddr(true)` — SO_REUSEADDR for fast restart.
+- `WithTicker(true)` — **required** for `OnTick` to fire; it's what drives the periodic ping / idle-deadline sweep (`server.go:126`). Without it, `OnTick` never runs.
+
+**4. Readiness + shutdown.** `OnBoot` (`server.go:65`) closes the `s.boot` channel, exposed via `Booted()`, so callers and tests can wait until the loop is listening. Shutdown calls `gnet.Stop(ctx, "tcp://"+*wsAddr)` (`main.go:81`) — addressed by the same multiaddr string passed to `Run`.
+
+So: `server.go` is registered by (a) embedding `gnet.BuiltinEventEngine` to become an `EventHandler`, and (b) `gnet.Run(srv, addr, opts...)` in `cmd/hubd/main.go` handing that handler to the event loop.
+<!-- agent:boundary:0ae6d060 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-/goal Implement backlog item(s): #htv4
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#htv4] How does is the server.go module registered in gnet?
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]

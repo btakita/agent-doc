@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.116
+
+- **Post-commit boundary reposition now converges editor, disk, and Git.** The CRDT reposition path previously waited for the editor ACK and let Git adopt the new singleton boundary, but returned before materializing those acknowledged bytes to the working tree. The same authority-CAS write now crosses the disk projection barrier before success, preventing an immediately dirty session, repeated boundary drift, and a terminal `HEAD`/authority versus disk split.
+- **Document-model merge no longer duplicates old and new response boundaries.** Boundary markers are transaction control state, so closeout now canonicalizes a merge to the response branch's boundary ID at the terminal exchange position before the mandatory integrity gate. Live-buffer reconciliation can preserve concurrent text without producing a fragmented document or requiring repair.
+- **Historical post-commit projection splits recover without repair.** When `HEAD` and canonical editor authority already contain the same committed response, disk has the same semantic document with only older transient markers, and no conflicting deferred lineage exists, `session-check` now crosses the authority/ACK/disk barrier and restores exact equality automatically. Any semantic difference or mismatched retained intent still fails closed.
+- **Incomplete editor receipts no longer preserve partial response fragments for manual repair.** The file-IPC closeout model now requires a rejected partial materialization to restore the exact converged pre-write projection. It may retain the complete response capture for binary retry, but neither a fragment nor an unproven full fallback may remain in the document or reach the snapshot/commit boundary.
+
 ## 0.34.115
 
 - **Retained committed responses resume automatically after editor reattach.** If closeout reached exact committed CRDT authority while the editor owner temporarily had zero registered replicas, `session-check` now recognizes the exact `HEAD` target plus its content-bearing deferred base, re-enters the ordinary CRDT delivery/ACK barrier after replica registration, materializes disk, and clears the entire deferred lineage. The resumption fails closed if the live editor or disk has advanced beyond that retained base; it never asks an agent to repair or reconstruct the response.

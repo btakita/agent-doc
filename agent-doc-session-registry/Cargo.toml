@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-session-registry"
-version = "0.34.115"
+version = "0.34.116"
 edition = "2024"
 description = "Pure session registry mutation policy for agent-doc"
 license = "MIT"

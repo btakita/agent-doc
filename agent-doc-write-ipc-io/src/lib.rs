@@ -331,9 +331,10 @@ pub fn queue_file_ipc_reposition_boundary(
 
 /// Send a reposition-only IPC signal to the plugin.
 ///
-/// No content changes - just tells the plugin to move the boundary marker to the
-/// end of the exchange component. Used by `commit()` to keep the boundary at
-/// end-of-exchange without writing to the working tree.
+/// Used by `commit()` to keep the boundary at end-of-exchange. A successful
+/// CRDT path must also materialize the acknowledged canonical target to disk;
+/// otherwise Git/editor can commit the new singleton boundary while the
+/// working tree retains the superseded placement.
 pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
     let canonical = match file.canonicalize() {
         Ok(c) => c,
@@ -438,31 +439,27 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             }
             return true;
         }
-        match agent_doc_document_realtime_io::apply_canonical_replace_if_attached(
+        match agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
             file,
-            working,
             &target,
+            working,
             "post_commit_reposition",
         ) {
-            Ok(Some(relay_write)) => {
+            Ok(()) => {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "post_commit_reposition_crdt_relay file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
+                        "post_commit_reposition_materialized file={} content_hash={} authority_and_disk_converged=true",
                         file.display(),
-                        relay_write.content_hash,
-                        relay_write.update_bytes,
-                        relay_write.targets,
-                        relay_write.delivery_converged,
+                        agent_doc_hash::content_hash(&target),
                     ),
                 );
-                eprintln!("[commit] CRDT relay boundary refresh queued");
+                eprintln!("[commit] CRDT boundary refresh materialized");
                 return true;
             }
-            Ok(None) => {}
             Err(err) => {
                 eprintln!(
-                    "[commit] CRDT relay boundary refresh failed (falling back to IPC): {err}"
+                    "[commit] authority/disk boundary refresh failed (falling back to IPC): {err}"
                 );
             }
         }
@@ -899,6 +896,43 @@ mod tests {
         assert!(target.contains("\u{276f} do #spfxnorm. spec-test-build-install-commit-push"));
         assert!(!target.contains("\n<!-- agent:exchange -->\ndo #spfxnorm"));
         assert!(target.contains("<!-- agent:boundary:committed-id -->"));
+    }
+
+    #[test]
+    fn post_commit_reposition_materializes_acknowledged_crdt_target_to_disk() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+        let doc = dir.path().join("session.md");
+        let working = concat!(
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:committed-id -->\n",
+            "### Re: complete - gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        fs::write(&doc, working).unwrap();
+        agent_doc_snapshot_io::save(&doc, working, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "intellij:post-commit-reposition",
+            working,
+        );
+
+        let target = post_commit_reposition_target(working, Some("committed-id"), &[])
+            .expect("boundary before the response must move to the exchange tail");
+        assert!(try_ipc_reposition_boundary(&doc));
+
+        assert_eq!(fs::read_to_string(&doc).unwrap(), target);
+        assert_eq!(
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                &doc,
+                "post_commit_reposition_materialization_test",
+            )
+            .unwrap(),
+            target,
+        );
     }
 
     #[test]

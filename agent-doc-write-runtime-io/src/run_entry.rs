@@ -2273,15 +2273,19 @@ fn merge_template_document_model(
         content_current,
     ));
     if !cell_plan.fell_back {
+        let merged_doc = agent_doc_template::canonicalize_boundary_after_document_merge(
+            &cell_plan.merged_doc,
+            content_ours,
+        );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "template_document_model_merge file={} engine=cell conflicts={}",
+                "template_document_model_merge file={} engine=cell conflicts={} boundary=canonical_response_branch",
                 file.display(),
                 cell_plan.conflicts.len()
             ),
         );
-        return Ok(cell_plan.merged_doc);
+        return Ok(merged_doc);
     }
 
     agent_doc_ops_log_io::log_op(
@@ -2310,7 +2314,7 @@ fn merge_template_document_model(
             content_current.len()
         ),
     );
-    Ok(merged_doc)
+    Ok(agent_doc_template::canonicalize_boundary_after_document_merge(&merged_doc, content_ours))
 }
 
 fn editor_crdt_authority_attached(file: &Path) -> bool {

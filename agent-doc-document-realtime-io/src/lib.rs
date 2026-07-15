@@ -703,14 +703,15 @@ pub fn settle_committed_projection_if_current_through_authority(
     Ok(())
 }
 
-/// Resume a committed target that was durably retained while editor authority
-/// had zero registered replicas.
+/// Resume a committed target whose canonical authority is ahead of disk.
 ///
-/// The retained intent must prove both the current canonical target and the
-/// editor/disk base from which it was computed. The ordinary CRDT write barrier
-/// then delivers that target to the reattached replica and materializes disk.
-/// If the live editor has advanced beyond the retained base, the normal visible
-/// write guard fails closed instead of overwriting unsaved text.
+/// Ordinarily, a retained intent must prove both the current canonical target
+/// and the editor/disk base from which it was computed. For historical versions
+/// that cleared the intent after committing but before projecting disk, an
+/// absent intent is accepted only when committed authority and disk normalize
+/// to identical semantic content after transient markers are removed. The
+/// ordinary CRDT write barrier then delivers and materializes the target. A
+/// mismatched intent or semantic drift fails closed instead of overwriting text.
 pub fn settle_retained_committed_projection_through_authority(
     path: &Path,
     committed_content: &str,
@@ -722,18 +723,29 @@ pub fn settle_retained_committed_projection_through_authority(
     if canonical != committed_content || disk != expected_disk {
         return Ok(false);
     }
-    let Some(pending) = pending_document_write(path) else {
-        return Ok(false);
-    };
     let committed_hash = agent_doc_hash::content_hash(committed_content);
     let disk_hash = agent_doc_hash::content_hash(expected_disk);
-    if pending.target_content != committed_content
-        || !pending.target_hash.eq_ignore_ascii_case(&committed_hash)
-        || !pending.expected_hash.eq_ignore_ascii_case(&disk_hash)
-        || pending.expected_content.as_deref() != Some(expected_disk)
-    {
-        return Ok(false);
-    }
+    let settlement_basis = match pending_document_write(path) {
+        Some(pending)
+            if pending.target_content == committed_content
+                && pending.target_hash.eq_ignore_ascii_case(&committed_hash)
+                && pending.expected_hash.eq_ignore_ascii_case(&disk_hash)
+                && pending.expected_content.as_deref() == Some(expected_disk) =>
+        {
+            "retained_lineage"
+        }
+        Some(_) => return Ok(false),
+        None if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            committed_content,
+        )
+            == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                expected_disk,
+            ) =>
+        {
+            "historical_transient_split"
+        }
+        None => return Ok(false),
+    };
 
     atomic_write_if_current_through_authority(path, committed_content, expected_disk, source)?;
     let canonical = try_resolve_current_document_content(path, source)?;
@@ -750,10 +762,11 @@ pub fn settle_retained_committed_projection_through_authority(
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "retained_committed_projection_settled file={} prior_disk_hash={} committed_hash={} deferred_lineage=cleared",
+            "retained_committed_projection_settled file={} prior_disk_hash={} committed_hash={} settlement_basis={} deferred_lineage=cleared",
             path.display(),
             disk_hash,
             committed_hash,
+            settlement_basis,
         ),
     );
     Ok(true)
@@ -3355,6 +3368,48 @@ mod tests {
         assert!(
             pending_document_write(&file).is_none(),
             "successful reconnect delivery must clear retained lineage"
+        );
+    }
+
+    #[test]
+    fn committed_transient_split_without_retained_lineage_settles_after_upgrade() {
+        let stale_disk = "# Session\n\ncomplete response\n<!-- agent:boundary:old -->\n";
+        let committed = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
+        let (_dir, file, _canonical) = temp_doc(stale_disk);
+        let identity = "test-historical-committed-transient-split";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(client_id, 0, stale_disk.chars().count() as u32, committed)
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), stale_disk);
+        assert!(pending_document_write(&file).is_none());
+
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+        assert!(
+            settle_retained_committed_projection_through_authority(
+                &file,
+                committed,
+                stale_disk,
+                "historical_committed_transient_split_test",
+            )
+            .unwrap(),
+            "a historical authority/disk split that differs only by transient markers should settle without repair",
+        );
+        ack.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "historical_committed_transient_split_verify",
+            )
+            .unwrap(),
+            committed,
         );
     }
 

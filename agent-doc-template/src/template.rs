@@ -1368,6 +1368,24 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
     result
 }
 
+/// Canonicalize boundary control state after a document-model merge.
+///
+/// A response transaction replaces the previous cycle's boundary before it
+/// applies the response. A three-way merge can otherwise retain both the old
+/// boundary from the live document and the new boundary from the response
+/// branch. Boundaries are transaction control markers, not user content, so
+/// the merged document must keep only the response branch's boundary ID and
+/// place it at the terminal exchange position.
+pub fn canonicalize_boundary_after_document_merge(doc: &str, response_branch: &str) -> String {
+    let preferred_id = element::parse(response_branch).ok().and_then(|components| {
+        components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .and_then(|exchange| find_boundary_in_component(response_branch, exchange))
+    });
+    reposition_boundary_to_end_preserve_head_with_id(doc, preferred_id.as_deref())
+}
+
 /// Collapse only adjacent, standalone boundary markers produced by one CRDT
 /// merge frontier, preserving their semantic position relative to unresolved
 /// prompt text. Scattered or inline markers are document corruption and fail
@@ -2762,6 +2780,48 @@ User prompt here.
             "boundary should be before close tag"
         );
     }
+
+    #[test]
+    fn document_merge_boundary_canonicalization_keeps_response_branch_id() {
+        let merged = "\
+<!-- agent:exchange -->
+Previous response.
+<!-- agent:boundary:old-live-id -->
+User prompt here.
+### Re: Reply -- gpt-5
+
+Done.
+<!-- agent:boundary:new-response-id -->
+<!-- /agent:exchange -->";
+        let response_branch = "\
+<!-- agent:exchange -->
+Previous response.
+User prompt here.
+### Re: Reply -- gpt-5
+
+Done.
+<!-- agent:boundary:new-response-id -->
+<!-- /agent:exchange -->";
+
+        let result = canonicalize_boundary_after_document_merge(merged, response_branch);
+
+        assert!(!result.contains("old-live-id"));
+        assert_eq!(result.matches("<!-- agent:boundary:").count(), 1);
+        assert!(result.contains("<!-- agent:boundary:new-response-id -->"));
+        assert!(
+            result.find("Done.").unwrap()
+                < result
+                    .find("<!-- agent:boundary:new-response-id -->")
+                    .unwrap()
+        );
+        assert!(
+            result
+                .find("<!-- agent:boundary:new-response-id -->")
+                .unwrap()
+                < result.find("<!-- /agent:exchange -->").unwrap()
+        );
+    }
+
     #[test]
     fn reposition_boundary_no_exchange_unchanged() {
         let doc = "\

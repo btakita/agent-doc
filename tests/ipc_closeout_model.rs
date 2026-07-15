@@ -611,7 +611,8 @@ proptest! {
 
 #[test]
 fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
-    let (tmp, doc, baseline, original) = setup_project(true);
+    let (tmp, doc, baseline, _original) = setup_project(true);
+    let visible_before_finalize = fs::read_to_string(&doc).unwrap();
     let root = tmp.path();
     seed_durable_editor_delivery_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
@@ -653,8 +654,8 @@ fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
 
     let visible = fs::read_to_string(&doc).unwrap();
     assert_eq!(
-        original, visible,
-        "legacy ack-content must not be repaired through a direct document write"
+        visible_before_finalize, visible,
+        "legacy ack-content must not mutate the converged preflight projection through a direct document write"
     );
     let head = head_blob(root);
     assert_eq!(
@@ -694,6 +695,7 @@ fn file_ipc_missing_lazily_receipt_fails_closed_before_commit() {
 #[test]
 fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     let (tmp, doc, baseline, _original) = setup_project(true);
+    let visible_before_finalize = fs::read_to_string(&doc).unwrap();
     let root = tmp.path();
     seed_durable_editor_delivery_open(root, &doc);
     let agent_doc_dir = root.join(".agent-doc");
@@ -744,9 +746,13 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
 
     let visible = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        visible_before_finalize, visible,
+        "an incomplete receipt must restore the exact converged pre-write projection",
+    );
     assert!(
-        visible.contains(partial_marker),
-        "editor-visible partial materialization should remain for retry:\n{visible}"
+        !visible.contains(partial_marker),
+        "a partial response fragment must not remain for operator repair:\n{visible}"
     );
     assert!(
         !visible.contains(&response_body("partial response")),
@@ -772,8 +778,9 @@ fn file_ipc_partial_response_materialization_fails_closed_before_commit() {
     );
     let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("ipc_materialization_missing_response"),
-        "partial materialization should fail before snapshot/commit:\n{ops_log}"
+        ops_log.contains("visible_write_lazily_event_observed")
+            && ops_log.contains("run_stream_ipc_retry_required_no_disk_write"),
+        "partial materialization should be observed and rejected before snapshot/commit:\n{ops_log}"
     );
     assert!(
         ops_log.contains("recovery=retry_without_disk_write"),

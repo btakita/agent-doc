@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.120
+
+- **ACK recovery can no longer resurrect the response target it just superseded.** When a response-cell retry is already the live CPC authority, deferred-write retention now replaces the older target and rebases reconnect lineage on that exact failed-ACK editor cut instead of three-way-merging the stale assistant response back in. Reconnect returns the newest complete response directly for an unchanged buffer and semantically preserves later `❯` operator prompts with one boundary.
+- **The live IDEA failure is covered at both persistence layers.** Regression coverage reproduces an older deferred response, a newer canonical response, the forced replica reconnect lookup, and an operator prompt appended after the failed ACK; it proves the newest target remains retained and the stale response cannot reappear.
+
 ## 0.34.119
 
 - **A complete retry now supersedes older uncommitted response tails atomically.** Before adding a response cell, the controller compares the live exchange with `HEAD`, anchors at the last unchanged committed response, removes only later assistant-response nodes, preserves every operator prompt, and emits the latest complete response with one terminal boundary. Interrupted partial/full variants no longer accumulate and do not require `agent-doc repair`.

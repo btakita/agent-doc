@@ -481,6 +481,14 @@ Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.
 
+A deferred response target also cannot overrule a newer `ApplyInFlight` CPC
+frontier that already contains the latest complete response. That newer live
+target supersedes the deferred assistant tail and rebases reconnect proof on the
+exact failed-ACK target. An unchanged editor cut receives the live target
+directly; if the operator appended prompt nodes afterward, semantic response-tail
+reconciliation preserves those prompts while removing the superseded response
+and canonicalizing one terminal boundary.
+
 The diagrams pin their Mermaid palette instead of inheriting page colors. Nodes
 and edge labels use opaque fills, dark text, and mid-contrast links so they stay
 readable in both light and dark renderers.

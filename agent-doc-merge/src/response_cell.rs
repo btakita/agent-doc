@@ -103,6 +103,74 @@ fn boundary_line(line: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
 }
 
+fn supersede_response_tail_after_anchor(
+    doc: &str,
+    anchor_id: &str,
+    retained_response_ids: &HashSet<String>,
+    response: &str,
+) -> anyhow::Result<Option<ResponseCellAddOutcome>> {
+    let components = element::parse(doc)?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
+    let current_nodes = parse_exchange_nodes(exchange.content(doc));
+    let Some(anchor_index) = current_nodes
+        .iter()
+        .rposition(|node| node.node_id() == anchor_id)
+    else {
+        return Ok(None);
+    };
+
+    let mut removed = false;
+    let mut boundary = None;
+    let mut retained = Vec::with_capacity(current_nodes.len());
+    for (index, mut node) in current_nodes.into_iter().enumerate() {
+        for line in &node.lines {
+            if boundary_line(line) {
+                boundary = Some(line.trim().to_string());
+            }
+        }
+        node.lines.retain(|line| !boundary_line(line));
+        let stale_response = index > anchor_index
+            && matches!(node.kind, ExchangeNodeKind::Response { .. })
+            && !retained_response_ids.contains(&node.node_id());
+        if stale_response {
+            removed = true;
+            continue;
+        }
+        if !node.lines.is_empty() {
+            retained.push(node);
+        }
+    }
+    if !removed {
+        return Ok(None);
+    }
+
+    let cleaned_exchange = render_exchange_nodes(&retained);
+    let cleaned_doc = exchange.replace_content(doc, &cleaned_exchange);
+    let mut outcome = add_response_cell(&cleaned_doc, response)?;
+    if let Some(boundary) = boundary {
+        let reparsed = element::parse(&outcome.content)?;
+        let reparsed_exchange = reparsed
+            .iter()
+            .find(|component| component.name == "exchange")
+            .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
+        let mut inner = reparsed_exchange
+            .content(&outcome.content)
+            .trim_end_matches('\n')
+            .to_string();
+        if !inner.is_empty() {
+            inner.push('\n');
+        }
+        inner.push_str(&boundary);
+        inner.push('\n');
+        outcome.content = reparsed_exchange.replace_content(&outcome.content, &inner);
+    }
+    outcome.applied = true;
+    Ok(Some(outcome))
+}
+
 /// Replace response nodes appended after the last unchanged committed response,
 /// then add the latest complete response as one semantic cell.
 ///
@@ -138,66 +206,111 @@ pub fn supersede_uncommitted_response_tail(
         return add_response_cell(doc, response);
     };
 
-    let components = element::parse(doc)?;
-    let exchange = components
+    if let Some(outcome) = supersede_response_tail_after_anchor(
+        doc,
+        &last_committed_response_id,
+        &committed_response_ids,
+        response,
+    )? {
+        Ok(outcome)
+    } else {
+        add_response_cell(doc, response)
+    }
+}
+
+/// Reconcile an editor still based on a superseded deferred target with the
+/// latest authoritative response tail.
+///
+/// The last response common to both targets is the safe anchor. Responses that
+/// exist only in the prior target are removed from `doc`, responses that exist
+/// only in the latest target are installed as one cell, and operator prompts in
+/// `doc` remain untouched. `None` means the targets do not prove a response-tail
+/// supersession and the caller must use its ordinary merge policy.
+pub fn reconcile_superseded_response_targets(
+    doc: &str,
+    prior_target: &str,
+    latest_target: &str,
+) -> anyhow::Result<Option<String>> {
+    let prior_components = element::parse(prior_target)?;
+    let Some(prior_exchange) = prior_components
         .iter()
         .find(|component| component.name == "exchange")
-        .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
-    let current_nodes = parse_exchange_nodes(exchange.content(doc));
-    let Some(anchor_index) = current_nodes
-        .iter()
-        .rposition(|node| node.node_id() == last_committed_response_id)
     else {
-        return add_response_cell(doc, response);
+        return Ok(None);
     };
+    let latest_components = element::parse(latest_target)?;
+    let Some(latest_exchange) = latest_components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let prior_nodes = parse_exchange_nodes(prior_exchange.content(prior_target));
+    let latest_nodes = parse_exchange_nodes(latest_exchange.content(latest_target));
+    let latest_node_ids = latest_nodes
+        .iter()
+        .map(ExchangeNode::node_id)
+        .collect::<HashSet<_>>();
+    let latest_response_ids = latest_nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        .map(ExchangeNode::node_id)
+        .collect::<HashSet<_>>();
+    let Some((prior_anchor_index, anchor_id)) = prior_nodes
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, node)| latest_node_ids.contains(&node.node_id()))
+        .map(|(index, node)| (index, node.node_id()))
+    else {
+        return Ok(None);
+    };
+    let prior_has_superseded_response =
+        prior_nodes.iter().skip(prior_anchor_index + 1).any(|node| {
+            matches!(node.kind, ExchangeNodeKind::Response { .. })
+                && !latest_response_ids.contains(&node.node_id())
+        });
+    if !prior_has_superseded_response {
+        return Ok(None);
+    }
+    let Some(latest_anchor_index) = latest_nodes
+        .iter()
+        .rposition(|node| node.node_id() == anchor_id)
+    else {
+        return Ok(None);
+    };
+    let prior_response_ids = prior_nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        .map(ExchangeNode::node_id)
+        .collect::<HashSet<_>>();
+    let common_response_ids = prior_response_ids
+        .intersection(&latest_response_ids)
+        .cloned()
+        .collect::<HashSet<_>>();
+    let replacement_nodes = latest_nodes
+        .iter()
+        .skip(latest_anchor_index + 1)
+        .filter(|node| {
+            matches!(node.kind, ExchangeNodeKind::Response { .. })
+                && !prior_response_ids.contains(&node.node_id())
+        })
+        .cloned()
+        .map(|mut node| {
+            node.lines.retain(|line| !boundary_line(line));
+            node
+        })
+        .filter(|node| !node.lines.is_empty())
+        .collect::<Vec<_>>();
+    if replacement_nodes.is_empty() {
+        return Ok(None);
+    }
 
-    let mut removed = false;
-    let mut boundary = None;
-    let mut retained = Vec::with_capacity(current_nodes.len());
-    for (index, mut node) in current_nodes.into_iter().enumerate() {
-        for line in &node.lines {
-            if boundary_line(line) {
-                boundary = Some(line.trim().to_string());
-            }
-        }
-        node.lines.retain(|line| !boundary_line(line));
-        let stale_response = index > anchor_index
-            && matches!(node.kind, ExchangeNodeKind::Response { .. })
-            && !committed_response_ids.contains(&node.node_id());
-        if stale_response {
-            removed = true;
-            continue;
-        }
-        if !node.lines.is_empty() {
-            retained.push(node);
-        }
-    }
-    if !removed {
-        return add_response_cell(doc, response);
-    }
-
-    let cleaned_exchange = render_exchange_nodes(&retained);
-    let cleaned_doc = exchange.replace_content(doc, &cleaned_exchange);
-    let mut outcome = add_response_cell(&cleaned_doc, response)?;
-    if let Some(boundary) = boundary {
-        let reparsed = element::parse(&outcome.content)?;
-        let reparsed_exchange = reparsed
-            .iter()
-            .find(|component| component.name == "exchange")
-            .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
-        let mut inner = reparsed_exchange
-            .content(&outcome.content)
-            .trim_end_matches('\n')
-            .to_string();
-        if !inner.is_empty() {
-            inner.push('\n');
-        }
-        inner.push_str(&boundary);
-        inner.push('\n');
-        outcome.content = reparsed_exchange.replace_content(&outcome.content, &inner);
-    }
-    outcome.applied = true;
-    Ok(outcome)
+    let response = render_exchange_nodes(&replacement_nodes);
+    Ok(
+        supersede_response_tail_after_anchor(doc, &anchor_id, &common_response_ids, &response)?
+            .map(|outcome| outcome.content),
+    )
 }
 
 #[cfg(test)]
@@ -314,6 +427,40 @@ mod tests {
         assert!(!replay.applied);
         assert_eq!(replay.cell_id, first.cell_id);
         assert_eq!(replay.content, first.content);
+    }
+
+    #[test]
+    fn deferred_target_reconcile_anchors_on_first_turn_prompt() {
+        let prior_target = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            "### Re: stale — gpt-5\n\nStale response.\n<!-- agent:boundary:stale -->",
+        );
+        let latest_target = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            "### Re: latest — gpt-5\n\nComplete response.\n<!-- agent:boundary:latest -->",
+        );
+        let editor_with_follow_up = prior_target.replace(
+            "<!-- agent:boundary:stale -->",
+            "❯ operator follow-up\n<!-- agent:boundary:editor -->",
+        );
+
+        let reconciled = reconcile_superseded_response_targets(
+            &editor_with_follow_up,
+            &prior_target,
+            &latest_target,
+        )
+        .unwrap()
+        .expect("the shared prompt should anchor first-turn response supersession");
+
+        assert!(reconciled.contains("❯ operator prompt"));
+        assert!(reconciled.contains("❯ operator follow-up"));
+        assert!(reconciled.contains("### Re: latest — gpt-5"));
+        assert!(!reconciled.contains("### Re: stale — gpt-5"));
+        assert_eq!(
+            reconciled.matches("agent:boundary:").count(),
+            1,
+            "reconciled document:\n{reconciled}"
+        );
     }
 
     #[test]

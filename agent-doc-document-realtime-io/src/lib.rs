@@ -1454,7 +1454,24 @@ fn ensure_deferred_document_write_intent(
         }
 
         let expected_hash = agent_doc_hash::content_hash(expected_current);
-        if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
+        if requested_target_hash.eq_ignore_ascii_case(&expected_hash) {
+            // The requested target is already the live CPC authority. A prior
+            // deferred target is therefore obsolete, not a concurrent branch
+            // to merge back into the document. Rebase the reconnect lineage on
+            // that exact prior target so the editor buffer which failed to ACK
+            // it receives the newer canonical target directly, while later
+            // operator edits still merge over the superseded cut.
+            expected_content = pending.target_content.clone();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_deferred_write_superseded_by_current_authority file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash}",
+                    file.display(),
+                    pending.intent_id,
+                    pending.target_hash,
+                ),
+            );
+        } else if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
             let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
                 agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
             });
@@ -1587,11 +1604,17 @@ pub fn deferred_document_write_reconnect_content(
         return Ok(Some(pending.target_content));
     }
 
+    let editor_content = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
+        editor_content,
+        &base,
+        &pending.target_content,
+    )?
+    .unwrap_or_else(|| editor_content.to_string());
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&base).encode_state();
     let merged = agent_doc_merge::crdt::merge_by_component(
         Some(&base_state),
         &pending.target_content,
-        editor_content,
+        &editor_content,
     )
     .with_context(|| {
         format!(
@@ -3310,6 +3333,54 @@ mod tests {
             pending_document_write(&file).is_none(),
             "a settled committed projection must not retain or uncover an older target"
         );
+    }
+
+    #[test]
+    fn live_canonical_target_supersedes_stale_deferred_response_lineage() {
+        let baseline = "<!-- agent:exchange -->\n### Re: committed — gpt-5\n\nCommitted.\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        let stale_target = "<!-- agent:exchange -->\n### Re: committed — gpt-5\n\nCommitted.\n\n### Re: stale — gpt-5\n\nStale response.\n<!-- agent:boundary:stale -->\n<!-- /agent:exchange -->\n";
+        let latest_target = "<!-- agent:exchange -->\n### Re: committed — gpt-5\n\nCommitted.\n\n### Re: latest — gpt-5\n\nComplete response.\n<!-- agent:boundary:latest -->\n<!-- /agent:exchange -->\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            baseline,
+            stale_target,
+            "stale_response_intent_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            latest_target,
+            latest_target,
+            "latest_response_intent_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("latest target should remain retained");
+        assert_eq!(pending.target_content, latest_target);
+        assert_eq!(pending.expected_content.as_deref(), Some(stale_target));
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, stale_target)
+                .unwrap()
+                .as_deref(),
+            Some(latest_target),
+            "the stale editor cut must receive the newer canonical response without recomposition",
+        );
+
+        let editor_with_operator_note = stale_target.replace(
+            "<!-- /agent:exchange -->",
+            "\n❯ Operator note after the failed ACK.\n<!-- /agent:exchange -->",
+        );
+        let merged = deferred_document_write_reconnect_content(&file, &editor_with_operator_note)
+            .unwrap()
+            .expect("later operator text should merge over the superseded editor cut");
+        assert!(merged.contains("### Re: latest — gpt-5"));
+        assert!(!merged.contains("### Re: stale — gpt-5"));
+        assert!(merged.contains("❯ Operator note after the failed ACK."));
+        assert_eq!(merged.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

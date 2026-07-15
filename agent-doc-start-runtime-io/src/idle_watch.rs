@@ -72,9 +72,10 @@ const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 /// enough to let a saturated controller recover, short enough to keep
 /// queue-drain readiness prompt (~one probe per window per document).
 const IDLE_WATCH_CONTROLLER_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
-/// A quiescent session still polls the authoritative queue head every 500ms so
-/// unsaved editor work starts promptly, but the expensive pane/controller
-/// reconciliation body only needs a periodic liveness pass until work appears.
+/// A quiescent session keeps the cheap installed-binary probe at 500ms, but
+/// bounds pane inspection, full CRDT text reads, and reconciliation to this
+/// interval. A stable blocked queue head is quiescent too: retrying the same
+/// controller/model projection twice a second cannot make it dispatchable.
 const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(5);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -92,16 +93,17 @@ fn context_clear_projection_source_allows_supervisor_action(
     )
 }
 
-fn idle_watch_is_quiescent(
-    active_head: Option<&str>,
-    last_dispatched: Option<&str>,
+fn idle_watch_fast_path_can_sleep(
+    queue_state_observed: bool,
     actor_ready: bool,
+    urgent_maintenance: bool,
+    maintenance_due: bool,
 ) -> bool {
-    active_head.is_none()
-        || (actor_ready
-            && active_head
-                .zip(last_dispatched)
-                .is_some_and(|(active, dispatched)| active == dispatched))
+    queue_state_observed && actor_ready && !urgent_maintenance && !maintenance_due
+}
+
+fn stale_recycle_safe_checkpoint(supervisor_stale: bool, inflight_handlers: u64) -> bool {
+    supervisor_stale && inflight_handlers == 0
 }
 
 /// `#fbwire` Phase 2 — is the session document's current visible text converged
@@ -740,11 +742,49 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // ~1/30s during a wedge without losing queue-drain readiness.
             let mut controller_degraded_until: Option<std::time::Instant> = None;
             let mut controller_backoff_logged = false;
+            let mut queue_state_observed = false;
             let mut last_quiescent_maintenance: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
+                }
+                // `#idlequiet`: stale-binary convergence is the one check that
+                // must remain prompt at every stage of a turn. Keep it ahead of
+                // every quiescent fast-path gate; it is a local inode/stat probe
+                // and does not touch the controller or editor.
+                let supervisor_stale_fast = shared.refresh_binary_stale();
+                let now = std::time::Instant::now();
+                let zombie_reap_due = last_zombie_reap
+                    .is_none_or(|last| last.elapsed() >= IDLE_WATCH_ZOMBIE_REAP_INTERVAL);
+                if zombie_reap_due {
+                    let reaped = agent_doc_supervisor_process::detached_child::reap_historical_agent_doc_zombies();
+                    last_zombie_reap = Some(now);
+                    if reaped > 0 {
+                        log_event(
+                            &mut session_log,
+                            &format!("idle_queue_watch_reaped_historical_controller_zombies count={reaped}"),
+                        );
+                    }
+                }
+                let actor_ready_fast = actor_state_is_ready(&shared);
+                let urgent_maintenance = supervisor_stale_fast
+                    || context_reset_in_flight
+                    || awaiting_clear_settle
+                    || shared.restart_reexec.load(Ordering::Relaxed);
+                let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
+                    last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
+                });
+                if idle_watch_fast_path_can_sleep(
+                    queue_state_observed,
+                    actor_ready_fast,
+                    urgent_maintenance,
+                    maintenance_due,
+                ) {
+                    continue;
+                }
+                if !actor_ready_fast {
+                    last_quiescent_maintenance = None;
                 }
                 // `#capproofbg`: a *pending* managed-capability proof no longer
                 // stalls the idle-queue dispatch. Drain dispatch proceeds
@@ -880,47 +920,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
                 }
-                // `#idlequiet`: the former loop ran the entire reconciliation
-                // pipeline every 500ms even when there was no work, issuing a
-                // burst of one-request controller connections and pane probes.
-                // Keep the single authoritative head read prompt, then collapse
-                // the rest to a liveness pass while the session is quiescent.
-                // Binary staleness is checked before this gate on every tick, so
-                // install/recycle remains automatic at every turn stage.
-                let actor_ready_fast = actor_state_is_ready(&shared);
-                let quiescent = idle_watch_is_quiescent(
-                    active_head.as_deref(),
-                    last_dispatched.as_deref(),
-                    actor_ready_fast,
-                );
-                let supervisor_stale_fast = shared.refresh_binary_stale();
-                let now = std::time::Instant::now();
-                let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
-                    last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
-                });
-                let zombie_reap_due = last_zombie_reap
-                    .is_none_or(|last| last.elapsed() >= IDLE_WATCH_ZOMBIE_REAP_INTERVAL);
-                if zombie_reap_due {
-                    let reaped = agent_doc_supervisor_process::detached_child::reap_historical_agent_doc_zombies();
-                    last_zombie_reap = Some(now);
-                    if reaped > 0 {
-                        log_event(
-                            &mut session_log,
-                            &format!("idle_queue_watch_reaped_historical_controller_zombies count={reaped}"),
-                        );
-                    }
-                }
-                let urgent_maintenance = supervisor_stale_fast
-                    || context_reset_in_flight
-                    || awaiting_clear_settle
-                    || shared.restart_reexec.load(Ordering::Relaxed);
-                if quiescent && !urgent_maintenance && !maintenance_due {
-                    continue;
-                }
-                if quiescent {
+                queue_state_observed = true;
+                if actor_ready_fast && !urgent_maintenance {
                     last_quiescent_maintenance = Some(now);
-                } else {
-                    last_quiescent_maintenance = None;
                 }
                 let actor_ready = actor_ready_fast;
                 let ready_busy_reason = if active_head.is_some()
@@ -1727,16 +1729,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `generation closed` / stale-supervisor `#fcc0` case without dropping
                 // the live turn. Checked before the opt-in auto-recycle decision so a
                 // deliberate operator restart always supersedes (no env opt-in needed).
-                // `#midturn-recycle-resume`: the agent-doc-cycle interlock the coarse
-                // harness `turn_boundary` cannot provide. A recycle / restart-reexec is
-                // a true `execve` that tears down the in-flight IPC listener; firing it
-                // while an agent-doc cycle is still open (preflight taken, finalize not
-                // committed) or an IPC receipt connection is in flight severs the
-                // visible-write receipt round-trip mid-cycle and drives the next finalize into
-                // `live_prompt_drift_after_preflight` against the pre-recycle preflight
-                // baseline. Defer until the cycle commits and IPC drains. Gates BOTH the
-                // operator `restart_drain_reexec` path below and the `#supselfheal`
-                // auto-recycle decision further down.
+                // `#midturn-recycle-resume`: an open cycle still gates operator-requested
+                // replacement, but binary staleness may recycle at any turn stage once
+                // supervisor IPC drains. The execve preserves the harness child and the
+                // durable cycle checkpoint; only an active receipt handler is unsafe.
+                // This prevents a long model/tool turn from pinning an obsolete supervisor.
                 // `#suprecyclespin`: an open cycle whose harness turn has already
                 // ended (we are at `turn_boundary`) but that never reached
                 // `committed`/`abandoned` keeps `is_open()` true forever, so the
@@ -2019,8 +2016,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         )
                     })
                     .unwrap_or(false);
-                // Recycle at the FIRST AVAILABLE SAFE intra-turn checkpoint, not the
-                // instant the wedge is seen. A tick is a safe checkpoint when no
+                // Recycle a wedged OR stale supervisor at the FIRST AVAILABLE SAFE
+                // intra-turn checkpoint, not merely at an idle prompt. A tick is a safe checkpoint when no
                 // supervisor IPC connection is being handled
                 // (`inflight_connection_handlers() == 0`): an `execve` recycle there
                 // cannot sever an active patch apply mid-flight. The wedge is already
@@ -2031,6 +2028,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // boundary), just at the earliest point that cannot corrupt in-flight IO.
                 let inflight_handlers = agent_doc_ipc_io::inflight_connection_handlers();
                 let at_safe_checkpoint = inflight_handlers == 0;
+                let stale_safe_checkpoint =
+                    stale_recycle_safe_checkpoint(supervisor_stale, inflight_handlers);
                 let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
                 if wedge_needs_recycle && !at_safe_checkpoint {
                     agent_doc_ops_log_io::log_op(
@@ -2046,16 +2045,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,
-                    turn_boundary,
+                    turn_boundary || stale_safe_checkpoint,
                     head_pending,
                     explicit_admin_recycle,
                     write_wedged,
                     reexec_failed,
-                    // `#midturn-recycle-resume` Phase B: the escalation backstop forces
-                    // the recycle past a never-closing cycle (`effective_cycle_open`),
-                    // layered on the `#suprecyclespin` stalled-resolve that already
-                    // cleared `cycle_open` for abandoned-older superseded cycles.
-                    effective_cycle_open,
+                    // A stale supervisor's safe intra-turn checkpoint owns the durable
+                    // resume handoff, so an open cycle does not block that hot reload.
+                    // Non-stale operator replacement retains the cycle-open interlock.
+                    effective_cycle_open && !stale_safe_checkpoint,
                 );
                 if matches!(recycle_action, SupervisorRecycleAction::DeferCycleOpen) {
                     agent_doc_ops_log_io::log_op(
@@ -2326,7 +2324,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // `execve`, preserving the live harness child + tmux pane. Falls
                     // back to a clean exit (child restarts) if the in-place swap cannot
                     // start.
-                    let recycle_boundary = if head_pending {
+                    let recycle_boundary = if stale_safe_checkpoint && !turn_boundary {
+                        "safe_intra_turn"
+                    } else if head_pending {
                         "next_queue_item"
                     } else {
                         "idle"
@@ -3339,12 +3339,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn idle_watch_quiescence_collapses_only_no_work_or_settled_dedup() {
-        assert!(idle_watch_is_quiescent(None, None, true));
-        assert!(idle_watch_is_quiescent(Some("#a"), Some("#a"), true));
-        assert!(!idle_watch_is_quiescent(Some("#a"), None, true));
-        assert!(!idle_watch_is_quiescent(Some("#a"), Some("#a"), false));
-        assert!(!idle_watch_is_quiescent(Some("#new"), Some("#old"), true));
+    fn idle_watch_fast_path_requires_observed_ready_nonurgent_state() {
+        assert!(idle_watch_fast_path_can_sleep(true, true, false, false));
+        assert!(!idle_watch_fast_path_can_sleep(false, true, false, false));
+        assert!(!idle_watch_fast_path_can_sleep(true, false, false, false));
+        assert!(!idle_watch_fast_path_can_sleep(true, true, true, false));
+        assert!(!idle_watch_fast_path_can_sleep(true, true, false, true));
+    }
+
+    #[test]
+    fn stale_supervisor_recycles_at_any_handler_safe_turn_stage() {
+        assert!(stale_recycle_safe_checkpoint(true, 0));
+        assert!(!stale_recycle_safe_checkpoint(true, 1));
+        assert!(!stale_recycle_safe_checkpoint(false, 0));
     }
 
     fn context_clear_projection_with_source(

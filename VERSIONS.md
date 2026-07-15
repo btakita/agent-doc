@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.123
+
+- **Idle means idle even when an editor remains attached or a queue head is stably blocked.** The 500 ms watch tick now performs only local binary/zombie liveness probes between five-second reconciliation passes; pane inspection and full CRDT text/controller reads no longer happen twice per second merely because the document is open.
+- **A stale supervisor hot-reloads at the first handler-safe checkpoint in every turn stage.** Once no supervisor IPC receipt is in flight, `execve` preserves the live harness child and durable cycle checkpoint instead of waiting for an idle prompt or a closed agent-doc cycle.
+
 ## 0.34.122
 
 - **Quiescent supervisors no longer execute the full idle reconciliation pipeline twice per second.** The idle watch keeps its prompt authoritative queue-head poll and installed-binary freshness check at 500ms, but collapses pane probes and the burst of controller-backed projection reads to a five-second liveness pass when there is no head or the same head has already settled. New work and stale binaries bypass the throttle immediately, preserving prompt dispatch and automatic recycling while removing the idle controller request storm.

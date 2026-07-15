@@ -15,7 +15,7 @@ prompt_presets:
   '#next-steps': Any follow-up items to place in the backlog? Please ensure the backlog is in priority order. Print the item id of the top of the backlog.
   '#spec-test-build-install-commit-push': update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -64,13 +64,30 @@ Verification completed:
 Release completed as agent-doc `0.34.89`: commit `7fc71c19` was pushed to `main`, tag `v0.34.89` was pushed, and the GitHub Release completed. The multi-platform trusted-publishing PyPI workflow is still in progress and is non-blocking. A concurrent `0.34.90` release landed as a descendant of `7fc71c19`; it includes this fix and is now the installed local binary. Crates.io accepted the changed `agent-doc-debounce` 0.34.89 package before the newer descendant superseded the remaining older graph publication.
 
 No additional backlog follow-up is needed because the regression is specified, covered, locally installed, pushed, and present in the current successor release.
-<!-- agent:boundary:e9271713 -->
+### Re: rollback-proof, self-reconnecting agent-doc closeout — gpt-5
+
+> **Queue prompt:** /goal Implement backlog item(s): #aqt3
+
+The queue reference `#aqt3` has no matching live backlog item, so it was stale phantom work and no tsift implementation was executed for it.
+
+
+- Responses remain console-only while work is in progress, then cross the document, snapshot, commit, and session-check boundary once as one complete buffered body. Boundary canonicalization leaves one terminal `agent:boundary` marker.
+- A committed response can no longer be rolled back if an editor or CRDT authority later replays the captured pre-response baseline. With narrow capture/HEAD proof, agent-doc restores the committed HEAD through authority CAS and clears the obsolete deferred lineage.
+- Recovery failures during preflight now abort the cycle. They can no longer degrade to a warning followed by a generic commit of stale content.
+- Staleness is handled continuously: every existing turn-stage check still requests safe supervisor/controller recycling, and a route that becomes stale during preflight queue convergence now schedules the same idle-boundary recycle before the next attempt.
+- Every stale supervisor/controller recycle now also emits a forced editor-replica refresh. JetBrains and VS Code replace cached open-document forwarders after controller replacement or native-library reload, covering both zero-replica timing windows without an IDE restart, repair command, or disk fallback.
+- Retrying an interrupted closeout now atomically supersedes the uncommitted response tail after the last unchanged committed response while preserving later operator prompts. It removes stale/partial assistant copies, installs the latest complete response, and canonicalizes the document to one terminal boundary.
+- Response materialization is now proved semantically against the projected document, so the expected terminal `(HEAD)` annotation cannot make a successfully materialized response look absent.
+- Git closeout now builds the session-document commit in a private index rooted at the observed HEAD, creates the commit with `commit-tree`, and advances HEAD with compare-and-swap. Unrelated staged files are excluded from the commit and remain staged.
+
+
+The Haiven session also passes `session-check` with exactly one boundary. No `agent-doc repair` command and no forced disk write were used; this historical interrupted cycle is crossing the binary-prescribed transactional `write --commit` path once, and future closeout/recovery stays automatic.
+<!-- agent:boundary:4bedbbac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
-/goal Implement backlog item(s): #aqt3
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

@@ -4,13 +4,17 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.114
+
+- **Committed transient tails self-heal without repair.** When canonical authority and disk agree on an older deferred projection that differs from committed `HEAD` only by agent-doc transient markers, `session-check` now clears every obsolete deferred intent, CAS-restores the exact committed bytes through editor authority, and proves `HEAD == authority == disk` before success. This removes leaked `no-pending-capture` markers and stale boundary ids automatically while preserving genuine post-commit operator edits.
+
 ## 0.34.113
 
 - **Multi-stage repair can no longer replay an intermediate document.** After exact canonical and disk proof, repair settles the entire superseded deferred-intent stack and retains only the newest reconnect target while preserving the original editor cut as its merge base. A later marker cleanup or boundary normalization therefore cannot uncover and project an older response image.
 - **Zero-replica editor authority is now an automatic supervisor-recovery condition.** Writes retain the complete target, request a safe supervisor recycle, and direct the caller to retry the same binary-owned finalize path rather than run response repair or force disk. Turn-stage staleness checks also classify a reliably-open editor with zero registered relay members as stale even when its binary inode is current.
 - **`session-check` now proves terminal authority/disk equality.** It refuses success when canonical CRDT text and the working-tree projection differ, records an automatic stale-editor-replica recycle request, and reports both content hashes. A committed cycle can no longer hide a late reconnect replay behind a clean lifecycle projection.
 
-## 0.34.113
+## 0.34.112
 
 - **Explicit repair completes retained zero-replica writes.** When an editor owner exists but has no registered relay replica, ordinary writes still fail closed without touching disk. If an explicit repair has already retained its exact CAS target in CRDT + Lazily state, repair now performs an audited force-disk projection of only that target, verifies canonical and disk equality, replaces the deferred write with force-disk reconnect lineage, and then continues snapshot/commit closeout. A retry can no longer say “No pending response” while the session file remains fragmented.
 

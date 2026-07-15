@@ -154,6 +154,20 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
     }
 
+    fn settle_committed_projection(
+        &self,
+        file: &Path,
+        committed_content: &str,
+        expected_current: &str,
+    ) -> Result<()> {
+        agent_doc_document_realtime_io::settle_committed_projection_if_current_through_authority(
+            file,
+            committed_content,
+            expected_current,
+            "session_check_committed_projection_settlement",
+        )
+    }
+
     fn repair_committed_historical_snapshot_drift(
         &self,
         file: &Path,

@@ -654,6 +654,55 @@ pub fn atomic_write_if_current_through_authority(
     atomic_write_through_authority(path, content)
 }
 
+/// Settle a committed projection that is known to differ from the current
+/// document only by transient agent-doc markers.
+///
+/// Session-check calls this only after proving canonical authority and disk are
+/// byte-identical and the committed target is normalization-equivalent. Clear
+/// every older deferred target on both sides of the CAS so a reconnect cannot
+/// replay the stale intermediate projection after the committed bytes become
+/// visible.
+pub fn settle_committed_projection_if_current_through_authority(
+    path: &Path,
+    committed_content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    anyhow::ensure!(
+        canonical == expected_current && disk == expected_current,
+        "{source}: refusing committed projection settlement for {} without exact authority/disk current-content proof (expected_hash={}, canonical_hash={}, disk_hash={})",
+        path.display(),
+        agent_doc_hash::content_hash(expected_current),
+        agent_doc_hash::content_hash(&canonical),
+        agent_doc_hash::content_hash(&disk),
+    );
+    clear_all_deferred_document_write_intents(path, source)?;
+    atomic_write_if_current_through_authority(path, committed_content, expected_current, source)?;
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    anyhow::ensure!(
+        canonical == committed_content && disk == committed_content,
+        "{source}: committed projection settlement for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={})",
+        path.display(),
+        agent_doc_hash::content_hash(committed_content),
+        agent_doc_hash::content_hash(&canonical),
+        agent_doc_hash::content_hash(&disk),
+    );
+    clear_all_deferred_document_write_intents(path, source)?;
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "committed_projection_settled file={} prior_hash={} committed_hash={} deferred_lineage=cleared",
+            path.display(),
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(committed_content),
+        ),
+    );
+    Ok(())
+}
+
 /// Repair-only zero-replica recovery.
 ///
 /// Ordinary editor-owned writes must never fall back to disk when the owner has
@@ -3147,6 +3196,41 @@ mod tests {
         assert!(
             pending_document_write(&file).is_none(),
             "settling the final reconnect target must not uncover an older intermediate repair"
+        );
+    }
+
+    #[test]
+    fn committed_projection_settlement_clears_stale_deferred_lineage() {
+        let editor_base = "# Session\n\ncomplete response\n";
+        let stale_projection = "# Session\n\ncomplete response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n";
+        let committed = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
+        let (_dir, file, _canonical) = temp_doc(stale_projection);
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            stale_projection,
+            "committed_projection_stale_intent_test",
+            DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
+        )
+        .unwrap();
+        assert!(pending_document_write(&file).is_some());
+
+        settle_committed_projection_if_current_through_authority(
+            &file,
+            committed,
+            stale_projection,
+            "committed_projection_settlement_test",
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
+        assert_eq!(
+            try_resolve_current_document_content(&file, "committed_projection_verify").unwrap(),
+            committed,
+        );
+        assert!(
+            pending_document_write(&file).is_none(),
+            "a settled committed projection must not retain or uncover an older target"
         );
     }
 

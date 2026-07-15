@@ -98,6 +98,12 @@ pub struct SessionCheckReport {
 pub trait SessionCheckEffects {
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn settle_committed_projection(
+        &self,
+        file: &Path,
+        committed_content: &str,
+        expected_current: &str,
+    ) -> Result<()>;
     fn repair_committed_historical_snapshot_drift(
         &self,
         file: &Path,
@@ -188,6 +194,52 @@ fn ensure_terminal_authority_disk_convergence(
     );
 }
 
+fn self_heal_transiently_stale_committed_projection(
+    file: &Path,
+    authority_content: &str,
+    effects: &impl SessionCheckEffects,
+) -> Result<bool> {
+    let Some(committed_content) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(false);
+    };
+    if authority_content == committed_content {
+        return Ok(false);
+    }
+    let normalized_authority =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            authority_content,
+        );
+    let normalized_committed =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+            &committed_content,
+        );
+    if normalized_authority != normalized_committed {
+        return Ok(false);
+    }
+
+    eprintln!(
+        "[session-check] committed_projection_stale: self-healing transient-only authority/disk drift for {}",
+        file.display(),
+    );
+    effects.settle_committed_projection(file, &committed_content, authority_content)?;
+    let settled_authority = crate::resolve_current_document_content(
+        file,
+        "session_check_committed_projection_settled",
+    )?;
+    let settled_disk =
+        crate::resolve_disk_document_content(file, "session_check_committed_projection_settled")?;
+    anyhow::ensure!(
+        settled_authority == committed_content && settled_disk == committed_content,
+        "[session-check] committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={})",
+        file.display(),
+        agent_doc_hash::content_hash(&committed_content),
+        agent_doc_hash::content_hash(&settled_authority),
+        agent_doc_hash::content_hash(&settled_disk),
+    );
+    agent_doc_snapshot_io::save(file, &committed_content, agent_doc_ops_log_io::log_op)?;
+    Ok(true)
+}
+
 /// `session-check` with the optional Codex final-gate.
 ///
 /// Default (`codex_final_gate = false`): keeps exit 0 for a clean document and
@@ -225,6 +277,7 @@ pub fn run_with_options(
     let disk_content =
         crate::resolve_disk_document_content(file, "session_check_terminal_convergence")?;
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content)?;
+    self_heal_transiently_stale_committed_projection(file, &authority_content, effects)?;
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
@@ -1357,6 +1410,48 @@ fn detect_duplicate_response_patchback(file: &Path) -> Result<Option<String>> {
 #[cfg(test)]
 mod terminal_convergence_tests {
     use super::*;
+    use std::process::Command;
+
+    struct TestEffects;
+
+    impl SessionCheckEffects for TestEffects {
+        fn closeout_recovery_hint(&self, _file: &Path) -> String {
+            String::new()
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_document_realtime_io::atomic_write_through_authority(file, content)
+        }
+
+        fn settle_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_current: &str,
+        ) -> Result<()> {
+            agent_doc_document_realtime_io::settle_committed_projection_if_current_through_authority(
+                file,
+                committed_content,
+                expected_current,
+                "session_check_test_settlement",
+            )
+        }
+
+        fn repair_committed_historical_snapshot_drift(
+            &self,
+            _file: &Path,
+        ) -> Result<Option<&'static str>> {
+            Ok(None)
+        }
+
+        fn recover_missing_commit_boundary(
+            &self,
+            _file: &Path,
+            _event: &str,
+        ) -> Result<Option<&'static str>> {
+            Ok(None)
+        }
+    }
 
     #[test]
     fn session_check_rejects_crdt_disk_divergence_after_committed_closeout() {
@@ -1380,6 +1475,53 @@ mod terminal_convergence_tests {
         assert_eq!(
             request.reason,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+        );
+    }
+
+    #[test]
+    fn session_check_self_heals_transiently_stale_committed_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let committed = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
+        let stale = "# Session\n\ncomplete response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n";
+        std::fs::write(&file, committed).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        let commit = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "clean closeout", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+        std::fs::write(&file, stale).unwrap();
+
+        let healed =
+            self_heal_transiently_stale_committed_projection(&file, stale, &TestEffects).unwrap();
+
+        assert!(healed);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&file).unwrap().as_deref(),
+            Some(committed),
         );
     }
 }

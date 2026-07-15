@@ -505,11 +505,6 @@ I don't see the mermaid diagrams on the dark background.
 
 
 
-How would CAS be achieved in go? Should we qualify a lock or CAS for the keys<!-- agent:boundary:69949696 --><!-- agent:boundary:69949696 -->
-- **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
-- **Local IDE preview (JetBrains/VS Code JCEF):** respects the init directive — this fixes it.
-
-
 ### Re: Mermaid invisible on dark background — opus-4-8
 
 That's a contrast problem, not a rendering failure: mermaid's default theme draws black strokes + dark text, which vanish on your dark editor background. Added `%%{init: {"theme":"dark"}}%%` as the first line of **both** diagrams (§2 hub topology, §4.1 lifecycle) — the built-in `dark` theme uses light-gray nodes, white text, and light edges, so they show up on a dark background.
@@ -519,7 +514,7 @@ Two caveats worth knowing:
 - **GitHub:** strips `%%{init}%%` for security and instead auto-themes mermaid to the page (dark on dark-mode GitHub, light on light). So the directive is a no-op there but GitHub already renders it correctly either way — no conflict.
 
 If you're viewing it somewhere that **doesn't render mermaid at all** (you'd see raw `flowchart` text, not an invisible diagram), tell me and I'll either drop back to ASCII art or export the diagrams to PNG and embed them. And if you want the doc to read cleanly on *both* light and dark (e.g. you'll export to PDF on a white page), I can swap `theme:"dark"` for explicit `themeVariables` that contrast on either — just say which surface it's final-rendered on.
-How would CAS be achieved in go? Should we qualify a lock or CAS for the ?
+How would CAS be achieved in go? Should we qualify a lock or CAS for the keys
 ### Re: CAS in Go for the registry — opus-4-8
 
 Important precision here, because "CAS" was doing two jobs in my earlier note. There's **hardware CAS** (a single atomic instruction) and the **logical compare-and-swap** semantics I meant for the unregister race. They're not interchangeable for a map. Added this to §2.3.
@@ -548,7 +543,52 @@ func (s *shard) unregister(k clientKey, connID uint64) {
 The `c.connID == connID` guard is the whole point: a laggy old connection calling `unregister` after a reconnect already installed a fresh conn (new `connID`) under the same key finds the guard false and **leaves the live connection alone**. Register is the mirror: under the lock, read the existing entry, apply the last-writer-wins eviction, then overwrite.
 
 **Bottom line:** registry = lock or actor (a map isn't word-CAS-able); the only genuine `atomic.CompareAndSwap` in play is if you go read-mostly copy-on-write, and the genuine atomic you *do* want regardless is the `connID` counter. For our write-hot path: **sharded `RWMutex` + compare-connID-under-lock**, or the actor which serializes it for free.
-<!-- agent:boundary:69949696 -->
+❯ Please clarify stateful vs stateless. I'm writing tasks/recruit/haiven/haiven-websocket-hub-takehome.md.
+
+### Re: Stateful vs stateless, clarified — opus-4-8
+
+First, the framing that makes it click: "stateful hub vs stateless hub" is a bit of a trap, because the socket is always stateful. A WebSocket sits on a TCP connection, and a TCP connection is pinned to exactly one process on one machine. Some node holds that file descriptor in memory. You can't make the live connection stateless.
+
+So the real decision isn't "does the hub hold state." It's "where does the routing and membership state live": in the node's own memory, or in an external shared plane that every node can read.
+
+Routing/membership state means: which clients are connected, which node owns each client, and which clients are in which topic/room. That's the part you can keep local or externalize.
+
+Three points on the spectrum:
+
+1. Stateful hub (single node). The node holds the sockets and the registry (clientID to conn, topic to set of clients) in its own memory. A message from client A to client B is one in-memory lookup and a write. Lowest latency, simplest to build and operate. The catch: that node is a single point. To run more than one node you need a way to know which node holds client B, and if the node dies, all its clients drop and its in-memory registry is gone.
+
+2. Stateless routing (many interchangeable nodes). The socket still lives on a node (unavoidable), but the routing/membership state moves out to a shared plane: a message bus plus a shared presence/routing table (NATS, or Redis, etc). Any node can reach any client by publishing to the plane; the node that owns the target's socket is subscribed and delivers it. Nodes are interchangeable, so you scale horizontally and survive a node loss (the client reconnects to any node and the plane re-resolves it). The cost is one extra network hop per cross-node message, plus the operational weight of the bus, the routing table, and dedup.
+
+3. Hybrid (what I'd actually build). Keep the socket and a local registry on each node, so same-node delivery stays one in-memory hop with no bus. Add a routing plane only for cross-node addressing: it maps clientID to the owning node and carries messages between nodes. You externalize addressing, not the socket. Local stays local; only cross-node traffic pays the hop.
+
+Concretely, how a message crosses nodes in the hybrid:
+- A and B on the same node: A to node, registry lookup, write to B. No bus.
+- A on node1, B on node2: node1 publishes to the plane keyed by B's clientID; node2 owns B, is subscribed, and delivers locally. One extra hop, and only for clients that aren't on this node.
+
+The tradeoffs, in one line each:
+- Latency: stateful lowest (one hop). Stateless/hybrid add a hop for cross-node.
+- Ops complexity: stateful lowest. Stateless highest (bus + routing table + dedup). Hybrid in between.
+- Failure blast radius: stateful worst (a node dies, all its clients drop and its registry is lost). Stateless/hybrid smaller (reconnect anywhere, state was external).
+- Scale: stateful is vertical only. Stateless/hybrid scale horizontally.
+
+For the takehome, the honest recommendation is: ship the stateful single node first (it's the correct core, and you need the connection layer either way), but put the registry and fan-out behind interfaces so the hybrid is a drop-in. Build the routing plane when connection count or an availability SLA forces multi-node, not before. The one framing that reads as senior: call out that the socket is inherently stateful, so "stateless" really means externalizing the routing plane, not the connection.
+
+Separately: the AI-tells pass on websocket-hub-design.md is done. Removed the spaced em-dashes, the section-symbol (§) cross-refs, and the bold, and cut the rhetorical flourishes. Verified zero of each remain. I also rebuilt and reloaded the agent-doc plugin (it was running stale code, which is what kept corrupting this session doc).
+
+### Re: Stateful vs stateless in the WebSocket hub — gpt-5
+
+The short version is: **the WebSocket hub is necessarily stateful at the connection edge, but durable application state should live outside it.** “Stateless” is useful for recomputable routing decisions; it does not describe the live socket owner.
+
+I rewrote §3 of `tasks/recruit/haiven/haiven-websocket-hub-takehome.md` to make the boundary precise:
+
+- **Ephemeral, node-local state:** the open socket, read/write pumps, authenticated identity, subscriptions, send queue, and local `clientID -> conn` registry. A live TCP connection cannot move between processes.
+- **Durable external state:** reliable messages, acknowledgements, resume cursors, and authoritative application/session data. These belong in an outbox/log, database, or downstream service.
+- **Stateless routing decisions:** choosing a shard from `clientID` or a bus subject from `topic` can be recomputed from each message. Delivery still depends on state somewhere—local connection registries, an external `clientID -> nodeID` directory, or deterministic shard ownership.
+- **Reconnect behavior:** a JWT carries identity and authorization, not mutable session state. A new node rebuilds ephemeral state using the JWT, durable backend data, and the client's last acknowledged cursor. Sticky routing is only an optimization; correctness must tolerate reconnecting elsewhere.
+
+A message bus removes the need for every node to know every connection when doing topic fan-out, but it does **not** make hub nodes stateless: each node still owns and delivers to its local subscribers.
+
+<!-- agent:boundary:54e779c0 -->
 <!-- /agent:exchange -->
 
 ## Queue

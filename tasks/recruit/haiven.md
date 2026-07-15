@@ -726,7 +726,49 @@ With **gnet + gobwas/ws + wsutil**, you hand-roll essentially none of the protoc
 So the earlier "gobwas = hand-roll the protocol, 3–4 days" was too pessimistic **if** you take the `gnet + wsutil` route. The honest remaining difference vs. nbio: nbio is **one** cohesive dependency and slightly less glue; the gnet+gobwas stack is **two** libraries but gives you gobwas's lower-level frame control if you ever want it.
 
 **Recommendation stands: nbio** — fewest moving parts for this hub, and the control gobwas offers isn't something this design needs. Choose gnet+gobwas only if you specifically want gnet's event-loop ergonomics or gobwas's frame-level control. Either way, "hand-rolling the WebSocket protocol" is **off the table** — that was never actually required.
-<!-- agent:boundary:0b3f7779 -->
+
+### Re: Decision — gobwas/ws; and libraries to fill nbio's out-of-the-box gaps — opus-4-8
+
+#### Decision logged
+
+**Chosen: gobwas/ws** (over nbio) for the WebSocket transport.
+
+**Rationale (yours, recorded):**
+- **Larger ecosystem** — gobwas/ws is widely used and composes with multiple independent event-loop and pool libraries, rather than being one integrated stack.
+- **No single-maintainer dependence** — nbio is effectively maintained by one person (`lesismal`). gobwas/ws is battle-tested and, more importantly, its natural event-loop partners have *organizational* backing: **`cloudwego/netpoll` is ByteDance-maintained** (a company, multi-contributor), and **`panjf2000/gnet`** has a broad contributor base and heavy production adoption. So the whole stack's bus-factor is spread across several projects, not concentrated in one maintainer.
+
+This reverses my earlier nbio recommendation — on the maintainer-risk / ecosystem axis you're weighting, gobwas/ws is the better call, and the effort gap is small (the `wsutil + gnet` route is ~2–2.5 days, no hand-rolled protocol or loop).
+
+#### What nbio gives out of the box, and the gobwas-ecosystem library for each
+
+The point of nbio is that it's *one* integrated framework. Going with gobwas means assembling equivalents. Here's the full gap list and the library that closes each — none require hand-rolling:
+
+| nbio provides OOTB | Missing in bare gobwas/ws | gobwas-ecosystem solution |
+|---|---|---|
+| Epoll/kqueue **event loop** (no goroutine-per-conn) | Yes — gobwas is just a codec | **`panjf2000/gnet`** (ergonomic) or **`cloudwego/netpoll`** (ByteDance-backed) |
+| **WS protocol**: ping/pong/close, fragmentation | Partially — raw `ws` is low-level | **`gobwas/ws/wsutil`** (`ControlHandler` does ping/pong/close) — ships with gobwas |
+| **Goroutine pool** for running handlers off poller threads | Yes | **`panjf2000/ants`** (gnet-native pool, same author) |
+| **Timing wheel** for read deadlines / ping intervals at scale (a `time.Timer` per conn doesn't scale to millions) | Yes — this is a real one | **`antlabs/timer`** or **`RussellLuo/timingwheel`**; gnet also exposes `OnTick` for a coarse shared ticker |
+| **Async write** with a per-conn write queue / flow control | Yes | **`gnet` `Conn.AsyncWrite`** (built in) — map your existing `sendQueue` onto it |
+| **Buffer pooling** (read/write) | Partially — gobwas is low-alloc but no managed pool | **gnet** pools internally; or **`valyala/bytebufferpool`** |
+| **Non-blocking HTTP** for `/connect` upgrade + `/healthz` `/metrics` on the same loop | Yes | **`cloudwego/hertz`** (netpoll-based) or gnet's HTTP example; **or** just keep `net/http` for the two low-traffic REST endpoints — they don't need the event loop |
+| **Non-blocking TLS** on the event loop | Yes — genuinely hard | **Non-issue here:** DESIGN.md §7.1 terminates TLS at the load balancer, so the hub sees plain WS. Only relevant if you ever terminate TLS in-process (then gnet's TLS wrapper or an LB stays the answer) |
+| Engine lifecycle / graceful shutdown / conn registry | Partially | **gnet** engine (`OnShutdown`, connection tracking) built in |
+
+#### The recommended gobwas stack
+
+For your ecosystem + maintainer-risk priorities:
+
+- **`gobwas/ws` + `gobwas/ws/wsutil`** — framing + protocol control frames.
+- **`panjf2000/gnet`** — event loop, async writes, buffer pooling, lifecycle. (Swap in **`cloudwego/netpoll`** if you want the strongest "corporate-backed, not one maintainer" story and are willing to wire more yourself.)
+- **`panjf2000/ants`** — handler goroutine pool.
+- **`antlabs/timer`** (or a gnet `OnTick` sweep) — scalable deadline/ping timing wheel.
+- **`net/http`** kept for `/healthz` + `/metrics` (low traffic; no need to move them onto the loop).
+
+Net: you reproduce everything nbio bundles, spread across independently-maintained libraries — exactly the bus-factor property you're after. The only real "extra assembly" vs. nbio is wiring the timing wheel and the gnet-byte-buffer↔`wsutil` adapter; both are well-trodden (gnet ships a gobwas WebSocket example that shows the adapter).
+
+Updated backlog `#haivenws` to target this gobwas stack instead of nbio, and the ADR will record this decision + the gap-filling table.
+<!-- agent:boundary:e1c8ebcf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -737,7 +779,7 @@ So the earlier "gobwas = hand-roll the protocol, 3–4 days" was too pessimistic
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#haivenws] Implement the nbio WebSocket transport migration for haiven-websocket-hub (scale + low latency): rewrite conn.go pumps into nbio OnMessage/OnClose callbacks, move server.go/main.go onto nbhttp, keep Accept/registry/router/outbox/breaker semantics, re-map sendQueue backpressure to async writes, update e2e test + DESIGN.md §3–§4, and add an ADR recording nbio vs gobwas/ws vs gorilla+gin. [recommended]
+- [ ] [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
 - [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role

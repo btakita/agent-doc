@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.121
+
+- **Forced IDEA reconnects now make the visible editor and replacement replica one atomic target.** When queue consumption or another post-response mutation advances the retained target, JetBrains compare-and-swaps the reconciled bytes into the open document under the non-operator mutation guard before it registers and swaps the replacement replica. Editor drift and pending local work fail closed, so a target-only replica can no longer ACK while stale IDEA text later replays an older boundary.
+- **Every deferred realtime merge keeps the newest target's singleton boundary.** Settled-operator rebases, chained deferred targets, and reconnect merges now canonicalize boundary control state after CRDT composition. Regression coverage reproduces the live queue-consume reconnect that previously retained a stale editor boundary, drops all older boundary identities, and proves boundary-free or malformed targets cannot mint or strip protocol markers.
+
 ## 0.34.120
 
 - **ACK recovery can no longer resurrect the response target it just superseded.** When a response-cell retry is already the live CPC authority, deferred-write retention now replaces the older target and rebases reconnect lineage on that exact failed-ACK editor cut instead of three-way-merging the stale assistant response back in. Reconnect returns the newest complete response directly for an unchanged buffer and semantically preserves later `❯` operator prompts with one boundary.

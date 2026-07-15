@@ -1377,13 +1377,26 @@ pub fn reposition_boundary_to_end_preserve_head_with_id(
 /// the merged document must keep only the response branch's boundary ID and
 /// place it at the terminal exchange position.
 pub fn canonicalize_boundary_after_document_merge(doc: &str, response_branch: &str) -> String {
-    let preferred_id = element::parse(response_branch).ok().and_then(|components| {
-        components
-            .iter()
-            .find(|component| component.name == "exchange")
-            .and_then(|exchange| find_boundary_in_component(response_branch, exchange))
-    });
-    reposition_boundary_to_end_preserve_head_with_id(doc, preferred_id.as_deref())
+    let Ok(response_components) = element::parse(response_branch) else {
+        return doc.to_string();
+    };
+    let Some(preferred_id) = response_components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .and_then(|exchange| find_boundary_in_component(response_branch, exchange))
+    else {
+        return doc.to_string();
+    };
+    let Ok(merged_components) = element::parse(doc) else {
+        return doc.to_string();
+    };
+    if !merged_components
+        .iter()
+        .any(|component| component.name == "exchange")
+    {
+        return doc.to_string();
+    }
+    reposition_boundary_to_end_preserve_head_with_id(doc, Some(&preferred_id))
 }
 
 /// Collapse only adjacent, standalone boundary markers produced by one CRDT
@@ -2819,6 +2832,19 @@ Done.
                 .find("<!-- agent:boundary:new-response-id -->")
                 .unwrap()
                 < result.find("<!-- /agent:exchange -->").unwrap()
+        );
+
+        let branch_without_boundary =
+            response_branch.replace("<!-- agent:boundary:new-response-id -->\n", "");
+        assert_eq!(
+            canonicalize_boundary_after_document_merge(merged, &branch_without_boundary),
+            merged,
+            "a non-response merge must not mint a boundary"
+        );
+        assert_eq!(
+            canonicalize_boundary_after_document_merge(merged, "<!-- agent:exchange -->"),
+            merged,
+            "an incomplete preferred branch must not strip existing boundaries"
         );
     }
 

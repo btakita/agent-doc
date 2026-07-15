@@ -1038,22 +1038,26 @@ pub fn apply_canonical_replace_if_attached(
                             continue;
                         }
                     } else {
-                        let effective_target =
-                            if relay_text == expected_current || relay_text == content {
-                                content.to_string()
-                            } else {
-                                agent_doc_merge::crdt::merge_by_component(
-                            Some(&base_state),
-                            content,
-                            &relay_text,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "{source}: failed to CRDT-merge the settled editor version for {}",
-                                file.display()
+                        let effective_target = if relay_text == expected_current
+                            || relay_text == content
+                        {
+                            content.to_string()
+                        } else {
+                            let merged = agent_doc_merge::crdt::merge_by_component(
+                                    Some(&base_state),
+                                    content,
+                                    &relay_text,
+                                )
+                                .with_context(|| {
+                                    format!(
+                                        "{source}: failed to CRDT-merge the settled editor version for {}",
+                                        file.display()
+                                    )
+                                })?;
+                            agent_doc_template::canonicalize_boundary_after_document_merge(
+                                &merged, content,
                             )
-                            })?
-                            };
+                        };
 
                         let zero_replica_visible_write_proven = live_editors == 0
                             && relay_text == effective_target
@@ -1509,6 +1513,10 @@ fn ensure_deferred_document_write_intent(
                     file.display()
                 )
             })?;
+            target_content = agent_doc_template::canonicalize_boundary_after_document_merge(
+                &target_content,
+                content,
+            );
             // Preserve the original editor cut as the merge base across a
             // chain of canonical target refinements (commit boundary moves,
             // marker cleanup, compaction). Re-basing on the prior target would
@@ -1623,6 +1631,10 @@ pub fn deferred_document_write_reconnect_content(
             file.display()
         )
     })?;
+    let merged = agent_doc_template::canonicalize_boundary_after_document_merge(
+        &merged,
+        &pending.target_content,
+    );
     if agent_doc_hash::content_hash(&merged).eq_ignore_ascii_case(&pending.target_hash) {
         return Ok(Some(pending.target_content));
     }
@@ -3092,12 +3104,12 @@ mod tests {
         let baseline = concat!(
             "# Session\n\n",
             "<!-- agent:queue -->\n- baseline\n<!-- /agent:queue -->\n\n",
-            "<!-- agent:exchange -->\nReady.\n<!-- /agent:exchange -->\n",
+            "<!-- agent:exchange -->\nReady.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n",
         );
         let operator = baseline.replace("- baseline\n", "- baseline\n- operator edit\n");
         let agent = baseline.replace(
-            "Ready.\n<!-- /agent:exchange -->",
-            "Ready.\n\n### Re: agent\n\nApplied once.\n<!-- /agent:exchange -->",
+            "Ready.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->",
+            "Ready.\n\n### Re: agent\n\nApplied once.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
         );
         let (_dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-crdt-rebase";
@@ -3126,6 +3138,9 @@ mod tests {
         assert!(current.contains("- operator edit"));
         assert_eq!(current.matches("### Re: agent").count(), 1);
         assert_eq!(current.matches("Applied once.").count(), 1);
+        assert!(current.contains("agent:boundary:new"));
+        assert!(!current.contains("agent:boundary:old"));
+        assert_eq!(current.matches("agent:boundary:").count(), 1);
     }
 
     #[test]
@@ -3381,6 +3396,99 @@ mod tests {
         assert!(!merged.contains("### Re: stale — gpt-5"));
         assert!(merged.contains("❯ Operator note after the failed ACK."));
         assert_eq!(merged.matches("agent:boundary:").count(), 1);
+    }
+
+    #[test]
+    fn queue_consume_reconnect_keeps_latest_singleton_boundary() {
+        let response_target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ /goal Implement backlog item(s): #missing\n",
+            "### Re: complete — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:response -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- /goal Implement backlog item(s): #missing\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let queue_consumed_target = response_target.replace(
+            "- /goal Implement backlog item(s): #missing",
+            "- ~~/goal Implement backlog item(s): #missing~~",
+        );
+        let editor_cut = response_target
+            .replace(
+                "### Re: complete — gpt-5",
+                "<!-- agent:boundary:stale-editor -->\n### Re: complete — gpt-5",
+            )
+            .replace("<!-- agent:boundary:response -->\n", "");
+        let (_dir, file, _canonical) = temp_doc(response_target);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            response_target,
+            &queue_consumed_target,
+            "queue_consume_boundary_reconnect_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let reconnected = deferred_document_write_reconnect_content(&file, &editor_cut)
+            .unwrap()
+            .expect("a newline-normalized editor cut should receive the queue-consumed target");
+        assert!(reconnected.contains("- ~~/goal Implement backlog item(s): #missing~~"));
+        assert!(
+            reconnected.contains("agent:boundary:response"),
+            "reconnected document:\n{reconnected}"
+        );
+        assert!(!reconnected.contains("agent:boundary:stale-editor"));
+        assert_eq!(
+            reconnected.matches("agent:boundary:").count(),
+            1,
+            "reconnected document:\n{reconnected}"
+        );
+    }
+
+    #[test]
+    fn deferred_target_composition_keeps_newest_singleton_boundary() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Apply the change.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let first_target = base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: first — gpt-5\n\nFirst target.\n<!-- agent:boundary:first -->",
+        );
+        let newest_target = base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: newest — gpt-5\n\nNewest target.\n<!-- agent:boundary:newest -->",
+        );
+        let (_dir, file, _canonical) = temp_doc(base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &first_target,
+            "deferred_boundary_composition_first",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &newest_target,
+            "deferred_boundary_composition_newest",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("newest deferred target retained");
+        assert!(pending.target_content.contains("agent:boundary:newest"));
+        assert!(!pending.target_content.contains("agent:boundary:first"));
+        assert!(!pending.target_content.contains("agent:boundary:base"));
+        assert_eq!(pending.target_content.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

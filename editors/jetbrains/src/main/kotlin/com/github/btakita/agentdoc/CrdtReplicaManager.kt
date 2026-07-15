@@ -202,18 +202,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         await: Boolean = false,
         forceRefresh: Boolean = false,
     ): Boolean {
-        val attach = {
+        val attach = attach@{
             val started = System.nanoTime()
             var chars = -1
             try {
                 val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
                 chars = text.length
-                shadows[filePath] = text
                 val registrationText = if (forceRefresh) {
                     NativePatching.deferredWriteReconnectContent(filePath, text) ?: text
                 } else {
                     text
                 }
+                if (registrationText != text &&
+                    !installDeferredReconnectContent(filePath, document, text, registrationText)
+                ) {
+                    log.info(
+                        "[crdt-replica] deferred open-document reconnect for ${File(filePath).name}; " +
+                            "the visible editor advanced before the canonical target could be installed",
+                    )
+                    return@attach false
+                }
+                chars = registrationText.length
+                shadows[filePath] = registrationText
                 val forwarder = forwarderFor(
                     filePath,
                     registrationText,
@@ -243,6 +253,41 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         executor.execute { attach() }
         return true
+    }
+
+    private fun installDeferredReconnectContent(
+        filePath: String,
+        document: Document,
+        expectedText: String,
+        canonical: String,
+    ): Boolean {
+        if (hasPendingLocal(filePath)) return false
+        var installed = false
+        ApplicationManager.getApplication().invokeAndWait {
+            val before = document.text
+            if (before == canonical) {
+                shadows[filePath] = canonical
+                installed = true
+                return@invokeAndWait
+            }
+            if (before != expectedText || hasPendingLocal(filePath)) return@invokeAndWait
+            advanceNonOperatorMutationEpoch(filePath)
+            applyingRemote.add(filePath)
+            try {
+                runUndoableRemoteUpdateCommand(document) {
+                    applyMinimalDocumentEditUtil(document, before, canonical)
+                }
+                shadows[filePath] = canonical
+                installed = true
+                log.info(
+                    "[crdt-replica] installed deferred reconnect target for ${File(filePath).name} " +
+                        "before replacement registration (${canonical.length} chars)",
+                )
+            } finally {
+                applyingRemote.remove(filePath)
+            }
+        }
+        return installed
     }
 
     private fun forwardLocalDeltaFromShadow(

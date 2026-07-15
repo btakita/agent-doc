@@ -385,6 +385,22 @@ same-target finalize retry cannot lose or duplicate the response. Recovery is
 bounded and automatic; it must not require closing the editor tab, recycling the
 controller, or choosing between force-disk and an uncommitted response.
 
+All generic realtime merges on this path—settled-operator rebase, deferred-target
+composition, and reconnect—canonicalize boundary control state from the newest
+target branch after the CRDT merge. A valid target boundary is the singleton
+boundary in the result and is placed at exchange end; a non-template, malformed,
+or boundary-free target cannot cause normalization to mint or strip a boundary.
+
+When the deferred reconnect result differs from the open JetBrains document, a
+forced refresh must install those exact bytes into the visible `Document` before
+registering the replacement replica. Installation is compare-and-swap against the
+editor bytes used to compute the reconnect result, refuses pending local edits or
+later buffer drift, and runs under the non-operator mutation guard. Only after the
+visible buffer and reconnect target agree may registration seed and atomically
+swap the replacement member. This ordering prevents queue-consume or other
+post-response targets from being ACKed by a target-only replica while stale IDEA
+text later replays an older boundary or queue state.
+
 ### Turn-State Projection To The Plugin
 
 The CPC owns the authoritative turn phase (`CyclePhase`). The plugin observes a

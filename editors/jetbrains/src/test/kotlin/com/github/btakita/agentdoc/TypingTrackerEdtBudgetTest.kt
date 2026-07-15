@@ -290,12 +290,31 @@ class TypingTrackerEdtBudgetTest {
             source.contains("fun ensureOpenDocumentReplica(") &&
                 source.contains("forceRefresh: Boolean = false") &&
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
-                source.contains("NativePatching.deferredWriteReconnectContent(filePath, text)") &&
+            source.contains("NativePatching.deferredWriteReconnectContent(filePath, text)") &&
+                source.contains("installDeferredReconnectContent(filePath, document, text, registrationText)") &&
                 source.contains("executor.submit<Boolean> { attach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
             source.contains("executor.execute { attach() }") &&
                 source.contains("forwarder.ensureEditorText(initialEditorText)"),
+        )
+        val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")
+            .substringBefore("private fun installDeferredReconnectContent(")
+        assertTrue(
+            "forced refresh must install the reconciled target into the visible editor before registering its replacement replica",
+            forceRefreshAttachBody.indexOf("installDeferredReconnectContent(filePath, document, text, registrationText)") <
+                forceRefreshAttachBody.indexOf("val forwarder = forwarderFor("),
+        )
+        val reconnectInstallBody = source.substringAfter("private fun installDeferredReconnectContent(")
+            .substringBefore("private fun forwardLocalDeltaFromShadow(")
+        assertTrue(
+            "deferred reconnect installation must reject editor drift and suppress local CRDT replay while applying canonical text",
+            reconnectInstallBody.contains("before != expectedText || hasPendingLocal(filePath)") &&
+                reconnectInstallBody.contains("advanceNonOperatorMutationEpoch(filePath)") &&
+                reconnectInstallBody.contains("applyingRemote.add(filePath)") &&
+                reconnectInstallBody.contains("applyMinimalDocumentEditUtil(document, before, canonical)") &&
+                reconnectInstallBody.contains("shadows[filePath] = canonical") &&
+                reconnectInstallBody.contains("applyingRemote.remove(filePath)"),
         )
         assertFalse(
             "an existing CRDT replica must never be overwritten from an unproven full editor snapshot",

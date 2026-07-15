@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -120,12 +120,11 @@ Done — picker re-sourced to LOS loan fundings (no LSS), deployed (worker `c379
 > **Queue prompt:** Can we create loan funding records in the api?
 
 Answered above: yes, via `PUT /api/admin/funds/:id/confirm-wire` → `AddLoanFunding`, which also writes the `loan_funding` cache row the picker reads. Offered a direct seed/create endpoint — awaiting your go on push-to-TMO vs cache-only.
-<!-- agent:boundary:c7d21b9a -->
+We need a bi-directional way to add a funding (with the lender (create or link to existing lender)) or to link to an existing funding. TMO already tracks fundings pre-wire, so we need this link once the loan application is accepted.
+<!-- agent:boundary:b4d70f1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
-- ~~Can we create loan funding records in the api?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

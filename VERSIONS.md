@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.130
+
+- **JetBrains `Run Agent Doc` can provision nested-project documents into a shared root tmux window without manual pane deletion.** When the target project's registry has no live anchor but the target session already has an `agent-doc` window, route startup now inspects every visible pane's process-tree document owner. It uses the requested left/right edge pane only as a split anchor when all owners are proven and different from the requested document; an unknown owner or an unregistered same-document owner still fails closed. This fixes the live `monsterrodholders.md` refusal where the nested `boost-client` registry was stale while the shared window's `%14`/`%15` panes safely owned root-project documents.
+- **Active typing cannot age out while a current-document authority query is blocked.** The resolver now snapshots the typing indicator before querying the controller/CRDT model and checks it again before idle disk fallback. If either observation is active, it fails closed, preventing controller/SQLite contention from turning a read that began during an operator edit into disk authority. This also removes the parallel-suite race in the missing-model fallback regression.
+
 ## 0.34.129
 
 - **Stale response captures now settle when only the live document carries an exchange prompt prefix.** Semantic response materialization strips a transient `❯ ` prefix symmetrically from captured and visible lines after removing transport wrappers and control markers. An already-visible response therefore refreshes the stale capture baseline and reaches committed closeout instead of retrying, while an absent or rewritten response still fails closed.

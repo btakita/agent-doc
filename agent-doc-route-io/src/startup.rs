@@ -1,7 +1,12 @@
 //! Route startup and provisioning I/O.
+//!
+//! A shared `agent-doc` tmux window may span nested project roots. Fresh
+//! provisioning may use a pane from another root as a split-only anchor only
+//! when every visible pane proves ownership of a different agent-doc document;
+//! unknown ownership and same-document ownership remain fail-closed.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cycle_ack::{RouteCycleAckEffects, wait_for_start_ack};
@@ -65,6 +70,63 @@ fn decide_existing_startup_registration<'a>(
     } else {
         ExistingStartupRegistrationDecision::IgnoreStale(existing_pane)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowPaneOwnerObservation<'a> {
+    pane: &'a str,
+    owner_document: Option<&'a Path>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingWindowAnchorDecision<'a> {
+    Use(&'a str),
+    NoPanes,
+    RefuseUnknownOwner(&'a str),
+    RefuseRequestedDocumentOwner(&'a str),
+}
+
+fn decide_existing_window_anchor<'a>(
+    requested_document: &Path,
+    panes: &'a [WindowPaneOwnerObservation<'a>],
+    split_before: bool,
+) -> ExistingWindowAnchorDecision<'a> {
+    if panes.is_empty() {
+        return ExistingWindowAnchorDecision::NoPanes;
+    }
+    for observation in panes {
+        match observation.owner_document {
+            Some(owner) if owner == requested_document => {
+                return ExistingWindowAnchorDecision::RefuseRequestedDocumentOwner(
+                    observation.pane,
+                );
+            }
+            Some(_) => {}
+            None => {
+                return ExistingWindowAnchorDecision::RefuseUnknownOwner(observation.pane);
+            }
+        }
+    }
+    let selected = if split_before {
+        panes.first()
+    } else {
+        panes.last()
+    }
+    .expect("non-empty pane observations were checked above");
+    ExistingWindowAnchorDecision::Use(selected.pane)
+}
+
+fn pane_owner_document(tmux: &Tmux, pane: &str) -> Option<PathBuf> {
+    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane)?;
+    let raw_document =
+        agent_doc_process_owner_io::process_tree_agent_doc_owner_document(&pane_pid.to_string())?;
+    let raw_path = PathBuf::from(raw_document);
+    let candidate = if raw_path.is_absolute() {
+        raw_path
+    } else {
+        agent_doc_tmux_io::pane_current_path(tmux, pane)?.join(raw_path)
+    };
+    candidate.canonicalize().ok()
 }
 
 /// Fresh-route agent dispatch-ready wait budget (`#waitmachine2`). Historically
@@ -355,20 +417,81 @@ pub fn auto_start_in_session_with_lock_mode(
     // Try to split directly in an existing pane.
     // When skip_wait=true (sync path), prefer panes in the target window (agent-doc window)
     // over stash panes — splitting in the stash creates invisible panes.
+    let window_panes = tmux
+        .list_panes_ordered(&format!("{}:agent-doc", session_name))
+        .unwrap_or_default();
+    let registered_anchor =
+        find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "");
+    let mut window_anchor_refusal = None;
     let existing_pane = if skip_wait {
         // Sync path: find a pane in the agent-doc window (not stash)
-        let window_panes = tmux
-            .list_panes_ordered(&format!("{}:agent-doc", session_name))
-            .unwrap_or_default();
         let positional = if split_before {
-            window_panes.into_iter().next() // leftmost by screen position
+            window_panes.first().cloned() // leftmost by screen position
         } else {
-            window_panes.into_iter().last() // rightmost by screen position
+            window_panes.last().cloned() // rightmost by screen position
         };
-        positional
-            .or_else(|| find_registered_pane_in_session(tmux, &registry_base_dir, session_name, ""))
+        positional.or(registered_anchor)
+    } else if registered_anchor.is_some() {
+        registered_anchor
+    } else if window_panes.is_empty() {
+        None
     } else {
-        find_registered_pane_in_session(tmux, &registry_base_dir, session_name, "")
+        let requested_document = file.canonicalize().ok();
+        let owner_documents: Vec<Option<PathBuf>> = window_panes
+            .iter()
+            .map(|pane| pane_owner_document(tmux, pane))
+            .collect();
+        let observations: Vec<WindowPaneOwnerObservation<'_>> = window_panes
+            .iter()
+            .zip(&owner_documents)
+            .map(|(pane, owner_document)| WindowPaneOwnerObservation {
+                pane,
+                owner_document: owner_document.as_deref(),
+            })
+            .collect();
+        match requested_document.as_deref() {
+            Some(requested_document) => {
+                match decide_existing_window_anchor(requested_document, &observations, split_before)
+                {
+                    ExistingWindowAnchorDecision::Use(anchor) => {
+                        let owner = observations
+                            .iter()
+                            .find(|observation| observation.pane == anchor)
+                            .and_then(|observation| observation.owner_document)
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_startup_cross_project_window_anchor file={} anchor={} anchor_owner={} session={}",
+                                file_path, anchor, owner, session_name
+                            ),
+                        );
+                        Some(anchor.to_string())
+                    }
+                    ExistingWindowAnchorDecision::RefuseUnknownOwner(pane) => {
+                        window_anchor_refusal = Some(format!(
+                            "pane {pane} in the target 'agent-doc' window has no provable agent-doc document owner"
+                        ));
+                        None
+                    }
+                    ExistingWindowAnchorDecision::RefuseRequestedDocumentOwner(pane) => {
+                        window_anchor_refusal = Some(format!(
+                            "pane {pane} appears to own the requested document but has no authoritative registration"
+                        ));
+                        None
+                    }
+                    ExistingWindowAnchorDecision::NoPanes => None,
+                }
+            }
+            None => {
+                window_anchor_refusal = Some(format!(
+                    "the requested document path {} could not be canonicalized for split-anchor ownership proof",
+                    file.display()
+                ));
+                None
+            }
+        }
     };
     let split_flag = if split_before { "-dbh" } else { "-dh" };
     let new_pane = if let Some(ref target) = existing_pane {
@@ -402,7 +525,9 @@ pub fn auto_start_in_session_with_lock_mode(
                     session_name,
                     file_path,
                     anchor_pane: None,
-                    cause: "the target session already has an 'agent-doc' window but no safe registered anchor pane was found",
+                    cause: window_anchor_refusal.as_deref().unwrap_or(
+                        "the target session already has an 'agent-doc' window but no safe registered anchor pane was found",
+                    ),
                 })
             );
         } else {
@@ -905,6 +1030,60 @@ mod tests {
         assert_eq!(
             decide_existing_startup_registration(Some("%7"), false, Some("%7")),
             ExistingStartupRegistrationDecision::None
+        );
+    }
+
+    #[test]
+    fn cross_project_window_anchor_uses_requested_edge_when_all_owners_differ() {
+        let requested = Path::new("/repo/child/tasks/requested.md");
+        let root_left = Path::new("/repo/tasks/left.md");
+        let root_right = Path::new("/repo/tasks/right.md");
+        let panes = [
+            WindowPaneOwnerObservation {
+                pane: "%14",
+                owner_document: Some(root_left),
+            },
+            WindowPaneOwnerObservation {
+                pane: "%15",
+                owner_document: Some(root_right),
+            },
+        ];
+
+        assert_eq!(
+            decide_existing_window_anchor(requested, &panes, true),
+            ExistingWindowAnchorDecision::Use("%14")
+        );
+        assert_eq!(
+            decide_existing_window_anchor(requested, &panes, false),
+            ExistingWindowAnchorDecision::Use("%15")
+        );
+    }
+
+    #[test]
+    fn cross_project_window_anchor_refuses_requested_document_owner() {
+        let requested = Path::new("/repo/child/tasks/requested.md");
+        let panes = [WindowPaneOwnerObservation {
+            pane: "%9",
+            owner_document: Some(requested),
+        }];
+
+        assert_eq!(
+            decide_existing_window_anchor(requested, &panes, false),
+            ExistingWindowAnchorDecision::RefuseRequestedDocumentOwner("%9")
+        );
+    }
+
+    #[test]
+    fn cross_project_window_anchor_refuses_unknown_owner() {
+        let requested = Path::new("/repo/child/tasks/requested.md");
+        let panes = [WindowPaneOwnerObservation {
+            pane: "%9",
+            owner_document: None,
+        }];
+
+        assert_eq!(
+            decide_existing_window_anchor(requested, &panes, false),
+            ExistingWindowAnchorDecision::RefuseUnknownOwner("%9")
         );
     }
 }

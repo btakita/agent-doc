@@ -1861,21 +1861,25 @@ fn resolve_idle_disk_fallback_current_doc(
     source: &str,
     reason: &str,
     detail: Option<&str>,
+    typing_status_at_resolve_start: agent_doc_debounce::TypingIndicatorStatus,
 ) -> Result<Reconciliation> {
     let file_str = file.to_string_lossy();
-    let typing_status = agent_doc_debounce::typing_indicator_status(
+    let typing_status_now = agent_doc_debounce::typing_indicator_status(
         &file_str,
         CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS,
     );
-    if typing_status == agent_doc_debounce::TypingIndicatorStatus::Active {
+    if typing_status_at_resolve_start == agent_doc_debounce::TypingIndicatorStatus::Active
+        || typing_status_now == agent_doc_debounce::TypingIndicatorStatus::Active
+    {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "realtime_doc_resolve_deferred file={} source={} reason={} typing_status={} fallback=none",
+                "realtime_doc_resolve_deferred file={} source={} reason={} typing_status_at_start={} typing_status_now={} fallback=none",
                 file.display(),
                 source,
                 reason,
-                typing_indicator_status_label(typing_status),
+                typing_indicator_status_label(typing_status_at_resolve_start),
+                typing_indicator_status_label(typing_status_now),
             ),
         );
         anyhow::bail!(
@@ -1901,7 +1905,7 @@ fn resolve_idle_disk_fallback_current_doc(
             file.display(),
             source,
             reason,
-            typing_indicator_status_label(typing_status),
+            typing_indicator_status_label(typing_status_now),
             detail.unwrap_or("none").replace('\n', " "),
         ),
     );
@@ -2632,6 +2636,15 @@ fn try_resolve_current_doc_with_disk_inner(
     source: &str,
     require_model_ensure: bool,
 ) -> Result<Reconciliation> {
+    // Snapshot active typing before the authority query. Under controller or
+    // SQLite contention that query can outlive the debounce interval; allowing
+    // the later fallback check to forget that the read began during typing
+    // would demote to disk in the middle of an operator edit.
+    let file_str = file.to_string_lossy();
+    let typing_status_at_resolve_start = agent_doc_debounce::typing_indicator_status(
+        &file_str,
+        CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS,
+    );
     let current = match if require_model_ensure {
         query_live_editor_authority_after_model_ensure(file, source)
     } else {
@@ -2648,6 +2661,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     "missing_replica"
                 },
                 None,
+                typing_status_at_resolve_start,
             );
         }
         Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
@@ -2661,6 +2675,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     "sync_pending"
                 },
                 None,
+                typing_status_at_resolve_start,
             );
         }
         Ok(current) => current,
@@ -2685,6 +2700,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     "editor_authority_error"
                 },
                 Some(&detail),
+                typing_status_at_resolve_start,
             );
         }
     };

@@ -134,6 +134,29 @@ impl RealtimeSteeringSet {
         }
         Some(out)
     }
+
+    /// Project the full operator-steering set into the wire-stable turn view.
+    /// The primary directive supplies the compact state/preview while `count`
+    /// and `verbatim` retain the complete aggregate for every consumer.
+    pub fn turn_projection(&self) -> agent_doc_turn::cpc_projection::TurnSteeringProjection {
+        use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
+
+        let primary = self.primary();
+        let preview = primary.preview().map(str::to_string);
+        let state = match primary {
+            RealtimeSteering::None => return TurnSteeringProjection::none(),
+            RealtimeSteering::PromptTarget { .. } => TurnSteeringState::PromptTarget,
+            RealtimeSteering::ContentEdit { .. } => TurnSteeringState::ContentEdit,
+            RealtimeSteering::PromptDeleted { .. } => TurnSteeringState::PromptDeleted,
+            RealtimeSteering::PromptReduced { .. } => TurnSteeringState::PromptReduced,
+        };
+        TurnSteeringProjection::observed_aggregate(
+            state,
+            self.len(),
+            preview,
+            self.verbatim_aggregate(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -546,6 +569,14 @@ mod tests {
         // The single-directive summary still reports the primary (oldest) one, so
         // label/interrupt paths keep working.
         assert_eq!(set.primary().label(), Some("prompt_target"));
+
+        let projection = set.turn_projection();
+        assert_eq!(projection.count, 2);
+        assert_eq!(
+            projection.preview.as_deref(),
+            Some("❯ First steering directive")
+        );
+        assert_eq!(projection.verbatim.as_deref(), Some(aggregate.as_str()));
     }
 
     #[test]
@@ -573,5 +604,6 @@ mod tests {
         let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
         assert!(!set.is_present());
         assert!(set.verbatim_aggregate().is_none());
+        assert!(!set.turn_projection().is_present());
     }
 }

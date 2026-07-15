@@ -106,12 +106,16 @@ object TurnStateBridge {
             val phaseLabel =
                 if (state == "awaiting_response") "⟳ agent-doc: awaiting response"
                 else "⟳ agent-doc: persisting"
-            val steeringLabel = root.getAsJsonObject("realtime_steering")
+            val steering = root.getAsJsonObject("realtime_steering")
+            val steeringCount = steering?.get("count")?.asInt ?: 0
+            val steeringLabel = steering
                 ?.get("state")
                 ?.asString
                 ?.let(::steeringLabel)
+                ?.let { label -> if (steeringCount > 1) "$label ($steeringCount edits)" else label }
             val label = listOfNotNull(phaseLabel, steeringLabel).joinToString(" · ")
-            TurnStatePresentation(label, true)
+            val tooltip = steering?.get("verbatim")?.asString?.takeIf(String::isNotBlank)
+            TurnStatePresentation(label, true, tooltip)
         }
     } catch (e: Throwable) {
         LOG.debug("[turn-projection] parse failed: ${e.message}")

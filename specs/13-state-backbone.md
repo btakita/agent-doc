@@ -224,6 +224,13 @@ across the three languages — no platform `Hasher` drift).
 
 Node payloads are `base64(serde_json(struct))`.
 
+While a cycle is open, its closeout payload may include `realtime_steering`.
+`RealtimeSteeringObserved` facts replace that aggregate using canonical CRDT
+content-hash event identity, so warm subscribers receive an ordinary `cell_set`
+delta. The payload carries the primary steering kind, total directive count,
+preview, and full ordered verbatim aggregate. `PreflightStarted`, commit, and
+abandonment clear the field at cycle boundaries.
+
 ### Derivation edges
 
 The snapshot/delta carry dependency edges so a plugin mirror can

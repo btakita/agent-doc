@@ -46,6 +46,12 @@ export interface AgentDocTurnProjection {
     state: 'idle' | 'awaiting_response' | 'persisting';
     turn_in_flight: boolean;
     transition_authority: 'project_controller';
+    realtime_steering?: {
+        state: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+        count?: number;
+        preview?: string;
+        verbatim?: string;
+    };
 }
 
 /**
@@ -89,12 +95,43 @@ function stringField(obj: Record<string, unknown> | null, key: string): string |
     return typeof value === 'string' ? value : undefined;
 }
 
-function turnProjectionFromPhase(phase: string | undefined): AgentDocTurnProjection {
+function realtimeSteeringField(
+    obj: Record<string, unknown> | null,
+): AgentDocTurnProjection['realtime_steering'] | undefined {
+    const value = obj?.realtime_steering;
+    if (!value || typeof value !== 'object') return undefined;
+    const steering = value as Record<string, unknown>;
+    const state = stringField(steering, 'state');
+    if (!['prompt_target', 'content_edit', 'prompt_deleted', 'prompt_reduced'].includes(state ?? '')) {
+        return undefined;
+    }
+    return {
+        state: state as NonNullable<AgentDocTurnProjection['realtime_steering']>['state'],
+        count: typeof steering.count === 'number' ? steering.count : undefined,
+        preview: stringField(steering, 'preview'),
+        verbatim: stringField(steering, 'verbatim'),
+    };
+}
+
+function turnProjectionFromPhase(
+    phase: string | undefined,
+    realtimeSteering?: AgentDocTurnProjection['realtime_steering'],
+): AgentDocTurnProjection {
     if (phase === 'preflight_started') {
-        return { state: 'awaiting_response', turn_in_flight: true, transition_authority: 'project_controller' };
+        return {
+            state: 'awaiting_response',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+            ...(realtimeSteering ? { realtime_steering: realtimeSteering } : {}),
+        };
     }
     if (phase === 'response_captured' || phase === 'write_applied') {
-        return { state: 'persisting', turn_in_flight: true, transition_authority: 'project_controller' };
+        return {
+            state: 'persisting',
+            turn_in_flight: true,
+            transition_authority: 'project_controller',
+            ...(realtimeSteering ? { realtime_steering: realtimeSteering } : {}),
+        };
     }
     return { state: 'idle', turn_in_flight: false, transition_authority: 'project_controller' };
 }
@@ -106,7 +143,10 @@ function turnProjectionFromPhase(phase: string | undefined): AgentDocTurnProject
  */
 export function agentDocTurnProjectionFromView(view: InstanceType<typeof GraphView>): AgentDocTurnProjection {
     const closeout = payloadJson(view.singletonNode(AgentDocNodeType.CLOSEOUT_CYCLE)?.payload);
-    return turnProjectionFromPhase(stringField(closeout, 'phase'));
+    return turnProjectionFromPhase(
+        stringField(closeout, 'phase'),
+        realtimeSteeringField(closeout),
+    );
 }
 
 /** Render the compact editor-visible status string (matches the kt `.compact()`). */

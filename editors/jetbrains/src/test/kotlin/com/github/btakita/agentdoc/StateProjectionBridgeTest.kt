@@ -197,9 +197,23 @@ class StateProjectionBridgeTest {
 
     @Test
     fun `turn projection derives from closeout cycle phase`() {
-        val awaiting = folded(snapshotMessage(epoch = 1, closeoutPayload = """{"phase":"preflight_started"}"""))
-        assertEquals("awaiting_response", AgentDocTurnProjection.fromView(awaiting).state)
-        assertTrue(AgentDocTurnProjection.fromView(awaiting).turnInFlight)
+        val awaiting = folded(
+            snapshotMessage(
+                epoch = 1,
+                closeoutPayload = """{"phase":"preflight_started","realtime_steering":{"state":"prompt_target","count":2,"preview":"First edit","verbatim":"First edit\n\nSecond edit"}}""",
+            ),
+        )
+        val awaitingProjection = AgentDocTurnProjection.fromView(awaiting)
+        assertEquals("awaiting_response", awaitingProjection.state)
+        assertTrue(awaitingProjection.turnInFlight)
+        val awaitingJson = JsonParser.parseString(awaitingProjection.toJsonString()).asJsonObject
+        assertEquals(2, awaitingJson.getAsJsonObject("realtime_steering").get("count").asInt)
+        assertTrue(
+            awaitingJson.getAsJsonObject("realtime_steering")
+                .get("verbatim")
+                .asString
+                .contains("Second edit"),
+        )
 
         val persisting = folded(snapshotMessage(epoch = 2, closeoutPayload = """{"phase":"response_captured"}"""))
         assertEquals("persisting", AgentDocTurnProjection.fromView(persisting).state)

@@ -4920,7 +4920,7 @@ fn handle_crdt_text_adopt_rpc(
 
 fn handle_crdt_replica_rpc(
     bootstrap: &ControllerBootstrap,
-    _runtime: Option<&ControllerRuntime>,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let requested_file = request_file(&request)?;
@@ -4952,6 +4952,23 @@ fn handle_crdt_replica_rpc(
     }
 
     let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
+    if method_name == "replica_update"
+        && let Some(runtime) = runtime
+        && let Err(error) = observe_realtime_steering_after_replica_update(
+            bootstrap, runtime, &canonical, authority,
+        )
+    {
+        // Steering is an observational projection over the already-accepted
+        // CRDT update. Preserve the edit and retry projection on the next
+        // replica update instead of failing the editor's canonical mutation.
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "realtime_steering_projection_deferred file={} reason={error:#}",
+                canonical.display(),
+            ),
+        );
+    }
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -4965,6 +4982,60 @@ fn handle_crdt_replica_rpc(
         ),
     );
     Ok(data)
+}
+
+fn observe_realtime_steering_after_replica_update(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+    authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+) -> Result<bool> {
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let Some(state) = runtime.document_state_projection(&document_hash)? else {
+        return Ok(false);
+    };
+    let (Some(cycle_id), Some(phase)) = (state.closeout.cycle_id.as_deref(), state.closeout.phase)
+    else {
+        return Ok(false);
+    };
+    if !phase.is_open() {
+        return Ok(false);
+    }
+    let Some(baseline) = agent_doc_snapshot_io::load(canonical)? else {
+        return Ok(false);
+    };
+    let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
+        agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+            canonical, authority,
+        )?
+    else {
+        return Ok(false);
+    };
+    let event = realtime_steering_event_for_text(&document_hash, cycle_id, &baseline, &text);
+    append_apply_state_event(bootstrap, runtime, event)
+}
+
+fn realtime_steering_event_for_text(
+    document_hash: &str,
+    cycle_id: &str,
+    baseline: &str,
+    current: &str,
+) -> agent_doc_state_backbone::StateEvent {
+    let content_hash = agent_doc_hash::content_hash(current);
+    let steering = agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
+        baseline, current,
+    )
+    .realtime_steering_all()
+    .turn_projection();
+    agent_doc_state_backbone::StateEvent::new(
+        format!("realtime-steering:{document_hash}:{cycle_id}:{content_hash}"),
+        agent_doc_state_backbone::StateFact::RealtimeSteeringObserved {
+            document_hash: document_hash.to_string(),
+            cycle_id: cycle_id.to_string(),
+            steering,
+            content_hash,
+        },
+    )
 }
 
 fn handle_editor_route_rpc(
@@ -12188,6 +12259,35 @@ mod tests {
             stale_mutating_client_binary(Some("definitely-stale")),
             Some("definitely-stale")
         );
+    }
+
+    #[test]
+    fn realtime_steering_event_carries_the_full_crdt_aggregate() {
+        let document = |tail: &str| {
+            format!(
+                "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- agent:boundary:base -->\n{tail}<!-- /agent:exchange -->\n"
+            )
+        };
+        let baseline = document("");
+        let current = document("❯ First live edit\n\n❯ Second live edit\n");
+        let event = realtime_steering_event_for_text("doc", "cycle", &baseline, &current);
+
+        let agent_doc_state_backbone::StateFact::RealtimeSteeringObserved {
+            cycle_id,
+            steering,
+            content_hash,
+            ..
+        } = &event.fact
+        else {
+            panic!("expected realtime steering fact");
+        };
+        assert_eq!(cycle_id, "cycle");
+        assert_eq!(steering.count, 2);
+        assert!(steering.verbatim.as_deref().is_some_and(
+            |body| body.contains("First live edit") && body.contains("Second live edit")
+        ));
+        assert_eq!(content_hash, &agent_doc_hash::content_hash(&current));
+        assert!(event.event_id.ends_with(content_hash));
     }
 
     #[test]

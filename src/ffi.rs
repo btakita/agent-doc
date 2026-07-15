@@ -775,9 +775,9 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
     let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
     if proj.turn_in_flight {
         let steering =
-            agent_doc_session_check_io::realtime_steering_since_turn_baseline(Path::new(path))
+            agent_doc_session_check_io::realtime_steering_set_since_turn_baseline(Path::new(path))
                 .ok()
-                .map(turn_steering_projection_from_realtime)
+                .map(|set| set.turn_projection())
                 .unwrap_or_else(agent_doc_turn::cpc_projection::TurnSteeringProjection::none);
         proj = proj.with_realtime_steering(steering);
     }
@@ -846,25 +846,6 @@ fn document_model_actor_state(file: &Path) -> Option<agent_doc_sqlite::state_sto
         .ok()
         .flatten()
         .map(|record| record.state)
-}
-
-fn turn_steering_projection_from_realtime(
-    steering: agent_doc_document_realtime::baseline_comparison::RealtimeSteering,
-) -> agent_doc_turn::cpc_projection::TurnSteeringProjection {
-    use agent_doc_document_realtime::baseline_comparison::RealtimeSteering;
-    use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
-
-    let Some(preview) = steering.preview().map(ToOwned::to_owned) else {
-        return TurnSteeringProjection::none();
-    };
-    let state = match steering {
-        RealtimeSteering::None => return TurnSteeringProjection::none(),
-        RealtimeSteering::PromptTarget { .. } => TurnSteeringState::PromptTarget,
-        RealtimeSteering::ContentEdit { .. } => TurnSteeringState::ContentEdit,
-        RealtimeSteering::PromptDeleted { .. } => TurnSteeringState::PromptDeleted,
-        RealtimeSteering::PromptReduced { .. } => TurnSteeringState::PromptReduced,
-    };
-    TurnSteeringProjection::observed(state, Some(preview))
 }
 
 /// Check if any operation is in progress for a file (file-based).

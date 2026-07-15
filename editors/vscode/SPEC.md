@@ -44,6 +44,9 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - VS Code CRDT replica IPC must use `.agent-doc/controller.sock` with the controller `crdt_replica` envelope. It must not connect to `.agent-doc/supervisor/*.sock`.
 - VS Code watches `.agent-doc/crdt-replica-events/*.json` and drains the named document's pending CRDT deliveries from the controller. It must not use a fixed interval remote-update pull loop.
 - VS Code reads turn-state refreshes from the Project Controller `state_subscribe` lazily projection and mirrors the returned snapshot/delta locally. It must not read or watch `.agent-doc/turn-scope/*.json`, `.agent-doc/state/cycles/*.json`, or any other sidecar for ordinary turn-state UI. If the Project Controller request fails, the status bar shows `agent-doc: Project Controller disconnected`; there is no sidecar compatibility fallback. The global cdylib reload-broadcast file remains event-driven, with no fallback reload polling interval. Turn-state refreshes are coalesced and use a minimum refresh interval; active-editor changes may force one immediate Project Controller refresh.
+- The mirrored closeout payload's Rust-owned `realtime_steering` aggregate drives
+  the active-turn status label/count and hover text; TypeScript must not derive
+  steering from the visible buffer or disk.
 - VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
 - Prompt steering is Project Controller-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 

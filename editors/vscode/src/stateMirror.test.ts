@@ -179,12 +179,30 @@ describe('GraphView fold + AgentDocProjection (#lzsync 3B clean split)', () => {
     it('agentDocTurnProjectionFromView derives from the closeout cycle phase', () => {
         const view = new GraphView();
         assert.strictEqual(applyIpcMessageToView(view, snapshotMsg(1, [
-            { node: CLOSEOUT, typeTag: AgentDocNodeType.CLOSEOUT_CYCLE, payload: { phase: 'preflight_started' } },
+            {
+                node: CLOSEOUT,
+                typeTag: AgentDocNodeType.CLOSEOUT_CYCLE,
+                payload: {
+                    phase: 'preflight_started',
+                    realtime_steering: {
+                        state: 'prompt_target',
+                        count: 2,
+                        preview: 'First edit',
+                        verbatim: 'First edit\n\nSecond edit',
+                    },
+                },
+            },
         ])), 'snapshot');
         assert.deepStrictEqual(agentDocTurnProjectionFromView(view), {
             state: 'awaiting_response',
             turn_in_flight: true,
             transition_authority: 'project_controller',
+            realtime_steering: {
+                state: 'prompt_target',
+                count: 2,
+                preview: 'First edit',
+                verbatim: 'First edit\n\nSecond edit',
+            },
         });
 
         applyIpcMessageToView(view, deltaMsg(1, 2, [cellSet(CLOSEOUT, { phase: 'write_applied' })]));

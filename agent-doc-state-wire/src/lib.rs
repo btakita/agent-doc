@@ -657,6 +657,24 @@ mod tests {
         )
     }
 
+    fn steering_event(id: &str, doc: &str, cycle: &str) -> StateEvent {
+        StateEvent::new(
+            id,
+            StateFact::RealtimeSteeringObserved {
+                document_hash: doc.to_string(),
+                cycle_id: cycle.to_string(),
+                steering:
+                    agent_doc_turn::cpc_projection::TurnSteeringProjection::observed_aggregate(
+                        agent_doc_turn::cpc_projection::TurnSteeringState::PromptTarget,
+                        2,
+                        Some("first edit".to_string()),
+                        Some("first edit\n\nsecond edit".to_string()),
+                    ),
+                content_hash: "steering-hash".to_string(),
+            },
+        )
+    }
+
     fn authority_event(
         id: &str,
         doc: &str,
@@ -776,6 +794,45 @@ mod tests {
         assert!(snapshot.edges.is_empty());
         assert!(snapshot.roots.is_empty());
         assert_eq!(snapshot.document_hash, "no-such-doc");
+    }
+
+    #[test]
+    fn steering_fact_updates_the_closeout_cycle_wire_payload() {
+        let mut ledger = EventLedger::new();
+        let doc = "steering-doc";
+        let cycle = "cycle-1";
+        ledger.append(preflight_event("e1", doc, cycle));
+        ledger.append(steering_event("e2", doc, cycle));
+
+        let snapshot = match subscribe(&ledger, doc, 0) {
+            WireSubscribe::Snapshot(snapshot) => snapshot,
+            _ => panic!("cold read must emit snapshot"),
+        };
+        let closeout = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.type_tag == AgentDocNodeType::CloseoutCycle.type_tag())
+            .expect("closeout cycle node");
+        let bytes = BASE64_STANDARD
+            .decode(closeout.payload.as_deref().expect("closeout payload"))
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(payload["realtime_steering"]["count"], 2);
+        assert!(
+            payload["realtime_steering"]["verbatim"]
+                .as_str()
+                .is_some_and(|body| body.contains("second edit"))
+        );
+
+        let delta = match subscribe(&ledger, doc, 1) {
+            WireSubscribe::Delta(delta) => delta,
+            _ => panic!("warm read must emit delta"),
+        };
+        let closeout_slot = slot_id(doc, AgentDocNodeType::CloseoutCycle.type_tag(), cycle);
+        assert!(delta.ops.iter().any(|op| matches!(
+            op,
+            WireDeltaOp::CellSet { slot_id, .. } if *slot_id == closeout_slot
+        )));
     }
 
     #[test]

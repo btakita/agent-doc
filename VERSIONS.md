@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.131
+
+- **Realtime document edits are now first-class turn state in both editor mirrors.** Every accepted CRDT replica update during an open closeout cycle is compared with the saved turn baseline, reduced to the aggregate steering kind/count/preview/verbatim payload, and appended as an idempotent state-backbone fact. State-wire snapshots and deltas carry that same cycle-scoped projection, so JetBrains and VS Code render live steering from the authoritative mirror instead of losing it when the direct FFI path is bypassed.
+- **Operator settlement is explicit without submitting incomplete edits.** The realtime aggregate remains attached to the active cycle until commit or abandonment, while `Run Agent Doc` continues through the serialized project-controller route and queues behind an active turn. An operator can finish editing and invoke the action once to hand off the settled document; the running turn and session-check both retain the full aggregate steering evidence.
+
 ## 0.34.130
 
 - **JetBrains `Run Agent Doc` can provision nested-project documents into a shared root tmux window without manual pane deletion.** When the target project's registry has no live anchor but the target session already has an `agent-doc` window, route startup now inspects every visible pane's process-tree document owner. It uses the requested left/right edge pane only as a split anchor when all owners are proven and different from the requested document; an unknown owner or an unregistered same-document owner still fails closed. This fixes the live `monsterrodholders.md` refusal where the nested `boost-client` registry was stale while the shared window's `%14`/`%15` panes safely owned root-project documents.

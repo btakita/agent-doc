@@ -14,15 +14,18 @@ class TurnStateBridgeTest {
                   "state":"awaiting_response",
                   "turn_in_flight":true,
                   "transition_authority":"project_controller",
-                  "realtime_steering":{
-                    "state":"prompt_deleted",
-                    "preview":"removed prompt"
-                  }
+                "realtime_steering":{
+                  "state":"prompt_deleted",
+                  "count":2,
+                  "preview":"removed prompt",
+                  "verbatim":"first removal\n\nsecond removal"
+                }
                 }
             """.trimIndent(),
         )
 
-        assertEquals("⟳ agent-doc: awaiting response · prompt deleted", presentation.label)
+        assertEquals("⟳ agent-doc: awaiting response · prompt deleted (2 edits)", presentation.label)
+        assertEquals("first removal\n\nsecond removal", presentation.tooltip)
         assertTrue(presentation.guardPromptForwarding)
     }
 

@@ -228,6 +228,16 @@ the turn lifecycle. This classification belongs to realtime authority;
 preflight and other lifecycle consumers should consume the classified state
 rather than re-deriving it from raw unified diff text.
 
+Each accepted editor `replica_update` also projects the current aggregate onto
+the open closeout cycle as a `RealtimeSteeringObserved` backbone fact. The
+JetBrains and VS Code state mirrors render that same Rust-owned payload in their
+active-turn banner/status surface; they must not derive steering from raw editor
+text. Projection is immediate, but dispatch remains barriered: editing does not
+type into a busy pane. The normal stop/session-check barrier supplies the full
+aggregate to the active turn. An explicit `agent-doc <file>` / **Run Agent Doc**
+after editing is the settlement handoff; when a turn owner is active it queues
+behind that owner, so partially typed text is never submitted as a new turn.
+
 Auto-DAG is part of realtime queue projection. Dependency edges such as
 `after=#id`, queue/backlog priority, and operator/agent priority pins are
 recomputed before turn admission decides which queue head is active. A

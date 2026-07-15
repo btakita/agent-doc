@@ -73,20 +73,52 @@ fn turn_steering_state_is_none(state: &TurnSteeringState) -> bool {
 pub struct TurnSteeringProjection {
     #[serde(default, skip_serializing_if = "turn_steering_state_is_none")]
     pub state: TurnSteeringState,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbatim: Option<String>,
+}
+
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 impl TurnSteeringProjection {
     pub const fn none() -> Self {
         Self {
             state: TurnSteeringState::None,
+            count: 0,
             preview: None,
+            verbatim: None,
         }
     }
 
     pub fn observed(state: TurnSteeringState, preview: Option<String>) -> Self {
-        Self { state, preview }
+        Self {
+            state,
+            count: 1,
+            preview,
+            verbatim: None,
+        }
+    }
+
+    pub fn observed_aggregate(
+        state: TurnSteeringState,
+        count: usize,
+        preview: Option<String>,
+        verbatim: Option<String>,
+    ) -> Self {
+        if count == 0 || matches!(state, TurnSteeringState::None) {
+            return Self::none();
+        }
+        Self {
+            state,
+            count,
+            preview,
+            verbatim,
+        }
     }
 
     pub fn is_present(&self) -> bool {
@@ -260,6 +292,7 @@ mod tests {
         );
         let json = serde_json::to_string(&proj).unwrap();
         assert!(json.contains("prompt_deleted"));
+        assert!(json.contains("\"count\":1"));
         assert!(json.contains("removed prompt"));
         let back: TurnProjection = serde_json::from_str(&json).unwrap();
         assert_eq!(proj, back);

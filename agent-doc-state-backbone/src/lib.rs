@@ -15,6 +15,7 @@ use lazily::{
 use serde::{Deserialize, Serialize};
 
 use agent_doc_turn::CyclePhase;
+use agent_doc_turn::cpc_projection::TurnSteeringProjection;
 use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
@@ -186,6 +187,12 @@ pub enum StateFact {
         session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tracked_work_maintenance_required: Option<bool>,
+    },
+    RealtimeSteeringObserved {
+        document_hash: String,
+        cycle_id: String,
+        steering: TurnSteeringProjection,
+        content_hash: String,
     },
     BaselineSaved {
         document_hash: String,
@@ -648,6 +655,7 @@ impl StateFact {
     pub fn document_hash(&self) -> &str {
         match self {
             Self::PreflightStarted { document_hash, .. }
+            | Self::RealtimeSteeringObserved { document_hash, .. }
             | Self::BaselineSaved { document_hash, .. }
             | Self::FileWatchChangeObserved { document_hash, .. }
             | Self::DocumentAuthorityObserved { document_hash, .. }
@@ -704,6 +712,7 @@ impl StateFact {
     pub fn domain(&self) -> StateDomain {
         match self {
             Self::PreflightStarted { .. }
+            | Self::RealtimeSteeringObserved { .. }
             | Self::ResponseCaptured { .. }
             | Self::PendingResponseCaptured { .. }
             | Self::PendingResponseCleared { .. }
@@ -760,6 +769,7 @@ impl StateFact {
     pub fn label(&self) -> &'static str {
         match self {
             Self::PreflightStarted { .. } => "preflight_started",
+            Self::RealtimeSteeringObserved { .. } => "realtime_steering_observed",
             Self::BaselineSaved { .. } => "baseline_saved",
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
@@ -1311,6 +1321,15 @@ impl DocumentStateProjection {
                 self.closeout.tracked_work_maintenance_required =
                     *tracked_work_maintenance_required;
             }
+            StateFact::RealtimeSteeringObserved {
+                cycle_id, steering, ..
+            } => {
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self.closeout.phase.is_some_and(CyclePhase::is_open)
+                {
+                    self.closeout.realtime_steering = steering.clone();
+                }
+            }
             StateFact::ResponseCaptured {
                 cycle_id,
                 capture_id,
@@ -1429,6 +1448,7 @@ impl DocumentStateProjection {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::Committed);
                 self.closeout.commit = Some(commit.clone());
+                self.closeout.realtime_steering = TurnSteeringProjection::none();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "committed");
             }
@@ -1443,6 +1463,7 @@ impl DocumentStateProjection {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::Abandoned);
                 self.closeout.abandoned_reason = Some(reason.clone());
+                self.closeout.realtime_steering = TurnSteeringProjection::none();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "abandoned");
             }
@@ -2510,6 +2531,10 @@ impl QueueHeadProjection {
     }
 }
 
+fn turn_steering_projection_is_none(steering: &TurnSteeringProjection) -> bool {
+    !steering.is_present()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CloseoutProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2544,6 +2569,8 @@ pub struct CloseoutProjection {
     pub pending_response: Option<PendingResponseProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_response_clear_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "turn_steering_projection_is_none")]
+    pub realtime_steering: TurnSteeringProjection,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_semantic_merge_acks: Vec<DocumentCellMergeAckProjection>,
 }
@@ -2563,6 +2590,7 @@ impl CloseoutProjection {
             self.response_snapshot_hash = None;
             self.captured_response = None;
             self.response_cell = None;
+            self.realtime_steering = TurnSteeringProjection::none();
             self.pending_semantic_merge_acks.clear();
         }
         let current = self.phase.unwrap_or(CyclePhase::PreflightStarted);
@@ -3995,6 +4023,59 @@ mod tests {
                 editor_id: None,
             },
         )
+    }
+
+    #[test]
+    fn realtime_steering_is_scoped_to_the_open_closeout_cycle() {
+        use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
+
+        let mut projection = DocumentStateProjection::new("doc-steering");
+        projection.apply(&StateFact::PreflightStarted {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-1".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.apply(&StateFact::RealtimeSteeringObserved {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-1".into(),
+            steering: TurnSteeringProjection::observed_aggregate(
+                TurnSteeringState::PromptTarget,
+                2,
+                Some("first prompt".into()),
+                Some("both prompts verbatim".into()),
+            ),
+            content_hash: "hash-1".into(),
+        });
+        assert_eq!(projection.closeout.realtime_steering.count, 2);
+        assert_eq!(
+            projection.closeout.realtime_steering.verbatim.as_deref(),
+            Some("both prompts verbatim")
+        );
+
+        projection.apply(&StateFact::CommitObserved {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-1".into(),
+            commit: "abc123".into(),
+        });
+        assert!(!projection.closeout.realtime_steering.is_present());
+
+        projection.apply(&StateFact::PreflightStarted {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-2".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.apply(&StateFact::RealtimeSteeringObserved {
+            document_hash: "doc-steering".into(),
+            cycle_id: "cycle-1".into(),
+            steering: TurnSteeringProjection::observed(
+                TurnSteeringState::ContentEdit,
+                Some("stale".into()),
+            ),
+            content_hash: "hash-stale".into(),
+        });
+        assert!(!projection.closeout.realtime_steering.is_present());
     }
 
     #[test]

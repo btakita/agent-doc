@@ -71,23 +71,32 @@ data class AgentDocProjection(
 data class AgentDocTurnProjection(
     val state: String,
     val turnInFlight: Boolean,
+    val realtimeSteering: JsonObject? = null,
 ) {
     fun toJsonString(): String {
         val root = JsonObject()
         root.addProperty("state", state)
         root.addProperty("turn_in_flight", turnInFlight)
         root.addProperty("transition_authority", "project_controller")
+        if (turnInFlight && realtimeSteering != null) {
+            root.add("realtime_steering", realtimeSteering)
+        }
         return root.toString()
     }
 
     companion object {
         /** Derive the turn projection from a folded [GraphView]. */
-        fun fromView(view: GraphView): AgentDocTurnProjection =
-            fromPhase(payloadJson(view.singletonNode(AgentDocNodeType.CLOSEOUT_CYCLE)?.payload).stringField("phase"))
+        fun fromView(view: GraphView): AgentDocTurnProjection {
+            val closeout = payloadJson(view.singletonNode(AgentDocNodeType.CLOSEOUT_CYCLE)?.payload)
+            return fromPhase(
+                closeout.stringField("phase"),
+                closeout?.getAsJsonObject("realtime_steering"),
+            )
+        }
 
-        fun fromPhase(phase: String?): AgentDocTurnProjection = when (phase) {
-            "preflight_started" -> AgentDocTurnProjection("awaiting_response", true)
-            "response_captured", "write_applied" -> AgentDocTurnProjection("persisting", true)
+        fun fromPhase(phase: String?, realtimeSteering: JsonObject? = null): AgentDocTurnProjection = when (phase) {
+            "preflight_started" -> AgentDocTurnProjection("awaiting_response", true, realtimeSteering)
+            "response_captured", "write_applied" -> AgentDocTurnProjection("persisting", true, realtimeSteering)
             else -> AgentDocTurnProjection("idle", false)
         }
     }

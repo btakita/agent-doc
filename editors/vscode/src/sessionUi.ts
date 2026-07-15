@@ -54,7 +54,9 @@ export interface TurnProjection {
     transition_authority: string;
     realtime_steering?: {
         state?: 'prompt_target' | 'content_edit' | 'prompt_deleted' | 'prompt_reduced';
+        count?: number;
         preview?: string;
+        verbatim?: string;
     };
 }
 
@@ -65,6 +67,8 @@ export interface TurnStatePresentation {
      * response (the `live_prompt_drift` double-append guard): the plugin queues it
      * for the next turn instead of feeding it into the current exchange. */
     guardPromptForwarding: boolean;
+    /** Full aggregate steering for status-bar hover text when present. */
+    tooltip?: string;
 }
 
 type TurnSteeringState = NonNullable<TurnProjection['realtime_steering']>['state'];
@@ -86,9 +90,14 @@ export function buildTurnStatePresentation(
         projection.state === 'awaiting_response'
             ? '⟳ agent-doc: awaiting response'
             : '⟳ agent-doc: persisting';
-    const steering = steeringLabel(projection.realtime_steering?.state);
+    const steeringCount = projection.realtime_steering?.count ?? 0;
+    const steeringBase = steeringLabel(projection.realtime_steering?.state);
+    const steering = steeringBase && steeringCount > 1
+        ? `${steeringBase} (${steeringCount} edits)`
+        : steeringBase;
     const label = steering ? `${phaseLabel} · ${steering}` : phaseLabel;
-    return { label, guardPromptForwarding: true };
+    const tooltip = projection.realtime_steering?.verbatim?.trim() || undefined;
+    return { label, guardPromptForwarding: true, ...(tooltip ? { tooltip } : {}) };
 }
 
 function steeringLabel(state: TurnSteeringState | undefined): string | null {

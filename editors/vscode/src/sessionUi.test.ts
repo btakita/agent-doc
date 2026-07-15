@@ -263,15 +263,18 @@ describe('buildTurnStatePresentation (Project Controller turn-state coordination
             transition_authority: 'project_controller',
             realtime_steering: {
                 state: 'prompt_deleted',
+                count: 2,
                 preview: 'removed prompt',
+                verbatim: 'first removal\n\nsecond removal',
             },
         };
 
         const presentation = buildTurnStatePresentation(deleted);
         assert.strictEqual(
             presentation.label,
-            '⟳ agent-doc: awaiting response · prompt deleted',
+            '⟳ agent-doc: awaiting response · prompt deleted (2 edits)',
         );
+        assert.strictEqual(presentation.tooltip, 'first removal\n\nsecond removal');
         assert.strictEqual(presentation.guardPromptForwarding, true);
     });
 });

@@ -39,7 +39,72 @@ done
 Compacted content:
 - Archived 1 response topic(s): database lock and JetBrains delivery-ACK wedge
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): JetBrains Run Agent Doc stall and editor-authoritative closeou...
-<!-- agent:boundary:255a58e0 -->
+- `main` and tag `v0.34.130` are pushed. CI and the tagged Release workflow are currently in progress.
+- A live replay with the same JetBrains editor-attempt marker selected `%15`, created `%18`, reached Claude readiness, and received accepted supervisor dispatch proof. `%18` remains live and registered as `busy` for `monsterrodholders.md`.
+- `make install-full` installed binary/cdylib 0.34.130, followed by an all-project controller recycle.
+- `make check` passed all 7,680 tests plus simulator, version-sync, and formal checks.
+- Added the realtime typing-entry regression guard.
+- Added route tests for safe cross-project selection, target-owner refusal, and unknown-owner refusal.
+❯ Fix JB `Run Agent Doc` on monsterrodholders.md
+```
+refusing to provision a duplicate tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md in session '0': the target session already has an 'agent-doc' window but no safe registered anchor pane was found
+Inspect the existing panes first:
+  tmux list-panes -t 0:agent-doc -F '#{pane_id} #{window_name} #{pane_current_command} #{pane_current_path}'
+  tmux list-panes -a -F '#{session_name} #{window_name} #{pane_id} #{pane_current_command} #{pane_current_path}' | grep ' /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md$'
+  tmux kill-pane -t <pane_id>
+Then rerun: agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
+```
+
+Editor document selection auto-sync with tmux pane is inconsistent.
+
+haiven.md session had a JB `File Cache Conflict`.
+```
+● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+  controller pid, retry the commit):
+
+  Ran 1 shell command
+
+● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+  Waiting, then retrying:
+
+  Ran 1 shell command
+
+● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+  tree? committed? is the editor replica alive?) before any further infra action.
+
+  Ran 1 shell command
+
+● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+```
+
+JB `Compact Exchange` on monsterrodholders.md
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+```
+
+haiven.md response was not committed.
+
+### Re: JetBrains Run Agent Doc on monsterrodholders.md — gpt-5
+
+Fixed and released in `agent-doc` 0.34.130 (`e7caf2e6c`).
+
+The refusal came from route startup consulting only the nested `boost-client` session registry. That registry had no live anchor for shared tmux session `0`, while the existing panes belonged to documents in the parent project. Startup therefore saw an existing `agent-doc` window but could not prove a safe pane beside which to split.
+
+Route startup now has a conservative cross-project fallback. When no live registry anchor exists, it derives canonical document ownership from every visible pane process tree. It selects the requested edge pane only when every pane is proven to own a different document; an unknown owner or a pane already owning the target remains fail-closed. This keeps the duplicate-pane protection while allowing nested projects to share the parent session.
+
+The full suite also exposed a timing race in realtime document fallback: editor typing could expire while the controller query was running, allowing a missing-model disk fallback. The resolver now blocks fallback when typing was active either at entry or at fallback time.
+
+Validation completed:
+
+- Added route tests for safe cross-project selection, target-owner refusal, and unknown-owner refusal.
+- Added the realtime typing-entry regression guard.
+- `make check` passed all 7,680 tests plus simulator, version-sync, and formal checks.
+- `make install-full` installed binary/cdylib 0.34.130, followed by an all-project controller recycle.
+- A live replay with the same JetBrains editor-attempt marker selected `%15`, created `%18`, reached Claude readiness, and received accepted supervisor dispatch proof. `%18` remains live and registered as `busy` for `monsterrodholders.md`.
+- `main` and tag `v0.34.130` are pushed. CI and the tagged Release workflow are currently in progress.
+<!-- agent:boundary:bda8caa4 -->
 <!-- /agent:exchange -->
 ## Queue
 

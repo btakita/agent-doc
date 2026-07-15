@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.126"
+agent-doc-version: "0.34.136"
 ---
 
 # agent-doc
@@ -122,7 +122,7 @@ RESPONSE
 
 `finalize` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `write --commit` shares that fail-closed boundary for repair writes.
 
-**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists. **Backpressure / pending-ACK recovery rule (all harnesses):** `controller_model_backpressure`, an outstanding delivery ACK, or a retained response already visible in the live editor is a settle-and-retry state, not a prompt to alternate `finalize` and `write --commit`. The complete target is retained and exact response cells are idempotent. Stop issuing concurrent closeout commands, leave the live editor authoritative, wait for the binary's cooldown/reconnect path, then retry the same closeout once. Do not kill/restart the project controller merely to clear backpressure or a queue strike, and do not use `--force-disk` while a live editor owns the document; both can turn a transient barrier into replica loss or duplicate-response reconciliation.
+**Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists. **Captured finalize is binary-owned (all harnesses):** invoke `finalize` once for a response. After the binary durably captures it, `controller_model_backpressure`, a pending ACK, CAS race, or retained visible response is owned by the keyed supervisor worker and harness closeout hook. Do not recapture, re-answer, alternate `finalize` with `write --commit`, kill the controller, or elect `--force-disk`; observe the terminal `session-check` result while the binary resumes the same capture with bounded retry and exact-once commit semantics. An external disk change under a live editor is a separate Lazily decision: exact accept plus replica propagation, a newer editor edit, an exact editor save-flush, or final editor close resolves it. The agent never component-merges that disk candidate.
 
 Full detail (ordering, full-suite + tmux-CI review, session-doc staging rule): [runbooks/persist-closeout.md](runbooks/persist-closeout.md), [runbooks/commit.md](runbooks/commit.md).
 

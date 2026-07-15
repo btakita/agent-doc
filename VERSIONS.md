@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.136
+
+- **Harness skill installs preserve binary-owned finalize recovery.** The bundled `SKILL.md` is now the same source of truth as the development Claude skill, and an install-time regression guard prevents OpenCode, Codex, Claude, or Cursor from reverting to agent-driven settle/retry churn.
+
 ## 0.34.135
 
 - **Finalize recovery is binary-owned and keyed by durable capture identity.** The repair command, supervisor worker, and Codex Stop hook resume one captured `(cycle, capture, response)` operation with bounded backoff and exact-once commit semantics. Retryable ACK/backpressure/CAS states no longer ask the agent to re-run finalize, kill controllers, or stack response cells; timed-out owners reap only proven descendants and classify intentional exit 144 as cancellation.

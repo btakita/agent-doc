@@ -2494,11 +2494,13 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skill_quiets_backpressure_without_force_disk_or_controller_kill() {
-        assert!(SKILL_TEMPLATE.contains("Backpressure / pending-ACK recovery rule"));
-        assert!(SKILL_TEMPLATE.contains("Stop issuing concurrent closeout commands"));
-        assert!(SKILL_TEMPLATE.contains("Do not kill/restart the project controller"));
-        assert!(SKILL_TEMPLATE.contains("do not use `--force-disk` while a live editor owns"));
+    fn bundled_skill_delegates_captured_finalize_recovery_to_the_binary() {
+        assert!(SKILL_TEMPLATE.contains("Captured finalize is binary-owned (all harnesses)"));
+        assert!(SKILL_TEMPLATE.contains("owned by the keyed supervisor worker"));
+        assert!(SKILL_TEMPLATE.contains("Do not recapture, re-answer"));
+        assert!(SKILL_TEMPLATE.contains("bounded retry and exact-once commit semantics"));
+        assert!(SKILL_TEMPLATE.contains("exact editor save-flush"));
+        assert!(!SKILL_TEMPLATE.contains("then retry the same closeout once"));
     }
 
     #[test]

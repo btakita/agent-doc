@@ -789,7 +789,33 @@ pub fn repair<R: RepairIoEffects + RepairTemplateWriteEffects, W: RepairReplayWr
     effects: RepairCoordinatorEffects<'_, R, W>,
     file: &Path,
 ) -> Result<RepairOutcome> {
-    let outcome = run(effects, file)?;
+    repair_with_force_disk_override(effects, file, None)
+}
+
+/// Resume a captured closeout while preserving the normal editor/CRDT authority
+/// path. This is the supervisor-owned finalize recovery entrypoint: it may replay
+/// the durable capture, dedupe an already-materialized response, and finish the
+/// commit boundary, but it never elects disk as a fallback authority.
+pub fn repair_preserving_live_authority<
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+) -> Result<RepairOutcome> {
+    repair_with_force_disk_override(effects, file, Some(false))
+}
+
+fn repair_with_force_disk_override<
+    R: RepairIoEffects + RepairTemplateWriteEffects,
+    W: RepairReplayWriteEffects,
+>(
+    effects: RepairCoordinatorEffects<'_, R, W>,
+    file: &Path,
+    force_disk_override: Option<bool>,
+) -> Result<RepairOutcome> {
+    let outcome =
+        run_with_queue_completion_ids_and_force_disk(effects, file, &[], force_disk_override)?;
     if outcome.repaired()
         && outcome != RepairOutcome::StalePreflightCycleAbandoned
         && agent_doc_git_io::status::is_in_git_repo(file)

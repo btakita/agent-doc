@@ -667,6 +667,47 @@ it('force-refresh never republishes an unproven full editor snapshot', async () 
     assert.strictEqual(transport.broadcasts.length, 1);
 });
 
+it('force-refresh installs a proven deferred target before replica rebootstrap', async () => {
+    const nodes: FakeNode[] = [];
+    const transport = new FakeTransport();
+    const filePath = '/work/plan.md';
+    let editorText = 'base';
+    const applied: Array<{ text: string; expected: string }> = [];
+    const settled: string[] = [];
+    const manager = new CrdtReplicaManager({
+        projectRoot: '/work',
+        identity: 'vscode-test',
+        transport,
+        nodeFactory: () => {
+            const node = new FakeNode();
+            nodes.push(node);
+            return node;
+        },
+        listDocuments: () => [],
+        currentText: () => editorText,
+        applyText: async (_file, text, expected) => {
+            applied.push({ text, expected });
+            if (editorText !== expected) return false;
+            editorText = text;
+            return true;
+        },
+        resolveDeferredReconnectContent: (_file, current) =>
+            current === 'base' ? 'recovered target' : null,
+        settleDeferredReconnectContent: (_file, current) => settled.push(current),
+    });
+
+    assert.strictEqual(await manager.attachDocument(filePath, editorText), true);
+    assert.strictEqual(await manager.attachDocument(filePath, editorText, true), true);
+
+    assert.deepStrictEqual(applied, [{ text: 'recovered target', expected: 'base' }]);
+    assert.strictEqual(editorText, 'recovered target');
+    assert.strictEqual(transport.registerCount, 2);
+    assert.strictEqual(transport.deregistered.length, 1);
+    assert.strictEqual(nodes.length, 2);
+    assert.deepStrictEqual(nodes[1].locals.map((local) => local.insert), ['recovered target']);
+    assert.deepStrictEqual(settled, ['recovered target']);
+});
+
 it('non-operator editor events fence queued deltas and never mutate canonical', async () => {
     const node = new FakeNode('base');
     const transport = new FakeTransport();

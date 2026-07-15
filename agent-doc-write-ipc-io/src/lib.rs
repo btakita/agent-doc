@@ -385,7 +385,9 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         && let Some(target) =
             post_commit_reposition_target(working, boundary_id.as_deref(), &normalize_prefix_lines)
     {
-        if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
+            .or_else(|| agent_doc_document_realtime_io::pending_external_disk_candidate(file))
+        {
             // A deferred reconnect target is canonical state, not an editor-only
             // transient projection. Retaining `(HEAD)` here would reintroduce a
             // stale working-tree diff when the JetBrains replica reconnects.

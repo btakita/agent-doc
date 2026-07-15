@@ -1114,15 +1114,119 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
                 },
             )??;
         }
-        // C1b (`plan-crdt-scramble-and-disk-propagation.md`): for an editor-attached
-        // document, ask CPC to drop a disk-change-reconcile marker so the controller
-        // reconciles this out-of-band disk change into the canonical replica.
-        // Best-effort + authority-gated inside the helper (headless docs get no
-        // marker); a failure here must never wedge the watch loop.
-        if let Err(e) = agent_doc_controller_io::project_controller::route_disk_change_signal_via_controller_model_for_doc(
-            Path::new(file),
-            &observation.delivery,
-        ) {
+        // A filesystem change cannot outrank an open editor. Retain its exact
+        // disk bytes as a Lazily user-decision candidate, or settle an older
+        // candidate when every live full-content buffer proves the same bytes
+        // were saved. Only editorless (or already matching) changes enter the
+        // ordinary disk-reconcile route.
+        let live_snapshots: Vec<_> = agent_doc_debounce::live_buffer_snapshots(file)
+            .into_iter()
+            .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+            .collect();
+        let full_live: Vec<_> = live_snapshots
+            .iter()
+            .filter_map(|snapshot| {
+                snapshot
+                    .content
+                    .as_deref()
+                    .map(|content| (snapshot, content))
+            })
+            .collect();
+        let (relay_has_live_editor, relay_editor_content) =
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(Path::new(file)) {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text, live_editors, ..
+                }) => (live_editors > 0, Some(text)),
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+                | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => (true, None),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) | Err(_) => (false, None),
+            };
+        let snapshot_editor_content = full_live.first().and_then(|(_, first)| {
+            full_live
+                .iter()
+                .all(|(_, content)| *content == *first)
+                .then(|| (*first).to_string())
+        });
+        let editor_content = relay_editor_content.or(snapshot_editor_content);
+        let has_live_editor = relay_has_live_editor || !live_snapshots.is_empty();
+        let all_live_match_disk = has_live_editor
+            && editor_content
+                .as_deref()
+                .is_some_and(|content| content == current_content);
+        let disk_candidate_pending = if all_live_match_disk {
+            if let Err(e) =
+                agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_save(
+                    Path::new(file),
+                    current_content,
+                    "file_watch_editor_save_flushed",
+                )
+            {
+                eprintln!("[watch] saved-editor pending settlement failed for {file}: {e}");
+            }
+            false
+        } else if let Some(editor_content) = editor_content.as_deref() {
+            match agent_doc_document_realtime_io::retain_external_disk_candidate(
+                Path::new(file),
+                editor_content,
+                current_content,
+                "file_watch_external_disk_change",
+            ) {
+                Ok(Some(intent_id)) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(file),
+                        &format!(
+                            "file_watch_external_disk_pending file={} intent_id={} editor_hash={} disk_hash={} mutation=none",
+                            file,
+                            intent_id,
+                            agent_doc_document_realtime_io::document_content_hash(editor_content),
+                            agent_doc_document_realtime_io::document_content_hash(current_content),
+                        ),
+                    );
+                    true
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    eprintln!("[watch] failed to retain external disk candidate for {file}: {e}");
+                    true
+                }
+            }
+        } else if has_live_editor {
+            // Preserve the disk candidate even while several editor replicas
+            // are still converging and no exact editor cut can be proven. The
+            // empty expected-hash marker keeps reconnect mutation-free.
+            match agent_doc_document_realtime_io::retain_external_disk_candidate_without_editor_cut(
+                Path::new(file),
+                current_content,
+                "file_watch_external_disk_change_unproven_editor_cut",
+            ) {
+                Ok(intent_id) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(file),
+                        &format!(
+                            "file_watch_external_disk_pending file={} intent_id={} editor_hash=unproven disk_hash={} mutation=none",
+                            file,
+                            intent_id,
+                            agent_doc_document_realtime_io::document_content_hash(current_content),
+                        ),
+                    );
+                    true
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[watch] failed to retain external disk candidate without editor cut for {file}: {e}"
+                    );
+                    true
+                }
+            }
+        } else {
+            false
+        };
+        if !disk_candidate_pending
+            && let Err(e) = agent_doc_controller_io::project_controller::route_disk_change_signal_via_controller_model_for_doc(
+                Path::new(file),
+                &observation.delivery,
+            )
+        {
             eprintln!("[watch] disk-change reconcile signal failed for {file}: {e}");
         }
         Ok(observation.delivery)

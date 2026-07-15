@@ -13,6 +13,66 @@ pub enum DocAuthority {
     Disk,
 }
 
+/// Source selected while rebuilding document authority after reconnect.
+///
+/// Live editor buffers are always ahead of filesystem replicas in the
+/// authority order. Multiple live editors converge through their shared CRDT;
+/// disk and git are recovery sources only when no editor buffer exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconnectAuthority {
+    EditorCrdt,
+    EditorBuffer,
+    Disk,
+    Git,
+    Unavailable,
+}
+
+/// Select the source from which a reconnecting replica must be reset.
+pub fn reconnect_authority(
+    live_editor_buffers: usize,
+    disk_available: bool,
+    git_available: bool,
+) -> ReconnectAuthority {
+    match live_editor_buffers {
+        2.. => ReconnectAuthority::EditorCrdt,
+        1 => ReconnectAuthority::EditorBuffer,
+        0 if disk_available => ReconnectAuthority::Disk,
+        0 if git_available => ReconnectAuthority::Git,
+        0 => ReconnectAuthority::Unavailable,
+    }
+}
+
+/// Resolution of an explicit recovery/force-disk write observed by a live
+/// editor. The binary retains the external target while the editor shows the
+/// pre-write cut; it never silently merges that target into a divergent buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalDiskDecision {
+    /// The editor loaded/accepted the exact external target.
+    AcceptedInEditor,
+    /// The editor still shows the cut from before the external write. Keep the
+    /// target pending while the IDE asks the operator which version to keep.
+    PendingUserDecision,
+    /// The editor contains another cut. It is authoritative and the retained
+    /// external target must be cleared.
+    EditorSupersedes,
+}
+
+pub fn external_disk_decision(
+    expected_editor_hash: &str,
+    external_target_hash: &str,
+    current_editor_hash: &str,
+) -> ExternalDiskDecision {
+    if current_editor_hash.eq_ignore_ascii_case(external_target_hash) {
+        ExternalDiskDecision::AcceptedInEditor
+    } else if expected_editor_hash.is_empty()
+        || current_editor_hash.eq_ignore_ascii_case(expected_editor_hash)
+    {
+        ExternalDiskDecision::PendingUserDecision
+    } else {
+        ExternalDiskDecision::EditorSupersedes
+    }
+}
+
 impl DocAuthority {
     /// Stable label for ops/log markers and diagnostics.
     pub fn as_str(self) -> &'static str {
@@ -86,11 +146,11 @@ pub fn reconcile_current_doc(disk: &str, buffer: Option<&BufferState>) -> Reconc
             diverged: false,
             reason: "editor_unsaved_newer",
         },
-        Some(_clean_but_differs) => Reconciliation {
-            authority: DocAuthority::Disk,
-            content: disk.to_string(),
+        Some(clean_but_differs) => Reconciliation {
+            authority: DocAuthority::EditorBuffer,
+            content: clean_but_differs.content.clone(),
             diverged: true,
-            reason: "buffer_clean_diverged_disk_newer",
+            reason: "live_editor_diverged_disk_pending_reconciliation",
         },
     }
 }
@@ -139,13 +199,13 @@ mod tests {
     }
 
     #[test]
-    fn clean_buffer_diverged_from_disk_uses_disk_and_flags() {
+    fn clean_buffer_diverged_from_disk_keeps_live_editor_authority() {
         let buf = BufferState::new("editor last-saved text", false, 3);
         let r = reconcile_current_doc("disk changed after save", Some(&buf));
-        assert_eq!(r.authority, DocAuthority::Disk);
-        assert_eq!(r.content, "disk changed after save");
+        assert_eq!(r.authority, DocAuthority::EditorBuffer);
+        assert_eq!(r.content, "editor last-saved text");
         assert!(r.diverged);
-        assert_eq!(r.reason, "buffer_clean_diverged_disk_newer");
+        assert_eq!(r.reason, "live_editor_diverged_disk_pending_reconciliation");
     }
 
     #[test]
@@ -163,5 +223,43 @@ mod tests {
         assert!(buffer_supersedes(1, 2));
         assert!(!buffer_supersedes(2, 2));
         assert!(!buffer_supersedes(3, 2));
+    }
+
+    #[test]
+    fn reconnect_authority_orders_editor_then_disk_then_git() {
+        assert_eq!(
+            reconnect_authority(2, true, true),
+            ReconnectAuthority::EditorCrdt
+        );
+        assert_eq!(
+            reconnect_authority(1, true, true),
+            ReconnectAuthority::EditorBuffer
+        );
+        assert_eq!(reconnect_authority(0, true, true), ReconnectAuthority::Disk);
+        assert_eq!(reconnect_authority(0, false, true), ReconnectAuthority::Git);
+        assert_eq!(
+            reconnect_authority(0, false, false),
+            ReconnectAuthority::Unavailable
+        );
+    }
+
+    #[test]
+    fn external_disk_write_waits_for_user_or_yields_to_editor() {
+        assert_eq!(
+            external_disk_decision("base", "target", "base"),
+            ExternalDiskDecision::PendingUserDecision
+        );
+        assert_eq!(
+            external_disk_decision("base", "target", "target"),
+            ExternalDiskDecision::AcceptedInEditor
+        );
+        assert_eq!(
+            external_disk_decision("base", "target", "new-editor-cut"),
+            ExternalDiskDecision::EditorSupersedes
+        );
+        assert_eq!(
+            external_disk_decision("", "target", "unproven-editor-cut"),
+            ExternalDiskDecision::PendingUserDecision
+        );
     }
 }

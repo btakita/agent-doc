@@ -2243,6 +2243,8 @@ class PatchWatcher implements vscode.Disposable {
     private liveBufferReports = new Map<string, LiveBufferReportState>();
     /** Native typing markers are queued off the text-change listener path. */
     private nativeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    /** Clean external-reload reconciliation is also deferred off the UI listener. */
+    private deferredReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** CRDT local forwards are queued off the text-change listener path. */
     private crdtLocalChangeTimers = new Map<string, Set<ReturnType<typeof setTimeout>>>();
     /** Native editor-op writes are queued off the text-change listener path. */
@@ -2309,6 +2311,11 @@ class PatchWatcher implements vscode.Disposable {
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
             currentText: (filePath) => this.currentOpenDocumentText(filePath),
             applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
+            resolveDeferredReconnectContent: (filePath, editorText) =>
+                native.deferredWriteReconnectContent(filePath, editorText, projectRoot),
+            settleDeferredReconnectContent: (filePath, editorText) => {
+                native.deferredWriteReconnectPropagated(filePath, editorText, projectRoot);
+            },
             normalizeTemplateStructure: (text) => native.normalizeTemplateStructure(text, projectRoot),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
@@ -2345,7 +2352,14 @@ class PatchWatcher implements vscode.Disposable {
                     ? path.dirname(path.dirname(this.patchesDir))
                     : undefined;
                 if (operatorEdit) this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);
-                this.scheduleLiveBufferReport(e.document, eventProjectRoot);
+            this.scheduleLiveBufferReport(e.document, eventProjectRoot);
+            if (!operatorEdit && !remoteCrdtApply) {
+                // A clean cache reload may be the operator accepting a pending
+                // external-disk candidate. The shared resolver returns content
+                // only with exact Lazily lineage; attachDocument then resets the
+                // replica from the visible buffer before it can publish.
+                this.scheduleDeferredReconnectRefresh(e.document);
+            }
                 const changes: ReplicaTextChange[] = e.contentChanges.map((change) => ({
                     rangeOffset: change.rangeOffset,
                     rangeLength: change.rangeLength,
@@ -2913,6 +2927,19 @@ class PatchWatcher implements vscode.Disposable {
         this.nativeChangeTimers.set(fsPath, timer);
     }
 
+    private scheduleDeferredReconnectRefresh(document: vscode.TextDocument): void {
+        const fsPath = document.uri.fsPath;
+        const prior = this.deferredReconnectTimers.get(fsPath);
+        if (prior) clearTimeout(prior);
+        const timer = setTimeout(() => {
+            this.deferredReconnectTimers.delete(fsPath);
+            const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === fsPath);
+            if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
+            void this.crdtReplicas?.attachDocument(fsPath, latest.getText(), true);
+        }, 0);
+        this.deferredReconnectTimers.set(fsPath, timer);
+    }
+
     private scheduleLiveBufferReport(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
         const state = this.liveBufferReports.get(fsPath) ?? {
@@ -3007,6 +3034,9 @@ class PatchWatcher implements vscode.Disposable {
         const nativeTimer = this.nativeChangeTimers.get(filePath);
         if (nativeTimer) clearTimeout(nativeTimer);
         this.nativeChangeTimers.delete(filePath);
+        const reconnectTimer = this.deferredReconnectTimers.get(filePath);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        this.deferredReconnectTimers.delete(filePath);
         const crdtTimers = this.crdtLocalChangeTimers.get(filePath);
         if (crdtTimers) {
             for (const crdtTimer of crdtTimers) clearTimeout(crdtTimer);
@@ -3429,6 +3459,10 @@ class PatchWatcher implements vscode.Disposable {
             clearTimeout(timer);
         }
         this.nativeChangeTimers.clear();
+        for (const timer of this.deferredReconnectTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.deferredReconnectTimers.clear();
         for (const timers of this.crdtLocalChangeTimers.values()) {
             for (const timer of timers) clearTimeout(timer);
         }

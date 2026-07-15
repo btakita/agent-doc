@@ -260,6 +260,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             loggedFilePath = filePath
             if (managerForFilePath(filePath) !== this) return
             if (!CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)) {
+                // A clean File Cache Conflict reload may be the operator
+                // accepting a Lazily-retained external disk candidate. Resolve
+                // on the worker; exact CAS/rebootstrap rules keep ordinary
+                // remote CRDT applies as no-ops here.
+                ensureOpenDocumentReplica(filePath, event.document, forceRefresh = true)
                 requestRemoteDrain(filePath, "non-operator-editor-event")
                 return
             }
@@ -327,11 +332,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             try {
                 val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
                 chars = text.length
-                val registrationText = if (forceRefresh) {
-                    NativePatching.deferredWriteReconnectContent(filePath, text) ?: text
-                } else {
-                    text
-                }
+                val deferredReconnect = if (forceRefresh) {
+                    NativePatching.deferredWriteReconnectContent(filePath, text)
+                } else null
+                val registrationText = deferredReconnect ?: text
                 if (registrationText != text &&
                     !installDeferredReconnectContent(filePath, document, text, registrationText)
                 ) {
@@ -342,6 +346,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     return@attach false
                 }
                 chars = registrationText.length
+                if (forceRefresh && deferredReconnect != null) {
+                    forwarders.remove(filePath)?.deregister()
+                }
                 shadows[filePath] = registrationText
                 val forwarder = forwarderFor(
                     filePath,
@@ -349,7 +356,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     bypassRegisterBackoff = forceRefresh,
                 )
                 (forwarder != null).also { attached ->
-                    if (attached) requestRemoteDrain(filePath, "open-document")
+                    if (attached) {
+                        if (deferredReconnect != null) {
+                            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
+                        }
+                        requestRemoteDrain(filePath, "open-document")
+                    }
                 }
             } catch (e: Exception) {
                 log.debug("[crdt-replica] open-document attach skipped for $filePath: ${e.message}")

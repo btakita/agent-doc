@@ -1591,6 +1591,29 @@ pub fn pending_document_write(
         .clone()
 }
 
+/// Return the independent durable candidate created by an external disk write
+/// while an editor buffer is open. This lineage must never replace a pending
+/// agent response write.
+pub fn pending_external_disk_candidate(
+    file: &Path,
+) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+        .ok()?
+        .document(&document_hash)?
+        .document
+        .pending_external_disk
+        .clone()
+}
+
+/// Hash document content through the realtime authority boundary so CLI/editor
+/// adapters do not duplicate document-projection policy.
+pub fn document_content_hash(content: &str) -> String {
+    agent_doc_hash::content_hash(content)
+}
+
 /// Extend an existing deferred write with a later canonical target without
 /// touching disk. If no deferred write exists, this starts one.
 pub fn retain_deferred_document_write_target(
@@ -1608,6 +1631,16 @@ fn pending_document_write_for_target(
     target_hash: &str,
 ) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
     pending_document_write(file)
+        .as_ref()
+        .filter(|pending| pending.target_hash.eq_ignore_ascii_case(target_hash))
+        .cloned()
+}
+
+fn pending_external_disk_candidate_for_target(
+    file: &Path,
+    target_hash: &str,
+) -> Option<agent_doc_state_backbone::DocumentWriteIntentProjection> {
+    pending_external_disk_candidate(file)
         .as_ref()
         .filter(|pending| pending.target_hash.eq_ignore_ascii_case(target_hash))
         .cloned()
@@ -1644,97 +1677,143 @@ fn ensure_deferred_document_write_intent(
     let mut expected_content = expected_current.to_string();
     let mut target_content = content.to_string();
     let requested_target_hash = agent_doc_hash::content_hash(content);
-    if let Some(pending) = pending_document_write(file) {
+    let external_disk_candidate =
+        reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor;
+    let existing_pending = if external_disk_candidate {
+        pending_external_disk_candidate(file)
+    } else {
+        pending_document_write(file)
+    };
+    if let Some(pending) = existing_pending {
         if pending
             .target_hash
             .eq_ignore_ascii_case(&requested_target_hash)
+            && (!external_disk_candidate
+                || pending
+                    .expected_hash
+                    .eq_ignore_ascii_case(&agent_doc_hash::content_hash(expected_current)))
         {
             return Ok(pending.intent_id);
         }
 
-        let expected_hash = agent_doc_hash::content_hash(expected_current);
-        if requested_target_hash.eq_ignore_ascii_case(&expected_hash) {
-            // The requested target is already the live CPC authority. A prior
-            // deferred target is therefore obsolete, not a concurrent branch
-            // to merge back into the document. Rebase the reconnect lineage on
-            // that exact prior target so the editor buffer which failed to ACK
-            // it receives the newer canonical target directly, while later
-            // operator edits still merge over the superseded cut.
-            expected_content = pending.target_content.clone();
+        // An external disk candidate is a replaceable user-decision value, not
+        // a CRDT branch. A later filesystem event replaces the candidate while
+        // preserving the exact current editor cut; never component-merge two
+        // successive disk versions into the live buffer.
+        if external_disk_candidate {
+            // Boundary/marker cleanup after one operator-authorized force-disk
+            // write refines that same candidate. Keep the original editor cut
+            // as its comparison base; the bytes currently on disk are the
+            // prior force-disk target, not a newer editor decision.
+            if source.starts_with("force_disk")
+                && pending.source.starts_with("force_disk")
+                && let Some(retained_base) = pending.expected_content.clone().filter(|base| {
+                    agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+                })
+            {
+                expected_content = retained_base;
+            }
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{source}_deferred_write_superseded_by_current_authority file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash}",
+                    "{source}_external_disk_candidate_replaced file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash}",
                     file.display(),
                     pending.intent_id,
                     pending.target_hash,
                 ),
             );
-        } else if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
-            let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
-                agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
-            });
-            let merge_base = pending
-                .expected_content
-                .clone()
-                .filter(|base| {
-                    agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
-                })
-                .or_else(|| {
-                    (expected_hash.eq_ignore_ascii_case(&pending.expected_hash))
-                        .then(|| expected_current.to_string())
-                })
-                .or(legacy_disk_base);
-            let Some(merge_base) = merge_base else {
+        } else {
+            let expected_hash = agent_doc_hash::content_hash(expected_current);
+            if requested_target_hash.eq_ignore_ascii_case(&expected_hash) {
+                // The requested target is already the live CPC authority. A prior
+                // deferred target is therefore obsolete, not a concurrent branch
+                // to merge back into the document. Rebase the reconnect lineage on
+                // that exact prior target so the editor buffer which failed to ACK
+                // it receives the newer canonical target directly, while later
+                // operator edits still merge over the superseded cut.
+                expected_content = pending.target_content.clone();
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "{source}_deferred_write_preserved_prior file={} prior_intent_id={} reason=missing_content_bearing_merge_base requested_hash={requested_target_hash}",
+                        "{source}_deferred_write_superseded_by_current_authority file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash}",
                         file.display(),
                         pending.intent_id,
+                        pending.target_hash,
                     ),
                 );
-                return Ok(pending.intent_id);
-            };
-            let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
-            target_content = agent_doc_merge::crdt::merge_by_component(
-                Some(&base_state),
-                &pending.target_content,
-                content,
-            )
-            .with_context(|| {
-                format!(
-                    "failed to compose deferred document writes for {}",
-                    file.display()
+            } else if !pending.target_hash.eq_ignore_ascii_case(&expected_hash) {
+                let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
+                    agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
+                });
+                let merge_base = pending
+                    .expected_content
+                    .clone()
+                    .filter(|base| {
+                        agent_doc_hash::content_hash(base)
+                            .eq_ignore_ascii_case(&pending.expected_hash)
+                    })
+                    .or_else(|| {
+                        (expected_hash.eq_ignore_ascii_case(&pending.expected_hash))
+                            .then(|| expected_current.to_string())
+                    })
+                    .or(legacy_disk_base);
+                let Some(merge_base) = merge_base else {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "{source}_deferred_write_preserved_prior file={} prior_intent_id={} reason=missing_content_bearing_merge_base requested_hash={requested_target_hash}",
+                            file.display(),
+                            pending.intent_id,
+                        ),
+                    );
+                    return Ok(pending.intent_id);
+                };
+                let base_state =
+                    agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
+                target_content = agent_doc_merge::crdt::merge_by_component(
+                    Some(&base_state),
+                    &pending.target_content,
+                    content,
                 )
-            })?;
-            target_content = agent_doc_template::canonicalize_boundary_after_document_merge(
-                &target_content,
-                content,
-            );
-            // Preserve the original editor cut as the merge base across a
-            // chain of canonical target refinements (commit boundary moves,
-            // marker cleanup, compaction). Re-basing on the prior target would
-            // make a reconnecting pre-force editor look like it deleted the
-            // response introduced by that target.
-            expected_content = merge_base;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_deferred_write_composed file={} prior_intent_id={} requested_hash={requested_target_hash} composed_hash={}",
-                    file.display(),
-                    pending.intent_id,
-                    agent_doc_hash::content_hash(&target_content),
-                ),
-            );
-        } else if let Some(retained_base) = pending.expected_content.clone().filter(|base| {
-            agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
-        }) {
-            expected_content = retained_base;
+                .with_context(|| {
+                    format!(
+                        "failed to compose deferred document writes for {}",
+                        file.display()
+                    )
+                })?;
+                target_content = agent_doc_template::canonicalize_boundary_after_document_merge(
+                    &target_content,
+                    content,
+                );
+                // Preserve the original editor cut as the merge base across a
+                // chain of canonical target refinements (commit boundary moves,
+                // marker cleanup, compaction). Re-basing on the prior target would
+                // make a reconnecting pre-force editor look like it deleted the
+                // response introduced by that target.
+                expected_content = merge_base;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{source}_deferred_write_composed file={} prior_intent_id={} requested_hash={requested_target_hash} composed_hash={}",
+                        file.display(),
+                        pending.intent_id,
+                        agent_doc_hash::content_hash(&target_content),
+                    ),
+                );
+            } else if let Some(retained_base) = pending.expected_content.clone().filter(|base| {
+                agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+            }) {
+                expected_content = retained_base;
+            }
         }
     }
     let target_hash = agent_doc_hash::content_hash(&target_content);
-    if let Some(pending) = pending_document_write_for_target(file, &target_hash) {
+    let pending_for_target = if external_disk_candidate {
+        pending_external_disk_candidate_for_target(file, &target_hash)
+    } else {
+        pending_document_write_for_target(file, &target_hash)
+    };
+    if let Some(pending) = pending_for_target {
         return Ok(pending.intent_id);
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file)
@@ -1778,10 +1857,60 @@ pub fn deferred_document_write_reconnect_content(
     file: &Path,
     editor_content: &str,
 ) -> Result<Option<String>> {
+    let editor_hash = agent_doc_hash::content_hash(editor_content);
+    if let Some(pending) = pending_external_disk_candidate(file) {
+        match agent_doc_document_realtime::external_disk_decision(
+            &pending.expected_hash,
+            &pending.target_hash,
+            &editor_hash,
+        ) {
+            agent_doc_document_realtime::ExternalDiskDecision::AcceptedInEditor => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "external_disk_editor_decision file={} intent_id={} decision=accepted target_hash={}",
+                        file.display(),
+                        pending.intent_id,
+                        pending.target_hash,
+                    ),
+                );
+                return Ok(Some(pending.target_content));
+            }
+            agent_doc_document_realtime::ExternalDiskDecision::PendingUserDecision => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "external_disk_editor_decision file={} intent_id={} decision=pending_user_decision expected_hash={} target_hash={} mutation=none",
+                        file.display(),
+                        pending.intent_id,
+                        pending.expected_hash,
+                        pending.target_hash,
+                    ),
+                );
+                return Ok(None);
+            }
+            agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes => {
+                clear_external_disk_candidate_intent(
+                    file,
+                    &pending.target_hash,
+                    "editor_reconnect_superseded_external_disk",
+                )?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "external_disk_editor_decision file={} intent_id={} decision=editor_supersedes editor_hash={} prior_target_hash={} pending_cleared=true",
+                        file.display(),
+                        pending.intent_id,
+                        editor_hash,
+                        pending.target_hash,
+                    ),
+                );
+            }
+        }
+    }
     let Some(pending) = pending_document_write(file) else {
         return Ok(None);
     };
-    let editor_hash = agent_doc_hash::content_hash(editor_content);
     if editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
         return Ok(Some(pending.target_content));
     }
@@ -1847,6 +1976,88 @@ pub fn deferred_document_write_reconnect_content(
     Ok(Some(merged))
 }
 
+/// Retain an out-of-band disk version while one or more live editor buffers own
+/// the document. Repeated disk changes replace the candidate exactly; they are
+/// not merged into each other or into the editor buffer.
+pub fn retain_external_disk_candidate(
+    file: &Path,
+    editor_content: &str,
+    disk_content: &str,
+    source: &str,
+) -> Result<Option<String>> {
+    if editor_content == disk_content {
+        return Ok(None);
+    }
+    ensure_deferred_document_write_intent(
+        file,
+        editor_content,
+        disk_content,
+        source,
+        DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+    )
+    .map(Some)
+}
+
+/// Retain an external disk version when editors are known to be open but the
+/// CRDT relay cannot yet prove one exact editor cut (for example, two replicas
+/// are still converging after reconnect). An empty expected hash is a typed
+/// "unknown editor cut" marker: reconnect remains mutation-free until an
+/// explicit editor edit, save, accepted target propagation, or final close.
+pub fn retain_external_disk_candidate_without_editor_cut(
+    file: &Path,
+    disk_content: &str,
+    source: &str,
+) -> Result<String> {
+    let target_hash = agent_doc_hash::content_hash(disk_content);
+    if let Some(pending) = pending_external_disk_candidate(file) {
+        if pending.target_hash.eq_ignore_ascii_case(&target_hash)
+            && pending.expected_hash.is_empty()
+        {
+            return Ok(pending.intent_id);
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_external_disk_candidate_replaced_without_editor_cut file={} prior_intent_id={} prior_target_hash={} requested_hash={target_hash}",
+                file.display(),
+                pending.intent_id,
+                pending.target_hash,
+            ),
+        );
+    }
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let sequence = DOCUMENT_WRITE_INTENT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let intent_id = format!("{now_nanos}-{sequence}-{target_hash}");
+    let event = agent_doc_state_backbone::StateEvent::new(
+        format!("document-write-deferred-{document_hash}-{intent_id}"),
+        agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+            document_hash,
+            intent_id: intent_id.clone(),
+            expected_hash: String::new(),
+            expected_content: None,
+            target_hash,
+            target_content: disk_content.to_string(),
+            source: source.to_string(),
+            reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+        },
+    );
+    agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
+        .with_context(|| {
+            format!(
+                "failed to retain external disk candidate without editor cut for {}",
+                file.display()
+            )
+        })?;
+    Ok(intent_id)
+}
+
 fn retain_force_disk_reconnect_intent(file: &Path, content: &str) -> Result<()> {
     if !agent_doc_document_realtime::write_authority::is_visible_document(file) {
         return Ok(());
@@ -1860,9 +2071,132 @@ fn retain_force_disk_reconnect_intent(file: &Path, content: &str) -> Result<()> 
         &pre_force_disk,
         content,
         "force_disk",
-        DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
+        DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
     )?;
     Ok(())
+}
+
+/// Clear a force-disk/recovery candidate after a proven local editor edit
+/// advances beyond both the pre-write cut and the external target. Both editor
+/// plugins report full visible content through the same v3 FFI hook, so this
+/// transition is shared and parity-safe.
+pub fn clear_pending_external_disk_decision_on_editor_edit(
+    file: &Path,
+    editor_content: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_external_disk_candidate(file) else {
+        return Ok(false);
+    };
+    let editor_hash = agent_doc_hash::content_hash(editor_content);
+    if !pending.expected_hash.is_empty()
+        && agent_doc_document_realtime::external_disk_decision(
+            &pending.expected_hash,
+            &pending.target_hash,
+            &editor_hash,
+        ) != agent_doc_document_realtime::ExternalDiskDecision::EditorSupersedes
+    {
+        return Ok(false);
+    }
+    if pending.expected_hash.is_empty() && editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
+        return Ok(false);
+    }
+    clear_external_disk_candidate_intent(file, &pending.target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "external_disk_editor_decision file={} intent_id={} decision=editor_supersedes source={} editor_hash={} prior_target_hash={} pending_cleared=true",
+            file.display(),
+            pending.intent_id,
+            source,
+            editor_hash,
+            pending.target_hash,
+        ),
+    );
+    Ok(true)
+}
+
+/// Settle any pending external disk candidate after an editor save has proven
+/// that its exact buffer bytes reached disk. This is intentionally independent
+/// of which candidate was pending: the saved editor version is authoritative.
+pub fn clear_pending_external_disk_decision_on_editor_save(
+    file: &Path,
+    saved_editor_content: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_external_disk_candidate(file) else {
+        return Ok(false);
+    };
+    let disk = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "failed to verify saved editor content for {}",
+            file.display()
+        )
+    })?;
+    if disk != saved_editor_content {
+        return Ok(false);
+    }
+    clear_external_disk_candidate_intent(file, &pending.target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "external_disk_editor_decision file={} intent_id={} decision=editor_save_overrides_candidate saved_hash={} prior_target_hash={} pending_cleared=true",
+            file.display(),
+            pending.intent_id,
+            agent_doc_hash::content_hash(saved_editor_content),
+            pending.target_hash,
+        ),
+    );
+    Ok(true)
+}
+
+/// Settle a candidate after an editor plugin has reset/seeded its CRDT replica
+/// from the exact accepted disk target.
+pub fn clear_pending_external_disk_decision_after_editor_propagation(
+    file: &Path,
+    editor_content: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_external_disk_candidate(file) else {
+        return Ok(false);
+    };
+    let editor_hash = agent_doc_hash::content_hash(editor_content);
+    if !editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
+        return Ok(false);
+    }
+    clear_external_disk_candidate_intent(file, &pending.target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "external_disk_editor_decision file={} intent_id={} decision=accepted_and_propagated editor_hash={} pending_cleared=true",
+            file.display(),
+            pending.intent_id,
+            editor_hash,
+        ),
+    );
+    Ok(true)
+}
+
+/// Clear the pending editor decision when the last editor closes. Disk then
+/// becomes the current replica; callers record that authority after this step.
+pub fn clear_pending_external_disk_decision_on_last_editor_close(
+    file: &Path,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_external_disk_candidate(file) else {
+        return Ok(false);
+    };
+    clear_external_disk_candidate_intent(file, &pending.target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "external_disk_editor_decision file={} intent_id={} decision=last_editor_closed prior_target_hash={} pending_cleared=true authority=disk",
+            file.display(),
+            pending.intent_id,
+            pending.target_hash,
+        ),
+    );
+    Ok(true)
 }
 
 fn clear_deferred_document_write_intent(
@@ -1873,6 +2207,26 @@ fn clear_deferred_document_write_intent(
     let Some(pending) = pending_document_write_for_target(file, target_hash) else {
         return Ok(());
     };
+    append_document_write_converged_event(file, pending, target_hash, source)
+}
+
+fn clear_external_disk_candidate_intent(
+    file: &Path,
+    target_hash: &str,
+    source: &str,
+) -> Result<()> {
+    let Some(pending) = pending_external_disk_candidate_for_target(file, target_hash) else {
+        return Ok(());
+    };
+    append_document_write_converged_event(file, pending, target_hash, source)
+}
+
+fn append_document_write_converged_event(
+    file: &Path,
+    pending: agent_doc_state_backbone::DocumentWriteIntentProjection,
+    target_hash: &str,
+    source: &str,
+) -> Result<()> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -3510,13 +3864,34 @@ mod tests {
             pending.reason,
             DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection
         );
+        let external = projection
+            .document(&document_hash)
+            .and_then(|document| document.document.pending_external_disk.as_ref())
+            .expect("zero-replica disk projection must remain a separate editor decision");
+        assert_eq!(external.target_content, final_target);
         assert_eq!(
             deferred_document_write_reconnect_content(&file, baseline)
                 .unwrap()
                 .as_deref(),
-            Some(final_target),
-            "a stale editor must receive only the final normalized repair target",
+            None,
+            "a stale editor cut must remain mutation-free while the disk projection is pending",
         );
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, final_target)
+                .unwrap()
+                .as_deref(),
+            Some(final_target),
+            "the editor-visible accepted target may propagate exactly",
+        );
+        assert!(
+            clear_pending_external_disk_decision_after_editor_propagation(
+                &file,
+                final_target,
+                "repair_zero_replica_editor_propagated_test",
+            )
+            .unwrap()
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
 
         clear_deferred_document_write_intent(
             &file,
@@ -3817,7 +4192,7 @@ mod tests {
     }
 
     #[test]
-    fn force_disk_retains_reconnect_lineage_and_merges_reappearing_editor_text() {
+    fn force_disk_is_a_pending_candidate_and_reappearing_editor_supersedes_it() {
         let baseline = "# Session\n\nbody\n";
         let target = "# Session\n\nbody\n\n### Re: agent\n\nresponse\n";
         let (dir, file, _canonical) = temp_doc(baseline);
@@ -3831,18 +4206,137 @@ mod tests {
         let document_hash = agent_doc_hash::document_id_for_path(&file);
         let pending = projection
             .document(&document_hash)
-            .and_then(|document| document.document.pending_write.as_ref())
-            .expect("force-disk must retain reconnect lineage");
+            .and_then(|document| document.document.pending_external_disk.as_ref())
+            .expect("force-disk must retain an independent external-disk candidate");
         assert_eq!(pending.expected_content.as_deref(), Some(baseline));
         assert_eq!(pending.target_content, target);
         assert_eq!(pending.source, "force_disk");
 
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, baseline).unwrap(),
+            None,
+            "unchanged editor must wait for the user's cache-conflict decision"
+        );
+        assert!(pending_external_disk_candidate(&file).is_some());
+
         let editor_with_unsaved_note = format!("{baseline}\noperator note after relay loss\n");
-        let merged = deferred_document_write_reconnect_content(&file, &editor_with_unsaved_note)
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, &editor_with_unsaved_note).unwrap(),
+            None,
+            "the editor already owns its newer bytes; reconnect must not merge the disk candidate"
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+    }
+
+    #[test]
+    fn external_disk_decision_is_independent_replaced_exactly_and_cleared_by_save() {
+        let baseline = "# Session\n\nbody\n";
+        let response = "# Session\n\nbody\n\n### Re: agent\n\nresponse\n";
+        let disk_one = "# Session\n\nexternal one\n";
+        let disk_two = "# Session\n\nexternal two\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+
+        retain_deferred_document_write_target(
+            &file,
+            baseline,
+            response,
+            "independent_agent_response",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        retain_external_disk_candidate(&file, baseline, disk_one, "external_one").unwrap();
+        retain_external_disk_candidate(&file, baseline, disk_two, "external_two").unwrap();
+
+        assert_eq!(
+            pending_document_write(&file)
+                .expect("agent response lineage")
+                .target_content,
+            response
+        );
+        let external = pending_external_disk_candidate(&file).expect("external candidate");
+        assert_eq!(external.expected_content.as_deref(), Some(baseline));
+        assert_eq!(external.target_content, disk_two);
+        assert!(!external.target_content.contains("external one"));
+
+        std::fs::write(&file, baseline).unwrap();
+        assert!(
+            clear_pending_external_disk_decision_on_editor_save(
+                &file,
+                baseline,
+                "editor_save_test"
+            )
             .unwrap()
-            .expect("reappearing editor should reconcile against force-disk target");
-        assert!(merged.contains("### Re: agent"));
-        assert!(merged.contains("operator note after relay loss"));
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
+        assert!(pending_document_write(&file).is_some());
+    }
+
+    #[test]
+    fn accepted_disk_candidate_clears_only_after_editor_replica_propagates() {
+        let baseline = "# Session\n\nbody\n";
+        let disk = "# Session\n\naccepted external edit\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        retain_external_disk_candidate(&file, baseline, disk, "external_accept").unwrap();
+
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, disk).unwrap(),
+            Some(disk.to_string())
+        );
+        assert!(pending_external_disk_candidate(&file).is_some());
+        assert!(
+            clear_pending_external_disk_decision_after_editor_propagation(
+                &file,
+                disk,
+                "editor_propagated_test"
+            )
+            .unwrap()
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
+    }
+
+    #[test]
+    fn unproven_multi_editor_cut_stays_pending_until_explicit_editor_action() {
+        let baseline = "# Session\n\nbody\n";
+        let disk = "# Session\n\nexternal edit\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        retain_external_disk_candidate_without_editor_cut(&file, disk, "multi_editor_sync")
+            .unwrap();
+
+        let pending = pending_external_disk_candidate(&file).expect("external candidate");
+        assert!(pending.expected_hash.is_empty());
+        assert!(pending.expected_content.is_none());
+        assert_eq!(
+            deferred_document_write_reconnect_content(&file, baseline).unwrap(),
+            None,
+            "an arbitrary reconnecting replica must not resolve an unproven editor cut"
+        );
+        assert!(
+            clear_pending_external_disk_decision_on_editor_edit(
+                &file,
+                "# Session\n\nnew operator edit\n",
+                "operator_edit_test"
+            )
+            .unwrap()
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
+    }
+
+    #[test]
+    fn last_editor_close_clears_external_disk_decision_for_disk_fallback() {
+        let baseline = "# Session\n\nbody\n";
+        let disk = "# Session\n\nexternal edit\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        retain_external_disk_candidate(&file, baseline, disk, "external_close").unwrap();
+
+        assert!(
+            clear_pending_external_disk_decision_on_last_editor_close(
+                &file,
+                "last_editor_close_test"
+            )
+            .unwrap()
+        );
+        assert!(pending_external_disk_candidate(&file).is_none());
     }
 
     #[test]

@@ -5,6 +5,44 @@
 //! effects itself.
 
 use std::path::Path;
+use std::time::Duration;
+
+/// Scalar gate for a supervisor-owned captured-finalize resume. The effectful
+/// idle watch supplies these facts; this pure policy prevents recovery from
+/// competing with a live agent turn, editor typing, an IPC handler, or another
+/// resume worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapturedFinalizeResumeFacts {
+    pub captured_operation_present: bool,
+    pub actor_ready: bool,
+    pub editor_typing: bool,
+    pub ipc_inflight: u64,
+    pub worker_in_flight: bool,
+    pub retry_cooldown_elapsed: bool,
+    pub controller_pressure_cooldown: bool,
+    pub urgent_supervisor_maintenance: bool,
+}
+
+pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts) -> bool {
+    facts.captured_operation_present
+        && facts.actor_ready
+        && !facts.editor_typing
+        && facts.ipc_inflight == 0
+        && !facts.worker_in_flight
+        && facts.retry_cooldown_elapsed
+        && !facts.controller_pressure_cooldown
+        && !facts.urgent_supervisor_maintenance
+}
+
+/// Exponential retry capped at one attempt per 30 seconds. Transient editor or
+/// controller recovery can therefore complete unattended without recreating the
+/// high-frequency finalize/backpressure loop it is intended to heal.
+pub fn captured_finalize_resume_retry_delay(attempt: u32) -> Duration {
+    const BASE_SECS: u64 = 2;
+    const MAX_SECS: u64 = 30;
+    let shift = attempt.saturating_sub(1).min(4);
+    Duration::from_secs((BASE_SECS << shift).min(MAX_SECS))
+}
 
 /// `#supinstallfeedback` phases of the supervisor dogfood auto-install, used to
 /// build the user-visible owned-pane status.
@@ -83,6 +121,68 @@ pub fn idle_queue_context_reset_ops_log_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ready_resume_facts() -> CapturedFinalizeResumeFacts {
+        CapturedFinalizeResumeFacts {
+            captured_operation_present: true,
+            actor_ready: true,
+            editor_typing: false,
+            ipc_inflight: 0,
+            worker_in_flight: false,
+            retry_cooldown_elapsed: true,
+            controller_pressure_cooldown: false,
+            urgent_supervisor_maintenance: false,
+        }
+    }
+
+    #[test]
+    fn captured_finalize_resume_requires_a_quiet_single_flight_boundary() {
+        assert!(captured_finalize_resume_should_start(ready_resume_facts()));
+        for blocked in [
+            CapturedFinalizeResumeFacts {
+                actor_ready: false,
+                ..ready_resume_facts()
+            },
+            CapturedFinalizeResumeFacts {
+                editor_typing: true,
+                ..ready_resume_facts()
+            },
+            CapturedFinalizeResumeFacts {
+                ipc_inflight: 1,
+                ..ready_resume_facts()
+            },
+            CapturedFinalizeResumeFacts {
+                worker_in_flight: true,
+                ..ready_resume_facts()
+            },
+            CapturedFinalizeResumeFacts {
+                controller_pressure_cooldown: true,
+                ..ready_resume_facts()
+            },
+        ] {
+            assert!(!captured_finalize_resume_should_start(blocked));
+        }
+    }
+
+    #[test]
+    fn captured_finalize_resume_backoff_is_bounded() {
+        assert_eq!(
+            captured_finalize_resume_retry_delay(1),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            captured_finalize_resume_retry_delay(2),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            captured_finalize_resume_retry_delay(5),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            captured_finalize_resume_retry_delay(99),
+            Duration::from_secs(30)
+        );
+    }
 
     #[test]
     fn supervisor_auto_install_pane_message_started_warns_against_keypress() {

@@ -533,6 +533,18 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
                 &capabilities,
                 no_unsaved_operator_edits != 0,
             );
+        if no_unsaved_operator_edits == 0
+            && let Err(err) =
+                agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_edit(
+                    std::path::Path::new(path),
+                    text,
+                    "operator_editor_content_advanced",
+                )
+        {
+            eprintln!(
+                "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
+            );
+        }
     }
     agent_doc_debounce::document_changed(path);
 }
@@ -613,6 +625,22 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     // open (and it stays editor-authoritative until the last one closes).
     if agent_doc_debounce::live_buffer_snapshots(path).is_empty() {
         agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
+        let file = std::path::Path::new(path);
+        if let Err(err) =
+            agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_last_editor_close(
+                file,
+                "last_editor_closed",
+            )
+        {
+            eprintln!("[ffi] clear pending external disk decision failed for {path}: {err}");
+        }
+        if let Ok(disk) = std::fs::read_to_string(file) {
+            agent_doc_document_realtime_io::record_disk_replica_authority(
+                file,
+                "last_editor_closed",
+                &disk,
+            );
+        }
     }
 }
 
@@ -2294,8 +2322,9 @@ pub unsafe extern "C" fn agent_doc_state_projection(document_hash: *const c_char
 }
 
 /// Reconcile an editor buffer that re-registers after a deferred document
-/// write. Lazily state retains the write base and target; a stale clean buffer
-/// receives the target, while later unsaved editor edits are component-merged.
+/// write. Ordinary CRDT-delivery targets retain their proven merge lineage.
+/// An explicit external-disk target remains pending while the editor shows its
+/// pre-write cut and is cleared when a newer editor cut appears.
 ///
 /// Returns null when no deferred write exists or recovery cannot be proven.
 /// Caller must free a non-null result with [`agent_doc_free_string`].
@@ -2321,6 +2350,14 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
         editor_content,
     ) {
         Ok(Some(content)) => Some(content),
+        Ok(None)
+            if agent_doc_document_realtime_io::pending_external_disk_candidate(
+                std::path::Path::new(path),
+            )
+            .is_some() =>
+        {
+            None
+        }
         Ok(None) => match agent_doc_capture_io::load_active(std::path::Path::new(path)) {
             Ok(Some(capture))
                 if capture.committed_at.is_none()
@@ -2375,6 +2412,35 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
         .and_then(|content| CString::new(content).ok())
         .map(CString::into_raw)
         .unwrap_or(std::ptr::null_mut())
+}
+
+/// Settle a pending external-disk candidate after the editor has successfully
+/// reset/seeded its CRDT replica from the exact visible target.
+///
+/// # Safety
+/// Both arguments must be valid, NUL-terminated UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_propagated(
+    file_path: *const c_char,
+    editor_content: *const c_char,
+) -> i32 {
+    let Ok(path) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        return 0;
+    };
+    let Ok(content) = (unsafe { CStr::from_ptr(editor_content) }).to_str() else {
+        return 0;
+    };
+    match agent_doc_document_realtime_io::clear_pending_external_disk_decision_after_editor_propagation(
+        std::path::Path::new(path),
+        content,
+        "editor_crdt_reconnect_propagated",
+    ) {
+        Ok(cleared) => i32::from(cleared),
+        Err(err) => {
+            eprintln!("[deferred-write] propagated settlement failed for {path}: {err}");
+            0
+        }
+    }
 }
 
 /// Record a lazily state-backbone event from a plugin.

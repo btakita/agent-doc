@@ -50,6 +50,12 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - VS Code activation must not run automatic `agent-doc resync`, `resync --fix`, or a reconnect-reread scan over open buffers. Session repair/audit remains an explicit `Resync / Fix Sessions` operator action only.
 - Prompt steering is Project Controller-owned. VS Code must not treat stale supervisor freshness as an editor-IPC apply/receipt/repair veto; supervisor recycle is only an explicit session action.
 
+## External Disk Pending Parity
+
+- A clean whole-buffer text event may mean the operator accepted an external file reload. VS Code defers heavy work off the change listener, asks the shared binary resolver for an exact pending disk candidate, installs only that proven target, then resets and re-registers the replica from the visible buffer. It reports the candidate settled only after CRDT propagation succeeds.
+- A dirty operator edit remains editor-authoritative and clears the shared candidate through the full-buffer report; the disk version is never component-merged. A successful editor save is recognized by the binary file watcher when the exact buffer bytes reach disk and clears any older candidate. Closing the final editor falls back to disk.
+- This is the same FFI and authority lifecycle as JetBrains. VS Code must not implement a private disk reread, Git fallback, or extension-local pending-response slot.
+
 ## Editor Performance Parity
 
 VS Code must match the JetBrains plugin's editor-hot-path discipline so neither plugin can slow the host editor:

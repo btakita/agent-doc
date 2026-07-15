@@ -25,8 +25,9 @@ pub mod write_authority;
 pub mod write_policy;
 
 pub use read_authority::{
-    BufferState, DocAuthority, Reconciliation, buffer_supersedes, current_doc,
-    reconcile_current_doc,
+    BufferState, DocAuthority, ExternalDiskDecision, Reconciliation, ReconnectAuthority,
+    buffer_supersedes, current_doc, external_disk_decision, reconcile_current_doc,
+    reconnect_authority,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

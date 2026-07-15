@@ -58,6 +58,7 @@ pub enum DocumentWriteDeferredReason {
     CrdtDeliveryAckPending,
     MergeUnsavedEditorCutWithDeferredTarget,
     RetainEditorReconnectLineageBeforeDiskProjection,
+    PendingUserDecisionExternalDiskVsEditor,
     ExtendPendingEditorReconnectTarget,
     Legacy(String),
 }
@@ -72,6 +73,9 @@ impl DocumentWriteDeferredReason {
             }
             Self::RetainEditorReconnectLineageBeforeDiskProjection => {
                 "retain_editor_reconnect_lineage_before_disk_projection"
+            }
+            Self::PendingUserDecisionExternalDiskVsEditor => {
+                "pending_user_decision_external_disk_vs_editor"
             }
             Self::ExtendPendingEditorReconnectTarget => "extend_pending_editor_reconnect_target",
             Self::Legacy(token) => token,
@@ -89,6 +93,9 @@ impl From<&str> for DocumentWriteDeferredReason {
             }
             "retain_editor_reconnect_lineage_before_disk_projection" => {
                 Self::RetainEditorReconnectLineageBeforeDiskProjection
+            }
+            "pending_user_decision_external_disk_vs_editor" => {
+                Self::PendingUserDecisionExternalDiskVsEditor
             }
             "extend_pending_editor_reconnect_target" => Self::ExtendPendingEditorReconnectTarget,
             token => Self::Legacy(token.to_string()),
@@ -1117,7 +1124,7 @@ impl DocumentStateProjection {
                 reason,
                 ..
             } => {
-                self.document.pending_write = Some(DocumentWriteIntentProjection {
+                let pending = DocumentWriteIntentProjection {
                     intent_id: intent_id.clone(),
                     expected_hash: expected_hash.clone(),
                     expected_content: expected_content.clone(),
@@ -1125,7 +1132,15 @@ impl DocumentStateProjection {
                     target_content: target_content.clone(),
                     source: source.clone(),
                     reason: reason.clone(),
-                });
+                };
+                if *reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor {
+                    // External file-cache conflicts and agent-owned response
+                    // delivery are independent durable lineages. One must
+                    // never replace or clear the other.
+                    self.document.pending_external_disk = Some(pending);
+                } else {
+                    self.document.pending_write = Some(pending);
+                }
             }
             StateFact::DocumentWriteConverged {
                 intent_id,
@@ -1136,6 +1151,16 @@ impl DocumentStateProjection {
                     pending.intent_id == *intent_id && pending.target_hash == *target_hash
                 }) {
                     self.document.pending_write = None;
+                }
+                if self
+                    .document
+                    .pending_external_disk
+                    .as_ref()
+                    .is_some_and(|pending| {
+                        pending.intent_id == *intent_id && pending.target_hash == *target_hash
+                    })
+                {
+                    self.document.pending_external_disk = None;
                 }
             }
             StateFact::QueueHeadSelected {
@@ -2029,6 +2054,8 @@ pub struct DocumentProjection {
     pub latest_authority: Option<DocumentAuthorityProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_write: Option<DocumentWriteIntentProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_external_disk: Option<DocumentWriteIntentProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5429,6 +5456,75 @@ mod tests {
                 .document
                 .pending_write
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn external_disk_candidate_does_not_replace_agent_write_lineage() {
+        let mut ledger = EventLedger::new();
+        ledger.append(state_event(
+            "agent-write-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "agent-intent".into(),
+                expected_hash: "editor-base".into(),
+                expected_content: Some("editor base".into()),
+                target_hash: "agent-target".into(),
+                target_content: "agent response".into(),
+                source: "finalize".into(),
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        ));
+        ledger.append(state_event(
+            "external-disk-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "disk-intent".into(),
+                expected_hash: "editor-base".into(),
+                expected_content: Some("editor base".into()),
+                target_hash: "disk-target".into(),
+                target_content: "external disk edit".into(),
+                source: "file_watch".into(),
+                reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("agent-intent")
+        );
+        assert_eq!(
+            projected
+                .document
+                .pending_external_disk
+                .as_ref()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("disk-intent")
+        );
+
+        ledger.append(state_event(
+            "external-disk-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "disk-intent".into(),
+                target_hash: "disk-target".into(),
+                source: "editor_save".into(),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert!(projected.document.pending_external_disk.is_none());
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("agent-intent")
         );
     }
 

@@ -92,7 +92,7 @@ fn crdt_path(root: &Path, doc: &Path) -> PathBuf {
         .join(format!("{}.yrs", doc_hash(doc)))
 }
 
-fn pending_document_write(
+fn pending_external_disk_candidate(
     root: &Path,
     doc: &Path,
 ) -> agent_doc_state_backbone::DocumentWriteIntentProjection {
@@ -102,7 +102,7 @@ fn pending_document_write(
     let document_hash = agent_doc_hash::document_id_for_path(doc);
     projection
         .document(&document_hash)
-        .and_then(|document| document.document.pending_write.as_ref())
+        .and_then(|document| document.document.pending_external_disk.as_ref())
         .cloned()
         .expect("force-disk reconnect intent must remain durable")
 }
@@ -571,7 +571,7 @@ fn write_commit_force_disk_with_editor_owner_recovers_without_waiting_for_crdt()
         head_blob(tmp.path()),
         "force-disk recovery must commit the response"
     );
-    let pending = pending_document_write(tmp.path(), &doc);
+    let pending = pending_external_disk_candidate(tmp.path(), &doc);
     assert_eq!(
         pending.expected_content.as_deref(),
         Some(current_content.as_str()),
@@ -651,7 +651,7 @@ fn finalize_force_disk_with_editor_owner_recovers_and_preserves_disk_drift() {
         head_blob(tmp.path()),
         "force-disk finalize must commit the merged response"
     );
-    let pending = pending_document_write(tmp.path(), &doc);
+    let pending = pending_external_disk_candidate(tmp.path(), &doc);
     assert_eq!(
         pending.expected_content.as_deref(),
         Some(current.as_str()),

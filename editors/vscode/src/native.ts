@@ -173,6 +173,8 @@ function resetBindings(): void {
     _document_changed_digest_content_for_editor_v2 = null;
     _document_changed_digest_content_for_editor_v3 = null;
     _document_closed_for_editor = null;
+    _deferred_write_reconnect_content = null;
+    _deferred_write_reconnect_propagated = null;
     _plugin_owner_try_acquire = null;
     _plugin_owner_release = null;
     _resolve_project_path = null;
@@ -206,7 +208,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 const EDITOR_PLUGIN_KIND = 'vscode';
-const EDITOR_PLUGIN_VERSION = '0.2.40';
+const EDITOR_PLUGIN_VERSION = '0.2.52';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const EDITOR_CAPABILITIES = [
@@ -363,6 +365,8 @@ let _document_changed_digest_content_for_editor: any = null;
 let _document_changed_digest_content_for_editor_v2: any = null;
 let _document_changed_digest_content_for_editor_v3: any = null;
 let _document_closed_for_editor: any = null;
+let _deferred_write_reconnect_content: any = null;
+let _deferred_write_reconnect_propagated: any = null;
 let _plugin_owner_try_acquire: any = null;
 let _plugin_owner_release: any = null;
 let _resolve_project_path: any = null;
@@ -569,6 +573,22 @@ function bindFunctions(): void {
     } catch (e: any) {
         console.log(`[agent-doc/native] live-buffer provenance ABI unavailable: ${e.message}`);
         _document_changed_digest_content_for_editor_v3 = null;
+    }
+    try {
+        _deferred_write_reconnect_content = lib.func(
+            'agent_doc_deferred_write_reconnect_content',
+            'char*',
+            ['str', 'str'],
+        );
+        _deferred_write_reconnect_propagated = lib.func(
+            'agent_doc_deferred_write_reconnect_propagated',
+            'int32',
+            ['str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] deferred reconnect ABI unavailable: ${e.message}`);
+        _deferred_write_reconnect_content = null;
+        _deferred_write_reconnect_propagated = null;
     }
     try {
         _plugin_owner_try_acquire = lib.func(
@@ -1926,6 +1946,35 @@ export function documentClosedForEditor(
     if (_document_closed_for_editor) {
         _document_closed_for_editor(filePath, editorId);
     }
+}
+
+/** Resolve a Lazily-retained reconnect target against the exact live buffer. */
+export function deferredWriteReconnectContent(
+    filePath: string,
+    editorContent: string,
+    projectRoot?: string,
+): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_deferred_write_reconnect_content) return null;
+    const ptr = _deferred_write_reconnect_content(filePath, editorContent);
+    if (!ptr) return null;
+    try {
+        return koffi.decode(ptr, 'char', -1);
+    } finally {
+        _free_string(ptr);
+    }
+}
+
+export function deferredWriteReconnectPropagated(
+    filePath: string,
+    editorContent: string,
+    projectRoot?: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_deferred_write_reconnect_propagated) return false;
+    return _deferred_write_reconnect_propagated(filePath, editorContent) === 1;
 }
 
 export function pluginOwnerTryAcquire(

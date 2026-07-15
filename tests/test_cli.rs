@@ -3618,7 +3618,7 @@ fn test_repair_io_owns_strict_empty_response_recovery() {
         "write.rs must not re-own strict empty-response closeout recovery coordination"
     );
     for required in [
-        "run(effects, file)?",
+        "run_with_queue_completion_ids_and_force_disk(effects, file, &[], force_disk_override)?",
         "recover_missing_committed_head_response",
         "recover_dedupe_only_drift",
         "committing pending mutations without a response body",

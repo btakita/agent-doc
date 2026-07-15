@@ -1116,6 +1116,40 @@ mod tests {
     }
 
     #[test]
+    fn binary_owned_resume_commits_one_durable_capture_exactly_once() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, "Binary-owned closeout.").unwrap();
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response should expose a durable resume key");
+        assert!(matches!(
+            agent_doc_repair_command_io::resume_captured_finalize(&doc, &key),
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+        ));
+        assert!(matches!(
+            agent_doc_repair_command_io::resume_captured_finalize(&doc, &key),
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
+        ));
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(result.matches("Binary-owned closeout.").count(), 1);
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        ));
+    }
+
+    #[test]
     fn recover_already_applied_template_canonicalizes_prompt_prefixes() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

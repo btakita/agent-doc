@@ -26,8 +26,10 @@ use agent_doc_supervisor::{
         stale_busy_idle_reconcile_decision,
     },
     idle_watch::{
-        SupervisorAutoInstallPhase, idle_queue_context_reset_ops_log_message,
-        paused_idle_watch_should_skip, supervisor_auto_install_pane_message,
+        CapturedFinalizeResumeFacts, SupervisorAutoInstallPhase,
+        captured_finalize_resume_retry_delay, captured_finalize_resume_should_start,
+        idle_queue_context_reset_ops_log_message, paused_idle_watch_should_skip,
+        supervisor_auto_install_pane_message,
     },
     lifecycle::{
         MAX_CYCLE_OPEN_DEFER_TICKS, MAX_REEXEC_ESCALATIONS, SupervisorInstallAction,
@@ -82,6 +84,33 @@ const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
 /// full-text queue projection as a fail-safe against missed external signals.
 const IDLE_WATCH_FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+struct CapturedFinalizeResumeWorker {
+    key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
+    result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
+}
+
+struct CapturedFinalizeResumeRetry {
+    key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
+    attempts: u32,
+    retry_at: std::time::Instant,
+    needs_operator: bool,
+}
+
+fn spawn_captured_finalize_resume_worker(
+    file: PathBuf,
+    key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
+) -> std::io::Result<CapturedFinalizeResumeWorker> {
+    let (send, result) = std::sync::mpsc::channel();
+    let worker_key = key.clone();
+    std::thread::Builder::new()
+        .name("captured-finalize-resume".into())
+        .spawn(move || {
+            let outcome = agent_doc_repair_command_io::resume_captured_finalize(&file, &worker_key);
+            let _ = send.send(outcome);
+        })?;
+    Ok(CapturedFinalizeResumeWorker { key, result })
+}
 
 fn supervisor_background_context_clear_enabled() -> bool {
     false
@@ -808,6 +837,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut last_document_revision: Option<IdleWatchDocumentRevision> = None;
             let mut last_full_reconcile: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
+            // `#binaryownedfinalize`: once finalize has durably captured a
+            // response, this supervisor owns retrying that exact operation.
+            // A dedicated worker keeps repair/commit latency off the queue-watch
+            // thread; `resume_worker` is the local keyed-single-flight latch.
+            let mut resume_worker: Option<CapturedFinalizeResumeWorker> = None;
+            let mut resume_retry: Option<CapturedFinalizeResumeRetry> = None;
+            let mut last_resume_key_error_hash: Option<String> = None;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -818,6 +854,104 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // and does not touch the controller or editor.
                 let supervisor_stale_fast = shared.refresh_binary_stale();
                 let now = std::time::Instant::now();
+                let finished_resume = resume_worker.as_ref().and_then(|worker| {
+                    match worker.result.try_recv() {
+                        Ok(outcome) => Some((worker.key.clone(), outcome)),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((
+                            worker.key.clone(),
+                            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable {
+                                reason: "captured finalize resume worker disconnected".to_string(),
+                            },
+                        )),
+                    }
+                });
+                if let Some((key, outcome)) = finished_resume {
+                    resume_worker = None;
+                    last_quiescent_maintenance = None;
+                    match outcome {
+                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed {
+                            repair_outcome,
+                        } => {
+                            resume_retry = None;
+                            let event = format!(
+                                "captured_finalize_resume_committed file={} cycle_id={} capture_id={} response_sha256={} repair_outcome={} authority=editor_crdt",
+                                path.display(),
+                                key.cycle_id,
+                                key.capture_id,
+                                key.response_sha256,
+                                repair_outcome,
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                        }
+                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
+                            resume_retry = None;
+                            let event = format!(
+                                "captured_finalize_resume_superseded file={} cycle_id={} capture_id={} response_sha256={}",
+                                path.display(),
+                                key.cycle_id,
+                                key.capture_id,
+                                key.response_sha256,
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                        }
+                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable {
+                            reason,
+                        } => {
+                            let attempts = resume_retry
+                                .as_ref()
+                                .filter(|retry| retry.key == key)
+                                .map_or(1, |retry| retry.attempts.saturating_add(1));
+                            let delay = captured_finalize_resume_retry_delay(attempts);
+                            resume_retry = Some(CapturedFinalizeResumeRetry {
+                                key: key.clone(),
+                                attempts,
+                                retry_at: now + delay,
+                                needs_operator: false,
+                            });
+                            let event = format!(
+                                "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
+                                path.display(),
+                                key.cycle_id,
+                                key.capture_id,
+                                key.response_sha256,
+                                attempts,
+                                delay.as_millis(),
+                                reason.len(),
+                                agent_doc_hash::content_hash(&reason),
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                        }
+                        agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
+                            reason,
+                        } => {
+                            resume_retry = Some(CapturedFinalizeResumeRetry {
+                                key: key.clone(),
+                                attempts: 1,
+                                retry_at: now,
+                                needs_operator: true,
+                            });
+                            let event = format!(
+                                "captured_finalize_resume_needs_operator file={} cycle_id={} capture_id={} response_sha256={} reason_bytes={} reason_sha256={} action=retain_without_mutation",
+                                path.display(),
+                                key.cycle_id,
+                                key.capture_id,
+                                key.response_sha256,
+                                reason.len(),
+                                agent_doc_hash::content_hash(&reason),
+                            );
+                            log_event(&mut session_log, &event);
+                            agent_doc_ops_log_io::log_op(&path, &event);
+                            eprintln!(
+                                "[agent-doc] captured finalize for {} needs operator resolution; response retained without mutation",
+                                path.display()
+                            );
+                        }
+                    }
+                }
                 let zombie_reap_due = last_zombie_reap
                     .is_none_or(|last| last.elapsed() >= IDLE_WATCH_ZOMBIE_REAP_INTERVAL);
                 if zombie_reap_due {
@@ -838,6 +972,99 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
                     last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
                 });
+                if maintenance_due {
+                    match agent_doc_repair_command_io::captured_finalize_resume_key(&path) {
+                        Ok(Some(key)) => {
+                            last_resume_key_error_hash = None;
+                            if resume_retry
+                                .as_ref()
+                                .is_some_and(|retry| retry.key != key)
+                            {
+                                resume_retry = None;
+                            }
+                            let needs_operator = resume_retry
+                                .as_ref()
+                                .filter(|retry| retry.key == key)
+                                .is_some_and(|retry| retry.needs_operator);
+                            let retry_cooldown_elapsed = resume_retry
+                                .as_ref()
+                                .filter(|retry| retry.key == key)
+                                .is_none_or(|retry| now >= retry.retry_at);
+                            let facts = CapturedFinalizeResumeFacts {
+                                captured_operation_present: true,
+                                actor_ready: actor_ready_fast,
+                                editor_typing: editor_typing_active_for_idle_queue(&path),
+                                ipc_inflight: agent_doc_ipc_io::inflight_connection_handlers(),
+                                worker_in_flight: resume_worker.is_some(),
+                                retry_cooldown_elapsed: retry_cooldown_elapsed
+                                    && !needs_operator,
+                                controller_pressure_cooldown: agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path),
+                                urgent_supervisor_maintenance: urgent_maintenance,
+                            };
+                            if captured_finalize_resume_should_start(facts) {
+                                match spawn_captured_finalize_resume_worker(
+                                    path.clone(),
+                                    key.clone(),
+                                ) {
+                                    Ok(worker) => {
+                                        let attempt = resume_retry
+                                            .as_ref()
+                                            .filter(|retry| retry.key == key)
+                                            .map_or(1, |retry| retry.attempts.saturating_add(1));
+                                        let event = format!(
+                                            "captured_finalize_resume_started file={} cycle_id={} capture_id={} response_sha256={} attempt={} authority=editor_crdt no_force_disk=true",
+                                            path.display(),
+                                            key.cycle_id,
+                                            key.capture_id,
+                                            key.response_sha256,
+                                            attempt,
+                                        );
+                                        log_event(&mut session_log, &event);
+                                        agent_doc_ops_log_io::log_op(&path, &event);
+                                        resume_worker = Some(worker);
+                                    }
+                                    Err(err) => {
+                                        let attempts = resume_retry
+                                            .as_ref()
+                                            .filter(|retry| retry.key == key)
+                                            .map_or(1, |retry| retry.attempts.saturating_add(1));
+                                        resume_retry = Some(CapturedFinalizeResumeRetry {
+                                            key,
+                                            attempts,
+                                            retry_at: now
+                                                + captured_finalize_resume_retry_delay(attempts),
+                                            needs_operator: false,
+                                        });
+                                        eprintln!(
+                                            "[agent-doc] warning: failed to spawn captured finalize resume worker: {err}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            last_resume_key_error_hash = None;
+                            if resume_worker.is_none() {
+                                resume_retry = None;
+                            }
+                        }
+                        Err(err) => {
+                            let reason = format!("{err:#}");
+                            let reason_hash = agent_doc_hash::content_hash(&reason);
+                            if last_resume_key_error_hash.as_deref() != Some(&reason_hash) {
+                                last_resume_key_error_hash = Some(reason_hash.clone());
+                                let event = format!(
+                                    "captured_finalize_resume_key_error file={} reason_bytes={} reason_sha256={} action=retain_without_mutation",
+                                    path.display(),
+                                    reason.len(),
+                                    reason_hash,
+                                );
+                                log_event(&mut session_log, &event);
+                                agent_doc_ops_log_io::log_op(&path, &event);
+                            }
+                        }
+                    }
+                }
                 if idle_watch_fast_path_can_sleep(
                     queue_state_observed,
                     actor_ready_fast,

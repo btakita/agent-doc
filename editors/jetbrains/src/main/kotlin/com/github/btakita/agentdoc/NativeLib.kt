@@ -480,6 +480,7 @@ interface AgentDocLib : Library {
      * Caller must free a non-null result with [agent_doc_free_string].
      */
     fun agent_doc_deferred_write_reconnect_content(filePath: String, editorContent: String): Pointer?
+    fun agent_doc_deferred_write_reconnect_propagated(filePath: String, editorContent: String): Int
 
     /**
      * Read the Project Controller→plugin turn-state projection JSON for a document path:
@@ -1359,6 +1360,11 @@ object NativePatching {
         } finally {
             lib.agent_doc_free_string(ptr)
         }
+    }
+
+    fun deferredWriteReconnectPropagated(filePath: String, editorContent: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return lib.agent_doc_deferred_write_reconnect_propagated(filePath, editorContent) == 1
     }
 
     /**

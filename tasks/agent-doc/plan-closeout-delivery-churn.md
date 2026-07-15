@@ -6,6 +6,7 @@
 - **Invariant:** A remote canonical rejected by the template-structure guard is never left as the attached native replica frontier. When the unchanged live editor baseline is itself structurally exact, each editor replica manager performs one fenced text-adopt and atomic re-registration; otherwise it fails closed with bounded retry and never overwrites the editor.
 - **Invariant:** An admitted operator edit is never projected away because disk is older or a native replica frontier is stale. If the native frontier does not equal the edit's shadow baseline, the plugin adopts the exact structurally-valid visible editor text once and atomically re-registers before accepting another delta.
 - **Invariant:** Save is a durability acknowledgement, not a second logical mutation. Unsaved and saved forms of one queue edit share one semantic identity and produce exactly one canonical queue item.
+- **Invariant:** Any disk change while an editor is open is an independent pending candidate, never CRDT authority and never the pending-response slot. Accept propagates the exact visible editor cut before clearing; a newer editor edit or exact save-flush clears the candidate; final editor close clears it and falls back to disk. Authority order is editor/CRDT, disk, then Git recovery evidence.
 - **Invariant:** Closeout reports `committed` only when the authoritative response projection is durable and the session document at `HEAD` equals the proven closeout snapshot. A binary-owned compacted projection may cross the historical-response guard only with durable compaction evidence; arbitrary response-bearing drift remains fail-closed.
 - **Invariant:** Commit-seam free-text cleanup is a bounded disk transaction. It performs no controller lookup while holding the document lock; ordinary editor-authoritative cleanup finishes its controller read before lock acquisition.
 - **Invariant:** A baseline overlay is a cache paired with a named explicit markdown baseline, never implicit merge authority. With no baseline path, a stale `.overlay.yrs` sidecar cannot resurrect a consumed queue head.
@@ -35,6 +36,12 @@
 | editor local delta | native replica equals the captured shadow | operator edit admitted | forwarding | apply one incremental delta; a later Save may advance disk durability only |
 | editor local delta | native replica differs from the captured shadow | exact visible editor text is stable | recovering | never apply the delta to stale lineage; text-adopt the editor once and atomically replace the replica |
 | editor Save | queue edit was already admitted | disk write/VFS echo | durable | preserve the canonical semantic identity; do not replay or duplicate the queue item |
+| external disk write | one or more editor buffers open | exact disk bytes observed | pending user decision | retain/replace one exact Lazily disk candidate; do not mutate canonical CRDT or the independent response lineage |
+| external disk pending | editor accepts/reloads exact candidate | replica re-registers from visible buffer | settled | propagate the accepted editor cut through CRDT, then clear only the disk candidate |
+| external disk pending | editor buffer advances | operator edit | settled | propagate editor authority and clear the candidate without component merge |
+| external disk pending | editor saves exact buffer bytes to disk | file-watch save proof | settled | make the saved editor cut authoritative and clear any older candidate |
+| external disk pending | final editor closes | current disk exists | disk authority | clear the candidate and fall back to disk; a non-final close preserves CRDT authority |
+| external disk pending | several replicas reconnect with no exact common cut | CRDT sync incomplete | pending user decision | retain the disk candidate with an unproven-editor-cut marker and perform no mutation |
 | JetBrains delivery | failed/stale projection | editor advanced | retry/reconcile | remove in-flight projection only after recording a bounded reconciliation request |
 | JetBrains relay | registered | controller transport/instance is lost | re-registering | invalidate the old registration and retry registration with bounded backoff while the document stays open |
 | idle watch | controller model reports backpressure | other sessions are polling or a publish is active | controller-wide cooldown | coalesce observation, stop issuing per-document controller reads, and retry once after bounded quiet time |
@@ -61,10 +68,29 @@
 
 ## Executable model and Lazily migration contract
 
-The reference model is agent-doc domain policy, not a second production runtime. Its state includes canonical/editor/disk/HEAD text, semantic queue-item identities, delivery and ACK frontiers, controller/replica epochs, IPC queues, semantic response identities, and cycle phase. Its actions include local edit, queue-item admission, remote delivery, projection, ACK, capture, finalize, commit, save-as-durability-only, disconnect/reconnect, controller recycle, interruption, timeout, drop, duplicate, delay, and reorder.
+The reference model is agent-doc domain policy, not a second production runtime. Its state includes canonical/editor/disk/HEAD text, an independent pending external-disk candidate, semantic queue-item identities, delivery and ACK frontiers, controller/replica epochs, IPC queues, semantic response identities, and cycle phase. Its actions include local edit, queue-item admission, external disk change, accept pending disk, remote delivery, projection, ACK, capture, finalize, commit, save-as-durability-only, disconnect/reconnect, controller recycle, interruption, timeout, drop, duplicate, delay, and reorder.
 
 Every reachable trace must preserve: editor text is never replaced without an exact authority proof; an accepted operator queue item is not lost and has multiplicity at most one on every plane; Save does not mutate canonical semantic identity; one semantic response identity produces at most one live response cell; ACK never advances beyond an exact visible projection; `committed` implies file, snapshot, and HEAD equality; a retained delivery is not decoded twice; timed-out work cannot outlive its proven owner; and, once injected faults stop, a live editor/controller pair can converge without force-disk or busy-looping.
 
-Generated traces run against a pure reference reducer, the current implementation adapter, and a Lazily-backed adapter. Adapters expose only observable state and either match the reference or return a typed `CapabilityMissing` value. Capability gaps are classified separately from implementation mismatches and are promoted into Lazily only when the missing primitive is domain-neutral (for example retained cells, keyed single-flight, epoch/CAS fences, virtual-time backoff, cancellation propagation, or durable-effect barriers).
+Generated traces run against a pure reference reducer, the current implementation adapter, and a Lazily-backed adapter. Adapters expose only observable state and either match the reference or return a typed `CapabilityMissing` value. Capability gaps are classified separately from implementation mismatches and are promoted into Lazily only when the missing primitive is domain-neutral (for example retained cells, keyed single-flight, epoch/CAS fences, virtual-time backoff, cancellation propagation, durable-effect barriers, or an independent pending external-value decision).
 
 Lean should encode the stable pure transition kernel and safety invariants once. Short-trace state-space exploration/property tests own concurrency and shrinking; liveness under fairness can be checked in TLA+ or an equivalent model checker. JetBrains, VS Code, legacy binary, and Lazily paths are adapters to the shared model, not separate formal specifications.
+
+## Binary-owned finalize and evidence rules
+
+After the first durable response capture, finalize is a keyed operation identified
+by cycle id, capture id, and response hash. The CLI, Codex Stop hook, and
+route-owned supervisor all resume that same operation through the strict
+repair/write/commit seam. Only one supervisor worker runs per key; retryable
+editor convergence, CAS races, controller backpressure, and ACK delays use bounded
+backoff. The capture remains durable across process exit and supervisor recycle.
+No automatic recovery uses force-disk or kills the controller.
+
+Ambiguity rules are evidence-based: dedupe one semantic operation; choose a
+causally newer authority over its stale projection; merge compatible complete
+CRDT histories. If causal lineage is missing or two concurrent edits express
+incompatible semantic replacement intent, retain both candidates and return
+`needs_operator` without mutation. The executable model and Lean kernel enforce
+this causal-versus-semantic boundary. The Lazily adapter reports
+`EvidenceBasedAmbiguityResolution` as a typed capability gap until the core can
+express the rule result and retained-candidate barrier directly.

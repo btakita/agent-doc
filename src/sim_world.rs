@@ -59,6 +59,36 @@ mod realtime_ipc_cycle_model {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AmbiguityEvidence {
+        SameSemanticOperation,
+        EditorCausallyNewer,
+        ReplicaCausallyNewer,
+        ConcurrentCrdtCompatible,
+        ConcurrentSemanticConflict,
+        MissingCausalProof,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum AmbiguityResolution {
+        Dedupe,
+        ChooseEditor,
+        ChooseReplica,
+        MergeCrdt,
+        NeedsOperator,
+    }
+
+    fn resolve_ambiguity(evidence: AmbiguityEvidence) -> AmbiguityResolution {
+        match evidence {
+            AmbiguityEvidence::SameSemanticOperation => AmbiguityResolution::Dedupe,
+            AmbiguityEvidence::EditorCausallyNewer => AmbiguityResolution::ChooseEditor,
+            AmbiguityEvidence::ReplicaCausallyNewer => AmbiguityResolution::ChooseReplica,
+            AmbiguityEvidence::ConcurrentCrdtCompatible => AmbiguityResolution::MergeCrdt,
+            AmbiguityEvidence::ConcurrentSemanticConflict
+            | AmbiguityEvidence::MissingCausalProof => AmbiguityResolution::NeedsOperator,
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct Frame {
         response_id: u8,
         generation: u64,
@@ -89,12 +119,15 @@ mod realtime_ipc_cycle_model {
         UserEdit,
         AddQueueItem(u8),
         SaveEditor,
+        ExternalDiskChange,
+        AcceptPendingDisk,
         ControllerRecycle,
         RegisterReplica,
         Interrupt,
         CloseEditor,
         OpenEditor,
         ForceDisk,
+        ResolveAmbiguity(AmbiguityEvidence),
         Commit,
     }
 
@@ -107,6 +140,8 @@ mod realtime_ipc_cycle_model {
         BoundedRetry,
         CancellationPropagation,
         DurableEffectBarrier,
+        PendingExternalDiskDecision,
+        EvidenceBasedAmbiguityResolution,
     }
 
     impl Action {
@@ -129,6 +164,10 @@ mod realtime_ipc_cycle_model {
                 Self::SaveEditor | Self::ForceDisk | Self::Commit => {
                     Capability::DurableEffectBarrier
                 }
+                Self::ExternalDiskChange | Self::AcceptPendingDisk => {
+                    Capability::PendingExternalDiskDecision
+                }
+                Self::ResolveAmbiguity(_) => Capability::EvidenceBasedAmbiguityResolution,
             }
         }
     }
@@ -138,6 +177,7 @@ mod realtime_ipc_cycle_model {
         canonical: u32,
         editor: u32,
         disk: u32,
+        pending_disk: Option<u32>,
         head: u32,
         controller_epoch: u64,
         replica_epoch: Option<u64>,
@@ -151,6 +191,7 @@ mod realtime_ipc_cycle_model {
         canonical: u32,
         editor: u32,
         disk: u32,
+        pending_disk: Option<u32>,
         head: u32,
         controller_epoch: u64,
         replica_epoch: Option<u64>,
@@ -185,6 +226,7 @@ mod realtime_ipc_cycle_model {
                 canonical: 1,
                 editor: 1,
                 disk: 1,
+                pending_disk: None,
                 head: 1,
                 controller_epoch: 1,
                 replica_epoch: Some(1),
@@ -221,6 +263,7 @@ mod realtime_ipc_cycle_model {
                 canonical: self.canonical,
                 editor: self.editor,
                 disk: self.disk,
+                pending_disk: self.pending_disk,
                 head: self.head,
                 controller_epoch: self.controller_epoch,
                 replica_epoch: self.replica_epoch,
@@ -289,6 +332,7 @@ mod realtime_ipc_cycle_model {
                 Action::Ack => self.ack(),
                 Action::UserEdit => {
                     self.editor = self.editor.saturating_add(1);
+                    self.pending_disk = None;
                     self.invalidate_visible_delivery_for_operator_edit();
                     if self.live_editor && self.replica_epoch == Some(self.controller_epoch) {
                         self.canonical = self.editor;
@@ -304,6 +348,7 @@ mod realtime_ipc_cycle_model {
                         self.accepted_queue_items.insert(item_id);
                         self.editor_queue_items.insert(item_id, 1);
                         self.editor = self.editor.saturating_add(1);
+                        self.pending_disk = None;
                         self.invalidate_visible_delivery_for_operator_edit();
                         if self.replica_epoch == Some(self.controller_epoch) {
                             self.canonical_queue_items.insert(item_id, 1);
@@ -326,6 +371,41 @@ mod realtime_ipc_cycle_model {
                         // but semantic identity makes this the same mutation.
                         self.canonical = self.editor;
                         self.canonical_queue_items = self.editor_queue_items.clone();
+                        self.editor_dirty = false;
+                        // A save-flush is exact authority evidence: the bytes that
+                        // reached disk came from the live editor, so any older
+                        // external-disk candidate is superseded.
+                        self.pending_disk = None;
+                    }
+                }
+                Action::ExternalDiskChange => {
+                    self.disk = self.disk.saturating_add(1);
+                    if self.phase == Phase::Committed {
+                        self.phase = Phase::Idle;
+                    }
+                    if self.live_editor {
+                        // Keep the live buffer/canonical replica authoritative
+                        // while the IDE presents its cache-conflict decision.
+                        self.pending_disk = Some(self.disk);
+                    } else {
+                        self.canonical = self.disk;
+                        self.canonical_queue_items = self.disk_queue_items.clone();
+                        self.pending_disk = None;
+                    }
+                }
+                Action::AcceptPendingDisk => {
+                    if self.live_editor
+                        && let Some(candidate) = self.pending_disk.take()
+                    {
+                        self.editor = candidate;
+                        self.canonical = candidate;
+                        self.editor_queue_items = self.disk_queue_items.clone();
+                        self.canonical_queue_items = self.disk_queue_items.clone();
+                        // The operator explicitly chose the disk-backed buffer in
+                        // the IDE conflict UI. Queue items absent from that chosen
+                        // buffer are deliberate replacements, not silent losses.
+                        self.accepted_queue_items
+                            .retain(|id| self.editor_queue_items.contains_key(id));
                         self.editor_dirty = false;
                     }
                 }
@@ -360,6 +440,11 @@ mod realtime_ipc_cycle_model {
                 Action::CloseEditor => {
                     self.live_editor = false;
                     self.replica_epoch = None;
+                    // Once the final editor closes there is no live-buffer
+                    // authority to protect. Current disk becomes the fallback.
+                    self.pending_disk = None;
+                    self.canonical = self.disk;
+                    self.canonical_queue_items = self.disk_queue_items.clone();
                 }
                 Action::OpenEditor => {
                     self.live_editor = true;
@@ -371,14 +456,27 @@ mod realtime_ipc_cycle_model {
                 }
                 Action::ForceDisk => {
                     if self.live_editor {
-                        // The safety fence blocks the mutation; record only an
-                        // impossible-write counter if a reducer ever violates it.
+                        // An explicitly-authorized recovery write is still only a
+                        // disk candidate while an editor is open. It cannot
+                        // overwrite or component-merge the live buffer.
+                        self.disk = self.canonical;
+                        self.disk_queue_items = self.canonical_queue_items.clone();
+                        self.pending_disk = (self.disk != self.editor).then_some(self.disk);
                     } else if self.pending_responses.is_empty() && !self.editor_dirty {
                         self.disk = self.canonical;
                         self.head = self.canonical;
                         self.disk_queue_items = self.canonical_queue_items.clone();
                         self.head_queue_items = self.canonical_queue_items.clone();
                         self.phase = Phase::Committed;
+                    }
+                }
+                Action::ResolveAmbiguity(evidence) => {
+                    // Rules may select/dedupe a causally proven authority or merge
+                    // a compatible CRDT history. Missing lineage or competing
+                    // semantic replacement intents must be a mutation-free stop.
+                    let before = self.observe();
+                    if resolve_ambiguity(evidence) == AmbiguityResolution::NeedsOperator {
+                        assert_eq!(self.observe(), before);
                     }
                 }
                 Action::Commit => self.commit(),
@@ -536,6 +634,7 @@ mod realtime_ipc_cycle_model {
                 && self.pending_responses.is_empty()
                 && self.retained.is_none()
                 && self.delivery.is_none()
+                && self.pending_disk.is_none()
                 && self.canonical == self.editor
             {
                 self.disk = self.editor;
@@ -639,6 +738,13 @@ mod realtime_ipc_cycle_model {
             self.fault = Fault::None;
             self.live_editor = true;
             for _ in 0..64 {
+                if self.pending_disk.is_some() {
+                    // Liveness assumes the environment eventually resolves
+                    // the IDE cache-conflict. Saving expresses the stated
+                    // editor-buffer authority rule.
+                    self.apply(Action::SaveEditor);
+                    continue;
+                }
                 if self.replica_epoch != Some(self.controller_epoch) {
                     self.apply(Action::RegisterReplica);
                     continue;
@@ -709,7 +815,7 @@ mod realtime_ipc_cycle_model {
         }
 
         fn action(&mut self) -> Action {
-            match self.next(18) {
+            match self.next(20) {
                 0 => Action::Capture {
                     response_id: self.next(4) as u8,
                     already_visible: self.next(2) == 0,
@@ -733,12 +839,22 @@ mod realtime_ipc_cycle_model {
                 7 => Action::UserEdit,
                 8 => Action::AddQueueItem(self.next(4) as u8),
                 9 => Action::SaveEditor,
-                10 => Action::ControllerRecycle,
-                11 => Action::RegisterReplica,
-                12 => Action::Interrupt,
-                13 => Action::CloseEditor,
-                14 => Action::OpenEditor,
-                15 => Action::ForceDisk,
+                10 => Action::ExternalDiskChange,
+                11 => Action::AcceptPendingDisk,
+                12 => Action::ControllerRecycle,
+                13 => Action::RegisterReplica,
+                14 => Action::Interrupt,
+                15 => Action::CloseEditor,
+                16 => Action::OpenEditor,
+                17 => Action::ForceDisk,
+                18 => Action::ResolveAmbiguity(match self.next(6) {
+                    0 => AmbiguityEvidence::SameSemanticOperation,
+                    1 => AmbiguityEvidence::EditorCausallyNewer,
+                    2 => AmbiguityEvidence::ReplicaCausallyNewer,
+                    3 => AmbiguityEvidence::ConcurrentCrdtCompatible,
+                    4 => AmbiguityEvidence::ConcurrentSemanticConflict,
+                    _ => AmbiguityEvidence::MissingCausalProof,
+                }),
                 _ => Action::Commit,
             }
         }
@@ -820,6 +936,80 @@ mod realtime_ipc_cycle_model {
     }
 
     #[test]
+    fn external_disk_candidate_waits_for_editor_and_save_flush_clears_it() {
+        let mut world = World::new();
+        let editor_before = world.editor;
+        let canonical_before = world.canonical;
+
+        world.apply(Action::ExternalDiskChange);
+        assert_eq!(world.editor, editor_before);
+        assert_eq!(world.canonical, canonical_before);
+        assert_eq!(world.pending_disk, Some(world.disk));
+
+        world.apply(Action::SaveEditor);
+        assert_eq!(world.disk, world.editor);
+        assert_eq!(world.canonical, world.editor);
+        assert_eq!(world.pending_disk, None);
+
+        world.apply(Action::ExternalDiskChange);
+        world.apply(Action::AcceptPendingDisk);
+        assert_eq!(world.editor, world.disk);
+        assert_eq!(world.canonical, world.editor);
+        assert_eq!(world.pending_disk, None);
+
+        world.apply(Action::ExternalDiskChange);
+        world.apply(Action::UserEdit);
+        assert_eq!(world.pending_disk, None);
+
+        world.apply(Action::ExternalDiskChange);
+        let disk = world.disk;
+        world.apply(Action::CloseEditor);
+        assert_eq!(world.pending_disk, None);
+        assert_eq!(world.canonical, disk);
+    }
+
+    #[test]
+    fn accepting_disk_conflict_records_explicit_replacement_of_unsaved_queue_item() {
+        let mut world = World::new();
+        world.apply(Action::AddQueueItem(9));
+        world.apply(Action::ExternalDiskChange);
+        world.apply(Action::AcceptPendingDisk);
+
+        assert!(!world.editor_queue_items.contains_key(&9));
+        assert!(!world.accepted_queue_items.contains(&9));
+        assert_eq!(world.pending_disk, None);
+    }
+
+    #[test]
+    fn ambiguity_rules_resolve_causal_cases_and_stop_on_semantic_conflicts() {
+        assert_eq!(
+            resolve_ambiguity(AmbiguityEvidence::SameSemanticOperation),
+            AmbiguityResolution::Dedupe
+        );
+        assert_eq!(
+            resolve_ambiguity(AmbiguityEvidence::EditorCausallyNewer),
+            AmbiguityResolution::ChooseEditor
+        );
+        assert_eq!(
+            resolve_ambiguity(AmbiguityEvidence::ReplicaCausallyNewer),
+            AmbiguityResolution::ChooseReplica
+        );
+        assert_eq!(
+            resolve_ambiguity(AmbiguityEvidence::ConcurrentCrdtCompatible),
+            AmbiguityResolution::MergeCrdt
+        );
+        for evidence in [
+            AmbiguityEvidence::ConcurrentSemanticConflict,
+            AmbiguityEvidence::MissingCausalProof,
+        ] {
+            assert_eq!(
+                resolve_ambiguity(evidence),
+                AmbiguityResolution::NeedsOperator
+            );
+        }
+    }
+
+    #[test]
     fn generated_realtime_ipc_cycle_fault_traces_preserve_safety_and_converge() {
         for seed in 0..512 {
             let mut rng = Rng::new(seed);
@@ -855,6 +1045,9 @@ mod realtime_ipc_cycle_model {
             Action::ControllerRecycle,
             Action::RegisterReplica,
             Action::Interrupt,
+            Action::ResolveAmbiguity(AmbiguityEvidence::ConcurrentSemanticConflict),
+            Action::ExternalDiskChange,
+            Action::AcceptPendingDisk,
             Action::Commit,
         ];
         let available = BTreeSet::from([
@@ -868,7 +1061,9 @@ mod realtime_ipc_cycle_model {
                 Capability::BoundedRetry,
                 Capability::CancellationPropagation,
                 Capability::DurableEffectBarrier,
+                Capability::EvidenceBasedAmbiguityResolution,
                 Capability::KeyedSingleFlight,
+                Capability::PendingExternalDiskDecision,
             ])
         );
     }

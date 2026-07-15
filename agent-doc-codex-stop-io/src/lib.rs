@@ -157,14 +157,24 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             Ok(StopResponse::Continue { continue_: true })
         }
         agent_doc_session_check_io::SessionCheckStatus::Interrupted(reason) => {
-            if is_editor_convergence_required_interruption(&reason) {
+            // `#binaryownedfinalize`: once the response is durably captured, the
+            // Stop hook is a status gate, not a request for another agent-authored
+            // finalize attempt. Give the binary's keyed repair/commit operation a
+            // bounded opportunity to finish through editor/CRDT authority. The
+            // route-owned supervisor continues the same operation after this hook
+            // returns if convergence takes longer.
+            let editor_convergence_blocked = is_editor_convergence_required_interruption(&reason);
+            if !editor_convergence_blocked && try_resume_captured_finalize_in_hook(&file) {
+                return apply_stop(input);
+            }
+            if editor_convergence_blocked {
                 agent_doc_ops_log_io::log_op(
                     &file,
                     "codex_stop_editor_convergence_required_blocked",
                 );
                 let display = file.display();
                 let message = format!(
-                    "agent-doc Stop hook found an editor-convergence blocked closeout for {display}. {reason} Do not send the final answer yet. Retry through the editor/CRDT path after the editor frontend has the required capability or the live editor state is otherwise proven. Do not run `--force-disk` unless the operator explicitly chooses that recovery."
+                    "agent-doc Stop hook found an editor-convergence blocked closeout for {display}. {reason} The captured response is retained and the agent-doc binary/supervisor owns the keyed editor/CRDT retry. Do not recapture the response, rerun finalize, kill the controller, or use `--force-disk`; only re-check session status after the binary reports recovery, unless it explicitly reports `needs_operator`. Do not send the final answer yet."
                 );
                 if input.stop_hook_active {
                     return Ok(StopResponse::Stop {
@@ -252,6 +262,78 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             })
         }
     }
+}
+
+fn try_resume_captured_finalize_in_hook(file: &Path) -> bool {
+    let Some(key) = agent_doc_repair_command_io::captured_finalize_resume_key(file)
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    const MAX_ATTEMPTS: u32 = 4;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match agent_doc_repair_command_io::resume_captured_finalize(file, &key) {
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_committed cycle_id={} capture_id={} response_sha256={} attempt={} authority=editor_crdt",
+                        key.cycle_id, key.capture_id, key.response_sha256, attempt,
+                    ),
+                );
+                return true;
+            }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
+                return agent_doc_session_check_io::inspect(
+                    file,
+                    &agent_doc_closeout_runtime_io::session_check_effects(),
+                )
+                .is_ok_and(|status| {
+                    matches!(
+                        status,
+                        agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+                    )
+                });
+            }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Retryable { reason } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_retry cycle_id={} capture_id={} response_sha256={} attempt={} reason_bytes={} action=retry_without_disk_write",
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        attempt,
+                        reason.len(),
+                    ),
+                );
+                if attempt < MAX_ATTEMPTS {
+                    std::thread::sleep(
+                        agent_doc_supervisor::idle_watch::captured_finalize_resume_retry_delay(
+                            attempt,
+                        ),
+                    );
+                }
+            }
+            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::NeedsOperator {
+                reason,
+            } => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "codex_stop_captured_finalize_resume_needs_operator cycle_id={} capture_id={} response_sha256={} reason_bytes={} action=retain_without_mutation",
+                        key.cycle_id,
+                        key.capture_id,
+                        key.response_sha256,
+                        reason.len(),
+                    ),
+                );
+                return false;
+            }
+        }
+    }
+    false
 }
 
 fn is_editor_convergence_required_interruption(reason: &str) -> bool {

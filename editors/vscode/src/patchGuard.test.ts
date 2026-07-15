@@ -124,8 +124,8 @@ describe('patchGuard', () => {
     });
 
     it('publishes plugin owner before VS Code patch receipt', () => {
-        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+    const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
         const branch = source.slice(
             source.indexOf('private async onPatchFileCreated('),
             source.indexOf('private async applyPatch(', source.indexOf('private async onPatchFileCreated(')),
@@ -173,9 +173,12 @@ describe('patchGuard', () => {
         assert.strictEqual(source.slice(interruptClearStart, interruptClearEnd).includes('document.save()'), false);
     });
 
-    it('keeps full-content disabled and reconnect repair hooks absent while allowing immediate save signal', () => {
+    it('keeps disk reread disabled while using the shared deferred reconnect authority', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const nativeSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'native.ts'), 'utf-8');
+        const replicaSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'crdtReplica.ts'), 'utf-8');
+        const jbReplicaSource = fs.readFileSync(path.join(__dirname, '..', '..', 'jetbrains', 'src', 'main', 'kotlin', 'com', 'github', 'btakita', 'agentdoc', 'CrdtReplicaManager.kt'), 'utf-8');
+        const jbNativeSource = fs.readFileSync(path.join(__dirname, '..', '..', 'jetbrains', 'src', 'main', 'kotlin', 'com', 'github', 'btakita', 'agentdoc', 'NativeLib.kt'), 'utf-8');
         const saveSignalStart = source.indexOf('private async processSaveDocumentSignal(');
         const saveSignalEnd = source.indexOf('/**', saveSignalStart + 1);
         const saveSignalBody = source.slice(saveSignalStart, saveSignalEnd);
@@ -192,6 +195,16 @@ describe('patchGuard', () => {
         assert.strictEqual(source.includes('reread_disk repair is disabled'), false);
         assert.strictEqual(nativeSource.includes('reconnectBufferDecision'), false);
         assert.strictEqual(nativeSource.includes('agent_doc_reconnect_buffer_decision'), false);
+        assert.ok(nativeSource.includes('agent_doc_deferred_write_reconnect_content'));
+        assert.ok(nativeSource.includes('agent_doc_deferred_write_reconnect_propagated'));
+        assert.ok(source.includes('native.deferredWriteReconnectContent(filePath, editorText, projectRoot)'));
+        assert.ok(source.includes('native.deferredWriteReconnectPropagated(filePath, editorText, projectRoot)'));
+        assert.ok(replicaSource.includes('resolveDeferredReconnectContent'));
+        assert.ok(replicaSource.includes('settleDeferredReconnectContent'));
+        assert.ok(jbNativeSource.includes('agent_doc_deferred_write_reconnect_content'));
+        assert.ok(jbNativeSource.includes('agent_doc_deferred_write_reconnect_propagated'));
+        assert.ok(jbReplicaSource.includes('deferredWriteReconnectContent'));
+        assert.ok(jbReplicaSource.includes('deferredWriteReconnectPropagated'));
     });
 
     it('does not ship prompt polling in the VS Code extension', () => {

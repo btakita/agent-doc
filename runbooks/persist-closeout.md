@@ -68,8 +68,30 @@ full closeout contract.
 
 Terminal success also proves current canonical CRDT authority equals the disk
 projection byte-for-byte. A zero-replica or authority/disk mismatch schedules
-automatic supervisor recovery and requires retrying the same finalize path after
-reconnect; it is not a reason to run response repair or force disk.
+automatic supervisor recovery of the same durable `(cycle, capture, response)`
+operation. Once the response is captured, the binary owns reconcile, replay,
+dedupe, ACK proof, and commit retry; the agent must not recapture the response or
+rerun finalize. The Stop hook is a status gate for that operation, not another
+write-loop driver. Recovery always stays on the editor/CRDT authority path: it
+does not kill the controller or elect `--force-disk`. Only a typed
+`needs_operator` result for competing user-authored intent pauses automatic
+recovery.
+
+Rule-based ambiguity resolution requires positive evidence. A duplicate semantic
+operation is deduped; a causally newer editor/replica epoch wins over its stale
+projection; compatible concurrent CRDT histories merge. Missing causal lineage or
+two incompatible semantic replacement intents retain both candidates and produce
+`needs_operator` without mutation. CRDT byte convergence alone is not proof of
+semantic intent.
+
+An external disk change while any editor is open is not an ambiguity for
+`finalize` to merge through. The binary retains it in a Lazily slot independent
+of the captured response and waits for editor evidence. Exact accept/reload plus
+replica propagation clears it; a later editor edit clears it; an editor save
+whose exact bytes reach disk clears it and makes that save cut authoritative;
+the final editor close clears it and falls back to disk. Until one of those
+events, finalize remains mutation-free for the disk candidate and may continue
+retrying only the independent response lineage.
 
 ## Manual repair / missed patchback rule (all harnesses)
 

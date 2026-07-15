@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.135
+
+- **Finalize recovery is binary-owned and keyed by durable capture identity.** The repair command, supervisor worker, and Codex Stop hook resume one captured `(cycle, capture, response)` operation with bounded backoff and exact-once commit semantics. Retryable ACK/backpressure/CAS states no longer ask the agent to re-run finalize, kill controllers, or stack response cells; timed-out owners reap only proven descendants and classify intentional exit 144 as cancellation.
+- **Every disk change under an open editor is a separate pending decision (JetBrains plugin 0.2.262; VS Code 0.2.52).** The file watcher retains exact external bytes in an independent Lazily slot without replacing the pending response or mutating CRDT. Exact accept/reload propagates the visible buffer before settlement; a newer edit clears it; an exact editor save-flush overrides and clears it; final editor close falls back to disk. Multiple reconnecting replicas remain mutation-free until an editor cut is proven.
+- **JetBrains and VS Code share the same reconnect/settlement FFI.** Both adapters can install only a binary-proven candidate, retire the stale forwarder, seed/register from the visible editor buffer, and settle after propagation. VS Code keeps this work off the text-change UI path, and cross-editor static guards pin parity.
+- **The realtime model and Lean kernel cover external disk decisions and expose the Lazily gap.** Generated traces now include external writes, accept, edit, save, and close; Lean proves pending disk writes cannot mutate live editor/canonical state and that save/edit/close clear pending safely. `PendingExternalDiskDecision` is a typed Lazily capability requirement rather than agent-doc-only hidden behavior.
+- **Harness policy is explicit:** OpenCode/Codex/Claude installs receive the current skill, local verification precedes closeout, and CI is inspected once; red relevant CI is fixed, while green/queued/in-progress CI is recorded without polling or waiting.
+
 ## 0.34.134
 
 - **Live editor authority survives stale replicas and Save echoes (JetBrains plugin 0.2.261; VS Code 0.2.51).** Both adapters verify the native replica against the captured shadow before forwarding a local delta. A mismatch adopts the exact structurally-valid editor once and atomically re-registers instead of projecting stale canonical text over an unsaved edit; saving reflects the same semantic queue identity without replay or duplication.

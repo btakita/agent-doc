@@ -494,6 +494,8 @@ export interface CrdtReplicaManagerOptions {
     listDocuments: () => ReplicaDocumentSnapshot[];
     currentText: (filePath: string) => string | null;
     applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
+    resolveDeferredReconnectContent?: (filePath: string, editorText: string) => string | null;
+    settleDeferredReconnectContent?: (filePath: string, editorText: string) => void;
     normalizeTemplateStructure?: (text: string) => string | null;
     logger?: ReplicaLogger;
 }
@@ -559,13 +561,53 @@ export class CrdtReplicaManager {
     }
 
     async attachDocument(filePath: string, text?: string, forceRefresh = false): Promise<boolean> {
-        if (text !== undefined) this.seedDocument(filePath, text);
+        let registrationText = text ?? this.currentEditorText(filePath) ?? this.shadows.get(filePath);
+        let rebootstrapProven = false;
+        if (forceRefresh && registrationText !== undefined) {
+            const recovered = this.options.resolveDeferredReconnectContent?.(
+                filePath,
+                registrationText,
+            );
+            if (recovered != null) {
+                rebootstrapProven = true;
+            }
+            if (recovered != null && recovered !== registrationText) {
+                if (this.hasPendingLocal(filePath)) return false;
+                this.advanceNonOperatorProjectionEpoch(filePath);
+                this.applyingRemote.add(filePath);
+                let installed = false;
+                try {
+                    installed = await this.options.applyText(filePath, recovered, registrationText);
+                } finally {
+                    this.applyingRemote.delete(filePath);
+                }
+                if (!installed) {
+                    this.logger.warn(
+                        `[crdt-replica] deferred reconnect target lost editor CAS for ${filePath}; keeping live editor authority`,
+                    );
+                    return false;
+                }
+                registrationText = recovered;
+            }
+        }
+        if (rebootstrapProven) {
+            const staleForwarder = this.forwarders.get(filePath);
+            if (staleForwarder) {
+                this.forwarders.delete(filePath);
+                await staleForwarder.deregister();
+            }
+        }
+        if (registrationText !== undefined) this.seedDocument(filePath, registrationText);
         const forwarder = await this.forwarderFor(filePath);
-        // `forceRefresh` bypasses only attachment timing. An existing replica is
-        // never rewritten from an unproven full editor snapshot; user edits are
-        // already carried by incremental admitted changes.
-        void forceRefresh;
-        if (forwarder) this.requestRemoteDrain(filePath);
+        // A null resolver result means either no retained target or a pending
+        // external-disk/editor decision. In both cases the exact editor buffer
+        // remains authoritative and is never republished as an unproven reset.
+        if (forwarder) {
+            if (rebootstrapProven && registrationText !== undefined) {
+                this.options.settleDeferredReconnectContent?.(filePath, registrationText);
+            }
+            this.requestRemoteDrain(filePath);
+        }
         return forwarder != null;
     }
 

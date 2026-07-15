@@ -619,7 +619,70 @@ Two notes:
 
 - I placed the submodule at `src/haiven-websocket-hub` to match this repo's submodule convention. Say the word if you'd rather it live under `tasks/recruit/haiven/`.
 - The outbox is in-memory (`NewMemOutbox`); swapping in SQLite or an append-only log is an interface change, not a hub rewrite.
-<!-- agent:boundary:95e1af69 -->
+Please use Gin instead of Gorilla.
+
+### Re: Logging the WebSocket transport decision + effort estimate — opus-4-8
+
+Decision record for the transport swap, plus how much each option actually costs.
+
+#### The reframe
+
+The original edit said "Gin instead of Gorilla," but two things surfaced in discussion and change the framing:
+
+1. **Gin isn't a requirement** — you confirmed this. Gin is an HTTP router/framework with **no WebSocket support of its own**, so "Gin instead of Gorilla" was never a real 1:1 swap. Routing was never the bottleneck.
+2. **The actual requirement is scale + low latency** — many connections, low per-connection cost, low per-message latency.
+
+That reframes the whole question from "which web framework" to "which connection engine."
+
+#### Why gorilla + Gin is *not* an option for this goal
+
+- **gorilla + Gin only changes routing.** You'd move `/connect`, `/healthz`, `/metrics` onto a `gin.Engine`, keep `gorilla/websocket` for the socket, and get **zero scale or latency improvement**. Gorilla stays, and Gorilla's cost model is the thing we're trying to beat.
+- **gorilla's cost is goroutines, not epoll.** Gorilla already rides Go's runtime netpoller (epoll under the hood). What it costs is **2–3 goroutines per connection** — the HTTP handler blocked in `Accept`, plus `readPump` and `writePump`, each with a stack. Fine at a few thousand conns; it becomes the memory ceiling and scheduler-pressure source at hundreds of thousands to millions.
+- **The win is removing goroutine-per-conn**, which nbio and gobwas both do via a user-space epoll poller + small worker pool. That is precisely *why* both are options over gorilla+Gin, and gorilla+Gin is not.
+
+#### The two real options
+
+| | **lesismal/nbio** | **gobwas/ws** (+ `cloudwego/netpoll`) |
+|---|---|---|
+| **What it is** | Full async framework: epoll loop + non-blocking HTTP + WebSocket, integrated | A WS frame codec on a raw `net.Conn`; you supply the event loop |
+| **Concurrency** | Callbacks (`OnOpen`/`OnMessage`/`OnClose`); no goroutine-per-conn | You build it: register fds with a poller, dispatch on a worker pool |
+| **Protocol work you own** | Low — framework does ping/pong/close/deadlines | **High** — you emit ping/close frames + manage deadlines yourself |
+| **Latency ceiling** | Very good; keep `OnMessage` non-blocking to avoid a pool hop | Potentially lowest — you own every hop — *if* tuned right |
+| **Scale (idle-conn memory)** | Excellent | Excellent |
+| **Design impact here** | Deletes the two pumps, inverts control, replaces the HTTP server | Rewrites the engine but keeps your `Conn`/pump vocabulary + HTTP layer |
+| **Maintenance note** | Active, production users | gobwas/ws stable; use `cloudwego/netpoll` for the poller, **not** the archived `mailru/easygo` |
+| **Failure surface** | Framework's model | Your hand-rolled ping/pong/deadline/close edge cases + poller lifecycle (fd leaks) |
+
+**Honest tension:** "scale" and "lowest latency" pull apart slightly. For a *moderate* number of *hot* connections, goroutine-per-conn (even gorilla) is already near-optimal on latency. The move only pays off when the target is **high connection count** — that's where killing the per-conn goroutines wins. Both nbio and gobwas get you there.
+
+#### How much work — gobwas/ws vs nbio
+
+**Untouched either way** (they never reference the socket type except through `Conn`): `envelope`, `auth`, `registry`, `router`, `outbox`, `sendqueue`/policy table, `breaker`, `metrics`, `ids`, `downstream/chat`. That's most of the codebase.
+
+**Shared cost (both paths):**
+- `Conn.ws` field type + all `websocket.*` message/close constants in `conn.go` and `hub.go`.
+- `hub.Accept` semantics — with an event loop it **stops blocking** (register + return; the loop drives I/O), a real behavioral change from today's "block in the HTTP goroutine."
+- Backpressure re-mapping — the `sendQueue` today assumes a `writePump` drains it on signal. With async writes, slow-consumer detection (§4.1/§4.5) has to be re-expressed against the framework's / poller's write model. This is the subtle part in **both** paths.
+- `e2e_test.go` (real loopback WS) updated to the new transport; `ws: nil` unit tests unaffected.
+
+**nbio — ~1 to 1.5 days.**
+- Rewrite `conn.go`: delete `serve`/`readPump`/`writePump`/`drain`; move the read-loop body into `OnMessage` (decode → stamp → dispatch) and teardown into `OnClose`. Writes → nbio's `WriteMessage` (keep `wmu` since callbacks can race). Ping/pong/deadlines → nbio handlers.
+- `server.go` + `main.go` onto `nbhttp.Server` + nbio's `websocket.Upgrader`; auth stays pre-upgrade in the HTTP handler.
+- Framework owns the protocol, so most effort is integration + the backpressure re-map. Low protocol-correctness risk.
+
+**gobwas/ws — ~3 to 4 days (~2–3× nbio).**
+- Everything nbio does, **plus you build the event loop**: integrate `cloudwego/netpoll`, register fds, readable callbacks, worker-pool dispatch, poller lifecycle.
+- **Plus you hand-write the protocol**: ping emission + pong-driven deadline extension, close frames with status codes, read-limit enforcement, deadlines on the raw `net.Conn`.
+- More of this work is the fiddly, easy-to-get-subtly-wrong kind (deadline/ping/pong/close edge cases, fd leaks), and it needs its own tests for the loop.
+
+#### Recommendation
+
+**nbio** — it's purpose-built for "many connections, low memory, low latency," is roughly a third of the work, and keeps the failure surface inside a maintained framework rather than a hand-rolled event loop. Pick **gobwas+netpoll** only if the point is to *demonstrate* a from-scratch epoll loop as the flex, or you need latency control beyond what a framework gives.
+
+The registry, router, envelope, outbox, rate-limit, and breaker survive intact under either — the swap is genuinely confined to the connection edge.
+
+Logged as backlog item `#haivenws`. Say the word and I'll implement the nbio path (and drop this record into the submodule as an ADR so it lives in the deliverable, not just the session doc).
+<!-- agent:boundary:dd2dfee2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -630,6 +693,7 @@ Two notes:
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#haivenws] Implement the nbio WebSocket transport migration for haiven-websocket-hub (scale + low latency): rewrite conn.go pumps into nbio OnMessage/OnClose callbacks, move server.go/main.go onto nbhttp, keep Accept/registry/router/outbox/breaker semantics, re-map sendQueue backpressure to async writes, update e2e test + DESIGN.md §3–§4, and add an ADR recording nbio vs gobwas/ws vs gorilla+gin. [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
 - [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role

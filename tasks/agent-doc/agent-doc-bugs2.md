@@ -107,11 +107,40 @@ Implemented the two failures as separate fixes in agent-doc 0.34.105.
 
 - JetBrains stall: the production controller RPC hard-coded operator-driven dispatch to false, so an explicit dispatch_only_reopen could be rejected as coalesced_in_flight by a stale same-generation receipt. Explicit operator reopen commands now bypass that stale receipt; automatic redispatch and duplicate action clicks still coalesce.
 - equityfundingsource.md recovery: committed-cycle adoption was incorrectly gated on a Codex hook session, excluding Claude Code plus JetBrains even while a live CRDT editor endpoint remained authoritative. Empty strict closeout now adopts the live editor buffer for every harness, converges and acknowledges it, and crosses the normal commit boundary exactly once. It never restores git HEAD and never asks the operator whether to reconcile.
+- a differing relay with registered live editors is treated as concurrent operator input and fails closed instead of being overwritten.
+- a frozen zero-editor relay fallback is repaired to the live target;
+- an already-converged live relay is never reset or rebootstraped;
+- snapshot staging and post-commit HEAD verification use the committed target;
+- editor-buffer save and relay convergence use the live target;
 
 Regression coverage reproduces both production paths, including a committed compacted HEAD with an expanded JetBrains-style editor replica and no Codex hook. The focused tests passed, make check passed, make install-full passed, and the installed CLI reports agent-doc 0.34.105. Source commit: cf273cca; superproject pin: 49d47aa42.
 
 The four unrelated concurrent source edits in the agent-doc worktree were preserved and excluded from the fix commit.
-<!-- agent:boundary:418d821d -->
+### Re: Editor-authority and Lazily recovery — gpt-5
+
+Implemented and pushed the full JetBrains/editor-authority recovery set in agent-doc 0.34.108.
+
+- Consolidated free-text state into enums: `CrdtConvergenceState`, Rust/Kotlin `CrdtReplicaEventReason`, and `DocumentWriteDeferredReason`. JSON keeps stable wire tokens; deferred-state deserialization retains a legacy-string compatibility variant.
+- Every canonical candidate is retained in CRDT plus Lazily state before delivery. A prior pending frontier now queues the target once, cumulative final-hash ACKs can clear the prefix, and retrying the same target is a canonical no-op.
+- JetBrains now journals remote ACKs before leaving the editor thread, recomputes proof from the current buffer, replays lost ACKs, clears obsolete lineage on rebootstrap, and responds to targeted refresh events. The binary asks for ACK replay every 250 ms, requests one targeted refresh after 2 seconds, and returns after a bounded 8 seconds with the write safely retained instead of causing 60-second retry churn or asking for controller/IDE/tab intervention.
+- Zero-replica writes fail fast without touching disk while preserving the canonical target. Compact Exchange and ordinary response closeout use the same visible-content and commit boundary, so uncompacted/stale editor text is not silently committed or left behind.
+- `--force-disk` is now recoverable: the pre-force base and intended target are saved in Lazily before the atomic authority bypass; concurrent disk drift is preserved, transient HEAD markers are stripped, and the pending target, disk, and committed HEAD converge to the same content. It no longer requires restoring git HEAD.
+- JetBrains forced refresh deregisters cached forwarders before REGISTER, and project reload refreshes every open Markdown document, addressing Run Agent Doc stalls and File Cache Conflict after controller/library changes.
+
+Live proof succeeded on `equityfundingsource.md`: with the tab open and the new plugin active, one routed recovery wake-up settled through the editor path, committed the response, returned its owner to ready, left the document clean, and passed `agent-doc session-check`. No tab close and no `--force-disk` were used.
+
+Source commit `a2b5022e` (`fix: recover editor writes through lazily state`) is pushed to `origin/main`; the source worktree is clean. Installed artifacts report CLI/lib 0.34.108 and JetBrains plugin 0.2.253 for IntelliJ IDEA 2026.1. Focused Rust packages, the delayed-ACK regression, Gradle tests/plugin build, clippy, full `make check`, and `make install-full` passed. The first GitHub CI attempt hit one unchanged Codex-stop test that passes locally alone and with its full package; the failed job rerun is currently in progress. No release was cut.
+❯ Implemented, committed, and pushed as `f42f1603`.
+
+- Free-text recovery state is now the typed `IpcLivePromptDriftState` enum.
+- Atomic JetBrains replica replacement and structural response recovery are included.
+- `make check` passes.
+- `agent-doc 0.34.109` is installed; JetBrains plugin `0.2.254` is installed.
+- CI is currently running.
+- No force-disk or Git-HEAD restoration occurred.
+
+❯ The agent-doc workflow is paused because the running IDE still has plugin `0.2.253`; registry count remains zero. Please restart IntelliJ IDEA 2026.1 and reply `restarted`. I’ll then perform one editor-authoritative repair and commit the captured response.
+<!-- agent:boundary:ba6858cc -->
 <!-- /agent:exchange -->
 ## Queue
 

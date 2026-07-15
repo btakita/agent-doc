@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -77,10 +77,25 @@ Note "LOS" here: lender master records actually live in TMO's Loan Servicing ser
 - Committed (`a909426`), pushed, and **deployed to prod** (worker version `bbe1e5f8`). Live-verified: `/api/admin/tmo-lenders` is auth-gated (401, not 404) and the deployed browser bundle contains the picker (`api/admin/tmo-lenders`, `combobox`).
 
 **One thing I can't check from here:** whether prod actually has TMO credentials set so the dropdown returns real lenders — that needs an authenticated admin session. Queued as `#tmo-lender-picker-verify` for a 30-second live check; the field works as manual entry regardless.
-<!-- agent:boundary:2db8f56f -->
+
+### Re: LOS lenders only — LSS is not used by EFS — opus-4-8
+
+Fixed and redeployed. You're right — I'd sourced the dropdown from `LSS.svc/GetLenders`, and EFS doesn't use LSS at all. Switched it to a **LOS-only** source.
+
+**What changed**
+- Dropped the `LSS.svc/GetLenders` client entirely. The picker's lender list now comes from **LOS loan fundings** — the distinct lenders on `LOS.svc/GetLoanFundings` records (funding `Account` / `FullName` / `LegalVesting` / `EmailAddress`), which EFS already caches as `loan_funding` entities during TMO sync.
+- `GET /api/admin/tmo-lenders` now reads those cached funding rows and aggregates distinct lenders by account (deduped, name/email backfilled across fundings, sorted). No live LSS call; still admin-guarded and `?q=` filterable.
+- `docs/TMO/get-lender.md` rewritten: EFS is LOS-only; picker sourced from LOS fundings; do not wire `LSS.svc`.
+- The four picker call sites (lender-request card, Lender Profile, advance-lender modal, deal link) are unchanged — only the data source moved.
+
+**Verified**
+- `make check` green (1633 pass / 0 fail); committed `bbfb694`, pushed, **deployed** (worker `c379d51b`). Confirmed live: endpoint 401 auth-gated, and the built worker has **zero** `LSS.svc/GetLenders` references.
+- Checked prod D1 for the `#tmo-lender-picker-verify` populate check: the cache has **18 loans / 10 payment schedules but 0 loan-funding records**. So the dropdown is wired correctly but is **empty right now** because no loans are funded yet in the LOS — as fundings sync in, lenders appear automatically. Until then the field is manual-entry (correct fallback). Closing the verify item; the "does it list names" moment just waits on the first funded loan.
+<!-- agent:boundary:759e2b3e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy
 <!-- /agent:queue -->
 
 ## Notes

@@ -799,7 +799,9 @@ Neither changes the headline win: **the goroutine-per-connection cost is elimina
 ### Re: #haivenws marked complete — opus-4-8
 
 Confirmed — closing `#haivenws` (the gobwas/ws + gnet event-loop transport migration for haiven-websocket-hub). Moving it out of the backlog into `agent:done` dated 2026-07-15. Follow-on work stays tracked: `#haivenwsopt` (O(1)-scale refinements — antlabs/timer per-conn wheel, ants dispatch pool, fragmented-handshake hardening) and `#tnpa` (Track C unreliable-network load-test harness).
+❯ How does is the server.go module registered in gnet?
 
+How does is the server.go module registered in gnet?
 
 ### Re: How is server.go registered in gnet? — opus-4-8
 
@@ -828,6 +830,8 @@ err := gnet.Run(srv, "tcp://"+*wsAddr,   // register + start the loop (main.go:6
 **4. Readiness + shutdown.** `OnBoot` (`server.go:65`) closes the `s.boot` channel, exposed via `Booted()`, so callers and tests can wait until the loop is listening. Shutdown calls `gnet.Stop(ctx, "tcp://"+*wsAddr)` (`main.go:81`) — addressed by the same multiaddr string passed to `Run`.
 
 So: `server.go` is registered by (a) embedding `gnet.BuiltinEventEngine` to become an `EventHandler`, and (b) `gnet.Run(srv, addr, opts...)` in `cmd/hubd/main.go` handing that handler to the event loop.
+Does gnet use gobwas/ws?
+`_ = gnet.Stop(ctx, "tcp://"+*wsAddr)` is deprecated. The docs recommend `Engine.Stop`. How do I access Engine.Stop?
 
 ### Re: gnet + gobwas/ws, and Engine.Stop — opus-4-8
 
@@ -847,24 +851,10 @@ func (s *Server) Stop(ctx context.Context) error { return s.eng.Stop(ctx) }
 
 Then in `main.go` shutdown call `srv.Stop(ctx)` instead of `gnet.Stop(ctx, "tcp://"+*wsAddr)`. `Engine` is a small value type with a value receiver on `Stop`, so storing the copy is idiomatic. (Informational — code not modified.)
 
-### Re: gnet + gobwas/ws, and Engine.Stop — opus-4-8
+### Re: (all three already answered above) — opus-4-8
 
-**Does gnet use gobwas/ws?** No — they are independent libraries this project composes; gnet has zero gobwas dependency (verified against gnet v2.10.0 source — no gobwas import anywhere in the module). `panjf2000/gnet/v2` is the epoll/kqueue event-loop and TCP poller; `gobwas/ws` is a standalone WebSocket protocol codec. In `server/server.go` the two are layered: gnet owns the raw byte stream and connection lifecycle (`OnOpen`/`OnTraffic`/`OnClose`), while gobwas's `ws.Upgrader` + `wsutil` perform the WebSocket handshake and frame encode/decode on top of gnet's bytes. That pairing (gnet poller + gobwas codec) is the choice recorded in the gobwas-vs-nbio-vs-gorilla ADR.
-
-**`gnet.Stop(ctx, addr)` is deprecated — how do I reach `Engine.Stop`?** You get the `Engine` from the `OnBoot` callback. In gnet v2.10.0: `gnet.go:734` `func Stop(ctx, protoAddr string)` carries the comment *"Use Engine.Stop instead."*; the replacement is `gnet.go:153` `func (e Engine) Stop(ctx context.Context) error`; and `OnBoot(eng Engine) Action` is handed the live `Engine` (`BuiltinEventEngine.OnBoot(_ Engine)` just discards it). So capture and store it:
-
-```go
-// server.go — add field: eng gnet.Engine
-func (s *Server) OnBoot(eng gnet.Engine) gnet.Action {
-    s.eng = eng
-    close(s.boot)
-    return gnet.None
-}
-func (s *Server) Stop(ctx context.Context) error { return s.eng.Stop(ctx) }
-```
-
-Then in `main.go` shutdown call `srv.Stop(ctx)` instead of `gnet.Stop(ctx, "tcp://"+*wsAddr)`. `Engine` is a small value type with a value receiver on `Stop`, so storing the copy is idiomatic. (Informational — code not modified.)
-<!-- agent:boundary:fcbfe5b0 -->
+These three prompts are already answered in the committed responses immediately above: (1) how `server.go` is registered in gnet — it embeds `gnet.BuiltinEventEngine` and `cmd/hubd/main.go` hands it to `gnet.Run`; (2) gnet does not use gobwas/ws — they are independent, composed layers; (3) reach `Engine.Stop` by capturing the `Engine` from `OnBoot(eng)` and storing it. No new content — this note just advances the exchange boundary past the prompts that a force-disk/editor-reconnect collision left straddling the boundary.
+<!-- agent:boundary:ecdb0808 -->
 <!-- /agent:exchange -->
 
 ## Queue

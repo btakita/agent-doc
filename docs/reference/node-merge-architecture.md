@@ -48,7 +48,9 @@ route through it.
 1. **Whole-document replay gate** — canonicalize an exact or monotonic duplicate projection
    on either side before any tree/CRDT reconciliation. If one side contains two structurally
    complete but divergent projections, reject the merge: the ordinary whole-document fallback
-   is not allowed to concatenate an ambiguous replay.
+   is not allowed to concatenate an ambiguous replay. Monotonic comparison uses the shared
+   code-block-aware ` (HEAD)` normalization and exchange-scoped prompt-prefix normalization;
+   the retained projection remains byte-verbatim.
 2. **Short-circuit** — if `ours == theirs`, return as-is.
 3. **Segment** both `ours` and `theirs` into nodes via `segment_into_cells`. If either fails
    to segment, fall back to the whole-doc `merge` (logged).

@@ -65,8 +65,20 @@ fn coalesce_monotonic_dual_document_replay(content: &str) -> Option<ExactDocumen
         return None;
     }
 
-    let first_lines = first.lines().collect::<Vec<_>>();
-    let second_lines = second.lines().collect::<Vec<_>>();
+    // `(HEAD)` is an editor-facing transient annotation, not durable document
+    // content. A replay can therefore contain the same response heading with
+    // the annotation in the current projection and without it in the stale
+    // projection. Compare the shared, code-block-aware normalization while
+    // retaining the original superset bytes as authority.
+    let normalize_projection = |projection: &str| {
+        agent_doc_document::transient_markers::strip_exchange_prompt_prefixes_for_compare(
+            &agent_doc_document::transient_markers::strip_head_markers(projection),
+        )
+    };
+    let normalized_first = normalize_projection(first);
+    let normalized_second = normalize_projection(second);
+    let first_lines = normalized_first.lines().collect::<Vec<_>>();
+    let second_lines = normalized_second.lines().collect::<Vec<_>>();
     let (canonical, retained_additions) =
         if line_sequence_is_subsequence(&second_lines, &first_lines) {
             (first, first_lines.len().saturating_sub(second_lines.len()))
@@ -127,5 +139,21 @@ mod tests {
 
         assert!(has_dual_complete_projection_shape(&replay));
         assert!(coalesce_exact_document_replay(&replay).is_none());
+    }
+
+    #[test]
+    fn monotonic_replay_ignores_transient_head_annotation() {
+        let current = format!(
+            "{HEADER}<!-- agent:exchange -->\nQ.\n\n### Re: Q — gpt-5 (HEAD)\n\n❯ Answer.\n\n### Re: follow-up — gpt-5\n\nNew answer.\n{TAIL}"
+        );
+        let stale =
+            format!("{HEADER}<!-- agent:exchange -->\nQ.\n\n### Re: Q — gpt-5\n\nAnswer.\n{TAIL}");
+        let replayed = format!("{current}{stale}");
+
+        let replay = coalesce_exact_document_replay(&replayed).expect("safe replay");
+
+        assert_eq!(replay.canonical, current);
+        assert_eq!(replay.copies, 2);
+        assert!(replay.retained_additions > 0);
     }
 }

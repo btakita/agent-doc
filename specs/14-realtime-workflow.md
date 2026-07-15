@@ -138,6 +138,10 @@ classification or dispatch. The shared merge entry point enforces the same
 gate before lossless-tree, component, or whole-document reconciliation: it may
 canonicalize an exact/monotonic replay, but it must reject two divergent
 complete projections rather than pass them to the whole-document fallback.
+Monotonic equivalence may ignore only shared transient materialization rules:
+code-block-aware ` (HEAD)` heading annotations and exchange-scoped `❯ ` prompt
+prefixes. The current superset is retained byte-verbatim; ordinary reordered or
+changed lines remain ambiguous.
 
 An accepted write that reaches canonical CRDT authority while the durable editor
 owner has zero registered replicas remains a content-bearing deferred delivery,

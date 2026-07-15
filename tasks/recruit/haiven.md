@@ -682,7 +682,51 @@ That reframes the whole question from "which web framework" to "which connection
 The registry, router, envelope, outbox, rate-limit, and breaker survive intact under either — the swap is genuinely confined to the connection edge.
 
 Logged as backlog item `#haivenws`. Say the word and I'll implement the nbio path (and drop this record into the submodule as an ADR so it lives in the deliverable, not just the session doc).
-<!-- agent:boundary:dd2dfee2 -->
+
+### Re: Do libraries handle the gobwas/ws protocol so you don't hand-roll it? — opus-4-8
+
+Yes — and this narrows the effort gap I quoted earlier. The "hand-rolling" I flagged is really **two separate jobs**, and there's a library for each:
+
+1. **Protocol plumbing** (frame parsing, ping/pong/close control frames, fragmentation)
+2. **The event loop** (epoll/kqueue poller, no goroutine-per-conn — the part that actually delivers the scale win)
+
+#### 1. Protocol — `gobwas/ws/wsutil` (ships *with* gobwas)
+
+gobwas already includes `wsutil`, a higher-level layer over the raw `ws` codec. It removes most of the frame-level hand-rolling:
+
+- `wsutil.ReadClientData` / `ReadServerData` — read a full message, transparently handling interleaved control frames.
+- `wsutil.WriteServerMessage` / `WriteClientMessage` — write with masking/opcodes handled.
+- **`wsutil.ControlHandler`** — responds to **ping/pong/close automatically**. This is exactly the ping/pong/close logic I said you'd hand-write; you don't.
+- `wsutil.Reader` with intermediate-frame handling — fragmentation done for you.
+
+So frame parsing and control-frame responses are **not** hand-rolled. What `wsutil` does *not* give you: read/write **deadlines** (you still `SetReadDeadline` on the `net.Conn`) and the event loop.
+
+#### 2. Event loop — a poller framework, not hand-rolled
+
+The reactor is the piece that makes gobwas "scale," and you don't write it yourself either. Options:
+
+- **`panjf2000/gnet`** — high-performance event-loop networking framework (Go's answer to netty/libuv). It has an official **WebSocket example built on `gobwas/ws`**: gnet drives the epoll loop and hands you readable bytes; gobwas/wsutil parses frames. This is the cleanest "assemble two mature libraries, hand-roll nothing" path that *keeps* gobwas.
+- **`cloudwego/netpoll`** (ByteDance) — actively maintained epoll/kqueue reactor; pair it with gobwas the same way. Lower-level than gnet, more wiring.
+- **Avoid `mailru/easygo/netpoll`** — the poller from the original "Going Infinite" article. It's archived/stale; don't build new work on it.
+
+#### What's left to actually write
+
+With **gnet + gobwas/ws + wsutil**, you hand-roll essentially none of the protocol or the loop. The remaining work is **integration glue**: the event-loop model hands you a *byte buffer in a callback*, while `wsutil.ReadClientData` wants an `io.Reader`. gnet's websocket example shows the standard adapter — wrap the connection so gobwas reads from the accumulated buffer, then decode complete frames. Plus deadline bookkeeping and mapping your `sendQueue` backpressure onto async writes (the same re-map nbio needs).
+
+#### Revised comparison
+
+| | **nbio** | **gnet + gobwas/ws + wsutil** |
+|---|---|---|
+| Event loop | Built in | gnet |
+| WS protocol / control frames | Built in | gobwas `wsutil` |
+| You write | Callbacks + backpressure re-map | Byte-buffer↔reader adapter + callbacks + backpressure re-map |
+| Dependencies | 1 (cohesive) | 2 (both best-in-class; gobwas gives finer frame control) |
+| Effort | ~1–1.5 days | **~2–2.5 days** (down from the 3–4 I quoted — no hand-rolled loop or protocol) |
+
+So the earlier "gobwas = hand-roll the protocol, 3–4 days" was too pessimistic **if** you take the `gnet + wsutil` route. The honest remaining difference vs. nbio: nbio is **one** cohesive dependency and slightly less glue; the gnet+gobwas stack is **two** libraries but gives you gobwas's lower-level frame control if you ever want it.
+
+**Recommendation stands: nbio** — fewest moving parts for this hub, and the control gobwas offers isn't something this design needs. Choose gnet+gobwas only if you specifically want gnet's event-loop ergonomics or gobwas's frame-level control. Either way, "hand-rolling the WebSocket protocol" is **off the table** — that was never actually required.
+<!-- agent:boundary:0b3f7779 -->
 <!-- /agent:exchange -->
 
 ## Queue

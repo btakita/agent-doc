@@ -223,6 +223,13 @@ divergence between the editor buffer and disk is then purely replica-driven (a
 `remoteCrdtApply` moved the buffer via CRDT-replica reconciliation), not genuine
 operator text.
 
+JetBrains now settles that replica-only dirty state before acknowledging a
+remote delivery: it saves the converged `Document` only when raw disk still
+equals the guarded editor baseline or the converged target. A novel disk image
+rejects the delivery without mutation. Thus the provenance bit remains a
+recovery guard rather than a long-lived dirty-buffer mode that can arm the IDE's
+memory/disk conflict resolver.
+
 The visible-write reconcile guard
 (`guard_visible_write_reconcile_with_target` in `write.rs`) uses it to
 distinguish replica churn from a real unsaved operator edit:

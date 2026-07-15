@@ -766,11 +766,32 @@ pub fn lossless_tree_merge_enabled() -> bool {
 /// the sole authority and the merge cost drops to the edited subtree. Only when a
 /// side *deleted* content — where a stale revert could regress a struck head or a
 /// committed block — does the CRDT run, as the arbiter of the guarded path.
+fn canonicalize_complete_document_replay<'a>(side: &str, text: &'a str) -> Result<&'a str> {
+    if let Some(replay) = crate::document_replay::coalesce_exact_document_replay(text) {
+        eprintln!(
+            "[crdt] merge_by_component: coalesced whole-document replay side={side} copies={} retained_additions={} original_len={} canonical_len={}",
+            replay.copies,
+            replay.retained_additions,
+            text.len(),
+            replay.canonical.len(),
+        );
+        return Ok(replay.canonical);
+    }
+    if crate::document_replay::has_dual_complete_projection_shape(text) {
+        anyhow::bail!(
+            "merge_by_component rejected divergent whole-document replay on {side}; refusing unsafe whole-document fallback"
+        );
+    }
+    Ok(text)
+}
+
 pub fn merge_by_component(
     base_state: Option<&[u8]>,
     ours_text: &str,
     theirs_text: &str,
 ) -> Result<String> {
+    let ours_text = canonicalize_complete_document_replay("ours", ours_text)?;
+    let theirs_text = canonicalize_complete_document_replay("theirs", theirs_text)?;
     if !lossless_tree_merge_enabled() {
         return merge_by_component_authoritative(base_state, ours_text, theirs_text);
     }
@@ -3806,6 +3827,43 @@ Second answer line three.
             advanced.to_text().unwrap(),
             merged,
             "fallback must still yield a per-node state round-tripping the merged text"
+        );
+    }
+
+    #[test]
+    fn merge_by_component_coalesces_monotonic_whole_document_replay() {
+        let header = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n";
+        let tail = "<!-- /agent:exchange -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let stale = format!("{header}<!-- agent:exchange -->\nQ.\n{tail}");
+        let current = format!(
+            "{header}<!-- agent:exchange -->\nQ.\n\n### Re: q — gpt-5\n\nResponse.\n{tail}"
+        );
+        let replayed = format!("{stale}{current}");
+        let base_state = CrdtDoc::from_text(&stale).encode_state();
+
+        let merged = merge_by_component(Some(&base_state), &current, &replayed).unwrap();
+
+        assert_eq!(merged, current);
+        assert_eq!(merged.matches("agent_doc_session: test").count(), 1);
+        assert_eq!(merged.matches("<!-- agent:exchange -->").count(), 1);
+    }
+
+    #[test]
+    fn merge_by_component_rejects_divergent_whole_document_replay() {
+        let header = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n";
+        let tail = "<!-- /agent:exchange -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n";
+        let base = format!("{header}<!-- agent:exchange -->\nQ.\n{tail}");
+        let first = format!("{header}<!-- agent:exchange -->\nfirst branch\n{tail}");
+        let second = format!("{header}<!-- agent:exchange -->\nnovel operator text\n{tail}");
+        let replayed = format!("{first}{second}");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+
+        let error = merge_by_component(Some(&base_state), &base, &replayed).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("divergent whole-document replay")
         );
     }
 

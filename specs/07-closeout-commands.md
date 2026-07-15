@@ -40,6 +40,12 @@ through exact authority CAS, align the snapshot, and clear superseded deferred
 intents. Any failure in this response-recovery stage aborts preflight before the
 generic commit path; recovery errors are never advisory warnings.
 
+Historical committed-capture recovery compares the editor-visible materialized
+response, not the byte-exact capture transport. Patch wrapper comments and
+transient control markers (including `no-pending-capture`) may be absent from
+the visible document without making an otherwise complete response eligible
+for replay or partial-line removal. Recovery must leave that response intact.
+
 If a route becomes stale after a turn stage's entry probe—for example, queue
 convergence times out while waiting for a terminal receipt—that stage must
 schedule an automatic safe-boundary editor/supervisor recycle before returning.

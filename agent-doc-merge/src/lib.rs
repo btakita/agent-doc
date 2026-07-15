@@ -11,6 +11,7 @@ pub mod crdt;
 pub mod crdt_sync;
 pub mod document_cell;
 pub mod document_cell_merge;
+pub mod document_replay;
 pub mod exchange_node_merge;
 pub mod exchange_seqcrdt;
 pub mod frontmatter_crdt;

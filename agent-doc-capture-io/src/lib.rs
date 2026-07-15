@@ -575,6 +575,7 @@ pub fn reconcile_partial_response_lines(
         || agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
             current, response,
         )
+        || agent_doc_turn::response_replay::response_materialized_in_content(response, current)
     {
         return None;
     }
@@ -642,6 +643,37 @@ pub fn fortify_baseline_content(
     if record.file_hash.as_deref() != Some(baseline_hash.as_str()) {
         return Ok(false);
     }
+    record.baseline_content = Some(baseline_content.to_string());
+    record.updated_at = now_secs();
+    write_record(file, &record)?;
+    Ok(true)
+}
+
+/// Refresh the JSON compatibility projection after Lazily-authoritative
+/// structural history recovery rebases an open captured response.
+///
+/// The caller appends the replacement `ResponseCaptured` fact first. This
+/// helper updates an existing sidecar only when its response identity and old
+/// baseline hash still match, so a stale projection can never overwrite a
+/// newer capture.
+pub fn project_structural_recovery_baseline(
+    file: &Path,
+    capture: &CaptureRecord,
+    expected_file_hash: Option<&str>,
+    baseline_content: &str,
+    snapshot_hash: &str,
+) -> Result<bool> {
+    let Some(mut record) = load_by_id(file, &capture.capture_id)? else {
+        return Ok(false);
+    };
+    if record.cycle_id != capture.cycle_id
+        || record.response_sha256 != capture.response_sha256
+        || record.file_hash.as_deref() != expected_file_hash
+    {
+        return Ok(false);
+    }
+    record.file_hash = Some(replay_file_hash(baseline_content));
+    record.snapshot_hash = Some(snapshot_hash.to_string());
     record.baseline_content = Some(baseline_content.to_string());
     record.updated_at = now_secs();
     write_record(file, &record)?;
@@ -1347,6 +1379,31 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn partial_response_reconciliation_keeps_semantically_materialized_response() {
+        let baseline = "---\nagent_doc_session: test\n---\n\n<!-- agent:exchange -->\n❯ topic\n<!-- /agent:exchange -->\n";
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\nLine two.\n",
+            "<!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ topic\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\nLine two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(response, current)
+        );
+        assert!(reconcile_partial_response_lines(baseline, current, response).is_none());
     }
 
     #[test]

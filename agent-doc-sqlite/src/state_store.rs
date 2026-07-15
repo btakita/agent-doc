@@ -488,6 +488,12 @@ PRAGMA busy_timeout = 30000;
 CREATE INDEX IF NOT EXISTS state_events_document_hash_id
 ON state_events(document_hash, id);
 
+-- Recovery reads recent content-bearing facts by type. Keep those reads
+-- proportional to the requested checkpoint window instead of replaying the
+-- document's complete event history.
+CREATE INDEX IF NOT EXISTS state_events_document_hash_fact_type_id
+ON state_events(document_hash, fact_type, id);
+
 -- Closeout/cycle projections never consume document-authority observations.
 -- Keep their hot replay index bounded to the durable facts they do consume;
 -- authority observations are intentionally excluded from this partial index.
@@ -1448,6 +1454,38 @@ pub fn load_state_events_for_cycle_projection_from_db(
     )?;
     let mut events = Vec::new();
     for row in stmt.query_map(params![document_hash], state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+/// Load a bounded newest-first window of one durable fact type for a document.
+///
+/// This is intentionally narrower than projection replay: history-aware
+/// recovery needs a few prior content-bearing checkpoints, not every fact the
+/// document has accumulated.
+pub fn load_recent_state_events_by_fact_type_from_db(
+    conn: &Connection,
+    document_hash: &str,
+    fact_type: &str,
+    limit: usize,
+) -> Result<Vec<StateEventStatus>> {
+    let limit = i64::try_from(limit.max(1)).context("state event history limit too large")?;
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+        FROM state_events
+        WHERE document_hash = ?1
+          AND fact_type = ?2
+        ORDER BY id DESC
+        LIMIT ?3
+        "#,
+    )?;
+    let mut events = Vec::new();
+    for row in stmt.query_map(
+        params![document_hash, fact_type, limit],
+        state_event_status_from_row,
+    )? {
         events.push(row?);
     }
     Ok(events)

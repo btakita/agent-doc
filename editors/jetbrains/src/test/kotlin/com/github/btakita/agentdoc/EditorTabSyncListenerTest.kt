@@ -125,6 +125,34 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
+    fun `accepted passive sync queues focus retry behind layout rescue`() {
+        assertEquals(
+            true,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
+                kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+                exitCode = 0,
+                currentGeneration = true,
+            ),
+        )
+        assertEquals(
+            false,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
+                kind = EditorTabSyncListener.AutomaticCommandKind.Focus,
+                exitCode = 0,
+                currentGeneration = true,
+            ),
+        )
+        assertEquals(
+            false,
+            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
+                kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
+                exitCode = 1,
+                currentGeneration = true,
+            ),
+        )
+    }
+
+    @Test
     fun `opposite pane selection routes to focus command when visible split is unchanged`() {
         // Switching focus to the other pane of an unchanged split is a pure focus
         // change → focus command (tmux follows), not a layout sync.

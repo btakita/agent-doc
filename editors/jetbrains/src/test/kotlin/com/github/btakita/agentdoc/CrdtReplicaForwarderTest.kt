@@ -241,6 +241,14 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `remote apply persists only across an exact disk baseline or target`() {
+        assertTrue(remoteCrdtDiskCanPersistUtil("base", "base remote", "base"))
+        assertTrue(remoteCrdtDiskCanPersistUtil("base", "base remote", "base remote"))
+        assertFalse(remoteCrdtDiskCanPersistUtil("base", "base remote", "external edit"))
+        assertFalse(remoteCrdtDiskCanPersistUtil("base", "base remote", null))
+    }
+
+    @Test
     fun `replace delivery boundary requires editor buffer and replica to match the expected baseline`() {
         assertTrue(remoteCrdtReplaceStillCurrentUtil("base", "base", "base"))
         assertFalse(remoteCrdtReplaceStillCurrentUtil("base", "base typed", "base"))

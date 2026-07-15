@@ -80,8 +80,9 @@ private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
  *
  * The manager is intentionally thin: local edits are forwarded to [CrdtReplicaForwarder],
  * remote updates are pulled from the CPC document model, and document mutation uses the same
- * minimal-edit helper as IPC patches. It never saves the document after a realtime
- * CRDT update.
+ * minimal-edit helper as IPC patches. A remote mutation is saved before acknowledgement only
+ * when raw disk still equals the guarded editor baseline or the converged target; novel external
+ * disk text rejects the apply instead of being overwritten.
  */
 class CrdtReplicaManager(private val project: Project) : Disposable, DocumentListener {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java)
@@ -576,7 +577,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     val before = document.text
                     if (before == canonical) {
                         shadows[filePath] = canonical
-                        installed = true
+                        installed = persistRemoteCrdtTextIfSafe(
+                            filePath,
+                            document,
+                            expectedText,
+                            canonical,
+                        )
                         return@invokeAndWait
                     }
                     if (hasPendingLocal(filePath)) return@invokeAndWait
@@ -591,6 +597,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         deferredEditorText = before
                         return@invokeAndWait
                     }
+                    if (!remoteCrdtDiskCanPersistUtil(expectedText, canonical, readRawDiskText(filePath))) {
+                        log.warn(
+                            "[crdt-replica] replace delivery rejected because disk contains novel external text for $filePath; " +
+                                "expected_hash=${contentHash(expectedText)} canonical_hash=${contentHash(canonical)}"
+                        )
+                        return@invokeAndWait
+                    }
                     advanceNonOperatorMutationEpoch(filePath)
                     applyingRemote.add(filePath)
                     try {
@@ -598,8 +611,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             applyMinimalDocumentEditUtil(document, before, canonical)
                         }
                         shadows[filePath] = canonical
-                        installed = true
-                        log.info("[crdt-replica] applied REPLACE re-bootstrap for $filePath (${canonical.length} chars)")
+                        installed = persistRemoteCrdtTextIfSafe(
+                            filePath,
+                            document,
+                            expectedText,
+                            canonical,
+                        )
+                        if (installed) {
+                            log.info("[crdt-replica] applied and saved REPLACE re-bootstrap for $filePath (${canonical.length} chars)")
+                        }
                     } finally {
                         applyingRemote.remove(filePath)
                     }
@@ -723,11 +743,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val before = document.text
             if (before == pending.targetText) {
                 shadows[pending.filePath] = pending.targetText
-                RemoteEditorApplyOutcome(true, before)
+                RemoteEditorApplyOutcome(
+                    persistRemoteCrdtTextIfSafe(
+                        pending.filePath,
+                        document,
+                        pending.expectedText,
+                        pending.targetText,
+                    ),
+                    before,
+                )
             } else if (hasPendingLocal(pending.filePath)) {
                 RemoteEditorApplyOutcome(false, before)
             } else if (!remoteCrdtApplyStillCurrentUtil(pending.expectedText, before, pending.targetText)) {
                 log.warn("[crdt-replica] stale coalesced remote update rejected for ${pending.filePath}; editor text advanced before apply")
+                RemoteEditorApplyOutcome(false, before)
+            } else if (!remoteCrdtDiskCanPersistUtil(
+                    pending.expectedText,
+                    pending.targetText,
+                    readRawDiskText(pending.filePath),
+                )
+            ) {
+                log.warn(
+                    "[crdt-replica] coalesced remote update rejected because disk contains novel external text for ${pending.filePath}; " +
+                        "expected_hash=${contentHash(pending.expectedText)} target_hash=${contentHash(pending.targetText)}"
+                )
                 RemoteEditorApplyOutcome(false, before)
             } else {
                 advanceNonOperatorMutationEpoch(pending.filePath)
@@ -737,7 +776,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         applyMinimalDocumentEditUtil(document, before, pending.targetText)
                         shadows[pending.filePath] = pending.targetText
                     }
-                    RemoteEditorApplyOutcome(true, pending.targetText)
+                    RemoteEditorApplyOutcome(
+                        persistRemoteCrdtTextIfSafe(
+                            pending.filePath,
+                            document,
+                            pending.expectedText,
+                            pending.targetText,
+                        ),
+                        pending.targetText,
+                    )
                 } finally {
                     applyingRemote.remove(pending.filePath)
                 }
@@ -747,6 +794,38 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             RemoteEditorApplyOutcome(false, null)
         }
         completeRemoteEditorApply(pending, outcome, started)
+    }
+
+    private fun readRawDiskText(filePath: String): String? =
+        try {
+            File(filePath).readText()
+        } catch (e: Exception) {
+            log.warn("[crdt-replica] raw disk read failed for $filePath: ${e.message}")
+            null
+        }
+
+    private fun persistRemoteCrdtTextIfSafe(
+        filePath: String,
+        document: Document,
+        expectedText: String,
+        targetText: String,
+    ): Boolean {
+        val diskText = readRawDiskText(filePath)
+        if (!remoteCrdtDiskCanPersistUtil(expectedText, targetText, diskText)) {
+            return false
+        }
+        return try {
+            val fileDocumentManager = FileDocumentManager.getInstance()
+            fileDocumentManager.saveDocument(document)
+            val saved = !fileDocumentManager.isDocumentUnsaved(document) && document.text == targetText
+            if (!saved) {
+                log.warn("[crdt-replica] remote editor apply did not reach a clean saved state for $filePath")
+            }
+            saved
+        } catch (e: RuntimeException) {
+            log.warn("[crdt-replica] remote editor apply save failed for $filePath", e)
+            false
+        }
     }
 
     private fun completeRemoteEditorApply(
@@ -1156,6 +1235,12 @@ internal fun remoteCrdtApplyStillCurrentUtil(
     targetText: String,
 ): Boolean =
     currentText == expectedText || currentText == targetText
+
+internal fun remoteCrdtDiskCanPersistUtil(
+    expectedText: String,
+    targetText: String,
+    diskText: String?,
+): Boolean = diskText == expectedText || diskText == targetText
 
 internal fun remoteCrdtReplaceStillCurrentUtil(
     expectedText: String,

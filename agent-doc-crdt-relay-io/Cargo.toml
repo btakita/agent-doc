@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-crdt-relay-io"
-version = "0.34.126"
+version = "0.34.127"
 edition = "2024"
 description = "CRDT relay host IO boundary for agent-doc"
 license = "MIT"
@@ -12,18 +12,18 @@ name = "agent_doc_crdt_relay_io"
 doctest = false
 
 [dependencies]
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.126" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.126" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.126" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.126" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.126" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.126" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.126" }
-agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.126" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.126" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.126" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.126" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.126" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.127" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.127" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.127" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.127" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.127" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.127" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.127" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.127" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.127" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.34.127" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.127" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.127" }
 anyhow = "1"
 lazily = { version = "0.40.0", features = ["ipc"] }
 serde = { version = "1", features = ["derive"] }

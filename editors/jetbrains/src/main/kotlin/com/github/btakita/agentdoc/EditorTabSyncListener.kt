@@ -211,6 +211,13 @@ class EditorTabSyncListener : FileEditorManagerListener {
         fun shouldScheduleDeferredRetry(startedGeneration: Long, latestGeneration: Long): Boolean =
             latestGeneration <= startedGeneration
 
+        fun shouldQueuePostSyncFocus(
+            kind: AutomaticCommandKind,
+            exitCode: Int,
+            currentGeneration: Boolean,
+        ): Boolean =
+            kind == AutomaticCommandKind.Sync && exitCode == 0 && currentGeneration
+
         fun analyzeCommandResult(
             kind: AutomaticCommandKind,
             exitCode: Int,
@@ -583,6 +590,27 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     "result: kind=${execution.plan.kind.name.lowercase()} exit=$exitCode timedOut=${processResult.timedOut} " +
                         "timeoutMs=$timeoutMs output=${summarizeOutput(output)}"
                 )
+                // The immediate focus handoff intentionally runs before the
+                // debounced sync and may report actor_pane_not_visible while the
+                // selected document is still parked in stash. Queue a second
+                // Project Controller focus command after the accepted sync
+                // command. The controller command plane preserves that order,
+                // so the retry observes the pane after passive layout rescue.
+                if (AutomaticCommandPlanner.shouldQueuePostSyncFocus(
+                        execution.plan.kind,
+                        exitCode,
+                        isCurrentGeneration(startedGeneration),
+                    )
+                ) {
+                    val focusResult = CpcRouteClient.submitFocusDocumentPane(
+                        projectRoot = snapshot.focusedProjectRoot,
+                        documentPath = execution.activeFile,
+                    )
+                    log(
+                        "post-sync-focus: exit=${focusResult.exitCode} file=${snapshot.focusedRelativePath} " +
+                            "output=${summarizeOutput(focusResult.output)}"
+                    )
+                }
                 if (processResult.timedOut) {
                     if (execution.plan.kind == AutomaticCommandKind.Sync) {
                         val delayMs = recordSyncTimeout(snapshot)

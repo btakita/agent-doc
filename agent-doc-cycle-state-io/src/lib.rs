@@ -422,6 +422,22 @@ pub struct ProjectedCapturedResponse {
     pub baseline_content: Option<String>,
 }
 
+/// One content-bearing response checkpoint from the append-only Lazily
+/// ledger. Unlike [`ProjectedCapturedResponse`], this retains history order so
+/// structural recovery can inspect an older valid checkpoint after a newer
+/// whole-document materialization was corrupted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedResponseCheckpoint {
+    pub sequence: u64,
+    pub cycle_id: String,
+    pub capture_id: String,
+    pub response_sha256: String,
+    pub response_body: String,
+    pub file_hash: Option<String>,
+    pub snapshot_hash: Option<String>,
+    pub baseline_content: Option<String>,
+}
+
 impl ProjectedCloseoutState {
     pub fn phase_is_open(&self) -> Option<bool> {
         self.phase.map(CyclePhase::is_open)
@@ -519,6 +535,62 @@ pub fn load_projected_captured_response(
     Ok(load_closeout_projection(file)?
         .and_then(|projection| projection.captured_response)
         .filter(|capture| capture.capture_id == capture_id))
+}
+
+/// Load a bounded newest-first history of content-bearing response captures.
+///
+/// Recovery previously had only the latest projection and JSON sidecars. A
+/// malformed latest baseline can therefore hide the valid checkpoint directly
+/// before it. This query keeps Lazily authoritative without replaying the full
+/// event ledger on every repair attempt.
+pub fn load_recent_captured_response_checkpoints(
+    file: &Path,
+    limit: usize,
+) -> Result<Vec<CapturedResponseCheckpoint>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(Vec::new());
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(Vec::new());
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let rows = agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+        &conn,
+        &document_hash,
+        "response_captured",
+        limit,
+    )?;
+    let mut checkpoints = Vec::new();
+    for row in rows {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&row.payload_json)
+                .with_context(|| format!("decode state event {}", row.event_id))?;
+        if let agent_doc_state_backbone::StateFact::ResponseCaptured {
+            cycle_id,
+            capture_id,
+            response_sha256,
+            response_body: Some(response_body),
+            file_hash,
+            snapshot_hash,
+            baseline_content,
+            ..
+        } = event.fact
+        {
+            checkpoints.push(CapturedResponseCheckpoint {
+                sequence: row.sequence,
+                cycle_id,
+                capture_id,
+                response_sha256,
+                response_body,
+                file_hash,
+                snapshot_hash,
+                baseline_content,
+            });
+        }
+    }
+    Ok(checkpoints)
 }
 
 fn load_document_projection(
@@ -2902,6 +2974,41 @@ mod tests {
         assert_eq!(projected.snapshot_hash.as_deref(), Some("snapshot-sha"));
         assert_eq!(projected.baseline_content.as_deref(), Some("body"));
         assert_eq!(projected.response_body, "### Re: topic - gpt-5\n\nDone.\n");
+    }
+
+    #[test]
+    fn recent_response_capture_history_is_bounded_and_newest_first() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        for (response_sha256, response_body, baseline) in [
+            ("response-1", "first response", "baseline-1"),
+            ("response-2", "second response", "baseline-2"),
+            ("response-3", "third response", "baseline-3"),
+        ] {
+            append_response_captured_body(
+                &doc,
+                CapturedResponseFactInput {
+                    cycle_id: &started.cycle_id,
+                    capture_id: &started.cycle_id,
+                    response_sha256,
+                    response_body,
+                    file_hash: Some(response_sha256),
+                    snapshot_hash: None,
+                    baseline_content: Some(baseline),
+                },
+            )
+            .unwrap();
+        }
+
+        let history = load_recent_captured_response_checkpoints(&doc, 2).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].response_sha256, "response-3");
+        assert_eq!(history[0].baseline_content.as_deref(), Some("baseline-3"));
+        assert_eq!(history[1].response_sha256, "response-2");
+        assert!(history[0].sequence > history[1].sequence);
     }
 
     #[test]

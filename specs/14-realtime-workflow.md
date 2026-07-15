@@ -134,7 +134,10 @@ or one copy's lines are an order-preserving subset of the other. The superset is
 the canonical projection so concurrent live prompt additions are retained. Two
 divergent or reordered copies remain ambiguous and must fail closed. The
 coalesced projection is written through CRDT authority before prompt-residue
-classification or dispatch.
+classification or dispatch. The shared merge entry point enforces the same
+gate before lossless-tree, component, or whole-document reconciliation: it may
+canonicalize an exact/monotonic replay, but it must reject two divergent
+complete projections rather than pass them to the whole-document fallback.
 
 An accepted write that reaches canonical CRDT authority while the durable editor
 owner has zero registered replicas remains a content-bearing deferred delivery,

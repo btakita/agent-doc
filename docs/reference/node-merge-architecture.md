@@ -45,24 +45,28 @@ Shipped as the anti-corruption rung (`#qnodemerge1`). Entry point:
 `crdt::merge_by_component(base_state, ours_text, theirs_text)`. Both FFI merge entry points
 route through it.
 
-1. **Short-circuit** — if `ours == theirs`, return as-is.
-2. **Segment** both `ours` and `theirs` into nodes via `segment_into_cells`. If either fails
+1. **Whole-document replay gate** — canonicalize an exact or monotonic duplicate projection
+   on either side before any tree/CRDT reconciliation. If one side contains two structurally
+   complete but divergent projections, reject the merge: the ordinary whole-document fallback
+   is not allowed to concatenate an ambiguous replay.
+2. **Short-circuit** — if `ours == theirs`, return as-is.
+3. **Segment** both `ours` and `theirs` into nodes via `segment_into_cells`. If either fails
    to segment, fall back to the whole-doc `merge` (logged).
-3. **Inline-mode guard** — if neither side has any components (a component-less / inline
+4. **Inline-mode guard** — if neither side has any components (a component-less / inline
    document), delegate to the legacy whole-doc `merge` with the original state, preserving
    exact prior behavior.
-4. **Structural-divergence guard** — if the *set or order* of component names differs between
+5. **Structural-divergence guard** — if the *set or order* of component names differs between
    `ours` and `theirs`, a per-node pairing is unsound, so fall back to the whole-doc `merge`
-   (logged). Structural reconciliation across differing node sets is the job of the recursive
-   phase (`#qnodemerge3`), not this rung.
-5. **Per-node base alignment** — decode the base state once, segment it, and build a
+   (logged), subject to the complete-document replay gate above. Structural reconciliation
+   across differing node sets is the job of the recursive phase (`#qnodemerge3`), not this rung.
+6. **Per-node base alignment** — decode the base state once, segment it, and build a
    `name → content` map (`base_by_name`) plus a positional list of interstitial base slots.
    Each node resolves its own base: components by name (so the `exchange` committed-response
    guard sees its *real* base), interstitials by position.
-6. **Per-node merge** — walk the `ours`/`theirs` node pairs in document order. If a pair is
+7. **Per-node merge** — walk the `ours`/`theirs` node pairs in document order. If a pair is
    identical, keep it verbatim; otherwise run the three-way leaf `merge` against *that node's*
    base only.
-7. **Recombine** in document order.
+8. **Recombine** in document order.
 
 The leaf merge is still the whole-doc `merge`, now applied to one node's text at a time.
 

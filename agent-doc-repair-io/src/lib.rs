@@ -12,6 +12,133 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+const STRUCTURAL_CAPTURE_HISTORY_LIMIT: usize = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructuralHistoryRecovery {
+    content: String,
+    checkpoint_sequence: u64,
+    checkpoint_capture_id: String,
+    checkpoint_response_sha256: String,
+    observed_response_lines: usize,
+}
+
+fn select_structural_history_recovery(
+    current: &str,
+    active: &agent_doc_cycle_state_io::ProjectedCapturedResponse,
+    history: &[agent_doc_cycle_state_io::CapturedResponseCheckpoint],
+) -> Option<StructuralHistoryRecovery> {
+    agent_doc_element::element::structural_corruption_reason(current)?;
+    let current_replay_hash = agent_doc_capture_io::replay_file_hash(current);
+    let active_index = history.iter().position(|checkpoint| {
+        checkpoint.cycle_id == active.cycle_id
+            && checkpoint.capture_id == active.capture_id
+            && checkpoint.response_sha256 == active.response_sha256
+            && checkpoint.file_hash.as_deref() == Some(current_replay_hash.as_str())
+            && checkpoint
+                .baseline_content
+                .as_deref()
+                .is_some_and(|baseline| {
+                    agent_doc_capture_io::replay_file_hash(baseline) == current_replay_hash
+                })
+    })?;
+
+    for checkpoint in history.iter().skip(active_index + 1) {
+        if checkpoint.cycle_id != active.cycle_id {
+            continue;
+        }
+        let Some(baseline) = checkpoint.baseline_content.as_deref() else {
+            continue;
+        };
+        if checkpoint.file_hash.as_deref()
+            != Some(agent_doc_capture_io::replay_file_hash(baseline).as_str())
+            || agent_doc_element::element::structural_corruption_reason(baseline).is_some()
+        {
+            continue;
+        }
+        let Some(partial) = agent_doc_capture_io::reconcile_partial_response_lines(
+            baseline,
+            current,
+            &checkpoint.response_body,
+        ) else {
+            continue;
+        };
+        if !corrupted_materialization_is_explained_by_checkpoint(
+            current,
+            baseline,
+            &checkpoint.response_body,
+        ) {
+            continue;
+        }
+        let Some(content) =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                baseline,
+                &checkpoint.response_body,
+            )
+        else {
+            continue;
+        };
+        if agent_doc_element::element::structural_corruption_reason(&content).is_some()
+            || !agent_doc_turn::response_replay::response_materialized_in_content(
+                &checkpoint.response_body,
+                &content,
+            )
+        {
+            continue;
+        }
+        return Some(StructuralHistoryRecovery {
+            content,
+            checkpoint_sequence: checkpoint.sequence,
+            checkpoint_capture_id: checkpoint.capture_id.clone(),
+            checkpoint_response_sha256: checkpoint.response_sha256.clone(),
+            observed_response_lines: partial.removed_nonblank_lines,
+        });
+    }
+    None
+}
+
+fn corrupted_materialization_is_explained_by_checkpoint(
+    current: &str,
+    baseline: &str,
+    response: &str,
+) -> bool {
+    let normalize = |content: &str| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
+    };
+    let current = normalize(current);
+    let baseline = normalize(baseline);
+    let response = normalize(response);
+    let common_prefix = current
+        .as_bytes()
+        .iter()
+        .zip(baseline.as_bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let required_prefix = 512usize.max(baseline.len() / 10).min(baseline.len());
+    if common_prefix < required_prefix {
+        return false;
+    }
+
+    let allowed_lines = baseline
+        .lines()
+        .chain(response.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let exact_lines = allowed_lines.iter().copied().collect::<HashSet<_>>();
+    current
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| {
+            exact_lines.contains(line)
+                || (line.len() >= 16
+                    && allowed_lines
+                        .iter()
+                        .any(|allowed| allowed.len() > line.len() && allowed.contains(line)))
+        })
+}
+
 pub use pending::{clear_pending, save_pending};
 pub use pending::{load_active_pending_response, load_pending_projection_file};
 
@@ -218,7 +345,12 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
     let pending_response = pending::load_pending_response_with_projection_backup(&canonical)?;
     let has_pending_response = pending_response.is_some();
-    let capture = agent_doc_capture_io::load_active(&canonical)?
+    let loaded_capture = agent_doc_capture_io::load_active(&canonical)?;
+    let projected_capture_is_repairable = loaded_capture
+        .as_ref()
+        .is_none_or(|capture| capture_state_is_repairable(capture.state));
+    let mut capture = loaded_capture
+        .clone()
         .filter(|capture| capture_state_is_repairable(capture.state));
     let mut doc_content = repair_current_document_content(
         &canonical,
@@ -232,7 +364,83 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         doc_content = restored;
     }
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
-    let historical_capture = if !has_pending_response && capture.is_none() {
+    let projected_capture = if projected_capture_is_repairable
+        && let Some(state) = cycle_state.as_ref()
+        && matches!(
+            state.phase,
+            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
+        )
+        && let Some(capture_id) = state.capture_id.as_deref()
+    {
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    } else {
+        None
+    };
+    if force_disk_override != Some(true)
+        && let Some(active) = projected_capture.as_ref()
+    {
+        let history = agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(
+            &canonical,
+            STRUCTURAL_CAPTURE_HISTORY_LIMIT,
+        )?;
+        if let Some(recovery) = select_structural_history_recovery(&doc_content, active, &history) {
+            let prior_content = doc_content;
+            agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+                &canonical,
+                &recovery.content,
+                &prior_content,
+                "repair_structural_response_history",
+            )?;
+            agent_doc_snapshot_io::save(
+                &canonical,
+                &recovery.content,
+                agent_doc_ops_log_io::log_op,
+            )?;
+            let file_hash = agent_doc_capture_io::replay_file_hash(&recovery.content);
+            let snapshot_hash = agent_doc_hash::content_hash(&recovery.content);
+            agent_doc_cycle_state_io::append_response_captured_body(
+                &canonical,
+                agent_doc_cycle_state_io::CapturedResponseFactInput {
+                    cycle_id: &active.cycle_id,
+                    capture_id: &active.capture_id,
+                    response_sha256: &active.response_sha256,
+                    response_body: &active.response_body,
+                    file_hash: Some(&file_hash),
+                    snapshot_hash: Some(&snapshot_hash),
+                    baseline_content: Some(&recovery.content),
+                },
+            )?;
+            if let Some(record) = capture.as_mut() {
+                let old_file_hash = record.file_hash.clone();
+                record.file_hash = Some(file_hash.clone());
+                record.snapshot_hash = Some(snapshot_hash.clone());
+                record.baseline_content = Some(recovery.content.clone());
+                let _ = agent_doc_capture_io::project_structural_recovery_baseline(
+                    &canonical,
+                    record,
+                    old_file_hash.as_deref(),
+                    &recovery.content,
+                    &snapshot_hash,
+                )?;
+            }
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "repair_structural_response_history_reconciled file={} checkpoint_sequence={} checkpoint_capture_id={} checkpoint_response_sha256={} observed_response_lines={} prior_hash={} recovered_hash={} authority=lazily_history",
+                    canonical.display(),
+                    recovery.checkpoint_sequence,
+                    recovery.checkpoint_capture_id,
+                    recovery.checkpoint_response_sha256,
+                    recovery.observed_response_lines,
+                    agent_doc_hash::content_hash(&prior_content),
+                    agent_doc_hash::content_hash(&recovery.content),
+                ),
+            );
+            doc_content = recovery.content;
+        }
+    }
+    let has_active_capture_evidence = capture.is_some() || projected_capture.is_some();
+    let historical_capture = if !has_pending_response && !has_active_capture_evidence {
         historical_committed_capture_replay(&canonical, &doc_content)?
     } else {
         None
@@ -244,7 +452,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         .flatten()
         .is_some();
     let visible_response_recovery = if !has_pending_response
-        && capture.is_none()
+        && !has_active_capture_evidence
         && historical_capture.is_none()
         && visible_response_recovery_is_adoptable(
             cycle_state.as_ref().map(|state| state.phase),
@@ -258,7 +466,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         None
     };
     if !has_pending_response
-        && capture.is_none()
+        && !has_active_capture_evidence
         && historical_capture.is_none()
         && visible_response_recovery.is_none()
     {
@@ -316,9 +524,10 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         return repair_completed_backlog_items(effects.repair_io_effects, file);
     }
 
-    let response = capture
+    let response = projected_capture
         .as_ref()
-        .map(|r| r.response_body.clone())
+        .map(|capture| capture.response_body.clone())
+        .or_else(|| capture.as_ref().map(|r| r.response_body.clone()))
         .or_else(|| historical_capture.as_ref().map(|r| r.response_body.clone()))
         .or_else(|| visible_response_recovery.clone())
         .or(pending_response.clone())
@@ -1511,9 +1720,9 @@ fn historical_committed_capture_replay_candidate(
     doc_content: &str,
     capture: HistoricalCommittedCapture,
 ) -> Result<Option<HistoricalCommittedCapture>> {
-    if agent_doc_turn::response_replay::response_already_applied(
-        doc_content,
+    if agent_doc_turn::response_replay::response_materialized_in_content(
         &capture.response_body,
+        doc_content,
     ) {
         return Ok(None);
     }
@@ -2552,6 +2761,121 @@ fn now_millis() -> u128 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    fn structural_history_fixture(
+        novel_line: Option<&str>,
+    ) -> (
+        String,
+        agent_doc_cycle_state_io::ProjectedCapturedResponse,
+        Vec<agent_doc_cycle_state_io::CapturedResponseCheckpoint>,
+        String,
+    ) {
+        let padding = "stable operator-authored context ".repeat(24);
+        let baseline = format!(
+            "---\nformat: exchange\n---\n{padding}\n<!-- agent:exchange -->\nPlease handle the checkpoint.\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- do [#task]\n<!-- /agent:queue -->\n\n<!-- agent:backlog -->\n- [ ] [#task] Preserve the document.\n<!-- /agent:backlog -->\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n"
+        );
+        let previous_response = "### Re: checkpoint - model\n\n- recovered response line alpha\n- recovered response line beta\n";
+        let novel = novel_line
+            .map(|line| format!("{line}\n"))
+            .unwrap_or_default();
+        let current = format!(
+            "---\nformat: exchange\n---\n{padding}\n<!-- agent:exchange -->\nPlease handle the checkpoint.\n- recovered response line alpha\n- recovered response line beta\n{novel}- [ ] [#task] Preserve the document.\n<!-- /agent:backlog -->\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n<!-- agent:done -->\n<!-- /agent:done -->\n\n<!-- agent:review -->\n<!-- /agent:review -->\n"
+        );
+        let active_response = "### Re: latest - model\n\nReady to repair.\n";
+        let active = agent_doc_cycle_state_io::ProjectedCapturedResponse {
+            cycle_id: "cycle-1".to_string(),
+            capture_id: "capture-1".to_string(),
+            response_sha256: "latest-sha".to_string(),
+            response_body: active_response.to_string(),
+            file_hash: Some(agent_doc_capture_io::replay_file_hash(&current)),
+            snapshot_hash: None,
+            baseline_content: Some(current.clone()),
+        };
+        let history = vec![
+            agent_doc_cycle_state_io::CapturedResponseCheckpoint {
+                sequence: 20,
+                cycle_id: active.cycle_id.clone(),
+                capture_id: active.capture_id.clone(),
+                response_sha256: active.response_sha256.clone(),
+                response_body: active.response_body.clone(),
+                file_hash: active.file_hash.clone(),
+                snapshot_hash: None,
+                baseline_content: active.baseline_content.clone(),
+            },
+            agent_doc_cycle_state_io::CapturedResponseCheckpoint {
+                sequence: 19,
+                cycle_id: active.cycle_id.clone(),
+                capture_id: active.capture_id.clone(),
+                response_sha256: "previous-sha".to_string(),
+                response_body: previous_response.to_string(),
+                file_hash: Some(agent_doc_capture_io::replay_file_hash(&baseline)),
+                snapshot_hash: None,
+                baseline_content: Some(baseline),
+            },
+        ];
+        (current, active, history, previous_response.to_string())
+    }
+
+    #[test]
+    fn structural_history_recovery_reconstructs_valid_prior_response() {
+        let (current, active, history, previous_response) = structural_history_fixture(None);
+        let recovered = select_structural_history_recovery(&current, &active, &history)
+            .expect("corrupted whole-document materialization should be recoverable");
+        assert_eq!(recovered.checkpoint_sequence, 19);
+        assert!(
+            agent_doc_element::element::structural_corruption_reason(&recovered.content).is_none()
+        );
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                &previous_response,
+                &recovered.content,
+            )
+        );
+    }
+
+    #[test]
+    fn structural_history_recovery_rejects_novel_operator_text() {
+        let (current, active, history, _) =
+            structural_history_fixture(Some("operator note must survive"));
+        assert!(select_structural_history_recovery(&current, &active, &history).is_none());
+    }
+
+    #[test]
+    fn historical_capture_does_not_replay_semantically_materialized_response() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\nLine two.\n",
+            "<!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ topic\n",
+            "### Re: topic — gpt-5\n\n",
+            "Line one.\nLine two.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let capture = HistoricalCommittedCapture {
+            cycle_id: "cycle-test".to_string(),
+            capture_id: "capture-test".to_string(),
+            response_sha256: agent_doc_hash::content_hash(response),
+            response_body: response.to_string(),
+            file_hash: None,
+            baseline_content: None,
+        };
+
+        assert!(
+            historical_committed_capture_replay_candidate(
+                Path::new("unused.md"),
+                current,
+                capture,
+            )
+            .unwrap()
+            .is_none()
+        );
+    }
 
     #[derive(Default)]
     struct TestRepairIoEffects {

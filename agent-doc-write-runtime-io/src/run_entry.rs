@@ -118,7 +118,9 @@ fn response_cell_from_patchback(
         return None;
     }
     let response = patches[0].content.trim_matches(['\n', '\r']);
-    (!response.is_empty()).then(|| response.to_string())
+    (!response.is_empty()
+        && agent_doc_template::response_materialization::response_text_has_heading(response))
+    .then(|| response.to_string())
 }
 
 /// Apply the response-only part of finalize as one idempotent semantic CRDT op.
@@ -2712,6 +2714,14 @@ mod tests {
             .is_none()
         );
         assert!(response_cell_from_patchback(&[], "").is_none());
+        let legacy_headingless = template::PatchBlock::new(
+            "exchange",
+            "Implemented the requested recovery.\n\n- Verification passed.\n",
+        );
+        assert!(
+            response_cell_from_patchback(std::slice::from_ref(&legacy_headingless), "").is_none(),
+            "legacy headingless patchbacks must use the semantic component patch path instead of an invalid response cell",
+        );
     }
 
     #[test]

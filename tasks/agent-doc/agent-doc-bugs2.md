@@ -34,43 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260715-174310.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260715-182105.md`*
 
 Compacted content:
-- Archived 2 response topic(s): JetBrains Run Agent Doc stall and editor-authoritative closeout recovery; Editor-authority and Lazily recovery
-- Prior summary/context: prior compacted content: Archived 6 response topic(s): JetBrains Run Agent Doc prompt flood and previous-response rep...
-❯ /goal Fix all issues:
-❯ First attempt at agent-doc start on this file:
-```
-❯ /home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs2.md
-Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: database is locked: Error code 5: database is locked
-```
-
-❯ After a JB `Compact Exchange`, a JB `File Cache Conflict` occurred.
-
-### Re: database lock and JetBrains delivery-ACK wedge — gpt-5
-
-Fixed and pushed in `src/agent-doc` commit `07358c03`.
-
-The two failures had separate write-path causes:
-
-- Session start opened a deferred SQLite transaction, read the actor generation, and then upgraded to a writer. Concurrent starters could both take read snapshots, making one upgrade fail immediately with `SQLITE_BUSY` despite the 30-second busy timeout. Actor-record compare-and-swap now begins with `BEGIN IMMEDIATE`, reserving the writer slot before the read so concurrent starts serialize through the timeout.
-- The JetBrains plugin retained and synchronously replayed every obsolete CRDT delivery generation. The controller already treats a current content hash as a cumulative receipt, but the plugin could spend seconds issuing one refused ACK RPC per intermediate typing generation. Live evidence showed the Compact Exchange waiting on `delivery_ack_pending`, forcing a replica refresh, and a later drain spending 7.5 seconds retrying obsolete generations. The Haiven wedge reported during this cycle is the same cross-document starvation path.
-
-JetBrains ACK replay now sends one oldest frontier ACK per drain with the newest visible hash. A successful cumulative receipt retires all represented generations through the matching target. Successful forced replica replacement also retires the old member frontier only after the atomic swap and before deregistration, while raced old-member ACKs are discarded instead of leaking onto the replacement identity.
-
-Verification passed:
-
-- `cargo test -p agent-doc-sqlite store_actor_record_waits_for_concurrent_writer_before_reading_cas_state`
-- focused JetBrains ACK-frontier and refresh-boundary tests
-- full `make check`
-- full `./gradlew test buildPlugin`
-- `git diff --check`
-
-The CLI and native library `0.34.129` were installed with `make install`. The signed local JetBrains plugin `0.2.257` was installed to `IntelliJIdea2026.1`. No shared-controller process was killed. CI run `29439101269` was queued after the push.
-
-Restart IntelliJ IDEA to activate the new plugin code. After restart, retry the Haiven `write --commit` and then run the existing `#jbcompactcommit` live Compact Exchange proof; that live IDE pass remains the final operator verification.
-<!-- agent:boundary:c85653c5 -->
+- Archived 1 response topic(s): database lock and JetBrains delivery-ACK wedge
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): JetBrains Run Agent Doc stall and editor-authoritative closeou...
+<!-- agent:boundary:255a58e0 -->
 <!-- /agent:exchange -->
 ## Queue
 

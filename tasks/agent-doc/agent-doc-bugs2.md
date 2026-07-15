@@ -34,29 +34,56 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260715-182105.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260715-185133.md`*
 
 Compacted content:
-- Archived 1 response topic(s): database lock and JetBrains delivery-ACK wedge
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): JetBrains Run Agent Doc stall and editor-authoritative closeou...
-- `main` and tag `v0.34.130` are pushed. CI and the tagged Release workflow are currently in progress.
-- A live replay with the same JetBrains editor-attempt marker selected `%15`, created `%18`, reached Claude readiness, and received accepted supervisor dispatch proof. `%18` remains live and registered as `busy` for `monsterrodholders.md`.
-- `make install-full` installed binary/cdylib 0.34.130, followed by an all-project controller recycle.
-- `make check` passed all 7,680 tests plus simulator, version-sync, and formal checks.
-- Added the realtime typing-entry regression guard.
-- Added route tests for safe cross-project selection, target-owner refusal, and unknown-owner refusal.
-❯ Fix JB `Run Agent Doc` on monsterrodholders.md
-```
-refusing to provision a duplicate tmux pane for /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md in session '0': the target session already has an 'agent-doc' window but no safe registered anchor pane was found
-Inspect the existing panes first:
-  tmux list-panes -t 0:agent-doc -F '#{pane_id} #{window_name} #{pane_current_command} #{pane_current_path}'
-  tmux list-panes -a -F '#{session_name} #{window_name} #{pane_id} #{pane_current_command} #{pane_current_path}' | grep ' /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md$'
-  tmux kill-pane -t <pane_id>
-Then rerun: agent-doc /home/brian/work/btakita/agent-loop/src/boost-client/tasks/monsterrodholders.md
-```
+- Archived 1 response topic(s): JetBrains Run Agent Doc on monsterrodholders.md
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): database lock and JetBrains delivery-ACK wedge
+❯ 5ar] 🚧 The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
+❯ - [ ] [#z
 
-Editor document selection auto-sync with tmux pane is inconsistent.
+### Re: #z5ar — gpt-5
 
+> **Queue prompt:**
+>
+> /goal Implement backlog item(s): #z5ar
+
+
+> **Queue prompt:** The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
+
+Implemented and released this as agent-doc 0.34.131. Every accepted CRDT replica update during an open turn is now compared with the saved turn baseline and recorded as an idempotent, cycle-scoped `RealtimeSteeringObserved` state fact. The closeout projection carries the aggregate primary kind, edit count, preview, and full verbatim steering text; commit, abandonment, or a new cycle clears it.
+
+JetBrains and VS Code now decode that authoritative state-wire projection instead of losing steering on the state-mirror hot path. Their in-flight turn presentations show the aggregate edit count and preview, with the complete verbatim aggregate available in the tooltip/hover.
+
+The settlement behavior is explicit: realtime edits surface immediately and aggregate throughout the active turn. Once the operator is done editing, invoking `agent-doc <file>` or the editor's Run Agent Doc action once is the handoff signal. The existing serialized project-controller route queues that request behind an active turn, so it does not submit an intermediate buffer; the running turn and `session-check` retain the aggregate steering evidence in the meantime.
+
+Architecture contract: the invariant is one primary kind/count/preview/verbatim projection for every consumer during an open cycle. `agent-doc-document-realtime` owns baseline comparison and `CloseoutProjection` owns lifecycle scope. Evidence is the active cycle, saved snapshot, canonical CRDT text, and content hash. Edits stayed within the turn projection, realtime comparison, state backbone/wire, controller ingestion, FFI, editor adapters, tests, specs, and the architecture plan. The larger SeqCrdt observable-set migration remains out of scope under `#steeringobservableset`.
+
+Verification passed: targeted Rust steering tests; 151 VS Code tests; the JetBrains Gradle suite; clippy, doctests, deterministic simulation, version/formal checks, and all 7,683 workspace tests. The latest completed CI run was green, including tmux. Release commit `a267c3a1` is on `main`, tag `v0.34.131` is pushed, the optimized binary/library and both local editor plugins are installed, and the portable manylinux 2.17 wheel uploaded successfully to PyPI. The tagged GitHub Release workflow is still in progress and is non-blocking per the release runbook.
+
+OpenCode's managed agent-doc skill is also regenerated and installed at v0.34.131; the managed-surface audit passes.
+<!-- agent:boundary:be32095e -->
+<!-- /agent:exchange -->
+## Queue
+
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- ~~/goal Implement backlog item(s): #z5ar~~
+- Editor document selection auto-sync with tmux pane is inconsistent.
+---
+In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+```
+---
+---
+haiven.md thrash issue:
+```
+● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
+  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
+  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
+```
+---
+---
 haiven.md session had a JB `File Cache Conflict`.
 ```
 ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
@@ -78,39 +105,22 @@ haiven.md session had a JB `File Cache Conflict`.
 ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
-
+---
+---
 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
-
-haiven.md response was not committed.
-
-### Re: JetBrains Run Agent Doc on monsterrodholders.md — gpt-5
-
-Fixed and released in `agent-doc` 0.34.130 (`e7caf2e6c`).
-
-The refusal came from route startup consulting only the nested `boost-client` session registry. That registry had no live anchor for shared tmux session `0`, while the existing panes belonged to documents in the parent project. Startup therefore saw an existing `agent-doc` window but could not prove a safe pane beside which to split.
-
-Route startup now has a conservative cross-project fallback. When no live registry anchor exists, it derives canonical document ownership from every visible pane process tree. It selects the requested edge pane only when every pane is proven to own a different document; an unknown owner or a pane already owning the target remains fail-closed. This keeps the duplicate-pane protection while allowing nested projects to share the parent session.
-
-The full suite also exposed a timing race in realtime document fallback: editor typing could expire while the controller query was running, allowing a missing-model disk fallback. The resolver now blocks fallback when typing was active either at entry or at fallback time.
-
-Validation completed:
-
-- Added route tests for safe cross-project selection, target-owner refusal, and unknown-owner refusal.
-- Added the realtime typing-entry regression guard.
-- `make check` passed all 7,680 tests plus simulator, version-sync, and formal checks.
-- `make install-full` installed binary/cdylib 0.34.130, followed by an all-project controller recycle.
-- A live replay with the same JetBrains editor-attempt marker selected `%15`, created `%18`, reached Claude readiness, and received accepted supervisor dispatch proof. `%18` remains live and registered as `busy` for `monsterrodholders.md`.
-- `main` and tag `v0.34.130` are pushed. CI and the tagged Release workflow are currently in progress.
-<!-- agent:boundary:64826d88 -->
-<!-- /agent:exchange -->
-## Queue
-
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-/goal Implement backlog item(s): #z5ar
-- Editor document selection auto-sync with tmux pane is inconsistent.
+---
+- In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.
+---
+haiven.md thrash issue:
+```
+● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
+  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
+  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
+```
+---
 ---
 haiven.md session had a JB `File Cache Conflict`.
 ```
@@ -141,6 +151,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 - haiven.md response was not committed.
+- t
+- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - do [#zqv8]
 - do [#crde]
 - do [#steeringobservableset]
@@ -201,7 +213,12 @@ right extraction is probably a focused FileIpcAckWaiter/sidecar waiter with toda
 ● No live JetBrains IDE, no active listener (both sockets 0B/stale), and the sync process has exited. The
   already_applied acks came from a now-dead stale endpoint — the "live buffer" is phantom. The response is durably
   captured and disk is still the clean 2344-byte prompt. This is the documented stale-endpoint → force-disk recovery
-  (no live editor to preserve). Let me first confirm HEAD hasn't advanced (no concurrent commit), then force-disk
+  (no live editor to preserve)
+JB `Compact Exchange` on this document had an error. As I was typing this prompt a JB `File Cache Conflict` occurred. I lost what I was typing:
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+```.---
+ Let me first confirm HEAD hasn't advanced (no concurrent commit), then force-disk
   finalize.
 ```
 ---
@@ -227,7 +244,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#z5ar] The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
+- [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
+- [x] [#z5ar] 🚧 The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
 - [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [ ] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
@@ -265,7 +283,7 @@ What are #next-steps to fix bugs?
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
 - [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
-- [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
+- [ ] 🚧 [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md

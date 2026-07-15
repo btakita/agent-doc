@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.133
+
+- **Visible editor proof now settles JetBrains CRDT deliveries (JetBrains plugin 0.2.260).** Remote delivery ACK eligibility is based on the exact visible editor projection, independently of whether disk persistence is deliberately deferred. Genuine editor races back off instead of immediately re-pulling and decoding the same large delivery.
+
 ## 0.34.132
 
 - **Editor closeout delivery is single-flight and reconnect-safe (JetBrains plugin 0.2.259).** A retained ACK frontier blocks another decode of the same remote delivery, controller transport loss triggers bounded replica re-registration, and a reconnecting live editor fences a previously-authorized force-disk mutation before disk can change.

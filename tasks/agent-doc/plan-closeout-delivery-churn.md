@@ -2,7 +2,7 @@
 
 ## Architecture contract
 
-- **Invariant:** A remote delivery identity may be decoded into a local replica at most once while its visible editor projection or ACK is outstanding. Repeated pulls of that identity coalesce into the retained projection/ACK state; they do not mutate the replica again, enqueue another EDT apply, or count as forward progress.
+- **Invariant:** A remote delivery identity may be decoded into a local replica at most once while its visible editor projection or ACK is outstanding. Exact visible editor content is sufficient ACK proof even when disk persistence is deliberately deferred; disk-save status cannot gate the ACK. Repeated pulls of that identity coalesce into the retained projection/ACK state; they do not mutate the replica again, enqueue another EDT apply, or count as forward progress.
 - **Invariant:** Closeout reports `committed` only when the authoritative response projection is durable and the session document at `HEAD` equals the proven closeout snapshot. A binary-owned compacted projection may cross the historical-response guard only with durable compaction evidence; arbitrary response-bearing drift remains fail-closed.
 - **Invariant:** Commit-seam free-text cleanup is a bounded disk transaction. It performs no controller lookup while holding the document lock; ordinary editor-authoritative cleanup finishes its controller read before lock acquisition.
 - **Invariant:** A baseline overlay is a cache paired with a named explicit markdown baseline, never implicit merge authority. With no baseline path, a stale `.overlay.yrs` sidecar cannot resurrect a consumed queue head.
@@ -24,7 +24,7 @@
 | JetBrains delivery | no in-flight identity | new peer delivery | projection pending | decode once, retain identity and ACK evidence, enqueue once |
 | JetBrains delivery | projection pending | same delivery repeats | projection pending | coalesce/no-op; no decode, enqueue, or progress credit |
 | JetBrains delivery | projection pending | distinct newer delivery | projection pending | merge only through the keyed projection owner and retain all unique ACK identities |
-| JetBrains delivery | projection applied | exact visible-content proof | ACK pending or settled | ACK through newest proven generation; retain on transport failure |
+| JetBrains delivery | projection applied | exact visible-content proof, with or without disk persistence | ACK pending or settled | ACK through newest proven generation; retain on transport failure |
 | JetBrains delivery | ACK pending | same delivery repeats | ACK pending | retry retained ACK before pull; do not decode again |
 | JetBrains delivery | failed/stale projection | editor advanced | retry/reconcile | remove in-flight projection only after recording a bounded reconciliation request |
 | JetBrains relay | registered | controller transport/instance is lost | re-registering | invalidate the old registration and retry registration with bounded backoff while the document stays open |

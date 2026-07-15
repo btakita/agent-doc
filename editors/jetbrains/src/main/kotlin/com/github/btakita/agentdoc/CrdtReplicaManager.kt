@@ -77,6 +77,13 @@ internal fun remoteAckReplayPlanUtil(
 internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): Boolean =
     pendingAckCount == 0
 
+@Suppress("UNUSED_PARAMETER")
+internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
+    editorText: String?,
+    targetText: String,
+    diskPersisted: Boolean,
+): Boolean = editorText == targetText
+
 internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
     delivery is ReplicaPullDelivery.Unavailable
 
@@ -88,7 +95,7 @@ private data class PendingRemoteEditorApply(
 )
 
 private data class RemoteEditorApplyOutcome(
-    val applied: Boolean,
+    val diskPersisted: Boolean,
     val editorText: String?,
 )
 
@@ -901,15 +908,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         outcome: RemoteEditorApplyOutcome,
         started: Long,
     ) {
+        val projectionVisible = shouldAcknowledgeVisibleRemoteDeliveryUtil(
+            outcome.editorText,
+            pending.targetText,
+            outcome.diskPersisted,
+        )
         logSlow(
             "remote-apply-edt",
             pending.filePath,
             started,
             warnMs = CRDT_EDT_WARN_MS,
-            details = "target_chars=${pending.targetText.length} applied=${outcome.applied} coalesced_updates=${pending.acknowledgements.size}",
+            details = "target_chars=${pending.targetText.length} visible=$projectionVisible disk_persisted=${outcome.diskPersisted} coalesced_updates=${pending.acknowledgements.size}",
         )
         if (disposed.get()) return
-        if (outcome.applied) {
+        if (projectionVisible) {
             // Retain before crossing back to the worker. If executor submission or
             // the socket ACK fails, the next drain replays it idempotently.
             rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)
@@ -917,26 +929,34 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         try {
             executor.execute {
                 try {
-                var acked = 0
-                if (outcome.applied) {
-                    val activeForwarder = forwarders[pending.filePath]
-                    if (activeForwarder != null) {
-                        acked = replayPendingRemoteAcks(
+                    var acked = 0
+                    if (projectionVisible) {
+                        val activeForwarder = forwarders[pending.filePath]
+                        if (activeForwarder != null) {
+                            acked = replayPendingRemoteAcks(
                             pending.filePath,
                             activeForwarder,
-                            outcome.editorText,
-                        )
-                    }
-                    } else if (outcome.editorText != null) {
-                        requestRemoteDrain(pending.filePath, "remote-editor-apply-raced")
+                                outcome.editorText,
+                            )
+                        }
                     }
                     log.debug(
                         "[crdt-replica] remote editor apply completed for ${File(pending.filePath).name}; " +
-                            "applied=${outcome.applied} acked=$acked coalesced_updates=${pending.acknowledgements.size}",
+                            "visible=$projectionVisible disk_persisted=${outcome.diskPersisted} acked=$acked coalesced_updates=${pending.acknowledgements.size}",
                     )
                 } finally {
                     remoteEditorApplyPaths.remove(pending.filePath)
-                    requestRemoteDrain(pending.filePath, "remote-editor-apply-complete")
+                    if (projectionVisible) {
+                        consecutiveNoOpReschedules.set(0)
+                        requestRemoteDrain(pending.filePath, "remote-editor-apply-complete")
+                    } else {
+                        val delayMs = nextNoOpRescheduleBackoffMs()
+                        log.debug(
+                            "[crdt-replica] remote editor projection not yet visible for ${File(pending.filePath).name}; " +
+                                "backing off retry by ${delayMs}ms",
+                        )
+                        scheduleRemoteDrainAfterBackoff(delayMs, "remote-editor-apply-raced")
+                    }
                 }
             }
         } catch (_: RejectedExecutionException) {

@@ -42,6 +42,31 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
+    fun `visible canonical projection is acknowledged independently of disk persistence`() {
+        assertTrue(
+            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+                editorText = "canonical",
+                targetText = "canonical",
+                diskPersisted = false,
+            ),
+        )
+        assertTrue(
+            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+                editorText = "canonical",
+                targetText = "canonical",
+                diskPersisted = true,
+            ),
+        )
+        assertFalse(
+            shouldAcknowledgeVisibleRemoteDeliveryUtil(
+                editorText = "operator edit",
+                targetText = "canonical",
+                diskPersisted = true,
+            ),
+        )
+    }
+
+    @Test
     fun `controller transport loss requests replica refresh`() {
         assertTrue(
             pullDeliveryRequestsReplicaRefreshUtil(

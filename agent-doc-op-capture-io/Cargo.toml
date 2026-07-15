@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-op-capture-io"
-version = "0.34.125"
+version = "0.34.126"
 edition = "2024"
 description = "Durable editor operation capture sidecar I/O for agent-doc"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_op_capture_io"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.125" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.125" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.125" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.126" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.126" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.126" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

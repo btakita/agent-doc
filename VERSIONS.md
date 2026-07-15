@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.126
+
+- **A restarted editor process can no longer leave an unreachable CRDT member holding the response commit barrier open.** The relay IO boundary records recognized JetBrains and VS Code replica identities with their encoded process ids. On replacement registration it conservatively proves prior editor processes dead, removes only those memberships before the new canonical bootstrap, and logs the prune count. Opaque, legacy, and test identities are never inferred or reaped. The update-driven controller-recycle auto-heal records the same metadata, so every registration path preserves the invariant without adding an idle poll. Coverage queues a complete response to a simulated dead member, proves the barrier is initially blocked, registers its replacement, and proves the stale member is gone and delivery converged.
+
 ## 0.34.125
 
 - **Project-root incarnation checks are safe on filesystems that immediately reuse inode numbers.** Detached controller startup retains an open handle to the caller's original directory until all startup checks finish, preventing the deleted inode from being recycled into a same-path replacement that could otherwise pass an inode-only comparison.

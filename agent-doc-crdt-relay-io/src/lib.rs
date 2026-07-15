@@ -233,6 +233,82 @@ fn hub_registry() -> &'static Mutex<HashMap<String, RelayHub>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Process-global identity metadata for editor replicas, keyed by document hash.
+///
+/// [`RelayHub`] intentionally knows only opaque CRDT client ids. The IO boundary
+/// retains the editor identity alongside those ids so a replacement editor can
+/// retire memberships left behind by an editor process that crashed or restarted
+/// without sending `deregister`. Unrecognized identities remain opaque and are
+/// never reaped automatically.
+fn replica_identity_registry() -> &'static Mutex<HashMap<String, HashMap<u64, String>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, HashMap<u64, String>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Extract the owning process id from identities minted by editor integrations.
+/// Both integrations append document/refresh suffixes after their stable
+/// `editor-pid-uuid` prefix, so only the decimal field immediately after the
+/// integration name is significant here.
+fn editor_process_id(identity: &str) -> Option<u32> {
+    let rest = ["jetbrains-", "vscode-"]
+        .into_iter()
+        .find_map(|prefix| identity.strip_prefix(prefix))?;
+    let pid = rest.split('-').next()?;
+    if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    pid.parse().ok()
+}
+
+fn dead_editor_replica_ids(
+    document_hash: &str,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<Vec<u64>> {
+    let registry = replica_identity_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    Ok(registry
+        .get(document_hash)
+        .into_iter()
+        .flat_map(|members| members.iter())
+        .filter_map(|(client_id, identity)| {
+            editor_process_id(identity)
+                .filter(|pid| !is_pid_live(*pid))
+                .map(|_| *client_id)
+        })
+        .collect())
+}
+
+fn record_replica_identity(
+    document_hash: &str,
+    client_id: u64,
+    identity: &str,
+    retired: &[u64],
+) -> Result<()> {
+    let mut registry = replica_identity_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let members = registry.entry(document_hash.to_string()).or_default();
+    for retired_id in retired {
+        members.remove(retired_id);
+    }
+    members.insert(client_id, identity.to_string());
+    Ok(())
+}
+
+fn forget_replica_identity(document_hash: &str, client_id: u64) -> Result<()> {
+    let mut registry = replica_identity_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    if let Some(members) = registry.get_mut(document_hash) {
+        members.remove(&client_id);
+        if members.is_empty() {
+            registry.remove(document_hash);
+        }
+    }
+    Ok(())
+}
+
 /// Run `f` against the per-document [`RelayHub`] for `file`, creating an empty hub
 /// on first contact. This is the single entry point for the live relay layer:
 /// register/deregister editor replicas, deliver deltas, and drive the commit
@@ -1249,12 +1325,32 @@ fn reseed_editor_attach_if_needed(file: &Path) {
 }
 
 pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(u64, Vec<u8>)>> {
+    register_replica_for_file_with_liveness(
+        file,
+        identity,
+        agent_doc_plugin_owner::plugin_owner_pid_is_live,
+    )
+}
+
+fn register_replica_for_file_with_liveness(
+    file: &Path,
+    identity: &str,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<Option<(u64, Vec<u8>)>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
     }
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
     let client_id = mint_client_id(identity);
+    // Gather under the metadata lock, then release it before taking the hub
+    // lock. This lock order is deliberate: registration and deregistration can
+    // never deadlock each other by holding both registries at once.
+    let dead_client_ids = dead_editor_replica_ids(&document_hash, is_pid_live)?;
     let bootstrap = with_hub_seeded_from_file(file, |hub| {
+        for dead_client_id in &dead_client_ids {
+            hub.deregister(*dead_client_id);
+        }
         if hub.is_registered(client_id) {
             // Idempotent re-register (e.g. an editor reconnect that re-announces
             // the same stable identity): reconnect/sync the existing mirror, then
@@ -1266,6 +1362,7 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
                 .map(|()| hub.canonical_encoded_state())
         }
     })??;
+    record_replica_identity(&document_hash, client_id, identity, &dead_client_ids)?;
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
     // Seed the legacy process-exit watcher from durable reliable-sync open pids.
@@ -1273,10 +1370,11 @@ pub fn register_replica_for_file(file: &Path, identity: &str) -> Result<Option<(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={}",
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} dead_members_pruned={}",
             file.display(),
             client_id,
             bootstrap.len(),
+            dead_client_ids.len(),
         ),
     );
     Ok(Some((client_id, bootstrap)))
@@ -1293,8 +1391,10 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
     if !authority.editor_attached() {
         return Ok(false);
     }
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
     let client_id = mint_client_id(identity);
     let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
+    forget_replica_identity(&document_hash, client_id)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1359,12 +1459,30 @@ pub fn relay_replica_update_for_file(
     // (recovers after a recycle/stale-exit without a per-update durable-state read).
     reseed_editor_attach_if_needed(file);
     if reattached {
+        // The normal register RPC records identity metadata. Preserve the same
+        // invariant when an update is the first event after controller recycle;
+        // otherwise a later IDE restart could leave this auto-healed member
+        // invisible to dead-process pruning.
+        let document_hash = agent_doc_fs::document_state_hash(file)?;
+        let dead_client_ids = dead_editor_replica_ids(
+            &document_hash,
+            agent_doc_plugin_owner::plugin_owner_pid_is_live,
+        )?;
+        if !dead_client_ids.is_empty() {
+            with_existing_hub(file, |hub| {
+                for dead_client_id in &dead_client_ids {
+                    hub.deregister(*dead_client_id);
+                }
+            })?;
+        }
+        record_replica_identity(&document_hash, client_id, identity, &dead_client_ids)?;
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=reregister_dropped_replica",
+                "crdt_replica_reattach_on_update file={} authority=multi_replica client_id={} recovery=reregister_dropped_replica dead_members_pruned={}",
                 file.display(),
                 client_id,
+                dead_client_ids.len(),
             ),
         );
         // `#reattach-adopt`: the member was just re-seeded from the recovered canonical,
@@ -3085,6 +3203,64 @@ mod tests {
         with_hub(&doc, |hub| {
             assert_eq!(hub.canonical_text(), on_disk);
             assert_eq!(hub.member_text(client_id).unwrap(), on_disk);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn editor_process_id_recognizes_supported_editor_identities_only() {
+        assert_eq!(
+            editor_process_id("jetbrains-1234-a1b2:/tmp/doc.md:refresh-2"),
+            Some(1234)
+        );
+        assert_eq!(
+            editor_process_id("vscode-5678-c3d4:/tmp/doc.md"),
+            Some(5678)
+        );
+        assert_eq!(editor_process_id("intellij:legacy"), None);
+        assert_eq!(editor_process_id("jetbrains-not-a-pid-id"), None);
+    }
+
+    #[test]
+    fn replacement_registration_prunes_dead_editor_members_before_delivery_barrier() {
+        let (_dir, doc) = temp_doc("dead-editor-member.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let stale_identity = "jetbrains-1111-stale:/tmp/dead-editor-member.md";
+        let stale_id = register_replica_for_file_with_liveness(&doc, stale_identity, |_| true)
+            .unwrap()
+            .expect("stale editor should initially attach")
+            .0;
+
+        let current = match current_text_for_file(&doc).unwrap() {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let next = format!("{current}\n### Re: retained\n\nComplete response.\n");
+        apply_cpc_write_for_file(&doc, &current, &next, "test_dead_editor_prune")
+            .unwrap()
+            .expect("canonical response write should queue delivery");
+        with_hub(&doc, |hub| {
+            assert!(!hub.delivery_converged());
+            assert!(!hub.pending_updates(stale_id).unwrap().is_empty());
+        })
+        .unwrap();
+
+        let replacement_identity = format!(
+            "jetbrains-{}-replacement:/tmp/dead-editor-member.md",
+            std::process::id()
+        );
+        let replacement_id =
+            register_replica_for_file_with_liveness(&doc, &replacement_identity, |pid| pid != 1111)
+                .unwrap()
+                .expect("replacement editor should attach")
+                .0;
+
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(stale_id));
+            assert!(hub.is_registered(replacement_id));
+            assert_eq!(hub.live_count(), 1);
+            assert!(hub.delivery_converged());
         })
         .unwrap();
     }

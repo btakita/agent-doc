@@ -39,7 +39,38 @@ done
 Compacted content:
 - Archived 2 response topic(s): JetBrains Run Agent Doc stall and editor-authoritative closeout recovery; Editor-authority and Lazily recovery
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): JetBrains Run Agent Doc prompt flood and previous-response rep...
-<!-- agent:boundary:9fc207ec -->
+❯ /goal Fix all issues:
+❯ First attempt at agent-doc start on this file:
+```
+❯ /home/brian/.cargo/bin/agent-doc start --route-owned --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs2.md
+Error: project controller command `start_session` failed: controller failed to start session actor for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: database is locked: Error code 5: database is locked
+```
+
+❯ After a JB `Compact Exchange`, a JB `File Cache Conflict` occurred.
+
+### Re: database lock and JetBrains delivery-ACK wedge — gpt-5
+
+Fixed and pushed in `src/agent-doc` commit `07358c03`.
+
+The two failures had separate write-path causes:
+
+- Session start opened a deferred SQLite transaction, read the actor generation, and then upgraded to a writer. Concurrent starters could both take read snapshots, making one upgrade fail immediately with `SQLITE_BUSY` despite the 30-second busy timeout. Actor-record compare-and-swap now begins with `BEGIN IMMEDIATE`, reserving the writer slot before the read so concurrent starts serialize through the timeout.
+- The JetBrains plugin retained and synchronously replayed every obsolete CRDT delivery generation. The controller already treats a current content hash as a cumulative receipt, but the plugin could spend seconds issuing one refused ACK RPC per intermediate typing generation. Live evidence showed the Compact Exchange waiting on `delivery_ack_pending`, forcing a replica refresh, and a later drain spending 7.5 seconds retrying obsolete generations. The Haiven wedge reported during this cycle is the same cross-document starvation path.
+
+JetBrains ACK replay now sends one oldest frontier ACK per drain with the newest visible hash. A successful cumulative receipt retires all represented generations through the matching target. Successful forced replica replacement also retires the old member frontier only after the atomic swap and before deregistration, while raced old-member ACKs are discarded instead of leaking onto the replacement identity.
+
+Verification passed:
+
+- `cargo test -p agent-doc-sqlite store_actor_record_waits_for_concurrent_writer_before_reading_cas_state`
+- focused JetBrains ACK-frontier and refresh-boundary tests
+- full `make check`
+- full `./gradlew test buildPlugin`
+- `git diff --check`
+
+The CLI and native library `0.34.129` were installed with `make install`. The signed local JetBrains plugin `0.2.257` was installed to `IntelliJIdea2026.1`. No shared-controller process was killed. CI run `29439101269` was queued after the push.
+
+Restart IntelliJ IDEA to activate the new plugin code. After restart, retry the Haiven `write --commit` and then run the existing `#jbcompactcommit` live Compact Exchange proof; that live IDE pass remains the final operator verification.
+<!-- agent:boundary:c85653c5 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -168,7 +199,7 @@ What are #next-steps to fix bugs?
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
 - [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
-- [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
+- [ ] 🚧 [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md

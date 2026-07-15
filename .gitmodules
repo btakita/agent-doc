@@ -181,3 +181,6 @@
 [submodule "src/lazily-cpp"]
 	path = src/lazily-cpp
 	url = git@github.com:lazily-hub/lazily-cpp.git
+[submodule "src/haiven-websocket-hub"]
+	path = src/haiven-websocket-hub
+	url = git@github.com:btakita/haiven-websocket-hub.git

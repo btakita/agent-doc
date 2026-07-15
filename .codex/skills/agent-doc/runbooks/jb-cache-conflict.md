@@ -2,11 +2,21 @@
 
 After a controller recycle or binary upgrade, an open JetBrains tab may outlive its server-side relay membership. `forceRefresh` is a real re-registration operation: the plugin retires the cached forwarder, issues a fresh `REGISTER`, and projects any durable deferred target into the buffer. A `reload_lib` broadcast triggers this refresh for every open Markdown document; tab reopen and IDE restart are not required recovery steps.
 
-`--force-disk` remains an explicit operator choice, but it is recoverable. Before writing disk, the binary stores the full pre-write base and target in `DocumentWriteDeferred`. On reconnect, an unchanged old buffer receives the target, while later unsaved edits are component-merged over the retained base. The recovery source is Lazily state, never Git HEAD.
+`--force-disk` remains an explicit operator choice, but it does not outrank an open editor. Before writing disk, the binary stores the full pre-write editor cut and disk target in an independent Lazily external-disk slot. It never component-merges that candidate into the editor. The ordinary pending response lineage remains separate, so a file-cache decision cannot replace or clear a retained agent response. The recovery source is Lazily state, never Git HEAD.
 
 Captured-response recovery is also editor-authoritative. The final capture stores the complete pre-response editor buffer in Lazily state. If a cache conflict leaves response lines partially or out-of-order in the editor, repair removes only a multi-line subset proven as additions relative to that baseline, publishes the reconciled buffer through document authority, and replays/commits the full capture. With no live replica, that target remains a durable deferred Lazily write and the command returns promptly. Git `HEAD` is never a restore target; for legacy hash-only captures it may serve only as a hash-verified historical anchor that is immediately upgraded into content-bearing capture state. `session-check` must not close the cycle merely because the old snapshot is in `HEAD`: the captured response body itself must be materialized there.
 
 When IntelliJ has a session document open, an older or degraded write path can surface a **File Cache Conflict** dialog because the editor cache disagrees with a competing disk or legacy IPC mutation. The current attached-document path prevents that race by treating CRDT delivery as the only visible-document mutation plane.
+
+## External Disk Pending Lifecycle
+
+Any filesystem change observed while at least one editor buffer is open is a pending disk candidate, regardless of whether agent-doc, Git, a formatter, or another process wrote it. The file watcher records the exact disk bytes in Lazily but does not route them into canonical CRDT state. The authority order is live editor/CRDT, then disk when no editor exists, then Git only as historical recovery evidence.
+
+- If the IDE loads/accepts the filesystem version, the plugin proves the exact candidate, resets its stale replica from the now-visible editor buffer, propagates that buffer through CRDT, and clears the candidate only after registration succeeds.
+- If the user edits the buffer, that newer editor cut propagates and clears the candidate without merging it.
+- If the editor saves and those exact buffer bytes flush to disk, the save cut is authoritative and clears any older candidate, even if it differs from the originally observed disk version.
+- If several editor replicas are reconnecting and no exact editor cut is proven, the disk bytes remain pending without mutation until CRDT converges or an explicit editor action resolves them.
+- When the final editor closes, the candidate is cleared and current disk becomes authority. Closing one of several editors does not demote the remaining editor/CRDT authority.
 
 ## Quiescent CRDT Delivery
 
@@ -34,8 +44,8 @@ The dialog contract below remains the recovery path for older plugins, already-o
 
 ## Dialog Contract
 
-- **Accept / Load FS changes** — IntelliJ resolves its cache state, but the plugin must not replay a payload that was already blocked by conflict detection. The binary-owned retry path keeps responsibility for the response.
-- **Cancel / Keep memory changes** — IntelliJ preserves the visible editor buffer. The plugin must not write over that memory state; it has already signaled failure so the binary can recover or fail closed. Historically the working tree could be left with a partial write while the cycle stayed at `WriteApplied` — see "Recovery" below.
+- **Accept / Load FS changes** — IntelliJ resolves its cache state. The exact accepted buffer reboots the editor replica and clears the pending disk candidate only after CRDT propagation. A response payload previously blocked by conflict detection is not replayed; its independent Lazily response lineage resumes normally.
+- **Cancel / Keep memory changes** — IntelliJ preserves the visible editor buffer. The plugin must not write over that memory state. The next editor mutation or save propagates the editor cut and clears the pending disk candidate without component-merging the disk version. Historically the working tree could be left with a partial write while the cycle stayed at `WriteApplied` — see "Recovery" below.
 
 ## Recovery
 

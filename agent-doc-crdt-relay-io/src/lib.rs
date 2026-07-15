@@ -314,6 +314,52 @@ pub enum CurrentText {
     },
 }
 
+/// Compact live-document revision resolved from the CRDT relay authority.
+///
+/// The idle supervisor compares this value before asking the relay to
+/// materialize the canonical markdown. It therefore keeps full-text queue
+/// parsing lazy while still observing editor attachment, replica liveness, and
+/// convergence changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CurrentRevision {
+    /// No live editor owns the document; callers may observe disk metadata.
+    Detached,
+    /// A live editor owns the document, but no relay replica has registered.
+    EditorAttachedMissingReplica,
+    /// The compact authoritative canonical frontier and related readiness state.
+    Current {
+        state_vector: Vec<u8>,
+        live_editors: usize,
+        delivery_converged: bool,
+    },
+}
+
+/// Return a compact revision for the current live CRDT authority without
+/// materializing canonical text or driving a commit barrier.
+pub fn current_revision_for_file_with_authority(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> Result<CurrentRevision> {
+    if !authority.editor_attached() {
+        return Ok(CurrentRevision::Detached);
+    }
+
+    let hash = agent_doc_fs::document_state_hash(file)?;
+    let registry = hub_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let Some(hub) = registry.get(&hash) else {
+        return Ok(CurrentRevision::EditorAttachedMissingReplica);
+    };
+
+    Ok(CurrentRevision::Current {
+        state_vector: hub.canonical_state_vector(),
+        live_editors: hub.live_count(),
+        delivery_converged: hub.delivery_converged(),
+    })
+}
+
 /// Return the current operator-visible document text from the live CRDT relay.
 ///
 /// This is the replacement read authority for the old live-buffer sidecar hot

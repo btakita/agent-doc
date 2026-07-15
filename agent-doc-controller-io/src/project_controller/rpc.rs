@@ -3594,6 +3594,27 @@ pub fn current_text_via_controller_model_read_for_doc(
     }
 }
 
+/// Read the compact CRDT revision from an already-running controller.
+///
+/// This intentionally does not materialize canonical markdown or emit the
+/// full-text observation log. Quiescent supervisors use it as the lazy
+/// invalidation key for queue parsing.
+pub fn revision_via_controller_model_read_for_doc(
+    doc: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentRevision>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    if !authority.editor_attached() {
+        return Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached));
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        return Ok(None);
+    };
+    request_existing_controller_crdt_revision_read(&project_root, &canonical, source).map(Some)
+}
+
 pub fn current_text_via_controller_model_for_doc(
     doc: &Path,
     source: &str,
@@ -3783,6 +3804,33 @@ fn request_existing_controller_crdt_current_text_read(
     let current = controller_current_text_from_data(&data)?;
     log_controller_current_text_result(canonical, source, &current);
     Ok(current)
+}
+
+fn request_existing_controller_crdt_revision_read(
+    project_root: &Path,
+    canonical: &Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentRevision> {
+    let data: serde_json::Value = request_existing_controller_with_timeout(
+        project_root,
+        ControllerRequest {
+            command: "crdt_revision".to_string(),
+            file: Some(canonical.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::json!({ "source": source }).to_string()),
+        },
+        CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+    )?;
+    serde_json::from_value(data).context("failed to parse controller CRDT revision response")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -4735,6 +4783,19 @@ fn handle_crdt_current_text_rpc(
     };
     log_controller_current_text_result(&canonical, &source, &current);
     Ok(controller_current_text_response(current))
+}
+
+fn handle_crdt_revision_rpc(
+    bootstrap: &ControllerBootstrap,
+    request: ControllerRequest,
+) -> Result<serde_json::Value> {
+    let requested_file = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
+    let file_arg = canonical.to_string_lossy().to_string();
+    let authority = crdt_authority_for_file(&file_arg);
+    let revision =
+        agent_doc_crdt_relay_io::current_revision_for_file_with_authority(&canonical, authority)?;
+    serde_json::to_value(revision).context("failed to serialize controller CRDT revision response")
 }
 
 fn crdt_current_text_payload(
@@ -7514,6 +7575,9 @@ pub(crate) fn handle_request_locked(
         ),
         "crdt_current_text" => {
             controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
+        }
+        "crdt_revision" => {
+            controller_envelope(handle_crdt_revision_rpc(&bootstrap_snapshot, request))
         }
         "crdt_cpc_write" => {
             controller_envelope(handle_crdt_cpc_write_rpc(&bootstrap_snapshot, request))

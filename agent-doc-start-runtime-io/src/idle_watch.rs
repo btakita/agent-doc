@@ -78,6 +78,9 @@ const IDLE_WATCH_CONTROLLER_BACKOFF: std::time::Duration = std::time::Duration::
 /// controller/model projection twice a second cannot make it dispatchable.
 const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(5);
+/// Even with an unchanged compact revision, periodically rerun the authoritative
+/// full-text queue projection as a fail-safe against missed external signals.
+const IDLE_WATCH_FULL_RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn supervisor_background_context_clear_enabled() -> bool {
@@ -104,6 +107,64 @@ fn idle_watch_fast_path_can_sleep(
 
 fn stale_recycle_safe_checkpoint(supervisor_stale: bool, inflight_handlers: u64) -> bool {
     supervisor_stale && inflight_handlers == 0
+}
+
+/// Lazy invalidation key for the supervisor's expensive queue-head projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum IdleWatchDocumentRevision {
+    Disk {
+        len: u64,
+        modified_nanos: u128,
+        controller_observation_suppressed: bool,
+    },
+    Controller(agent_doc_crdt_relay_io::CurrentRevision),
+}
+
+fn idle_watch_disk_revision(
+    file: &Path,
+    controller_observation_suppressed: bool,
+) -> Option<IdleWatchDocumentRevision> {
+    let metadata = std::fs::metadata(file).ok()?;
+    let modified_nanos = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(IdleWatchDocumentRevision::Disk {
+        len: metadata.len(),
+        modified_nanos,
+        controller_observation_suppressed,
+    })
+}
+
+fn idle_watch_document_revision(
+    file: &Path,
+    controller_observation_suppressed: bool,
+) -> Option<IdleWatchDocumentRevision> {
+    if controller_observation_suppressed
+        || !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file)
+    {
+        return idle_watch_disk_revision(file, controller_observation_suppressed);
+    }
+
+    match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
+        file,
+        "idle_watch_document_revision",
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)) => {
+            idle_watch_disk_revision(file, false)
+        }
+        Ok(Some(revision)) => Some(IdleWatchDocumentRevision::Controller(revision)),
+        Ok(None) | Err(_) => None,
+    }
+}
+
+fn idle_watch_revision_changed(
+    previous: Option<&IdleWatchDocumentRevision>,
+    current: Option<&IdleWatchDocumentRevision>,
+) -> bool {
+    current.is_none_or(|current| previous != Some(current))
 }
 
 /// `#fbwire` Phase 2 — is the session document's current visible text converged
@@ -744,6 +805,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut controller_backoff_logged = false;
             let mut queue_state_observed = false;
             let mut last_quiescent_maintenance: Option<std::time::Instant> = None;
+            let mut last_document_revision: Option<IdleWatchDocumentRevision> = None;
+            let mut last_full_reconcile: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
@@ -785,6 +848,33 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 }
                 if !actor_ready_fast {
                     last_quiescent_maintenance = None;
+                }
+                if actor_ready_fast && !urgent_maintenance && maintenance_due {
+                    let queue_controller_paused = agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(
+                        &path,
+                    )
+                    .is_some();
+                    let controller_in_cooldown = controller_degraded_until
+                        .is_some_and(|until| now < until);
+                    let revision = idle_watch_document_revision(
+                        &path,
+                        queue_controller_paused || controller_in_cooldown,
+                    );
+                    let revision_changed = idle_watch_revision_changed(
+                        last_document_revision.as_ref(),
+                        revision.as_ref(),
+                    );
+                    if let Some(revision) = revision {
+                        last_document_revision = Some(revision);
+                    }
+                    let full_reconcile_due = last_full_reconcile.is_none_or(|last| {
+                        last.elapsed() >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
+                    });
+                    if queue_state_observed && !revision_changed && !full_reconcile_due {
+                        last_quiescent_maintenance = Some(now);
+                        continue;
+                    }
+                    last_full_reconcile = Some(now);
                 }
                 // `#capproofbg`: a *pending* managed-capability proof no longer
                 // stalls the idle-queue dispatch. Drain dispatch proceeds
@@ -3352,6 +3442,25 @@ mod tests {
         assert!(stale_recycle_safe_checkpoint(true, 0));
         assert!(!stale_recycle_safe_checkpoint(true, 1));
         assert!(!stale_recycle_safe_checkpoint(false, 0));
+    }
+
+    #[test]
+    fn idle_watch_full_projection_is_invalidated_only_by_revision_change_or_probe_failure() {
+        let first = IdleWatchDocumentRevision::Disk {
+            len: 42,
+            modified_nanos: 7,
+            controller_observation_suppressed: false,
+        };
+        let changed = IdleWatchDocumentRevision::Disk {
+            len: 43,
+            modified_nanos: 8,
+            controller_observation_suppressed: false,
+        };
+
+        assert!(idle_watch_revision_changed(None, Some(&first)));
+        assert!(!idle_watch_revision_changed(Some(&first), Some(&first)));
+        assert!(idle_watch_revision_changed(Some(&first), Some(&changed)));
+        assert!(idle_watch_revision_changed(Some(&first), None));
     }
 
     fn context_clear_projection_with_source(

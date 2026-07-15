@@ -332,6 +332,15 @@ impl RelayHub {
         self.canonical.text()
     }
 
+    /// A compact revision token for the authoritative canonical replica.
+    ///
+    /// Unlike [`Self::canonical_text`], this does not materialize the document.
+    /// Observation paths can compare the encoded CRDT state vector and fetch the
+    /// full text only after the canonical frontier changes.
+    pub fn canonical_state_vector(&self) -> Vec<u8> {
+        self.canonical.state_vector()
+    }
+
     /// A registered member's current text (for inspection / tests).
     pub fn member_text(&self, client_id: u64) -> Option<String> {
         self.members.get(&client_id).map(|m| m.replica.text())
@@ -1314,6 +1323,19 @@ mod tests {
         assert_eq!(hub.member_text(2).unwrap(), "hello");
         assert_eq!(hub.member_text(3).unwrap(), "hello");
         assert_eq!(hub.member_text(4).unwrap(), "hello");
+    }
+
+    #[test]
+    fn canonical_state_vector_is_a_stable_lazy_revision_key() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        let before = hub.canonical_state_vector();
+
+        hub.apply_local(2, 0, 0, "hello").unwrap();
+
+        let after = hub.canonical_state_vector();
+        assert_ne!(before, after);
+        assert_eq!(after, hub.canonical_state_vector());
     }
 
     #[test]

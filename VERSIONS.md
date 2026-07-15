@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.124
+
+- **Idle queue observation is change-driven.** Editor-attached supervisors compare a compact CRDT canonical state vector plus liveness/convergence state before materializing markdown; detached or deliberately controller-suppressed sessions compare disk metadata. Full canonical reads, hashing, serialization, and queue parsing now run only after that lazy revision changes, after probe failure, or on a 60-second safety reconciliation.
+- **The controller exposes a log-silent compact revision RPC.** `crdt_revision` never flushes a commit barrier or materializes the document, so the five-second quiescent liveness pass remains cheap while editor changes still invalidate the queue projection promptly.
+
 ## 0.34.123
 
 - **Idle means idle even when an editor remains attached or a queue head is stably blocked.** The 500 ms watch tick now performs only local binary/zombie liveness probes between five-second reconciliation passes; pane inspection and full CRDT text/controller reads no longer happen twice per second merely because the document is open.

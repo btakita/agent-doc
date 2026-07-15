@@ -375,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn repair_fragmented_exchange_uses_live_crdt_baseline_over_stale_disk_projection() {
+    fn repair_fragmented_exchange_projects_retained_crdt_target_with_zero_editor_replicas() {
         let dir = setup_project();
         let doc = dir.path().join("session-live-authority.md");
         let snapshot_content = concat!(
@@ -405,10 +405,19 @@ mod tests {
             live_content.replacen("How would CAS wo?", "How would CAS w?", 1);
         std::fs::write(&doc, stale_disk_projection).unwrap();
         agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        let editor_identity = "intellij:repair-live-authority";
         agent_doc_test_support::publish_editor_text_via_crdt_relay(
             &doc,
-            "intellij:repair-live-authority",
+            editor_identity,
             live_content,
+        );
+        let relay_identity = format!(
+            "{editor_identity}:{}",
+            doc.canonicalize().unwrap().display()
+        );
+        assert!(
+            agent_doc_crdt_relay_io::deregister_replica_for_file(&doc, &relay_identity).unwrap(),
+            "the test editor replica must be removed while editor authority remains"
         );
 
         let outcome = run(&doc).unwrap();

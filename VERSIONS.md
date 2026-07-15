@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.112
+
+- **Explicit repair completes retained zero-replica writes.** When an editor owner exists but has no registered relay replica, ordinary writes still fail closed without touching disk. If an explicit repair has already retained its exact CAS target in CRDT + Lazily state, repair now performs an audited force-disk projection of only that target, verifies canonical and disk equality, replaces the deferred write with force-disk reconnect lineage, and then continues snapshot/commit closeout. A retry can no longer say “No pending response” while the session file remains fragmented.
+
 ## 0.34.111
 
 - **Repair is authoritative-CAS, not a stale whole-buffer merge.** Every repair mutation compares against the exact realtime document image it analyzed, then proves the resulting CRDT authority and disk projection are byte-identical to the intended repaired image before publishing a snapshot or reporting success. A stale IDE/disk projection can no longer resurrect fragmented responses or duplicate `agent:boundary` markers after repair.

@@ -113,7 +113,7 @@ fn repair_atomic_write_if_current(
     expected_current: &str,
     source: &str,
 ) -> Result<()> {
-    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+    agent_doc_document_realtime_io::atomic_repair_write_if_current_through_authority(
         file,
         content,
         expected_current,

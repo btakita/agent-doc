@@ -19,6 +19,7 @@
 //! - `durable_buffer_state_none_when_buffer_in_sync_with_disk`
 //! - `durable_buffer_state_wins_when_unsaved_buffer_ahead_of_disk`
 //! - `durable_buffer_state_none_when_no_editor_feed`
+//! - `repair_cas_projects_retained_target_when_editor_owner_has_zero_replicas`
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -126,6 +127,21 @@ const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 2_000;
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
+
+#[derive(Debug)]
+struct AwaitEditorReplicaNoDiskWrite(String);
+
+impl std::fmt::Display for AwaitEditorReplicaNoDiskWrite {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AwaitEditorReplicaNoDiskWrite {}
+
+fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
+    AwaitEditorReplicaNoDiskWrite(message).into()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CrdtConvergenceState {
@@ -638,6 +654,72 @@ pub fn atomic_write_if_current_through_authority(
     atomic_write_through_authority(path, content)
 }
 
+/// Repair-only zero-replica recovery.
+///
+/// Ordinary editor-owned writes must never fall back to disk when the owner has
+/// no registered relay replica. Explicit repair is different: after the CAS
+/// write has durably retained the exact canonical target, it may project that
+/// same target to disk through the audited force-disk authority. This closes the
+/// recovery transaction instead of leaving clean CRDT authority paired with a
+/// corrupt disk projection that a retry would misclassify as "nothing to do".
+pub fn atomic_repair_write_if_current_through_authority(
+    path: &Path,
+    content: &str,
+    expected_current: &str,
+    source: &str,
+) -> Result<()> {
+    match atomic_write_if_current_through_authority(path, content, expected_current, source) {
+        Ok(()) => return Ok(()),
+        Err(err)
+            if err
+                .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_none() =>
+        {
+            return Err(err);
+        }
+        Err(_) => {}
+    }
+
+    let canonical = try_resolve_current_document_content(path, source)?;
+    anyhow::ensure!(
+        canonical == content,
+        "{source}: zero-replica repair target for {} was not retained exactly (expected_hash={}, canonical_hash={}); refusing force-disk projection",
+        path.display(),
+        agent_doc_hash::content_hash(content),
+        agent_doc_hash::content_hash(&canonical),
+    );
+    let pre_force_disk = resolve_disk_current_document_content(path, source)?;
+    atomic_write_force_disk_through_authority(path, content)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    anyhow::ensure!(
+        disk == content,
+        "{source}: zero-replica repair projection for {} did not materialize exactly (expected_hash={}, disk_hash={})",
+        path.display(),
+        agent_doc_hash::content_hash(content),
+        agent_doc_hash::content_hash(&disk),
+    );
+    let target_hash = agent_doc_hash::content_hash(content);
+    clear_deferred_document_write_intent(path, &target_hash, source)?;
+    if pre_force_disk != content {
+        ensure_deferred_document_write_intent(
+            path,
+            &pre_force_disk,
+            content,
+            "repair_force_disk",
+            DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
+        )?;
+    }
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "{source}_zero_replica_repair_projected file={} content_hash={} authority=retained_crdt_cas transport=audited_force_disk",
+            path.display(),
+            agent_doc_hash::content_hash(content),
+        ),
+    );
+    Ok(())
+}
+
 /// Apply a binary/CPC-authored document update to the live CRDT relay.
 ///
 /// When an editor owns the document, this is the write-side companion to
@@ -857,10 +939,10 @@ pub fn apply_canonical_replace_if_attached(
                                     source,
                                     DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
                                 )?;
-                                anyhow::bail!(
+                                return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; recovery=await_editor_replica_no_disk_write",
                                     file.display(),
-                                );
+                                )));
                             }
                         }
 
@@ -910,10 +992,10 @@ pub fn apply_canonical_replace_if_attached(
                                         relay_write.content_hash,
                                     ),
                                 );
-                                anyhow::bail!(
+                                return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; recovery=await_editor_replica_no_disk_write",
                                     file.display(),
-                                );
+                                )));
                             }
                             Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
                                 relay_write.live_editors = live_editors;
@@ -2941,6 +3023,48 @@ mod tests {
             .expect("deferred write should merge with later editor text");
         assert!(merged.contains("agent:boundary id=deferred"));
         assert!(merged.contains("operator note"));
+    }
+
+    #[test]
+    fn repair_cas_projects_retained_target_when_editor_owner_has_zero_replicas() {
+        let baseline = "# Session\n\nfragmented response\n<!-- agent:boundary:old --><!-- agent:boundary:old -->\n";
+        let target = "# Session\n\ncomplete response\n<!-- agent:boundary:old -->\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-repair-zero-replica-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        atomic_repair_write_if_current_through_authority(
+            &file,
+            target,
+            baseline,
+            "repair_zero_replica_test",
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert_eq!(
+            try_resolve_current_document_content(&file, "repair_zero_replica_verify").unwrap(),
+            target,
+        );
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(
+                file.parent().unwrap(),
+            )
+            .unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let pending = projection
+            .document(&document_hash)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .expect("force-disk repair must preserve editor reconnect lineage");
+        assert_eq!(pending.target_content, target);
+        assert_eq!(
+            pending.reason,
+            DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection
+        );
     }
 
     #[test]

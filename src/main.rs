@@ -423,6 +423,16 @@ impl agent_doc_compact_io::CompactRuntimeEffects for CliCompactRuntimeEffects {
         agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
     }
 
+    fn begin_force_disk_authority_scope(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> anyhow::Result<Box<dyn std::any::Any>> {
+        Ok(Box::new(
+            agent_doc_document_realtime_io::begin_force_disk_authority_scope(file, source)?,
+        ))
+    }
+
     fn commit_with_outcome(
         &self,
         file: &Path,
@@ -3453,11 +3463,17 @@ enum PluginAction {
         /// Install from local build instead of GitHub Releases
         #[clap(long)]
         local: bool,
+        /// Exact JetBrains plugins directory (required for ambiguous non-interactive discovery)
+        #[arg(long, value_name = "PATH")]
+        plugins_dir: Option<PathBuf>,
     },
     /// Update an installed plugin to the latest version
     Update {
         /// Editor: jetbrains, vscode
         editor: String,
+        /// Exact JetBrains plugins directory (required for ambiguous non-interactive discovery)
+        #[arg(long, value_name = "PATH")]
+        plugins_dir: Option<PathBuf>,
     },
     /// List installed editor plugins
     List,
@@ -3982,14 +3998,33 @@ fn try_main() -> anyhow::Result<()> {
             }
         }
         Commands::Plugin { action } => match action {
-            PluginAction::Install { editor, local } => {
+            PluginAction::Install {
+                editor,
+                local,
+                plugins_dir,
+            } => {
                 if local {
-                    plugin::install_local(&editor)
+                    if let Some(plugins_dir) = plugins_dir.as_deref() {
+                        plugin::install_local_with_plugins_dir(&editor, Some(plugins_dir))
+                    } else {
+                        plugin::install_local(&editor)
+                    }
+                } else if let Some(plugins_dir) = plugins_dir.as_deref() {
+                    plugin::install_with_plugins_dir(&editor, Some(plugins_dir))
                 } else {
                     plugin::install(&editor)
                 }
             }
-            PluginAction::Update { editor } => plugin::update(&editor),
+            PluginAction::Update {
+                editor,
+                plugins_dir,
+            } => {
+                if let Some(plugins_dir) = plugins_dir.as_deref() {
+                    plugin::update_with_plugins_dir(&editor, Some(plugins_dir))
+                } else {
+                    plugin::update(&editor)
+                }
+            }
             PluginAction::List => plugin::list(),
         },
         Commands::Write { args, commit } => {

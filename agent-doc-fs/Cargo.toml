@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-fs"
-version = "0.34.131"
+version = "0.34.132"
 edition = "2024"
 description = "Filesystem helpers for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_fs"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.131" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.132" }
 anyhow = "1"
 
 [dev-dependencies]

@@ -145,6 +145,12 @@ Large specs now split behind stable entrypoint files instead of growing indefini
 agent-doc plugin install jetbrains
 ```
 
+When multiple JetBrains IDE data roots exist, select the target explicitly for automation:
+
+```sh
+agent-doc plugin install jetbrains --plugins-dir ~/.local/share/JetBrains/IdeaIC2026.1/plugins
+```
+
 Or install from JetBrains Marketplace. Configure an External Tool: Program=`agent-doc`, Args=`run $FilePath$`, Working dir=`$ProjectFileDir$`. Assign a keyboard shortcut.
 
 **VS Code**

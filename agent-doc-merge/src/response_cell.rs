@@ -103,6 +103,60 @@ fn boundary_line(line: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
 }
 
+/// Remove repeated response nodes with the same body-aware identity.
+///
+/// Response cells are idempotent: replaying the same heading and body is a
+/// no-op. Component-level three-way merges can nevertheless materialize both
+/// sides when an editor reconnects during a force-disk projection. Preserve
+/// the first semantic response occurrence, every prompt, and the newest
+/// boundary marker.
+pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
+    let components = element::parse(doc)?;
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let nodes = parse_exchange_nodes(exchange.content(doc));
+    let mut response_ids = HashSet::new();
+    let mut boundary = None;
+    let mut removed = false;
+    let mut retained = Vec::with_capacity(nodes.len());
+    for mut node in nodes {
+        for line in &node.lines {
+            if boundary_line(line) {
+                boundary = Some(line.trim().to_string());
+            }
+        }
+        node.lines.retain(|line| !boundary_line(line));
+        if matches!(node.kind, ExchangeNodeKind::Response { .. })
+            && !response_ids.insert(node.node_id())
+        {
+            removed = true;
+            continue;
+        }
+        if !node.lines.is_empty() {
+            retained.push(node);
+        }
+    }
+    if !removed {
+        return Ok(None);
+    }
+
+    let mut inner = render_exchange_nodes(&retained)
+        .trim_end_matches('\n')
+        .to_string();
+    if let Some(boundary) = boundary {
+        if !inner.is_empty() {
+            inner.push('\n');
+        }
+        inner.push_str(&boundary);
+        inner.push('\n');
+    }
+    Ok(Some(exchange.replace_content(doc, &inner)))
+}
+
 fn supersede_response_tail_after_anchor(
     doc: &str,
     anchor_id: &str,
@@ -343,6 +397,30 @@ mod tests {
         assert!(second.applied);
         assert_ne!(second.cell_id, first.cell_id);
         assert_eq!(second.content.matches("### Re: topic").count(), 2);
+    }
+
+    #[test]
+    fn duplicate_response_cells_from_reconnect_merge_are_collapsed() {
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n\n",
+            "### Re: topic — gpt-5\n\nDone.\n\n",
+            "❯ prompt retained from the live editor\n\n",
+            "### Re: topic — gpt-5\n\nDone.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let deduplicated = deduplicate_response_cells(duplicated)
+            .unwrap()
+            .expect("the repeated semantic response should be removed");
+
+        assert_eq!(deduplicated.matches("### Re: topic").count(), 1);
+        assert_eq!(deduplicated.matches("Done.").count(), 1);
+        assert!(deduplicated.contains("❯ original prompt"));
+        assert!(deduplicated.contains("❯ prompt retained from the live editor"));
+        assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

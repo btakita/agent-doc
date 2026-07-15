@@ -199,6 +199,7 @@ class CrdtReplicaForwarder(
         val detail = when (delivery) {
             is ReplicaPullDelivery.Deltas -> "updates=${delivery.updates.size}"
             is ReplicaPullDelivery.Replace -> "replace_chars=${delivery.text.length}"
+            is ReplicaPullDelivery.Unavailable -> "unavailable=${delivery.reason}"
         }
         logSlow("transport.pullDelivery", started, details = detail)
         return delivery
@@ -297,6 +298,8 @@ private fun sha256Text(text: String): String =
 sealed interface ReplicaPullDelivery {
     data class Deltas(val updates: List<ReplicaRemoteUpdate>) : ReplicaPullDelivery
     data class Replace(val text: String) : ReplicaPullDelivery
+    /** The controller transport or prior registration is no longer usable. */
+    data class Unavailable(val reason: String) : ReplicaPullDelivery
 }
 
 /**
@@ -429,8 +432,10 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
     override fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery {
         flushDocumentOps(filePath)
         val response = send(controllerRequest("replica_pull", filePath, identity))
-            ?: return ReplicaPullDelivery.Deltas(emptyList())
-        if (!response.ok) return ReplicaPullDelivery.Deltas(emptyList())
+            ?: return ReplicaPullDelivery.Unavailable(lastSendError ?: "controller_socket_unavailable")
+        if (!response.ok) {
+            return ReplicaPullDelivery.Unavailable(response.error ?: "controller_rejected_replica_pull")
+        }
         // D2: a replace delivery carries corrected canonical text; the manager
         // performs the editor-buffer baseline check before installing it.
         if (response.data?.get("kind")?.asString == "replace") {

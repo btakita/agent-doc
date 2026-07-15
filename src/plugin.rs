@@ -6,7 +6,7 @@
 //! - `install_local(editor)` — installs from a locally built artifact found by walking up from CWD to locate an `editors/` directory.
 //! - `update(editor)` — for JetBrains, skips re-install if the installed plugin.xml version matches the latest release tag; for VS Code, always reinstalls (handled idempotently by the CLI).
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
-//! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. When multiple IDEs are found, the user is prompted interactively on stderr.
+//! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`).
 //! - Asset selection: prefers `<prefix>-signed.<ext>`, falls back to any `<prefix>*.<ext>` match. For local JetBrains installs, prefers `-signed.zip` over `.zip`. Local VS Code installs require the VSIX version to match `package.json` exactly so stale artifacts cannot be installed by accident.
 //!
@@ -31,8 +31,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::fs;
-use std::io::{self, Read as _, Write as _};
-use std::path::PathBuf;
+use std::io::{self, IsTerminal as _, Read as _, Write as _};
+use std::path::{Path, PathBuf};
 
 const GITHUB_REPO: &str = "btakita/agent-doc";
 
@@ -222,7 +222,14 @@ fn is_jetbrains_ide_data_dir(name: &str) -> bool {
         && PRODUCTS.iter().any(|product| name.starts_with(product))
 }
 
-fn choose_plugins_dir(dirs: &[PathBuf]) -> Result<&PathBuf> {
+fn choose_plugins_dir_with_interactivity(
+    dirs: &[PathBuf],
+    explicit: Option<&Path>,
+    interactive: bool,
+) -> Result<PathBuf> {
+    if let Some(explicit) = explicit {
+        return Ok(explicit.to_path_buf());
+    }
     if dirs.is_empty() {
         bail!(
             "No JetBrains IDE plugins directory found.\n\
@@ -232,7 +239,17 @@ fn choose_plugins_dir(dirs: &[PathBuf]) -> Result<&PathBuf> {
         );
     }
     if dirs.len() == 1 {
-        return Ok(&dirs[0]);
+        return Ok(dirs[0].clone());
+    }
+    if !interactive {
+        let candidates = dirs
+            .iter()
+            .map(|dir| format!("  {}", dir.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "Multiple JetBrains IDE plugin directories found and stdin is non-interactive:\n{candidates}\nrerun with `--plugins-dir <PATH>`"
+        );
     }
 
     eprintln!("Multiple JetBrains IDEs found. Choose a plugins directory:");
@@ -247,15 +264,17 @@ fn choose_plugins_dir(dirs: &[PathBuf]) -> Result<&PathBuf> {
     if idx == 0 || idx > dirs.len() {
         bail!("Selection out of range");
     }
-    Ok(&dirs[idx - 1])
+    Ok(dirs[idx - 1].clone())
 }
 
-fn install_jetbrains(release: &Value) -> Result<()> {
+fn choose_plugins_dir(dirs: &[PathBuf], explicit: Option<&Path>) -> Result<PathBuf> {
+    choose_plugins_dir_with_interactivity(dirs, explicit, io::stdin().is_terminal())
+}
+
+fn install_jetbrains_into(release: &Value, target_dir: &Path) -> Result<()> {
     let (asset_name, url) = find_asset(release, "agent-doc-jetbrains", "zip")?;
     eprintln!("Found asset: {asset_name}");
-
-    let dirs = jetbrains_plugin_dirs();
-    let target_dir = choose_plugins_dir(&dirs)?;
+    fs::create_dir_all(target_dir).context("Failed to create JetBrains plugins directory")?;
 
     let tmp = download_to_temp(url)?;
 
@@ -288,6 +307,12 @@ fn install_jetbrains(release: &Value) -> Result<()> {
     eprintln!("Plugin installed ({version}) to {}", target_dir.display());
     eprintln!("Restart your IDE to activate.");
     Ok(())
+}
+
+fn install_jetbrains(release: &Value, plugins_dir: Option<&Path>) -> Result<()> {
+    let dirs = jetbrains_plugin_dirs();
+    let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
+    install_jetbrains_into(release, &target_dir)
 }
 
 // --- VS Code ---
@@ -331,12 +356,19 @@ fn install_vscode(release: &Value) -> Result<()> {
 // --- Public API ---
 
 pub fn install(editor: &str) -> Result<()> {
+    install_with_plugins_dir(editor, None)
+}
+
+pub fn install_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
     match editor {
         "jetbrains" | "jb" | "idea" => {
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
-            install_jetbrains(&release)
+            install_jetbrains(&release, plugins_dir)
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            if plugins_dir.is_some() {
+                bail!("--plugins-dir is only supported for JetBrains installs");
+            }
             let release = fetch_release_for_asset("agent-doc", "vsix")?;
             install_vscode(&release)
         }
@@ -345,9 +377,18 @@ pub fn install(editor: &str) -> Result<()> {
 }
 
 pub fn install_local(editor: &str) -> Result<()> {
+    install_local_with_plugins_dir(editor, None)
+}
+
+pub fn install_local_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
     match editor {
-        "jetbrains" | "jb" | "idea" => install_jetbrains_local(),
-        "vscode" | "code" | "vscodium" | "codium" | "cursor" => install_vscode_local(),
+        "jetbrains" | "jb" | "idea" => install_jetbrains_local(plugins_dir),
+        "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            if plugins_dir.is_some() {
+                bail!("--plugins-dir is only supported for JetBrains installs");
+            }
+            install_vscode_local()
+        }
         _ => bail!("Unknown editor: {editor}. Supported: jetbrains, vscode, cursor"),
     }
 }
@@ -372,7 +413,7 @@ fn find_local_build_dir() -> Result<PathBuf> {
     }
 }
 
-fn install_jetbrains_local() -> Result<()> {
+fn install_jetbrains_local(plugins_dir: Option<&Path>) -> Result<()> {
     let project_root = find_local_build_dir()?;
     let dist_dir = project_root.join("editors/jetbrains/build/distributions");
 
@@ -387,7 +428,8 @@ fn install_jetbrains_local() -> Result<()> {
     eprintln!("Installing from local build: {}", zip_path.display());
 
     let dirs = jetbrains_plugin_dirs();
-    let target_dir = choose_plugins_dir(&dirs)?;
+    let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
+    fs::create_dir_all(&target_dir).context("Failed to create JetBrains plugins directory")?;
 
     // Remove old installation if present
     let dest = target_dir.join("agent-doc-jetbrains");
@@ -543,23 +585,28 @@ fn find_local_zip(dist_dir: &std::path::Path, signed: bool) -> Option<PathBuf> {
 }
 
 pub fn update(editor: &str) -> Result<()> {
+    update_with_plugins_dir(editor, None)
+}
+
+pub fn update_with_plugins_dir(editor: &str, plugins_dir: Option<&Path>) -> Result<()> {
     match editor {
         "jetbrains" | "jb" | "idea" => {
+            let dirs = jetbrains_plugin_dirs();
+            let target_dir = choose_plugins_dir(&dirs, plugins_dir)?;
             let release = fetch_release_for_asset("agent-doc-jetbrains", "zip")?;
             let version = release_version(&release);
-            // Check if already installed at this version.
-            let dirs = jetbrains_plugin_dirs();
-            for d in &dirs {
-                if installed_jetbrains_plugin_version(d).as_deref()
-                    == Some(version.trim_start_matches('v'))
-                {
-                    eprintln!("JetBrains plugin is already at {version}.");
-                    return Ok(());
-                }
+            if installed_jetbrains_plugin_version(&target_dir).as_deref()
+                == Some(version.trim_start_matches('v'))
+            {
+                eprintln!("JetBrains plugin is already at {version}.");
+                return Ok(());
             }
-            install_jetbrains(&release)
+            install_jetbrains_into(&release, &target_dir)
         }
         "vscode" | "code" | "vscodium" | "codium" | "cursor" => {
+            if plugins_dir.is_some() {
+                bail!("--plugins-dir is only supported for JetBrains updates");
+            }
             let release = fetch_release_for_asset("agent-doc", "vsix")?;
             // VS Code/Cursor handles update-in-place via --install-extension
             install_vscode(&release)
@@ -572,13 +619,39 @@ pub fn update(editor: &str) -> Result<()> {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        find_asset, find_best_local_zip, find_local_vscode_vsix, find_local_zip, has_asset,
-        installed_jetbrains_plugin_version, is_jetbrains_ide_data_dir,
-        jetbrains_plugin_dirs_in_roots, release_version,
+        choose_plugins_dir_with_interactivity, find_asset, find_best_local_zip,
+        find_local_vscode_vsix, find_local_zip, has_asset, installed_jetbrains_plugin_version,
+        is_jetbrains_ide_data_dir, jetbrains_plugin_dirs_in_roots, release_version,
     };
     use serde_json::json;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn ambiguous_noninteractive_jetbrains_target_fails_with_rerun_guidance() {
+        let dirs = vec![
+            PathBuf::from("/tmp/IdeaIC/plugins"),
+            PathBuf::from("/tmp/RustRover/plugins"),
+        ];
+        let err = choose_plugins_dir_with_interactivity(&dirs, None, false).unwrap_err();
+        assert!(err.to_string().contains("stdin is non-interactive"));
+        assert!(err.to_string().contains("--plugins-dir <PATH>"));
+        assert!(err.to_string().contains("RustRover/plugins"));
+    }
+
+    #[test]
+    fn explicit_jetbrains_target_is_deterministic_among_multiple_ides() {
+        let dirs = vec![
+            PathBuf::from("/tmp/IdeaIC/plugins"),
+            PathBuf::from("/tmp/RustRover/plugins"),
+        ];
+        let explicit = PathBuf::from("/opt/jetbrains/plugins");
+        assert_eq!(
+            choose_plugins_dir_with_interactivity(&dirs, Some(&explicit), false).unwrap(),
+            explicit
+        );
+    }
 
     #[test]
     fn find_asset_prefers_signed_variant() {

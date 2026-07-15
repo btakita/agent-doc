@@ -2494,6 +2494,14 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_quiets_backpressure_without_force_disk_or_controller_kill() {
+        assert!(SKILL_TEMPLATE.contains("Backpressure / pending-ACK recovery rule"));
+        assert!(SKILL_TEMPLATE.contains("Stop issuing concurrent closeout commands"));
+        assert!(SKILL_TEMPLATE.contains("Do not kill/restart the project controller"));
+        assert!(SKILL_TEMPLATE.contains("do not use `--force-disk` while a live editor owns"));
+    }
+
+    #[test]
     fn bundled_skill_contains_finalize_commit_invariant() {
         assert!(SKILL_TEMPLATE.contains("agent-doc finalize <FILE>"));
         assert!(

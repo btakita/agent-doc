@@ -31,7 +31,7 @@ pub mod opencode;
 use anyhow::Result;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Output};
+use std::process::{Child, Command, Output};
 use std::time::{Duration, Instant};
 
 use agent_doc_config::AgentConfig;
@@ -67,6 +67,73 @@ pub fn run_agent_timeout() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
+/// Isolate an agent backend in a child-owned process group so a timeout can
+/// terminate and reap the backend together with any preflight/background
+/// descendants it started.
+pub fn configure_agent_child_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+}
+
+#[cfg(unix)]
+fn signal_agent_process_group(child_pid: u32, signal: libc::c_int) -> std::io::Result<()> {
+    let result = unsafe { libc::kill(-(child_pid as libc::pid_t), signal) };
+    if result == 0 {
+        return Ok(());
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(err)
+    }
+}
+
+#[cfg(unix)]
+fn agent_process_group_exists(child_pid: u32) -> std::io::Result<bool> {
+    let result = unsafe { libc::kill(-(child_pid as libc::pid_t), 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    match err.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(err),
+    }
+}
+
+/// Classify timeout shutdown as cancellation and synchronously reap the child
+/// process tree before a later preflight can contend with it.
+pub fn terminate_agent_child_process_group(child: &mut Child) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        const TERMINATE_GRACE: Duration = Duration::from_millis(500);
+        let child_pid = child.id();
+        signal_agent_process_group(child_pid, libc::SIGTERM)?;
+        let started = Instant::now();
+        while started.elapsed() < TERMINATE_GRACE && agent_process_group_exists(child_pid)? {
+            let _observed_status = child.try_wait()?;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if agent_process_group_exists(child_pid)? {
+            signal_agent_process_group(child_pid, libc::SIGKILL)?;
+        }
+        let _reaped_status = child.wait()?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        child.kill()?;
+        let _reaped_status = child.wait()?;
+        Ok(())
+    }
+}
+
 pub fn wait_with_output_timeout(mut child: Child, timeout: Duration) -> std::io::Result<Output> {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
@@ -91,11 +158,27 @@ pub fn wait_with_output_timeout(mut child: Child, timeout: Duration) -> std::io:
             break status;
         }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
+            let termination = terminate_agent_child_process_group(&mut child);
+            if termination.is_ok() {
+                for (name, handle) in [("stdout", stdout_handle), ("stderr", stderr_handle)] {
+                    match handle.join() {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => {
+                            eprintln!("[agent] timed-out {name} reader failed: {err}");
+                        }
+                        Err(_) => {
+                            eprintln!("[agent] timed-out {name} reader thread panicked");
+                        }
+                    }
+                }
+            }
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                format!("agent child process timed out after {}s", timeout.as_secs()),
+                format!(
+                    "agent child process group timed out after {}s; classification=cancellation; process_group_reaped={}",
+                    timeout.as_secs(),
+                    termination.is_ok()
+                ),
             ));
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -216,6 +299,51 @@ pub fn resolve_streaming_for_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn process_exists(pid: libc::pid_t) -> bool {
+        let result = unsafe { libc::kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timed_out_agent_reaps_background_descendants() {
+        let temp = tempfile::tempdir().unwrap();
+        let descendant_pid_path = temp.path().join("descendant.pid");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!(
+                "sleep 30 & echo $! > '{}'; wait",
+                descendant_pid_path.display()
+            ))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        configure_agent_child_process_group(&mut command);
+        let child = command.spawn().unwrap();
+
+        let started = Instant::now();
+        while !descendant_pid_path.exists() && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let descendant_pid: libc::pid_t = std::fs::read_to_string(&descendant_pid_path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+
+        let err = wait_with_output_timeout(child, Duration::from_millis(100)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("classification=cancellation"));
+        assert!(err.to_string().contains("process_group_reaped=true"));
+
+        let started = Instant::now();
+        while process_exists(descendant_pid) && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!process_exists(descendant_pid));
+    }
 
     #[test]
     fn resolve_claude() {

@@ -855,7 +855,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     )
                     .is_some();
                     let controller_in_cooldown = controller_degraded_until
-                        .is_some_and(|until| now < until);
+                        .is_some_and(|until| now < until)
+                        || agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path);
                     let revision = idle_watch_document_revision(
                         &path,
                         queue_controller_paused || controller_in_cooldown,
@@ -973,8 +974,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // not flooded with a CRDT-model read every poll. The cooldown
                 // expires → one controller probe → if it failed again, renew.
                 let now = std::time::Instant::now();
+                let shared_controller_cooldown = agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path);
                 let controller_in_cooldown = controller_degraded_until
-                    .is_some_and(|until| now < until);
+                    .is_some_and(|until| now < until)
+                    || shared_controller_cooldown;
+                if shared_controller_cooldown {
+                    controller_degraded_until = Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                }
                 let active_head = if queue_controller_paused || controller_in_cooldown {
                     idle_watch_paused_queue_head(&path)
                 } else {

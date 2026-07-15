@@ -143,6 +143,197 @@ fn await_editor_replica_no_disk_write(message: String) -> anyhow::Error {
     AwaitEditorReplicaNoDiskWrite(message).into()
 }
 
+#[derive(Debug)]
+struct ForceDiskAuthorityChanged(String);
+
+impl std::fmt::Display for ForceDiskAuthorityChanged {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ForceDiskAuthorityChanged {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForceDiskMutationFence {
+    NoRegisteredEditorReplica,
+    RegisteredEditorReplica,
+}
+
+#[derive(Debug)]
+struct ActiveForceDiskMutationBaseline {
+    fence: ForceDiskMutationFence,
+    owner: std::thread::ThreadId,
+    holders: usize,
+}
+
+static FORCE_DISK_MUTATION_BASELINES: LazyLock<
+    Mutex<HashMap<PathBuf, ActiveForceDiskMutationBaseline>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Captures editor authority at the explicit force-disk authorization boundary.
+/// The final atomic mutation compares against this baseline so a relay that
+/// reconnects during response generation cannot be overwritten.
+pub struct ForceDiskAuthorityScope {
+    file: PathBuf,
+    _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl Drop for ForceDiskAuthorityScope {
+    fn drop(&mut self) {
+        match FORCE_DISK_MUTATION_BASELINES.lock() {
+            Ok(mut baselines) => {
+                if let Some(active) = baselines.get_mut(&self.file) {
+                    if active.holders > 1 {
+                        active.holders -= 1;
+                    } else {
+                        baselines.remove(&self.file);
+                    }
+                }
+            }
+            Err(err) => eprintln!(
+                "[agent-doc] force-disk authority baseline lock poisoned while clearing {}: {err}",
+                self.file.display()
+            ),
+        }
+    }
+}
+
+pub fn begin_force_disk_authority_scope(
+    file: &Path,
+    source: &str,
+) -> Result<ForceDiskAuthorityScope> {
+    let file = file.to_path_buf();
+    let owner = std::thread::current().id();
+    {
+        let mut baselines = FORCE_DISK_MUTATION_BASELINES
+            .lock()
+            .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?;
+        if let Some(active) = baselines.get_mut(&file) {
+            if active.owner != owner {
+                anyhow::bail!(
+                    "another force-disk authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
+                    file.display()
+                );
+            }
+            active.holders += 1;
+            return Ok(ForceDiskAuthorityScope {
+                file,
+                _not_send: std::marker::PhantomData,
+            });
+        }
+    }
+    let baseline = if agent_doc_reliable_sync_io::authority_enabled() {
+        let current = query_live_editor_authority(&file, source).with_context(|| {
+            format!(
+                "force-disk could not capture initial editor authority for {}; no disk write was performed",
+                file.display()
+            )
+        })?;
+        force_disk_mutation_fence(&current)
+    } else {
+        ForceDiskMutationFence::NoRegisteredEditorReplica
+    };
+    let mut baselines = FORCE_DISK_MUTATION_BASELINES
+        .lock()
+        .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?;
+    if baselines.contains_key(&file) {
+        anyhow::bail!(
+            "another force-disk authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
+            file.display()
+        );
+    }
+    baselines.insert(
+        file.clone(),
+        ActiveForceDiskMutationBaseline {
+            fence: baseline,
+            owner,
+            holders: 1,
+        },
+    );
+    drop(baselines);
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "force_disk_authority_scope file={} source={} initial={:?}",
+            file.display(),
+            source,
+            baseline
+        ),
+    );
+    Ok(ForceDiskAuthorityScope {
+        file,
+        _not_send: std::marker::PhantomData,
+    })
+}
+
+fn force_disk_mutation_fence(
+    current: &agent_doc_crdt_relay_io::CurrentText,
+) -> ForceDiskMutationFence {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Detached
+        | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::Current {
+            live_editors: 0, ..
+        } => ForceDiskMutationFence::NoRegisteredEditorReplica,
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+        | agent_doc_crdt_relay_io::CurrentText::Current { .. } => {
+            ForceDiskMutationFence::RegisteredEditorReplica
+        }
+    }
+}
+
+fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
+    if !agent_doc_reliable_sync_io::authority_enabled() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "force_disk_mutation_fence file={} status=legacy_authority_disabled",
+                file.display()
+            ),
+        );
+        return Ok(());
+    }
+    let current = query_live_editor_authority(file, "force_disk_mutation_fence").with_context(|| {
+        format!(
+            "force-disk mutation fence could not revalidate editor authority for {}; no disk write was performed; retry after the controller is responsive",
+            file.display()
+        )
+    })?;
+    let initial = FORCE_DISK_MUTATION_BASELINES
+        .lock()
+        .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?
+        .get(file)
+        .map(|active| active.fence);
+    let current_fence = force_disk_mutation_fence(&current);
+    match (initial, current_fence) {
+        (_, ForceDiskMutationFence::NoRegisteredEditorReplica)
+        | (
+            Some(ForceDiskMutationFence::RegisteredEditorReplica),
+            ForceDiskMutationFence::RegisteredEditorReplica,
+        ) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "force_disk_mutation_fence file={} status=clear initial={:?} editor_authority={}",
+                    file.display(),
+                    initial,
+                    current_text_status(&current)
+                ),
+            );
+            Ok(())
+        }
+        (initial, ForceDiskMutationFence::RegisteredEditorReplica) => {
+            Err(ForceDiskAuthorityChanged(format!(
+                "force-disk authority changed before mutation for {}: a live editor relay is now registered (initial={initial:?}, status={}); no disk write was performed; retry finalize without --force-disk so the editor replica can reconcile",
+                file.display(),
+                current_text_status(&current)
+            ))
+            .into())
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CrdtConvergenceState {
     TypingQuiescence,
@@ -636,6 +827,10 @@ pub fn atomic_write_force_disk_through_authority(path: &Path, content: &str) -> 
         return result;
     }
 
+    // Revalidate at the serialized mutation boundary. Authorization may have
+    // been granted while the editor relay was absent, then become stale while
+    // this write waited behind another document operation.
+    ensure_force_disk_mutation_authority(path)?;
     retain_force_disk_reconnect_intent(path, content)?;
     atomic_write_authority_raw(path, content)
 }
@@ -1631,6 +1826,10 @@ pub fn deferred_document_write_reconnect_content(
             file.display()
         )
     })?;
+    let merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
+        .ok()
+        .flatten()
+        .unwrap_or(merged);
     let merged = agent_doc_template::canonicalize_boundary_after_document_merge(
         &merged,
         &pending.target_content,
@@ -3644,6 +3843,32 @@ mod tests {
             .expect("reappearing editor should reconcile against force-disk target");
         assert!(merged.contains("### Re: agent"));
         assert!(merged.contains("operator note after relay loss"));
+    }
+
+    #[test]
+    fn force_disk_aborts_when_editor_replica_reconnects_before_mutation() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: agent\n\nresponse\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let _force_disk_authority_scope = begin_force_disk_authority_scope(
+            &file,
+            "force_disk_reconnect_fence_test_authorization",
+        )
+        .unwrap();
+        let identity = "test-force-disk-reconnect-fence";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach before the mutation fence");
+
+        let err = atomic_write_force_disk_through_authority(&file, target).unwrap_err();
+
+        assert!(
+            err.downcast_ref::<ForceDiskAuthorityChanged>().is_some(),
+            "force-disk must fail with the typed authority-change error: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        assert!(pending_document_write(&file).is_none());
     }
 
     fn wait_for_active_typing_indicator(file: &str) {

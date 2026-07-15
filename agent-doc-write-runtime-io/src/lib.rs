@@ -526,6 +526,13 @@ fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning)
 /// (and, with the flag on, the derived cross-check cache; Rung 4). With the flag
 /// off this is byte-for-byte the legacy `.md` path.
 fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
+    // The model sidecar is a cache paired with an explicit markdown baseline,
+    // not an independently authoritative baseline. Loading it when the caller
+    // supplied no baseline can resurrect content from an older cycle (notably
+    // an already-consumed queue head) during recovery writes.
+    if baseline_file.is_none() {
+        return Ok(None);
+    }
     let md_content = read_explicit_baseline_md(file, baseline_file)?;
 
     if agent_doc_snapshot_io::mps_enabled() {
@@ -1099,6 +1106,16 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     let file = options.file.as_path();
+    let _force_disk_authority_scope = if options.force_disk {
+        Some(
+            agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+                file,
+                "finalize_write_force_disk_authorization",
+            )?,
+        )
+    } else {
+        None
+    };
     let _ = agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
         file,
         "finalize_write_start",
@@ -3117,6 +3134,28 @@ mod tests {
             .expect("baseline should be recovered from migrated hash");
         assert_eq!(baseline, "preflight baseline\n");
     }
+
+    #[test]
+    fn absent_explicit_baseline_never_promotes_stale_model_sidecar() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("test.md");
+        fs::write(&doc, "current document without the old queue head\n").unwrap();
+        agent_doc_snapshot_io::save_baseline_model(
+            &doc,
+            "stale baseline with /goal Implement backlog item(s): #htv4\n",
+            |_file, _message| {},
+        )
+        .unwrap();
+
+        let baseline = read_explicit_baseline(&doc, None).unwrap();
+
+        assert_eq!(
+            baseline, None,
+            "an unpaired model sidecar is cache, not authority"
+        );
+    }
+
     #[test]
     fn guard_rejects_normal_write_when_diff_requests_compact_exchange() {
         let dir = TempDir::new().unwrap();

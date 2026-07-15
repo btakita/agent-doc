@@ -340,6 +340,7 @@ class TypingTrackerEdtBudgetTest {
             source.contains("pendingRemoteAckReplays") &&
                 source.contains("rememberPendingRemoteAcks(pending.filePath, pending.acknowledgements)") &&
                 source.contains("replayPendingRemoteAcks(filePath, forwarder)") &&
+                source.contains("shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount)") &&
                 source.contains("val visibleText = editorBufferText(filePath)"),
         )
         val remoteDrainBody = source.substringAfter("private fun drainRemoteUpdatesFor")

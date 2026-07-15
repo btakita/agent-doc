@@ -28,8 +28,8 @@ private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
-private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 60_000L
-private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 300_000L
+private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
+private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 // `#crdt-drain-idle-quiet`: the no-op drain-all loop must keep polling so purely-remote
 // CRDT updates (a peer edits with no local event here) still get pulled — but an idle
@@ -67,6 +67,18 @@ internal fun remoteAckReplayPlanUtil(
         .maxOfOrNull { it.generation }
     return RemoteAckReplayPlan(candidate, acknowledgedThrough)
 }
+
+/**
+ * An unacknowledged visible frontier owns the delivery slot. Pulling again while
+ * that frontier is retained only returns the same controller delivery and would
+ * decode the same (potentially multi-megabyte) CRDT update into the replica on
+ * every drain cycle. Let the existing no-op drain backoff retry the ACK first.
+ */
+internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): Boolean =
+    pendingAckCount == 0
+
+internal fun pullDeliveryRequestsReplicaRefreshUtil(delivery: ReplicaPullDelivery): Boolean =
+    delivery is ReplicaPullDelivery.Unavailable
 
 private data class PendingRemoteEditorApply(
     val filePath: String,
@@ -481,11 +493,24 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // stale remembered text is never allowed to acknowledge a newer cut.
             ackCount += replayPendingRemoteAcks(filePath, forwarder)
             usefulWork = ackCount
+            val pendingAckCount = pendingRemoteAckCount(filePath, forwarder)
+            if (!shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount)) {
+                log.debug(
+                    "[crdt-replica] remote pull deferred for ${File(filePath).name}; " +
+                        "pending_ack_frontier=$pendingAckCount acked=$ackCount",
+                )
+                return usefulWork
+            }
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs
             // the corrected canonical only when the editor buffer still matches
             // the local replica baseline; normal deltas are merged into the native
             // replica first, then applied to the editor in one EDT command.
             val delivery = forwarder.pullRemoteDelivery()
+            if (pullDeliveryRequestsReplicaRefreshUtil(delivery)) {
+                val reason = (delivery as ReplicaPullDelivery.Unavailable).reason
+                refreshReplicaAfterTransportLoss(filePath, forwarder, expectedText, reason)
+                return usefulWork
+            }
             if (delivery is ReplicaPullDelivery.Replace) {
                 deliveryKind = "replace"
             queuedForEditor = applyReplaceDelivery(filePath, forwarder, expectedText, delivery.text)
@@ -557,6 +582,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     private fun clearPendingRemoteAcks(filePath: String): Int =
         pendingRemoteAckReplays.remove(filePath)?.size ?: 0
+
+    private fun pendingRemoteAckCount(filePath: String, forwarder: CrdtReplicaForwarder): Int =
+        pendingRemoteAckReplays[filePath]
+            ?.values
+            ?.count { it.forwarder === forwarder }
+            ?: 0
 
     private fun replayPendingRemoteAcks(
         filePath: String,
@@ -993,6 +1024,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         filePath: String,
         initialEditorText: String? = null,
         bypassRegisterBackoff: Boolean = false,
+        replaceCached: Boolean = bypassRegisterBackoff,
     ): CrdtReplicaForwarder? {
         val cached = forwarders[filePath]
         if (bypassRegisterBackoff) {
@@ -1000,13 +1032,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // gap by deregistering the working member before its replacement has
             // accepted the canonical bootstrap.
             clearRegisterFailure(filePath)
-        } else {
+        } else if (!replaceCached) {
             cached?.let { return it }
         }
-        if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return null
+        if (!bypassRegisterBackoff && !shouldAttemptRegister(filePath)) return cached
         val root = resolveProjectRoot(filePath) ?: return null
         val baseIdentity = "${EditorIdentity.id}:$filePath"
-        val identity = if (bypassRegisterBackoff && cached != null) {
+        val identity = if (replaceCached && cached != null) {
             "$baseIdentity:refresh-${refreshConnectionEpoch.incrementAndGet()}"
         } else {
             baseIdentity
@@ -1028,7 +1060,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (initialEditorText != null) {
             forwarder.ensureEditorText(initialEditorText)
         }
-        if (bypassRegisterBackoff && cached != null) {
+        if (replaceCached && cached != null) {
             if (forwarders.replace(filePath, cached, forwarder)) {
                 // The replacement is now authoritative. Retire the prior
                 // member's retained ACK frontier only after the successful
@@ -1053,6 +1085,33 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         log.info("[crdt-replica] attached ${File(filePath).name} as $identity")
         return forwarder
+    }
+
+    private fun refreshReplicaAfterTransportLoss(
+        filePath: String,
+        staleForwarder: CrdtReplicaForwarder,
+        editorText: String,
+        reason: String,
+    ) {
+        if (forwarders[filePath] !== staleForwarder) return
+        val replacement = forwarderFor(
+            filePath = filePath,
+            initialEditorText = editorText,
+            bypassRegisterBackoff = false,
+            replaceCached = true,
+        )
+        if (replacement != null && replacement !== staleForwarder) {
+            log.info(
+                "[crdt-replica] controller transport recovered for ${File(filePath).name}; " +
+                    "reason=$reason",
+            )
+            requestRemoteDrain(filePath, "controller-transport-reregistered")
+        } else {
+            log.debug(
+                "[crdt-replica] controller transport unavailable for ${File(filePath).name}; " +
+                    "reason=$reason",
+            )
+        }
     }
 
     private fun shouldAttemptRegister(filePath: String): Boolean {

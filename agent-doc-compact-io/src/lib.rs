@@ -139,6 +139,11 @@ impl CompactDocumentTargets {
 pub trait CompactRuntimeEffects: Sync {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
     fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String>;
+    fn begin_force_disk_authority_scope(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<Box<dyn std::any::Any>>;
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome>;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn force_disk_atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -187,6 +192,16 @@ impl CompactRuntimeEffects for TestCompactRuntimeEffects {
 
     fn force_disk_document_content(&self, file: &Path, source: &str) -> Result<String> {
         agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+    }
+
+    fn begin_force_disk_authority_scope(
+        &self,
+        file: &Path,
+        source: &str,
+    ) -> Result<Box<dyn std::any::Any>> {
+        Ok(Box::new(
+            agent_doc_document_realtime_io::begin_force_disk_authority_scope(file, source)?,
+        ))
     }
 
     fn commit_with_outcome(&self, file: &Path) -> Result<CompactCommitOutcome> {
@@ -361,6 +376,11 @@ pub fn run_in_controller(
     }
 
     let effects = runtime_effects()?;
+    let _force_disk_authority_scope = if force_disk {
+        Some(effects.begin_force_disk_authority_scope(file, "compact_force_disk_authorization")?)
+    } else {
+        None
+    };
     let write_base_content = (if force_disk {
         effects.force_disk_document_content(file, "compact_run_initial_force_disk")
     } else {
@@ -1226,6 +1246,11 @@ fn run_component_compact_force_disk(
     message: Option<&str>,
     is_crdt: bool,
 ) -> Result<String> {
+    let _force_disk_authority_scope =
+        agent_doc_document_realtime_io::begin_force_disk_authority_scope(
+            file,
+            "compact_test_force_disk_authorization",
+        )?;
     run_component_compact_with_options(file, content, content, target, message, is_crdt, true)
         .map(|targets| targets.committed)
 }
@@ -1604,6 +1629,13 @@ mod tests {
         }
         fn force_disk_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
             Ok(self.current.clone())
+        }
+        fn begin_force_disk_authority_scope(
+            &self,
+            _file: &Path,
+            _source: &str,
+        ) -> Result<Box<dyn std::any::Any>> {
+            unimplemented!("not exercised by converge-retry tests")
         }
         fn commit_with_outcome(&self, _file: &Path) -> Result<CompactCommitOutcome> {
             unimplemented!("not exercised by converge-retry tests")

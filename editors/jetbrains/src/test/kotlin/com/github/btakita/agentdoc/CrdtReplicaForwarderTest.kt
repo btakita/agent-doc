@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -321,6 +322,21 @@ class CrdtReplicaForwarderTest {
 
         fwdA.forwardLocalDelta(0, 0, "HELLO")
         assertEquals("HELLO", nodeB.text())
+    }
+
+    @Test
+    fun `socket loss is distinguishable from an idle controller pull`() {
+        val projectRoot = Files.createTempDirectory("agent-doc-missing-controller").toFile()
+        try {
+            val transport = CpcSocketReplicaTransport(projectRoot.absolutePath)
+
+            val delivery = transport.pullDelivery("plan.md", "intellij:lost-controller")
+
+            assertTrue(delivery is ReplicaPullDelivery.Unavailable)
+            assertTrue((delivery as ReplicaPullDelivery.Unavailable).reason.contains("controller.sock"))
+        } finally {
+            projectRoot.deleteRecursively()
+        }
     }
 
     @Test

@@ -214,6 +214,7 @@ fn prove_dns_resolution() -> Result<()> {
 }
 
 fn spawn_agent_command(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    super::configure_agent_child_process_group(cmd);
     let mut attempt = 0usize;
     loop {
         match cmd.spawn() {
@@ -243,14 +244,12 @@ fn wait_with_timeout(
             });
         }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let output = child.wait_with_output().map_err(|e| {
-                anyhow::anyhow!("failed to collect timed-out {harness} child probe output: {e}")
+            super::terminate_agent_child_process_group(&mut child).map_err(|e| {
+                anyhow::anyhow!("failed to reap timed-out {harness} child process group: {e}")
             })?;
             anyhow::bail!(
-                "{harness} child {probe_name} probe timed out after {}s; stderr={}",
+                "{harness} child {probe_name} probe timed out after {}s; classification=cancellation; process_group_reaped=true",
                 timeout.as_secs(),
-                String::from_utf8_lossy(&output.stderr).trim()
             );
         }
         std::thread::sleep(Duration::from_millis(100));

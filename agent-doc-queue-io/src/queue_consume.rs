@@ -293,8 +293,22 @@ pub fn strike_answered_free_text_queue_heads(
     if response_body.trim().is_empty() {
         return Ok(0);
     }
+    // Editor-authoritative lookup may cross the controller socket. Never hold
+    // the document lock across that bounded RPC: a slow/unavailable controller
+    // would otherwise serialize every preflight/commit contender behind the
+    // timeout. The convergence write below still compares against this exact
+    // source content. Commit-seam cleanup is explicitly disk-owned, so it reads
+    // disk only after acquiring the lock and never contacts the controller.
+    let resolved_editor_content = if skip_visible_guard {
+        None
+    } else {
+        Some(effects.current_document_content(file, "free_text_queue_strike")?)
+    };
     let _lock = acquire_doc_lock(file)?;
-    let content = effects.current_document_content(file, "free_text_queue_strike")?;
+    let content = match resolved_editor_content {
+        Some(content) => content,
+        None => effects.force_disk_document_content(file, "free_text_queue_strike force_disk")?,
+    };
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
         return Ok(0);
@@ -1230,6 +1244,7 @@ mod core_tests {
     use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -1271,6 +1286,51 @@ mod core_tests {
                 ),
             );
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct TrackingStrikeEffects {
+        current_reads: AtomicUsize,
+        force_disk_reads: AtomicUsize,
+    }
+
+    impl QueueConsumeWriteEffects for TrackingStrikeEffects {
+        fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            self.current_reads.fetch_add(1, Ordering::SeqCst);
+            let lock_path = agent_doc_fs::state_lock_path_for(file)?;
+            if let Some(parent) = lock_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let probe = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(&lock_path)?;
+            probe
+                .try_lock_exclusive()
+                .context("controller/current lookup ran while the document lock was held")?;
+            FileExt::unlock(&probe)?;
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn force_disk_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+            self.force_disk_reads.fetch_add(1, Ordering::SeqCst);
+            Ok(std::fs::read_to_string(file)?)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            agent_doc_fs::write_atomic(file, content.as_bytes())
+        }
+
+        fn converge_document_or_disk(
+            &self,
+            file: &Path,
+            target_content: &str,
+            _source_content: &str,
+            _reason: &str,
+        ) -> Result<()> {
+            agent_doc_fs::write_atomic(file, target_content.as_bytes())
         }
     }
 
@@ -2592,6 +2652,46 @@ mod core_tests {
             content,
             "My free-text queue items are not immediately struck as if they are addressed."
         ));
+    }
+
+    #[test]
+    fn free_text_strike_resolves_editor_content_before_document_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        std::fs::write(&doc, "---\nqueue_active: false\n---\n").unwrap();
+        let effects = TrackingStrikeEffects::default();
+
+        let struck = super::strike_answered_free_text_queue_heads(
+            &doc,
+            "### Re: answer\n\nDone.\n",
+            false,
+            &effects,
+        )
+        .unwrap();
+
+        assert_eq!(struck, 0);
+        assert_eq!(effects.current_reads.load(Ordering::SeqCst), 1);
+        assert_eq!(effects.force_disk_reads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn commit_seam_free_text_strike_never_reads_controller_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        std::fs::write(&doc, "---\nqueue_active: false\n---\n").unwrap();
+        let effects = TrackingStrikeEffects::default();
+
+        let struck = super::strike_answered_free_text_queue_heads(
+            &doc,
+            "### Re: answer\n\nDone.\n",
+            true,
+            &effects,
+        )
+        .unwrap();
+
+        assert_eq!(struck, 0);
+        assert_eq!(effects.current_reads.load(Ordering::SeqCst), 0);
+        assert_eq!(effects.force_disk_reads.load(Ordering::SeqCst), 1);
     }
 
     #[test]

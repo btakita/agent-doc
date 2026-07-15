@@ -1,7 +1,9 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CrdtReplicaAckFrontierTest {
@@ -30,6 +32,24 @@ class CrdtReplicaAckFrontierTest {
 
         assertEquals(11L, plan.candidate.generation)
         assertNull(plan.acknowledgedThroughGeneration)
+    }
+
+    @Test
+    fun `a retained ack frontier blocks another delivery pull`() {
+        assertFalse(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 1))
+        assertFalse(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 3))
+        assertTrue(shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount = 0))
+    }
+
+    @Test
+    fun `controller transport loss requests replica refresh`() {
+        assertTrue(
+            pullDeliveryRequestsReplicaRefreshUtil(
+                ReplicaPullDelivery.Unavailable("controller socket replaced"),
+            ),
+        )
+        assertFalse(pullDeliveryRequestsReplicaRefreshUtil(ReplicaPullDelivery.Deltas(emptyList())))
+        assertFalse(pullDeliveryRequestsReplicaRefreshUtil(ReplicaPullDelivery.Replace("current")))
     }
 
     private fun update(generation: Long, expectedHash: String) = ReplicaRemoteUpdate(

@@ -212,7 +212,7 @@ wheel:
 
 # Publish to PyPI
 publish-pypi:
-	.venv/bin/maturin publish --skip-existing --no-sdist
+	.venv/bin/maturin publish --skip-existing --no-sdist --zig --compatibility manylinux_2_17
 
 # agent-doc's Rust workspace is private; release binaries through GitHub and PyPI.
 publish: publish-pypi

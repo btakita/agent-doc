@@ -40,6 +40,14 @@ Do not run `--force-disk` from a harness unless the operator explicitly chooses
 that escape hatch, because force-disk is a human recovery decision rather than
 an automatic closeout strategy.
 
+`controller_model_backpressure`, a pending delivery ACK, or a response that is
+already present in the live editor is also a settle-and-retry state. The target is
+retained and exact response cells are idempotent, so repeated `finalize` / `write
+--commit` calls only add contention. Stop concurrent closeout attempts, keep the
+live editor authoritative, wait for the shared cooldown/reconnect path, and retry
+the same closeout once. Do not kill the project controller to clear a queue strike
+or backpressure, and do not use `--force-disk` while the editor is live.
+
 A live editor buffer that differs from disk is usually a **valid unsaved-document
 state, not a wedge** (`#unsaved-buffer-divergence-valid`). When the editor has the
 document open with unsaved changes, its in-memory buffer legitimately diverges from

@@ -33,7 +33,10 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::{Agent, AgentResponse};
+use super::{
+    Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
+    wait_with_output_timeout,
+};
 
 pub struct Junie {
     command: String,
@@ -126,26 +129,28 @@ impl Agent for Junie {
                 .to_string(),
         );
 
-        let output = Command::new(&self.command)
+        let mut command = Command::new(&self.command);
+        command
             .args(&args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                if let Some(ref mut stdin) = child.stdin {
-                    stdin.write_all(prompt.as_bytes())?;
-                }
-                child.wait_with_output()
-            })
-            .with_context(|| {
-                format!(
-                    "failed to run junie command '{}'. Install junie-bridge.sh to your PATH \
+            .stderr(std::process::Stdio::piped());
+        configure_agent_child_process_group(&mut command);
+        let mut child = command.spawn().with_context(|| {
+            format!(
+                "failed to run junie command '{}'. Install junie-bridge.sh to your PATH \
                      or configure [agents.junie] command in ~/.config/agent-doc/config.toml",
-                    self.command
-                )
-            })?;
+                self.command
+            )
+        })?;
+        {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(prompt.as_bytes())?;
+            }
+            child.stdin.take();
+        }
+        let output = wait_with_output_timeout(child, run_agent_timeout())?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

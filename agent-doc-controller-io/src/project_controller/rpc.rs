@@ -22,6 +22,7 @@ use std::collections::BTreeSet;
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
 const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
+const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 /// A CPC-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
@@ -32,6 +33,152 @@ const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
+}
+
+fn controller_model_pressure_paths(project_root: &Path) -> (PathBuf, PathBuf) {
+    let runtime = project_root.join(".agent-doc/runtime");
+    (
+        runtime.join("controller-model-pressure-until"),
+        runtime.join("controller-model-pressure.lock"),
+    )
+}
+
+fn controller_model_pressure_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn controller_model_pressure_jitter_secs(doc: &Path) -> u64 {
+    let hash = agent_doc_hash::content_hash(&doc.to_string_lossy());
+    u64::from_str_radix(hash.get(..2).unwrap_or("00"), 16).unwrap_or(0) % 8
+}
+
+fn read_controller_model_pressure_deadline(project_root: &Path) -> Option<u64> {
+    let (state, _) = controller_model_pressure_paths(project_root);
+    let raw = match std::fs::read_to_string(&state) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] failed to read controller model pressure marker {}: {err}",
+                state.display()
+            );
+            return None;
+        }
+    };
+    match raw.trim().parse() {
+        Ok(deadline) => Some(deadline),
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] invalid controller model pressure marker {}: {err}",
+                state.display()
+            );
+            None
+        }
+    }
+}
+
+fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &str, error: &str) {
+    let (state, lock_path) = controller_model_pressure_paths(project_root);
+    let Some(runtime) = state.parent() else {
+        eprintln!(
+            "[agent-doc] controller model pressure marker has no runtime parent: {}",
+            state.display()
+        );
+        return;
+    };
+    if let Err(err) = std::fs::create_dir_all(runtime) {
+        eprintln!(
+            "[agent-doc] failed to create controller model pressure runtime {}: {err}",
+            runtime.display()
+        );
+        return;
+    }
+    let lock = match std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(lock) => lock,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] failed to open controller model pressure lock {}: {err}",
+                lock_path.display()
+            );
+            return;
+        }
+    };
+    if let Err(err) = fs2::FileExt::lock_exclusive(&lock) {
+        eprintln!(
+            "[agent-doc] failed to lock controller model pressure marker {}: {err}",
+            lock_path.display()
+        );
+        return;
+    }
+    let deadline = controller_model_pressure_now_secs()
+        .saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs());
+    let retained_deadline = read_controller_model_pressure_deadline(project_root)
+        .unwrap_or(0)
+        .max(deadline);
+    if let Err(err) = std::fs::write(&state, format!("{retained_deadline}\n")) {
+        eprintln!(
+            "[agent-doc] failed to write controller model pressure marker {}: {err}",
+            state.display()
+        );
+    }
+    if let Err(err) = fs2::FileExt::unlock(&lock) {
+        eprintln!(
+            "[agent-doc] failed to unlock controller model pressure marker {}: {err}",
+            lock_path.display()
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        doc,
+        &format!(
+            "controller_model_pressure_recorded file={} source={} cooldown_secs={} deadline={} error={}",
+            doc.display(),
+            source,
+            CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs(),
+            retained_deadline,
+            error.replace('\n', "\\n")
+        ),
+    );
+}
+
+fn clear_expired_controller_model_pressure(project_root: &Path) {
+    let Some(deadline) = read_controller_model_pressure_deadline(project_root) else {
+        return;
+    };
+    if controller_model_pressure_now_secs() < deadline {
+        return;
+    }
+    let (state, _) = controller_model_pressure_paths(project_root);
+    if let Err(err) = std::fs::remove_file(&state)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!(
+            "[agent-doc] failed to clear controller model pressure marker {}: {err}",
+            state.display()
+        );
+    }
+}
+
+/// Project-wide idle-observation cooldown. A single failed controller-model
+/// read quiets every supervisor in the project; foreground write/finalize RPCs
+/// deliberately do not consult this gate.
+pub fn controller_model_pressure_cooldown_active_for_doc(doc: &Path) -> bool {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(doc) else {
+        return false;
+    };
+    let Some(deadline) = read_controller_model_pressure_deadline(&project_root) else {
+        return false;
+    };
+    controller_model_pressure_now_secs()
+        < deadline.saturating_add(controller_model_pressure_jitter_secs(doc))
 }
 
 pub(crate) fn connect_path(path: &Path) -> Result<interprocess::local_socket::Stream> {
@@ -3576,8 +3723,17 @@ pub fn current_text_via_controller_model_read_for_doc(
         return Ok(None);
     };
     match request_existing_controller_crdt_current_text_read(&project_root, &canonical, source) {
-        Ok(current) => Ok(Some(current)),
+        Ok(current) => {
+            clear_expired_controller_model_pressure(&project_root);
+            Ok(Some(current))
+        }
         Err(err) => {
+            record_controller_model_pressure(
+                &project_root,
+                &canonical,
+                source,
+                &format!("{err:#}"),
+            );
             agent_doc_ops_log_io::log_op(
                 &canonical,
                 &format!(
@@ -3612,7 +3768,21 @@ pub fn revision_via_controller_model_read_for_doc(
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return Ok(None);
     };
-    request_existing_controller_crdt_revision_read(&project_root, &canonical, source).map(Some)
+    match request_existing_controller_crdt_revision_read(&project_root, &canonical, source) {
+        Ok(revision) => {
+            clear_expired_controller_model_pressure(&project_root);
+            Ok(Some(revision))
+        }
+        Err(err) => {
+            record_controller_model_pressure(
+                &project_root,
+                &canonical,
+                source,
+                &format!("{err:#}"),
+            );
+            Err(err)
+        }
+    }
 }
 
 pub fn current_text_via_controller_model_for_doc(
@@ -12259,6 +12429,29 @@ mod tests {
             stale_mutating_client_binary(Some("definitely-stale")),
             Some("definitely-stale")
         );
+    }
+
+    #[test]
+    fn controller_model_pressure_marker_quiets_all_project_idle_watchers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let first = dir.path().join("first.md");
+        let second = dir.path().join("second.md");
+        std::fs::write(&first, "# first\n").unwrap();
+        std::fs::write(&second, "# second\n").unwrap();
+
+        assert!(!controller_model_pressure_cooldown_active_for_doc(&first));
+        record_controller_model_pressure(
+            dir.path(),
+            &first,
+            "idle_watch_test",
+            "controller_model_backpressure",
+        );
+
+        assert!(controller_model_pressure_cooldown_active_for_doc(&first));
+        assert!(controller_model_pressure_cooldown_active_for_doc(&second));
+        let deadline = read_controller_model_pressure_deadline(dir.path()).unwrap();
+        assert!(deadline >= controller_model_pressure_now_secs());
     }
 
     #[test]

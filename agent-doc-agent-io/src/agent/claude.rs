@@ -93,11 +93,11 @@ impl Agent for Claude {
                 }
             }
         }
-        let mut child = cmd
-            .stdin(std::process::Stdio::piped())
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .stderr(std::process::Stdio::piped());
+        super::configure_agent_child_process_group(&mut cmd);
+        let mut child = cmd.spawn()?;
         {
             use std::io::Write;
             if let Some(ref mut stdin) = child.stdin {
@@ -166,11 +166,11 @@ impl StreamingAgent for Claude {
                 }
             }
         }
-        let mut child = cmd
-            .stdin(std::process::Stdio::piped())
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .stderr(std::process::Stdio::piped());
+        super::configure_agent_child_process_group(&mut cmd);
+        let mut child = cmd.spawn()?;
 
         // Write prompt to stdin and close it
         {

@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.132
+
+- **Editor closeout delivery is single-flight and reconnect-safe (JetBrains plugin 0.2.259).** A retained ACK frontier blocks another decode of the same remote delivery, controller transport loss triggers bounded replica re-registration, and a reconnecting live editor fences a previously-authorized force-disk mutation before disk can change.
+- **Commit-seam cleanup no longer asks the controller for a free-text queue head.** The strike reads disk inside its serialized transaction, and stale `.overlay.yrs` model sidecars cannot become a baseline unless an explicit markdown baseline was supplied, preventing phantom goals and controller-lookup hangs.
+- **Shared controller pressure now quiets every idle watcher in the project.** One `controller_model_backpressure` event establishes a project-wide cooldown with deterministic recovery jitter, while exact response cells materialized by reconnect merges collapse idempotently instead of duplicating the answer.
+- **Timed-out agent runs terminate and reap their whole process group.** Background preflight descendants cannot survive their owner timeout to contend with the next run, and the diagnostic classifies the resulting termination as cancellation.
+- **Release and plugin automation is deterministic.** JetBrains install/update accepts `--plugins-dir` and fails clearly instead of blocking ambiguous non-interactive jobs; PyPI publishing builds a zig-backed `manylinux_2_17` wheel; the managed Claude, Codex, OpenCode, and Cursor skills carry the same backpressure recovery rule.
+
 ## 0.34.131
 
 - **Realtime document edits are now first-class turn state in both editor mirrors.** Every accepted CRDT replica update during an open closeout cycle is compared with the saved turn baseline, reduced to the aggregate steering kind/count/preview/verbatim payload, and appended as an idempotent state-backbone fact. State-wire snapshots and deltas carry that same cycle-scoped projection, so JetBrains and VS Code render live steering from the authoritative mirror instead of losing it when the direct FFI path is bypassed.

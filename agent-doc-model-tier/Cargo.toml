@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-model-tier"
-version = "0.34.116"
+version = "0.34.117"
 edition = "2024"
 description = "Harness-agnostic model tier resolution for agent-doc"
 license = "MIT"
@@ -12,7 +12,7 @@ name = "agent_doc_model_tier"
 
 [dependencies]
 anyhow = "1"
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.116" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.34.117" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

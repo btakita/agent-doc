@@ -1,7 +1,7 @@
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
-use std::process::Output;
+use std::process::{Command, Output};
 
 use agent_doc_document::commit_normalization::canonicalize_answered_prompt_prefixes;
 use agent_doc_document::transient_markers::{strip_guard_markers, strip_head_markers};
@@ -138,6 +138,7 @@ pub fn update_parent_submodule_pointer(
 #[derive(Debug)]
 pub enum CommitTransactionError {
     RetryableIndexLock { phase: &'static str, detail: String },
+    RetryableHeadMoved { detail: String },
     IgnoredPath { path: String },
     Fatal(anyhow::Error),
 }
@@ -166,34 +167,11 @@ fn git_path_is_ignored_untracked(
     git_path_is_ignored(git_root, rel_path)
 }
 
-fn git_add_force(
-    git_root: &Path,
-    resolved: &Path,
-) -> std::result::Result<(), CommitTransactionError> {
-    let rel_path = relative_to_root(resolved, git_root);
-    let output =
-        crate::index::add_force(git_root, &rel_path).map_err(CommitTransactionError::Fatal)?;
-    if !output.status.success() {
-        let detail = render_git_process_output(&output);
-        if output_has_index_lock_contention(&output) {
-            return Err(CommitTransactionError::RetryableIndexLock {
-                phase: "git add",
-                detail,
-            });
-        }
-        return Err(CommitTransactionError::Fatal(anyhow::anyhow!(
-            "git add failed: {}",
-            detail
-        )));
-    }
-    Ok(())
-}
-
-fn stage_snapshot_for_commit(
+fn staged_blob_for_commit(
     git_root: &Path,
     resolved: &Path,
     snapshot_content: Option<&str>,
-) -> std::result::Result<(), CommitTransactionError> {
+) -> std::result::Result<(String, String), CommitTransactionError> {
     let rel_path = relative_to_root(resolved, git_root);
     if git_path_is_ignored_untracked(git_root, &rel_path)? {
         return Err(CommitTransactionError::IgnoredPath {
@@ -201,29 +179,37 @@ fn stage_snapshot_for_commit(
         });
     }
 
-    if let Some(snap) = snapshot_content {
-        let staged_content = strip_guard_markers(&strip_head_markers(
-            &canonicalize_answered_prompt_prefixes(snap),
-        ));
-        if let Ok(hash) = crate::index::hash_object(git_root, &staged_content) {
-            let cacheinfo = format!("100644,{},{}", hash, rel_path.to_string_lossy());
-            let output = crate::index::update_index_cacheinfo(git_root, &cacheinfo)
-                .map_err(CommitTransactionError::Fatal)?;
-            if !output.status.success() {
-                if output_has_index_lock_contention(&output) {
-                    return Err(CommitTransactionError::RetryableIndexLock {
-                        phase: "update-index",
-                        detail: render_git_process_output(&output),
-                    });
-                }
-                eprintln!("[commit] update-index failed, falling back to git add");
-                return git_add_force(git_root, resolved);
-            }
-            return Ok(());
-        }
-    }
+    let staged_content = if let Some(snap) = snapshot_content {
+        strip_guard_markers(&strip_head_markers(&canonicalize_answered_prompt_prefixes(
+            snap,
+        )))
+    } else {
+        std::fs::read_to_string(resolved).map_err(|err| {
+            CommitTransactionError::Fatal(anyhow::anyhow!(
+                "failed to read commit path {}: {err}",
+                resolved.display()
+            ))
+        })?
+    };
+    let hash = crate::index::hash_object(git_root, &staged_content)
+        .map_err(CommitTransactionError::Fatal)?;
+    Ok((hash, rel_path.to_string_lossy().into_owned()))
+}
 
-    git_add_force(git_root, resolved)
+fn git_output_or_transaction_error(
+    output: Output,
+    phase: &'static str,
+) -> std::result::Result<Output, CommitTransactionError> {
+    if output.status.success() {
+        return Ok(output);
+    }
+    let detail = render_git_process_output(&output);
+    if output_has_index_lock_contention(&output) {
+        return Err(CommitTransactionError::RetryableIndexLock { phase, detail });
+    }
+    Err(CommitTransactionError::Fatal(anyhow::anyhow!(
+        "git {phase} failed: {detail}"
+    )))
 }
 
 pub fn stage_and_commit_once(
@@ -232,16 +218,107 @@ pub fn stage_and_commit_once(
     snapshot_content: Option<&str>,
     msg: &str,
 ) -> std::result::Result<Output, CommitTransactionError> {
-    stage_snapshot_for_commit(git_root, resolved, snapshot_content)?;
+    let (blob_hash, rel_path) = staged_blob_for_commit(git_root, resolved, snapshot_content)?;
+    let base_output = Command::new("git")
+        .current_dir(git_root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .map_err(|err| CommitTransactionError::Fatal(err.into()))?;
+    let base = base_output.status.success().then(|| {
+        String::from_utf8_lossy(&base_output.stdout)
+            .trim()
+            .to_string()
+    });
 
-    // Capture stdout so callers that reserve stdout for JSON are not polluted.
-    let output =
-        crate::commit::commit_no_verify(git_root, msg).map_err(CommitTransactionError::Fatal)?;
-    if !output.status.success() && output_has_index_lock_contention(&output) {
-        return Err(CommitTransactionError::RetryableIndexLock {
-            phase: "git commit",
-            detail: render_git_process_output(&output),
-        });
+    // Build the commit from a private index rooted at the exact observed HEAD.
+    // The user's real index may contain unrelated staged work (or conflicts) and
+    // must remain outside the agent-doc transaction.
+    let temp_dir = tempfile::tempdir().map_err(|err| CommitTransactionError::Fatal(err.into()))?;
+    let temp_index = temp_dir.path().join("index");
+    let mut read_tree = Command::new("git");
+    read_tree
+        .current_dir(git_root)
+        .env("GIT_INDEX_FILE", &temp_index)
+        .arg("read-tree");
+    if let Some(base) = base.as_deref() {
+        read_tree.arg(base);
+    } else {
+        read_tree.arg("--empty");
     }
-    Ok(output)
+    git_output_or_transaction_error(
+        read_tree
+            .output()
+            .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
+        "read-tree",
+    )?;
+
+    let cacheinfo = format!("100644,{blob_hash},{rel_path}");
+    git_output_or_transaction_error(
+        Command::new("git")
+            .current_dir(git_root)
+            .env("GIT_INDEX_FILE", &temp_index)
+            .args(["update-index", "--add", "--cacheinfo", &cacheinfo])
+            .output()
+            .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
+        "update-index",
+    )?;
+    let tree_output = git_output_or_transaction_error(
+        Command::new("git")
+            .current_dir(git_root)
+            .env("GIT_INDEX_FILE", &temp_index)
+            .arg("write-tree")
+            .output()
+            .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
+        "write-tree",
+    )?;
+    let tree = String::from_utf8_lossy(&tree_output.stdout)
+        .trim()
+        .to_string();
+
+    let mut commit_tree = Command::new("git");
+    commit_tree
+        .current_dir(git_root)
+        .args(["commit-tree", &tree]);
+    if let Some(base) = base.as_deref() {
+        commit_tree.args(["-p", base]);
+    }
+    let commit_output = git_output_or_transaction_error(
+        commit_tree
+            .args(["-m", msg])
+            .output()
+            .map_err(|err| CommitTransactionError::Fatal(err.into()))?,
+        "commit-tree",
+    )?;
+    let commit_oid = String::from_utf8_lossy(&commit_output.stdout)
+        .trim()
+        .to_string();
+
+    let zero_oid = "0000000000000000000000000000000000000000";
+    let expected = base.as_deref().unwrap_or(zero_oid);
+    let update_ref = Command::new("git")
+        .current_dir(git_root)
+        .args(["update-ref", "HEAD", &commit_oid, expected])
+        .output()
+        .map_err(|err| CommitTransactionError::Fatal(err.into()))?;
+    if !update_ref.status.success() {
+        let detail = render_git_process_output(&update_ref);
+        if detail.contains("expected") || detail.contains("cannot lock ref") {
+            return Err(CommitTransactionError::RetryableHeadMoved { detail });
+        }
+        return git_output_or_transaction_error(update_ref, "update-ref");
+    }
+
+    // Advance only the session document's entry in the real index to the new
+    // committed blob. Every unrelated staged entry remains byte-for-byte intact.
+    match crate::index::update_index_cacheinfo(git_root, &cacheinfo) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => eprintln!(
+            "[commit] warning: committed exact path but could not align its real-index entry: {}",
+            render_git_process_output(&output)
+        ),
+        Err(err) => eprintln!(
+            "[commit] warning: committed exact path but could not align its real-index entry: {err}"
+        ),
+    }
+    Ok(update_ref)
 }

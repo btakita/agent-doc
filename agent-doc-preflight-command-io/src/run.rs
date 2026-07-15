@@ -339,18 +339,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 file,
             ) {
                 Ok(outcome) => outcome.repaired(),
-                Err(e) => {
-                    let message = e.to_string();
-                    if message.contains(
-                        agent_doc_turn::repair::AMBIGUOUS_PREFLIGHT_STARTED_PATCHBACK_ERROR,
-                    ) || message
-                        .contains(agent_doc_turn::repair::EMPTY_PREFLIGHT_STARTED_NO_CAPTURE_ERROR)
-                    {
-                        return Err(e);
-                    }
-                    eprintln!("[preflight] repair warning: {}", e);
-                    false
-                }
+                // A failed response recovery is never advisory. Continuing into the
+                // generic commit stage can commit the stale pre-response projection
+                // that caused the recovery attempt, permanently rolling back an
+                // already-committed answer. Abort before any commit or queue mutation.
+                Err(e) => return Err(e.context("preflight response recovery failed closed")),
             }
         };
 

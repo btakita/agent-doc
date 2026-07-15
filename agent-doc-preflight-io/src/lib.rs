@@ -4472,7 +4472,19 @@ pub(crate) fn converge_live_buffer_queue_shape(
             "[preflight] queue: converged live editor buffer (auto={want_auto}, queue_active={queue_active})"
         ),
         Err(e) => {
-            eprintln!("[preflight] queue: live buffer convergence send failed (non-fatal): {e}")
+            // A connected route that accepts the message but cannot produce a
+            // terminal receipt is stale evidence discovered *during* preflight,
+            // after the entry-stage stale probe has already run. Schedule the
+            // same safe-boundary supervisor/editor recycle used by the other
+            // turn stages so the next stage never inherits this wedged route.
+            let recycle_status = agent_doc_controller_io::project_controller::
+                schedule_stale_editor_replica_pcp_recycle(
+                    file,
+                    "preflight_queue_convergence_failure",
+                );
+            eprintln!(
+                "[preflight] queue: live buffer convergence send failed (non-fatal): {e}; automatic recycle: {recycle_status}"
+            )
         }
     }
 }

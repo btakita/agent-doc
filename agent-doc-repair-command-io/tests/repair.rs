@@ -2221,6 +2221,97 @@ mod tests {
     }
 
     #[test]
+    fn recover_restores_committed_head_when_authority_replays_capture_baseline() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:baseline -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(dir.path(), &doc);
+
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: reply — gpt-5\n\n",
+            "Committed response.\n",
+            "<!-- /patch:exchange -->\n"
+        );
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        assert_eq!(capture.baseline_content.as_deref(), Some(baseline));
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        let committed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Please reply\n",
+            "### Re: reply — gpt-5\n\n",
+            "Committed response.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n"
+        );
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(response, committed)
+        );
+        std::fs::write(&doc, committed).unwrap();
+        ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["add", "test.md"])
+            .output()
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "test_committed_response",
+            Some(committed),
+            Some(committed),
+        )
+        .unwrap();
+        ProcessCommand::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "committed response"])
+            .output()
+            .unwrap();
+        let persisted_capture = agent_doc_capture_io::latest_committed(&doc)
+            .unwrap()
+            .expect("committed capture should remain available");
+        assert_eq!(
+            persisted_capture.baseline_content.as_deref(),
+            Some(baseline)
+        );
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                &persisted_capture.response_body,
+                &agent_doc_git_io::revision::show_head(&doc)
+                    .unwrap()
+                    .unwrap(),
+            )
+        );
+
+        // Model the late IDE/CRDT baseline projection that previously made
+        // preflight repair delete the committed response and commit the rollback.
+        std::fs::write(&doc, baseline).unwrap();
+
+        let recovered = run(&doc).unwrap();
+        assert_eq!(recovered, RepairOutcome::Noop);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&doc)
+                .unwrap()
+                .unwrap(),
+            committed
+        );
+        assert_eq!(
+            committed.matches("<!-- agent:boundary:").count(),
+            1,
+            "the committed response projection must retain one terminal boundary"
+        );
+    }
+
+    #[test]
     fn recover_replays_latest_committed_capture_when_matching_prompt_was_left_orphaned() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");

@@ -1670,7 +1670,7 @@ fn clear_deferred_document_write_intent(
 /// uncover an older intermediate repair target and replay it after the final
 /// boundary/marker normalization. Exact canonical+disk proof at the caller makes
 /// every older intent obsolete.
-fn clear_all_deferred_document_write_intents(file: &Path, source: &str) -> Result<()> {
+pub fn clear_all_deferred_document_write_intents(file: &Path, source: &str) -> Result<()> {
     for _ in 0..256 {
         let Some(pending) = pending_document_write(file) else {
             return Ok(());

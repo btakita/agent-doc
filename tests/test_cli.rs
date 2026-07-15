@@ -17567,6 +17567,14 @@ fn test_stale_supervisor_recycle_is_checked_at_every_turn_stage() {
             "{relative_path} must schedule a proven-stale supervisor recycle at stage {stage}"
         );
     }
+
+    let preflight_queue =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    assert!(
+        preflight_queue.contains("schedule_stale_editor_replica_pcp_recycle(")
+            && preflight_queue.contains("preflight_queue_convergence_failure"),
+        "a route that becomes stale during preflight queue convergence must schedule an automatic safe-boundary recycle"
+    );
 }
 
 #[test]
@@ -26994,7 +27002,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn stage_and_commit_once(",
         "crate::index::hash_object(git_root, &staged_content)",
         "crate::index::update_index_cacheinfo(git_root, &cacheinfo)",
-        "crate::commit::commit_no_verify(git_root, msg)",
+        "GIT_INDEX_FILE",
+        "\"commit-tree\"",
+        "\"update-ref\", \"HEAD\"",
+        "RetryableHeadMoved",
     ] {
         assert!(
             git_transaction_source.contains(required),

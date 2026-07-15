@@ -529,6 +529,69 @@ Duplicate replay should stay live.
             "commit must not silently absorb the divergent disk body after IPC adoption was blocked:\n{ops_log}"
         );
     }
+
+    #[test]
+    fn commit_excludes_and_preserves_unrelated_staged_work() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        th::commit_file(root, "session.md", "initial session\n", "add session");
+        th::commit_file(root, "foreign.txt", "foreign baseline\n", "add foreign");
+
+        fs::write(root.join("foreign.txt"), "foreign staged work\n").unwrap();
+        Command::new("git")
+            .current_dir(root)
+            .args(["add", "--", "foreign.txt"])
+            .output()
+            .unwrap();
+
+        let doc = root.join("session.md");
+        fs::write(&doc, "updated session\n").unwrap();
+        agent_doc_snapshot_io::save(&doc, "updated session\n", agent_doc_ops_log_io::log_op)
+            .unwrap();
+
+        assert!(commit(&doc).expect("session document should commit"));
+
+        let committed_paths = Command::new("git")
+            .current_dir(root)
+            .args(["show", "--pretty=format:", "--name-only", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&committed_paths.stdout).trim(),
+            "session.md",
+            "agent-doc must commit only its owned session document"
+        );
+        let staged_paths = Command::new("git")
+            .current_dir(root)
+            .args(["diff", "--cached", "--name-only"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&staged_paths.stdout).trim(),
+            "foreign.txt",
+            "unrelated staged work must remain staged"
+        );
+        let foreign_head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:foreign.txt"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&foreign_head.stdout),
+            "foreign baseline\n"
+        );
+        let foreign_index = Command::new("git")
+            .current_dir(root)
+            .args(["show", ":foreign.txt"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&foreign_index.stdout),
+            "foreign staged work\n"
+        );
+    }
+
     #[test]
     fn reposition_boundary_to_end_basic() {
         let content = "<!-- agent:exchange patch=append -->\nResponse.\n<!-- agent:boundary:abc123 -->\nUser prompt.\n<!-- /agent:exchange -->\n";

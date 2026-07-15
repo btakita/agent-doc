@@ -225,6 +225,12 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         "repair_current_document",
         force_disk_override,
     )?;
+    if force_disk_override != Some(true)
+        && let Some(restored) =
+            restore_committed_head_after_authority_regression(&canonical, &doc_content)?
+    {
+        doc_content = restored;
+    }
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let historical_capture = if !has_pending_response && capture.is_none() {
         historical_committed_capture_replay(&canonical, &doc_content)?
@@ -1424,6 +1430,80 @@ pub struct HistoricalCommittedCapture {
     response_body: String,
     file_hash: Option<String>,
     baseline_content: Option<String>,
+}
+
+/// A terminal response already committed in `HEAD` must not be removable by a
+/// late editor/CRDT projection of the capture baseline. This is deliberately
+/// narrower than generic snapshot repair: the committed capture must be
+/// materialized in `HEAD`, absent from the current authority, and the current
+/// authority must equal that capture's exact pre-response baseline after
+/// transient-marker normalization. Those proofs make restoring `HEAD` an exact
+/// rollback of the stale projection rather than an overwrite of operator work.
+fn restore_committed_head_after_authority_regression(
+    file: &Path,
+    current_doc: &str,
+) -> Result<Option<String>> {
+    let capture = if let Some(capture) = agent_doc_capture_io::latest_committed(file)? {
+        HistoricalCommittedCapture {
+            cycle_id: capture.cycle_id,
+            capture_id: capture.capture_id,
+            response_sha256: capture.response_sha256,
+            response_body: capture.response_body,
+            file_hash: capture.file_hash,
+            baseline_content: capture.baseline_content,
+        }
+    } else if let Some(projected) = projected_committed_capture_response(file)? {
+        projected
+    } else {
+        return Ok(None);
+    };
+    if capture.response_body.trim().is_empty()
+        || agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            current_doc,
+        )
+    {
+        return Ok(None);
+    }
+    let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
+        return Ok(None);
+    };
+    if !agent_doc_turn::response_replay::response_materialized_in_content(
+        &capture.response_body,
+        &head_doc,
+    ) {
+        return Ok(None);
+    }
+    let Some(baseline) = capture.baseline_content.as_deref() else {
+        return Ok(None);
+    };
+    if agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current_doc)
+        != agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(baseline)
+    {
+        return Ok(None);
+    }
+
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        file,
+        &head_doc,
+        current_doc,
+        "repair_restore_committed_head_after_authority_regression",
+    )?;
+    agent_doc_snapshot_io::save(file, &head_doc, agent_doc_ops_log_io::log_op)?;
+    agent_doc_document_realtime_io::clear_all_deferred_document_write_intents(
+        file,
+        "repair_restore_committed_head_after_authority_regression",
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "committed_head_restored_after_authority_regression file={} capture_id={} response_sha256={} stale_projection=exact_capture_baseline",
+            file.display(),
+            capture.capture_id,
+            capture.response_sha256,
+        ),
+    );
+    Ok(Some(head_doc))
 }
 
 fn historical_committed_capture_replay_candidate(

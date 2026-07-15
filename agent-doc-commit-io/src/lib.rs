@@ -1490,6 +1490,23 @@ where
                         detail
                     ));
                 }
+                Err(CommitTransactionError::RetryableHeadMoved { detail })
+                    if commit_attempts < 3 =>
+                {
+                    commit_attempts += 1;
+                    eprintln!(
+                        "[commit] HEAD moved during exact-path commit (retry {}/3): {}",
+                        commit_attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(commit_attempts));
+                    continue;
+                }
+                Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
+                    break Err(anyhow::anyhow!(
+                        "git exact-path commit failed after HEAD compare-and-swap retries: {}",
+                        detail
+                    ));
+                }
                 Err(CommitTransactionError::IgnoredPath { path }) => {
                     break Err(
                         agent_doc_git_io::commit_result_reporting::ignored_untracked_path_error(

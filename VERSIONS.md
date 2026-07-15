@@ -4,7 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
-## 0.34.116
+## 0.34.117
+
+- **A late editor baseline can no longer roll back an already-committed response.** Repair recognizes the exact capture baseline as a stale authority regression only when the corresponding committed capture is present in `HEAD`, then restores that committed projection through authority CAS, advances the snapshot, and clears superseded deferred intents. Preflight now fails closed on every response-recovery error instead of continuing into a generic commit that could persist the regressed baseline.
+- **Preflight-discovered stale routes recycle automatically.** A queue-convergence send or receipt failure discovered after the entry-stage stale probe now schedules the same safe-boundary editor/supervisor recycle used by the other turn stages, so finalize does not inherit a newly wedged route.
+- **Session-document commits exclude unrelated staged work.** The commit transaction builds the snapshot-selected document blob in a private index rooted at the observed `HEAD`, creates the commit tree, and advances `HEAD` with compare-and-swap retries. Only the owned document's real-index entry is aligned afterward; every foreign staged entry remains staged and outside the commit.
+- **Committed response recovery is no longer an operator repair workflow.** Regression coverage reproduces the stale-authority rollback, validates automatic restoration to one terminal boundary, and proves that pre-staged foreign files cannot be swept into response commits.
+
+## 0.34.117
 
 - **Post-commit boundary reposition now converges editor, disk, and Git.** The CRDT reposition path previously waited for the editor ACK and let Git adopt the new singleton boundary, but returned before materializing those acknowledged bytes to the working tree. The same authority-CAS write now crosses the disk projection barrier before success, preventing an immediately dirty session, repeated boundary drift, and a terminal `HEAD`/authority versus disk split.
 - **Document-model merge no longer duplicates old and new response boundaries.** Boundary markers are transaction control state, so closeout now canonicalizes a merge to the response branch's boundary ID at the terminal exchange position before the mandatory integrity gate. Live-buffer reconciliation can preserve concurrent text without producing a fragmented document or requiring repair.

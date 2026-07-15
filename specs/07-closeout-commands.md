@@ -32,6 +32,19 @@ retain the complete response capture for automatic binary retry, but it must
 not leave a response fragment for operator repair or substitute an unproven
 full response in the document, snapshot, or commit.
 
+After a response is committed, an editor/CRDT replica may not regress authority
+to that capture's pre-response baseline. When the current authority is proven
+equal to the capture baseline, the captured response is absent there, and the
+same committed capture is materialized in `HEAD`, recovery must restore `HEAD`
+through exact authority CAS, align the snapshot, and clear superseded deferred
+intents. Any failure in this response-recovery stage aborts preflight before the
+generic commit path; recovery errors are never advisory warnings.
+
+If a route becomes stale after a turn stage's entry probe—for example, queue
+convergence times out while waiting for a terminal receipt—that stage must
+schedule an automatic safe-boundary editor/supervisor recycle before returning.
+Stale-route detection is continuous across the turn, not entry-only.
+
 ## commit
 
 `agent-doc commit <FILE>`
@@ -47,6 +60,7 @@ full response in the document, snapshot, or commit.
 - Direct assistant patchback in the working tree without a newer binary-owned cycle must fail closed.
 - Historical self-heal must fail closed if typed components such as `status`, backlog, or pending changed, or if the repaired tail would still contain a bare prompt target.
 - The command serializes the staging/commit critical section with a git-dir scoped advisory lock.
+- The commit tree is built from a private index rooted at the observed `HEAD` and advances `HEAD` by compare-and-swap. The session document is the only selected path; unrelated real-index entries remain staged and are never included in the response commit.
 - **Concurrent-supervisor superproject write-back must serialize (`#ipc-drift-writeback-serialize`).** The git-dir-scoped commit lock is keyed on the resolved absolute git dir, so every write-back into one superproject — a submodule document's parent gitlink (`submodule pointer`) commit *and* a sibling superproject-root document's closeout — contends on the same lock. Two supervisor processes writing back to the same superproject at once cannot interleave partial commits or strand a captured response outside `HEAD`; the second waits for the first to finish its staging/commit critical section. A submodule document additionally holds its own submodule-scoped lock for the inner commit, then acquires the superproject lock for the pointer update, so the inner submodule commit and the superproject pointer update are each serialized at their own repo scope.
 - For submodule-hosted documents, `commit` must carry the closeout through the parent repository gitlink commit. If the document snapshot is committed in the submodule but the parent `HEAD:<submodule>` pointer still differs from the submodule `HEAD`, closeout remains incomplete and recovery is `agent-doc commit <FILE>`.
 - Successful post-commit cleanup must leave the committed blob, snapshot, and user-facing file in the same clean shape except for genuine later user edits.

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -120,11 +120,33 @@ Done — picker re-sourced to LOS loan fundings (no LSS), deployed (worker `c379
 > **Queue prompt:** Can we create loan funding records in the api?
 
 Answered above: yes, via `PUT /api/admin/funds/:id/confirm-wire` → `AddLoanFunding`, which also writes the `loan_funding` cache row the picker reads. Offered a direct seed/create endpoint — awaiting your go on push-to-TMO vs cache-only.
-We need a bi-directional way to add a funding (with the lender (create or link to existing lender)) or to link to an existing funding. TMO already tracks fundings pre-wire, so we need this link once the loan application is accepted.
-<!-- agent:boundary:b4d70f1d -->
+We need a bi-directional way to add a funding (with the lender (create or link to existing lender)) or to link to an existing funding. TMO already tracks fundings pre-wire, so we need this link once the loan application is accepted. This is very important but should not block deal progress.
+
+### Re: Bi-directional funding + lender linking at acceptance — opus-4-8
+
+Got it, and this lines up well with what's already in place — a good chunk of the substrate exists, so this is mostly connecting it, not building from zero.
+
+**What your requirement maps onto**
+- **Link to an existing (pre-wire) funding** — already have the primitive: TMO sync pulls `LOS.svc/GetLoanFundings` into cache, unmatched ones land in `tmo_unmatched_fundings` with an admin **bind** endpoint. That's exactly "TMO already tracks fundings pre-wire → link to it."
+- **Add a funding with a lender (create or link lender)** — the `funds` table + `admin_funds_*` endpoints already model a lender-backed funding; the new `TmoLenderPicker` handles *link an existing lender*, and a free-text account/name handles *create*. `AddLoanFunding` carries the lender fields inline (LOS-style), so "create lender" needs no LSS call.
+- **At acceptance, not at wire** — today `AddLoanFunding` only fires at confirm-wire behind the `final_docs_ready_for_funding` gate. The change is to expose add/link earlier (once `application_writeback_accept_` marks the app accepted) and keep it **non-blocking** — no new hard gate on deal progress, exactly as you said.
+
+**Plan** (`src/equityfundingsource-dev/prds/funding-lender-linking.md`), phased so nothing blocks the pipeline:
+1. **#fundlink1** — admin add/link-funding action on an accepted loan (picker = link lender, free-text = create), writes `funds` + `loan_funding` cache row, no ready-for-funding gate.
+2. **#fundlink2** — link an accepted loan to an existing pre-wire TMO funding (reuse the unmatched-funding bind).
+3. **#fundlink3** — bi-directional push to TMO (`AddLoanFunding`/reconcile) — stays behind the existing #dzmm/#7a4d writeback gate + idempotency so it never blocks or duplicates.
+
+**Two decisions before I build (my assumptions in parens):**
+- **D1 — "create lender":** embed the lender fields on the LOS funding (`AddLoanFunding`), not an LSS lender-master create — since EFS is LOS-only. *(Assume yes.)*
+- **D2 — push timing at acceptance:** at "accepted", **link-first** — bind to a funding TMO already tracks pre-wire and keep any *new* funding local until wire — vs push a new `AddLoanFunding` to TMO right away. Your "TMO already tracks fundings pre-wire" points at link-first. *(Assume link-first; new fundings push at wire via the existing gated path.)*
+
+Queued **#fundlink1 / #fundlink2** as actionable. Confirm D1/D2 (or just say "assumptions are fine, go") and I'll build phase 1.
+<!-- agent:boundary:36d85ad0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
+- ~~Can we create loan funding records in the api?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

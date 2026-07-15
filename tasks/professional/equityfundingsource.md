@@ -77,7 +77,7 @@ Note "LOS" here: lender master records actually live in TMO's Loan Servicing ser
 - Committed (`a909426`), pushed, and **deployed to prod** (worker version `bbe1e5f8`). Live-verified: `/api/admin/tmo-lenders` is auth-gated (401, not 404) and the deployed browser bundle contains the picker (`api/admin/tmo-lenders`, `combobox`).
 
 **One thing I can't check from here:** whether prod actually has TMO credentials set so the dropdown returns real lenders — that needs an authenticated admin session. Queued as `#tmo-lender-picker-verify` for a 30-second live check; the field works as manual entry regardless.
-<!-- agent:boundary:6ef090f8 -->
+<!-- agent:boundary:2db8f56f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -104,6 +104,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-lender-picker-verify] [recommended] [operator-verify] Confirm the TMO-lender searchable dropdown populates in prod: sign into /admin, open a pending lender request (or a lender's Lender Profile), and check the account field lists real LSS.svc GetLenders lenders. If it stays empty/'TMO is not connected', set TMO_API_TOKEN/TMO_DATABASE prod secrets (picker already degrades to manual entry). Validates #04v8/#jzqj GetLenders read path.
 <!-- /agent:backlog -->
 
 ## Review

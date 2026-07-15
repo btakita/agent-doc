@@ -110,7 +110,22 @@ The fragmented-response, stale-supervisor, and idle-thrash failure class is fixe
 The complete agent-doc gate passed 7,658 tests with 240 skipped. The idle supervisors sampled at 0.30%, 0.70%, and 0.80% CPU, down from roughly 2–2.25%, and their full-text reads occur once per safety interval instead of twice per second. The shared controller's remaining live load was traced entirely to this still-active tsift turn's pre-upgrade supervisor issuing two full reads per second; it will jump directly to `0.34.125` at this closeout boundary. Commits `4fc70f0e`, `565169d6`, `9a48253f`, `7429e3a7`, `611833e0`, `646e6164`, `2422c184`, `ebdf5868`, `9bb17a52`, and `8dc38335` are pushed, tags `v0.34.117` through `v0.34.125` are published, and the installed CLI, native library, and skill report `0.34.125`. The exact incarnation-reuse regression and the full gate pass locally; the latest agent-doc CI run is pending. tsift commit `9db6e80` and tag `v0.1.77` are pushed and installed with green CI. IntelliJ 2026.1 loaded JetBrains plugin `0.2.256`, then exercised delivery-ack re-registration for Haiven and tsift without another read-access assertion; its banner refresher remains event-driven/coalesced.
 
 The Haiven session also passes `session-check` with exactly one boundary. No `agent-doc repair` command and no forced disk write were used; this historical interrupted cycle is crossing the binary-prescribed transactional `write --commit` path once, and future closeout/recovery stays automatic.
-<!-- agent:boundary:f29fac18 -->
+
+### Re: replacement-editor convergence follow-up — gpt-5
+
+The final post-restart delivery wedge is fixed in agent-doc `0.34.126` and installed. JetBrains `0.2.256` was already registering the complete visible 14 KB response, but the controller still retained the old `0.2.255` IDE process as a live CRDT member with an unreachable pending-delivery queue. Because the commit barrier correctly requires every live member to acknowledge delivery, that dead membership prevented the otherwise-complete response from committing.
+
+The relay now records recognized JetBrains and VS Code replica identities with their encoded process ids. Replacement registration and update-driven controller-recycle reattachment prune only memberships whose editor process is provably dead, before evaluating convergence; opaque and independent live identities remain protected. This is event-driven registration cleanup, not another idle poll.
+
+The long-term Lazily split is therefore:
+
+- Yes for quiescent queue observation: it is now a lazy derived projection keyed by compact CRDT revision/state-vector and liveness, with full text materialized only after invalidation or the bounded safety interval.
+- No for IntelliJ model access and editor-process membership: the former is a read-action synchronization rule, while the latter is lifecycle cleanup at registration. Modeling either as more durable Lazily state would preserve stale facts longer and obscure the ownership boundary.
+
+The dead-member regression queues a complete response, proves delivery is blocked, registers a replacement, and proves the stale member is gone and convergence succeeds. The complete gate passed 7,660/7,660 tests with 240 skipped. Commit `529872e7` and tag `v0.34.126` are pushed; the CLI, native library, skill, tsift supervisor, and controller all report the new installed binary. The current GitHub Actions run is in progress; the preceding `0.34.125` run and tsift `0.1.77` CI are green.
+
+The automatic 0.34.126 handoff then recovered the already-visible complete response, retired its obsolete pending artifact, advanced the snapshot, and committed it through preflight. No `agent-doc repair` command or forced disk write was used.
+<!-- agent:boundary:398f1b7e -->
 <!-- /agent:exchange -->
 
 ## Queue

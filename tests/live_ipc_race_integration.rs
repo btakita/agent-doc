@@ -55,6 +55,7 @@ fn record_visible_write_receipt(
     );
     let live_replica = publish_editor_text_via_project_controller(file, replica, content);
     start_project_controller_delivery_pump(file, replica, live_replica);
+    wait_for_project_controller_delivery_convergence(file, content);
     let _ =
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file,
@@ -292,6 +293,30 @@ fn start_project_controller_delivery_pump(
             std::thread::sleep(Duration::from_millis(5));
         }
     });
+}
+
+fn wait_for_project_controller_delivery_convergence(doc: &Path, expected: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if matches!(
+            agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+                doc,
+                "live_ipc_race_delivery_convergence",
+            ),
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                delivery_converged: true,
+                ..
+            })) if text == expected
+        ) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!(
+        "test editor delivery did not converge to expected content within {:?}",
+        Duration::from_secs(5)
+    );
 }
 
 fn apply_first_component_patch(current: &str, payload: &Value) -> Option<String> {

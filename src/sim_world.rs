@@ -26,6 +26,854 @@ enum CyclePhase {
     Committed,
 }
 
+/// Cross-layer reference kernel for realtime delivery, editor IPC, and cycle
+/// closeout. This deliberately models observable policy rather than sockets,
+/// IDE APIs, or a second production implementation. Generated schedules make
+/// retained delivery identity, controller epochs, semantic response cells, and
+/// the durable commit barrier share one state space.
+mod realtime_ipc_cycle_model {
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Structure {
+        Exact,
+        Invalid,
+        RepairRequired,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Fault {
+        None,
+        DropOnce,
+        DuplicateOnce,
+        DelayOnce,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Phase {
+        Idle,
+        Captured,
+        Projected,
+        Interrupted,
+        Committed,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct Frame {
+        response_id: u8,
+        generation: u64,
+        expected_editor: u32,
+        target: u32,
+        structure: Structure,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct Delivery {
+        frame: Frame,
+        visible: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        Capture {
+            response_id: u8,
+            already_visible: bool,
+            structure: Structure,
+        },
+        SetFault(Fault),
+        SendRetained,
+        ReleaseDelayed,
+        DeliverOne,
+        Project,
+        Ack,
+        UserEdit,
+        AddQueueItem(u8),
+        SaveEditor,
+        ControllerRecycle,
+        RegisterReplica,
+        Interrupt,
+        CloseEditor,
+        OpenEditor,
+        ForceDisk,
+        Commit,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum Capability {
+        RetainedDelivery,
+        KeyedSingleFlight,
+        AuthorityEpochFence,
+        SemanticIdempotence,
+        BoundedRetry,
+        CancellationPropagation,
+        DurableEffectBarrier,
+    }
+
+    impl Action {
+        fn capability(self) -> Capability {
+            match self {
+                Self::Capture { .. } => Capability::SemanticIdempotence,
+                Self::SetFault(_) | Self::SendRetained | Self::ReleaseDelayed => {
+                    Capability::RetainedDelivery
+                }
+                Self::DeliverOne => Capability::KeyedSingleFlight,
+                Self::Project | Self::ControllerRecycle | Self::RegisterReplica => {
+                    Capability::AuthorityEpochFence
+                }
+                Self::Ack
+                | Self::UserEdit
+                | Self::AddQueueItem(_)
+                | Self::OpenEditor
+                | Self::CloseEditor => Capability::BoundedRetry,
+                Self::Interrupt => Capability::CancellationPropagation,
+                Self::SaveEditor | Self::ForceDisk | Self::Commit => {
+                    Capability::DurableEffectBarrier
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Observation {
+        canonical: u32,
+        editor: u32,
+        disk: u32,
+        head: u32,
+        controller_epoch: u64,
+        replica_epoch: Option<u64>,
+        acked_generation: u64,
+        response_cells: Vec<u8>,
+        phase: Phase,
+    }
+
+    #[derive(Debug)]
+    struct World {
+        canonical: u32,
+        editor: u32,
+        disk: u32,
+        head: u32,
+        controller_epoch: u64,
+        replica_epoch: Option<u64>,
+        live_editor: bool,
+        editor_dirty: bool,
+        next_generation: u64,
+        retained: Option<Frame>,
+        delayed: VecDeque<Frame>,
+        ipc: VecDeque<Frame>,
+        delivery: Option<Delivery>,
+        decoded: BTreeMap<(u8, u64), usize>,
+        visible_frontiers: BTreeSet<(u8, u64)>,
+        acked_generation: u64,
+        ack_proof_valid: bool,
+        response_cells: Vec<u8>,
+        canonical_queue_items: BTreeMap<u8, usize>,
+        editor_queue_items: BTreeMap<u8, usize>,
+        disk_queue_items: BTreeMap<u8, usize>,
+        head_queue_items: BTreeMap<u8, usize>,
+        accepted_queue_items: BTreeSet<u8>,
+        pending_responses: BTreeSet<u8>,
+        phase: Phase,
+        fault: Fault,
+        retry_scheduled: bool,
+        unsafe_force_disk_writes: usize,
+        trace: Vec<Action>,
+    }
+
+    impl World {
+        fn new() -> Self {
+            Self {
+                canonical: 1,
+                editor: 1,
+                disk: 1,
+                head: 1,
+                controller_epoch: 1,
+                replica_epoch: Some(1),
+                live_editor: true,
+                editor_dirty: false,
+                next_generation: 0,
+                retained: None,
+                delayed: VecDeque::new(),
+                ipc: VecDeque::new(),
+                delivery: None,
+                decoded: BTreeMap::new(),
+                visible_frontiers: BTreeSet::new(),
+                acked_generation: 0,
+                ack_proof_valid: true,
+                response_cells: Vec::new(),
+                canonical_queue_items: BTreeMap::new(),
+                editor_queue_items: BTreeMap::new(),
+                disk_queue_items: BTreeMap::new(),
+                head_queue_items: BTreeMap::new(),
+                accepted_queue_items: BTreeSet::new(),
+                pending_responses: BTreeSet::new(),
+                phase: Phase::Idle,
+                fault: Fault::None,
+                retry_scheduled: false,
+                unsafe_force_disk_writes: 0,
+                trace: Vec::new(),
+            }
+        }
+
+        fn observe(&self) -> Observation {
+            let mut response_cells = self.response_cells.clone();
+            response_cells.sort_unstable();
+            Observation {
+                canonical: self.canonical,
+                editor: self.editor,
+                disk: self.disk,
+                head: self.head,
+                controller_epoch: self.controller_epoch,
+                replica_epoch: self.replica_epoch,
+                acked_generation: self.acked_generation,
+                response_cells,
+                phase: self.phase,
+            }
+        }
+
+        fn make_frame(
+            &mut self,
+            response_id: u8,
+            structure: Structure,
+            already_visible: bool,
+        ) -> Frame {
+            self.next_generation += 1;
+            let expected_editor = self.editor;
+            if already_visible {
+                self.insert_response_cell(response_id);
+                self.editor = self.editor.saturating_add(1);
+                self.canonical = self.editor;
+            } else {
+                self.canonical = self.canonical.max(self.editor).saturating_add(1);
+            }
+            Frame {
+                response_id,
+                generation: self.next_generation,
+                expected_editor: if already_visible {
+                    self.editor
+                } else {
+                    expected_editor
+                },
+                target: self.canonical,
+                structure,
+            }
+        }
+
+        fn insert_response_cell(&mut self, response_id: u8) {
+            if !self.response_cells.contains(&response_id) {
+                self.response_cells.push(response_id);
+            }
+        }
+
+        fn apply(&mut self, action: Action) {
+            self.trace.push(action);
+            match action {
+                Action::Capture {
+                    response_id,
+                    already_visible,
+                    structure,
+                } => {
+                    self.pending_responses.insert(response_id);
+                    let frame = self.make_frame(response_id, structure, already_visible);
+                    self.retained = Some(frame);
+                    self.phase = Phase::Captured;
+                }
+                Action::SetFault(fault) => self.fault = fault,
+                Action::SendRetained => self.send_retained(),
+                Action::ReleaseDelayed => {
+                    while let Some(frame) = self.delayed.pop_front() {
+                        self.ipc.push_back(frame);
+                    }
+                }
+                Action::DeliverOne => self.deliver_one(),
+                Action::Project => self.project(),
+                Action::Ack => self.ack(),
+                Action::UserEdit => {
+                    self.editor = self.editor.saturating_add(1);
+                    self.invalidate_visible_delivery_for_operator_edit();
+                    if self.live_editor && self.replica_epoch == Some(self.controller_epoch) {
+                        self.canonical = self.editor;
+                    }
+                    if self.phase == Phase::Committed {
+                        self.phase = Phase::Idle;
+                    }
+                    self.editor_dirty = true;
+                    self.retry_scheduled = true;
+                }
+                Action::AddQueueItem(item_id) => {
+                    if self.live_editor {
+                        self.accepted_queue_items.insert(item_id);
+                        self.editor_queue_items.insert(item_id, 1);
+                        self.editor = self.editor.saturating_add(1);
+                        self.invalidate_visible_delivery_for_operator_edit();
+                        if self.replica_epoch == Some(self.controller_epoch) {
+                            self.canonical_queue_items.insert(item_id, 1);
+                            self.canonical = self.editor;
+                        }
+                        if self.phase == Phase::Committed {
+                            self.phase = Phase::Idle;
+                        }
+                        self.editor_dirty = true;
+                        self.retry_scheduled = true;
+                    }
+                }
+                Action::SaveEditor => {
+                    // Save advances durability only. It must never replay the
+                    // already-admitted editor mutation into canonical state.
+                    if self.live_editor {
+                        self.disk = self.editor;
+                        self.disk_queue_items = self.editor_queue_items.clone();
+                        // Detached file-watch reflection may advance canonical,
+                        // but semantic identity makes this the same mutation.
+                        self.canonical = self.editor;
+                        self.canonical_queue_items = self.editor_queue_items.clone();
+                        self.editor_dirty = false;
+                    }
+                }
+                Action::ControllerRecycle => {
+                    self.controller_epoch += 1;
+                    self.replica_epoch = None;
+                    self.delivery = None;
+                    self.ipc.clear();
+                    self.delayed.clear();
+                    if let Some(mut retained) = self.retained {
+                        self.next_generation += 1;
+                        retained.generation = self.next_generation;
+                        retained.expected_editor = self.editor;
+                        retained.target = self.canonical;
+                        self.retained = Some(retained);
+                    }
+                    self.retry_scheduled = true;
+                }
+                Action::RegisterReplica => {
+                    if self.live_editor {
+                        self.replica_epoch = Some(self.controller_epoch);
+                        self.canonical = self.editor;
+                        self.canonical_queue_items = self.editor_queue_items.clone();
+                        self.retry_scheduled = false;
+                    }
+                }
+                Action::Interrupt => {
+                    if self.phase != Phase::Committed {
+                        self.phase = Phase::Interrupted;
+                    }
+                }
+                Action::CloseEditor => {
+                    self.live_editor = false;
+                    self.replica_epoch = None;
+                }
+                Action::OpenEditor => {
+                    self.live_editor = true;
+                    if self.phase == Phase::Committed {
+                        self.editor = self.canonical;
+                        self.editor_queue_items = self.canonical_queue_items.clone();
+                    }
+                    self.retry_scheduled = true;
+                }
+                Action::ForceDisk => {
+                    if self.live_editor {
+                        // The safety fence blocks the mutation; record only an
+                        // impossible-write counter if a reducer ever violates it.
+                    } else if self.pending_responses.is_empty() && !self.editor_dirty {
+                        self.disk = self.canonical;
+                        self.head = self.canonical;
+                        self.disk_queue_items = self.canonical_queue_items.clone();
+                        self.head_queue_items = self.canonical_queue_items.clone();
+                        self.phase = Phase::Committed;
+                    }
+                }
+                Action::Commit => self.commit(),
+            }
+            self.assert_invariants();
+        }
+
+        fn invalidate_visible_delivery_for_operator_edit(&mut self) {
+            let Some(mut delivery) = self.delivery else {
+                return;
+            };
+            if !delivery.visible {
+                return;
+            }
+            self.visible_frontiers
+                .remove(&(delivery.frame.response_id, delivery.frame.generation));
+            delivery.visible = false;
+            self.delivery = Some(delivery);
+        }
+
+        fn send_retained(&mut self) {
+            let Some(frame) = self.retained else {
+                return;
+            };
+            match std::mem::replace(&mut self.fault, Fault::None) {
+                Fault::None => self.ipc.push_back(frame),
+                Fault::DropOnce => {}
+                Fault::DuplicateOnce => {
+                    self.ipc.push_back(frame);
+                    self.ipc.push_back(frame);
+                }
+                Fault::DelayOnce => self.delayed.push_back(frame),
+            }
+        }
+
+        fn deliver_one(&mut self) {
+            if !self.live_editor || self.replica_epoch != Some(self.controller_epoch) {
+                self.retry_scheduled = true;
+                return;
+            }
+            let Some(frame) = self.ipc.pop_front() else {
+                return;
+            };
+            if !self.pending_responses.contains(&frame.response_id) {
+                // A late duplicate from an already committed semantic cell is
+                // retired without reopening the cycle.
+                if self.retained == Some(frame) {
+                    self.retained = None;
+                }
+                return;
+            }
+            let key = (frame.response_id, frame.generation);
+            if self.decoded.contains_key(&key) {
+                return;
+            }
+            self.decoded.insert(key, 1);
+            self.delivery = Some(Delivery {
+                frame,
+                visible: false,
+            });
+        }
+
+        fn project(&mut self) {
+            let Some(mut delivery) = self.delivery else {
+                return;
+            };
+            if !self.live_editor || self.replica_epoch != Some(self.controller_epoch) {
+                self.retry_scheduled = true;
+                return;
+            }
+            match delivery.frame.structure {
+                Structure::Exact => {
+                    if self.editor != delivery.frame.expected_editor
+                        && self.editor != delivery.frame.target
+                    {
+                        // The editor advanced. Retire the stale cut and
+                        // recompose the same semantic response exactly once.
+                        let response_id = delivery.frame.response_id;
+                        let already_visible = self.response_cells.contains(&response_id);
+                        let frame = self.make_frame(response_id, Structure::Exact, already_visible);
+                        self.retained = Some(frame);
+                        self.delivery = None;
+                        self.ipc.clear();
+                        self.retry_scheduled = true;
+                        return;
+                    }
+                    self.insert_response_cell(delivery.frame.response_id);
+                    self.canonical = delivery.frame.target;
+                    self.editor = delivery.frame.target;
+                    delivery.visible = true;
+                    self.visible_frontiers
+                        .insert((delivery.frame.response_id, delivery.frame.generation));
+                    self.delivery = Some(delivery);
+                    self.phase = Phase::Projected;
+                }
+                Structure::Invalid | Structure::RepairRequired => {
+                    if self.editor == delivery.frame.expected_editor {
+                        // Exact live-editor adoption repairs canonical and
+                        // re-registers the native frontier. The semantic
+                        // response remains pending when it was not yet visible.
+                        self.canonical = self.editor;
+                        self.replica_epoch = Some(self.controller_epoch);
+                        self.delivery = None;
+                        self.ipc.clear();
+                        self.delayed.clear();
+                        self.retained = None;
+                        if self.response_cells.contains(&delivery.frame.response_id) {
+                            self.pending_responses.remove(&delivery.frame.response_id);
+                            self.phase = Phase::Projected;
+                        }
+                        self.retry_scheduled = true;
+                    } else {
+                        let response_id = delivery.frame.response_id;
+                        let already_visible = self.response_cells.contains(&response_id);
+                        let frame = self.make_frame(response_id, Structure::Exact, already_visible);
+                        self.retained = Some(frame);
+                        self.delivery = None;
+                        self.ipc.clear();
+                        self.retry_scheduled = true;
+                    }
+                }
+            }
+        }
+
+        fn ack(&mut self) {
+            let Some(delivery) = self.delivery else {
+                return;
+            };
+            let key = (delivery.frame.response_id, delivery.frame.generation);
+            if delivery.frame.structure == Structure::Exact
+                && delivery.visible
+                && self.editor == delivery.frame.target
+                && self.visible_frontiers.contains(&key)
+            {
+                self.acked_generation = self.acked_generation.max(delivery.frame.generation);
+                self.pending_responses.remove(&delivery.frame.response_id);
+                if self.retained == Some(delivery.frame) {
+                    self.retained = None;
+                }
+                self.delivery = None;
+                self.ipc.retain(|frame| *frame != delivery.frame);
+                self.delayed.retain(|frame| *frame != delivery.frame);
+                self.retry_scheduled = false;
+            } else {
+                let mut retry = delivery;
+                retry.visible = false;
+                self.delivery = Some(retry);
+                self.retry_scheduled = true;
+            }
+        }
+
+        fn commit(&mut self) {
+            if self.live_editor
+                && self.replica_epoch == Some(self.controller_epoch)
+                && self.pending_responses.is_empty()
+                && self.retained.is_none()
+                && self.delivery.is_none()
+                && self.canonical == self.editor
+            {
+                self.disk = self.editor;
+                self.head = self.editor;
+                self.disk_queue_items = self.editor_queue_items.clone();
+                self.head_queue_items = self.editor_queue_items.clone();
+                self.editor_dirty = false;
+                self.phase = Phase::Committed;
+            }
+        }
+
+        fn assert_invariants(&self) {
+            let mut unique = BTreeSet::new();
+            assert!(
+                self.response_cells.iter().all(|id| unique.insert(*id)),
+                "duplicate semantic response cell; trace={:?}",
+                self.trace
+            );
+            assert!(
+                self.ack_proof_valid,
+                "ACK without exact visible proof; trace={:?}",
+                self.trace
+            );
+            assert_eq!(
+                self.unsafe_force_disk_writes, 0,
+                "force-disk crossed live-editor fence; trace={:?}",
+                self.trace
+            );
+            assert!(
+                self.decoded.values().all(|count| *count <= 1),
+                "delivery decoded more than once; trace={:?}",
+                self.trace
+            );
+            for (plane, items) in [
+                ("canonical", &self.canonical_queue_items),
+                ("editor", &self.editor_queue_items),
+                ("disk", &self.disk_queue_items),
+                ("HEAD", &self.head_queue_items),
+            ] {
+                assert!(
+                    items.values().all(|count| *count <= 1),
+                    "duplicate queue item on {plane}; trace={:?}",
+                    self.trace,
+                );
+            }
+            if self.live_editor {
+                assert!(
+                    self.accepted_queue_items
+                        .iter()
+                        .all(|id| self.editor_queue_items.contains_key(id)),
+                    "accepted operator queue item disappeared from live editor; trace={:?}",
+                    self.trace,
+                );
+            }
+            if let Some(delivery) = self.delivery
+                && delivery.visible
+            {
+                assert_eq!(
+                    self.editor, delivery.frame.target,
+                    "visible delivery target differs from editor; trace={:?}",
+                    self.trace
+                );
+            }
+            if self.phase == Phase::Committed {
+                if self.live_editor {
+                    assert_eq!(
+                        self.editor, self.canonical,
+                        "committed editor/canonical drift; trace={:?}",
+                        self.trace
+                    );
+                }
+                assert_eq!(
+                    self.disk, self.canonical,
+                    "committed disk/canonical drift; trace={:?}",
+                    self.trace
+                );
+                assert_eq!(
+                    self.head, self.disk,
+                    "committed HEAD/disk drift; trace={:?}",
+                    self.trace
+                );
+                assert_eq!(
+                    self.disk_queue_items, self.canonical_queue_items,
+                    "committed queue disk/canonical drift; trace={:?}",
+                    self.trace,
+                );
+                assert_eq!(
+                    self.head_queue_items, self.disk_queue_items,
+                    "committed queue HEAD/disk drift; trace={:?}",
+                    self.trace,
+                );
+                assert!(
+                    self.pending_responses.is_empty(),
+                    "committed with pending response; trace={:?}",
+                    self.trace
+                );
+            }
+        }
+
+        fn stop_faults_and_converge(&mut self) {
+            self.fault = Fault::None;
+            self.live_editor = true;
+            for _ in 0..64 {
+                if self.replica_epoch != Some(self.controller_epoch) {
+                    self.apply(Action::RegisterReplica);
+                    continue;
+                }
+                if self.retained.is_none() && self.delivery.is_none() {
+                    if let Some(response_id) = self.pending_responses.iter().next().copied() {
+                        let already_visible = self.response_cells.contains(&response_id);
+                        let frame = self.make_frame(response_id, Structure::Exact, already_visible);
+                        self.retained = Some(frame);
+                        self.phase = Phase::Captured;
+                        continue;
+                    }
+                }
+                if self.retained.is_some() && self.delivery.is_none() && self.ipc.is_empty() {
+                    self.apply(Action::SendRetained);
+                    continue;
+                }
+                if !self.delayed.is_empty() {
+                    self.apply(Action::ReleaseDelayed);
+                    continue;
+                }
+                if self.delivery.is_none() && !self.ipc.is_empty() {
+                    self.apply(Action::DeliverOne);
+                    continue;
+                }
+                if let Some(delivery) = self.delivery {
+                    self.apply(if delivery.visible {
+                        Action::Ack
+                    } else {
+                        Action::Project
+                    });
+                    continue;
+                }
+                self.apply(Action::Commit);
+                if self.phase == Phase::Committed {
+                    return;
+                }
+            }
+            panic!(
+                "world failed to converge after faults stopped; observation={:?} pending={:?} retained={:?} delivery={:?} ipc={} delayed={} live={} retry={} trace={:?}",
+                self.observe(),
+                self.pending_responses,
+                self.retained,
+                self.delivery,
+                self.ipc.len(),
+                self.delayed.len(),
+                self.live_editor,
+                self.retry_scheduled,
+                self.trace,
+            );
+        }
+    }
+
+    #[derive(Debug)]
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Self(seed ^ 0x517c_c1b7_2722_0a95)
+        }
+
+        fn next(&mut self, modulo: u64) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            (self.0 >> 32) % modulo
+        }
+
+        fn action(&mut self) -> Action {
+            match self.next(18) {
+                0 => Action::Capture {
+                    response_id: self.next(4) as u8,
+                    already_visible: self.next(2) == 0,
+                    structure: match self.next(3) {
+                        0 => Structure::Exact,
+                        1 => Structure::Invalid,
+                        _ => Structure::RepairRequired,
+                    },
+                },
+                1 => Action::SetFault(match self.next(4) {
+                    0 => Fault::None,
+                    1 => Fault::DropOnce,
+                    2 => Fault::DuplicateOnce,
+                    _ => Fault::DelayOnce,
+                }),
+                2 => Action::SendRetained,
+                3 => Action::ReleaseDelayed,
+                4 => Action::DeliverOne,
+                5 => Action::Project,
+                6 => Action::Ack,
+                7 => Action::UserEdit,
+                8 => Action::AddQueueItem(self.next(4) as u8),
+                9 => Action::SaveEditor,
+                10 => Action::ControllerRecycle,
+                11 => Action::RegisterReplica,
+                12 => Action::Interrupt,
+                13 => Action::CloseEditor,
+                14 => Action::OpenEditor,
+                15 => Action::ForceDisk,
+                _ => Action::Commit,
+            }
+        }
+    }
+
+    fn missing_capabilities(
+        actions: &[Action],
+        available: &BTreeSet<Capability>,
+    ) -> BTreeSet<Capability> {
+        actions
+            .iter()
+            .map(|action| action.capability())
+            .filter(|capability| !available.contains(capability))
+            .collect()
+    }
+
+    #[test]
+    fn template_rejection_recovers_from_exact_live_editor_without_ack_wedge() {
+        let mut world = World::new();
+        world.apply(Action::Capture {
+            response_id: 7,
+            already_visible: true,
+            structure: Structure::Invalid,
+        });
+        world.apply(Action::SendRetained);
+        world.apply(Action::DeliverOne);
+        world.apply(Action::Project);
+
+        assert!(world.delivery.is_none());
+        assert!(world.retained.is_none());
+        assert_eq!(world.response_cells, vec![7]);
+        assert_eq!(world.replica_epoch, Some(world.controller_epoch));
+        world.apply(Action::Commit);
+        assert_eq!(world.phase, Phase::Committed);
+    }
+
+    #[test]
+    fn duplicate_delivery_with_pending_ack_decodes_once_and_commits_once() {
+        let mut world = World::new();
+        world.apply(Action::Capture {
+            response_id: 2,
+            already_visible: false,
+            structure: Structure::Exact,
+        });
+        world.apply(Action::SetFault(Fault::DuplicateOnce));
+        world.apply(Action::SendRetained);
+        world.apply(Action::DeliverOne);
+        world.apply(Action::Project);
+        world.apply(Action::DeliverOne);
+        world.apply(Action::Ack);
+        world.apply(Action::Commit);
+
+        assert_eq!(world.decoded.values().copied().sum::<usize>(), 1);
+        assert_eq!(world.response_cells, vec![2]);
+        assert_eq!(world.phase, Phase::Committed);
+    }
+
+    #[test]
+    fn unsaved_queue_item_survives_remote_delivery_and_save_is_idempotent() {
+        let mut world = World::new();
+        world.apply(Action::AddQueueItem(9));
+        world.apply(Action::Capture {
+            response_id: 2,
+            already_visible: false,
+            structure: Structure::Exact,
+        });
+        world.apply(Action::SendRetained);
+        world.apply(Action::DeliverOne);
+        world.apply(Action::Project);
+        world.apply(Action::Ack);
+        world.apply(Action::SaveEditor);
+        world.apply(Action::SaveEditor);
+        world.apply(Action::Commit);
+
+        assert_eq!(world.editor_queue_items.get(&9), Some(&1));
+        assert_eq!(world.canonical_queue_items.get(&9), Some(&1));
+        assert_eq!(world.disk_queue_items.get(&9), Some(&1));
+        assert_eq!(world.head_queue_items.get(&9), Some(&1));
+    }
+
+    #[test]
+    fn generated_realtime_ipc_cycle_fault_traces_preserve_safety_and_converge() {
+        for seed in 0..512 {
+            let mut rng = Rng::new(seed);
+            let mut world = World::new();
+            for _ in 0..48 {
+                world.apply(rng.action());
+            }
+            world.stop_faults_and_converge();
+            world.assert_invariants();
+            assert_eq!(
+                world.phase,
+                Phase::Committed,
+                "seed={seed} observation={:?} trace={:?}",
+                world.observe(),
+                world.trace
+            );
+        }
+    }
+
+    #[test]
+    fn lazily_adapter_contract_reports_typed_capability_gaps() {
+        let trace = [
+            Action::Capture {
+                response_id: 1,
+                already_visible: false,
+                structure: Structure::Exact,
+            },
+            Action::SetFault(Fault::DelayOnce),
+            Action::SendRetained,
+            Action::DeliverOne,
+            Action::Project,
+            Action::Ack,
+            Action::ControllerRecycle,
+            Action::RegisterReplica,
+            Action::Interrupt,
+            Action::Commit,
+        ];
+        let available = BTreeSet::from([
+            Capability::RetainedDelivery,
+            Capability::SemanticIdempotence,
+        ]);
+        assert_eq!(
+            missing_capabilities(&trace, &available),
+            BTreeSet::from([
+                Capability::AuthorityEpochFence,
+                Capability::BoundedRetry,
+                Capability::CancellationPropagation,
+                Capability::DurableEffectBarrier,
+                Capability::KeyedSingleFlight,
+            ])
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum FaultPoint {
     SnapshotSave,

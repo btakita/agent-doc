@@ -28929,11 +28929,12 @@ fn test_agent_doc_document_realtime_owns_authority_boundaries() {
         "forwarders.replace(filePath, cached, forwarder)",
         "cached.deregister()",
         "canonical,\n                    bypassRegisterBackoff = true,",
-        "queueCanonicalProjection(filePath, editorText, canonical)",
+        "adoptExactEditorBaseline(",
+        "reason = \"replace-delivery-editor-diverged\"",
     ] {
         assert!(
             jetbrains_crdt_replica_manager.contains(required_snippet),
-            "JetBrains CRDT replace recovery must register, swap, and retire around a canonical rebootstrap: {required_snippet}"
+            "JetBrains CRDT replace recovery must preserve exact editor authority or register, swap, and retire around a canonical rebootstrap: {required_snippet}"
         );
     }
     let replacement_register = jetbrains_crdt_replica_manager

@@ -1,5 +1,5 @@
 name = "waitMachine"
-defaultTargets = ["WaitMachine"]
+defaultTargets = ["WaitMachine", "RealtimeCycle"]
 
 # Self-contained: no Mathlib / external deps, so it builds offline against the
 # pinned toolchain's core Lean. Mirrors the Rust `wait_machine::tick` (the source
@@ -7,3 +7,6 @@ defaultTargets = ["WaitMachine"]
 
 [[lean_lib]]
 name = "WaitMachine"
+
+[[lean_lib]]
+name = "RealtimeCycle"

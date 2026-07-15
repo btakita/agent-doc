@@ -107,6 +107,61 @@ function sha256(value: string): string {
     return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+export type TemplateStructureProjectionState = 'exact' | 'repair-required' | 'invalid';
+
+export function templateStructureProjectionState(
+    text: string,
+    normalized: string | null,
+): TemplateStructureProjectionState {
+    if (normalized == null) return 'invalid';
+    return normalized === text ? 'exact' : 'repair-required';
+}
+
+export type RemoteTemplateProjectionDecision =
+    | 'queue-remote'
+    | 'adopt-exact-editor-baseline'
+    | 'retry-fail-closed';
+
+export function remoteTemplateProjectionDecision(
+    remoteState: TemplateStructureProjectionState,
+    editorState: TemplateStructureProjectionState | null,
+    editorMatchesExpected: boolean,
+    recoveryInFlight: boolean,
+): RemoteTemplateProjectionDecision {
+    if (remoteState === 'exact') return 'queue-remote';
+    if (recoveryInFlight) return 'retry-fail-closed';
+    if (editorMatchesExpected && editorState === 'exact') return 'adopt-exact-editor-baseline';
+    return 'retry-fail-closed';
+}
+
+export type ReplicaBaselineDecision =
+    | 'apply-remote'
+    | 'realign-shadow'
+    | 'adopt-exact-editor'
+    | 'retry-fail-closed';
+
+export function replicaBaselineDecision(
+    editorState: TemplateStructureProjectionState | null,
+    editorMatchesExpected: boolean,
+    replicaMatchesExpected: boolean,
+    replicaMatchesEditor: boolean,
+    recoveryInFlight: boolean,
+): ReplicaBaselineDecision {
+    if (recoveryInFlight || editorState !== 'exact') return 'retry-fail-closed';
+    if (editorMatchesExpected && replicaMatchesExpected) return 'apply-remote';
+    if (replicaMatchesEditor) return 'realign-shadow';
+    return 'adopt-exact-editor';
+}
+
+export function shouldForwardLocalDelta(replicaText: string | null, shadowText: string): boolean {
+    return replicaText === shadowText;
+}
+
+interface PendingRemoteAck {
+    forwarder: CrdtReplicaForwarder;
+    update: ReplicaRemoteUpdate;
+}
+
 export function utf16RangeToCodePoints(
     oldText: string,
     rangeOffset: number,
@@ -166,9 +221,13 @@ export function parsePullResponse(response: ControllerResponse): ReplicaRemoteUp
  */
 export type ReplicaPullDelivery =
     | { kind: 'deltas'; updates: ReplicaRemoteUpdate[] }
-    | { kind: 'replace'; text: string };
+    | { kind: 'replace'; text: string }
+    | { kind: 'unavailable'; reason: string };
 
 export function parsePullDelivery(response: ControllerResponse): ReplicaPullDelivery {
+    if (!response.ok) {
+        return { kind: 'unavailable', reason: response.error ?? 'controller_rejected_replica_pull' };
+    }
     if (
         response.ok &&
         isRecord(response.data) &&
@@ -217,7 +276,9 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
     async pullDelivery(filePath: string, identity: string): Promise<ReplicaPullDelivery> {
         this.flushDocumentOps(filePath);
         const response = await this.send(this.controllerRequest('replica_pull', filePath, identity));
-        return response ? parsePullDelivery(response) : { kind: 'deltas', updates: [] };
+        return response
+            ? parsePullDelivery(response)
+            : { kind: 'unavailable', reason: 'controller_socket_unavailable' };
     }
 
     async ackUpdate(
@@ -433,6 +494,7 @@ export interface CrdtReplicaManagerOptions {
     listDocuments: () => ReplicaDocumentSnapshot[];
     currentText: (filePath: string) => string | null;
     applyText: (filePath: string, text: string, expectedText: string) => Promise<boolean>;
+    normalizeTemplateStructure?: (text: string) => string | null;
     logger?: ReplicaLogger;
 }
 
@@ -445,12 +507,17 @@ export class CrdtReplicaManager {
     private readonly attaching = new Map<string, Promise<CrdtReplicaForwarder | null>>();
     private readonly applyingRemote = new Set<string>();
     private readonly reattachRecovering = new Set<string>();
+    private readonly pendingRemoteAcks = new Map<string, Map<string, PendingRemoteAck>>();
+    private readonly templateGuardRecovering = new Set<string>();
+    private readonly replicaRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private readonly replicaRetryFailureCounts = new Map<string, number>();
     private readonly pendingLocalEdits = new Map<string, number>();
     private readonly nonOperatorProjectionEpochs = new Map<string, number>();
     private readonly drainRequestedPaths = new Set<string>();
     private drainAllRequested = false;
     private drainQueued = false;
     private drainTimer: ReturnType<typeof setTimeout> | undefined;
+    private refreshConnectionEpoch = 0;
     private disposed = false;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
@@ -474,6 +541,11 @@ export class CrdtReplicaManager {
         this.drainQueued = false;
         if (this.drainTimer) clearTimeout(this.drainTimer);
         this.drainTimer = undefined;
+        for (const timer of this.replicaRetryTimers.values()) clearTimeout(timer);
+        this.replicaRetryTimers.clear();
+        this.replicaRetryFailureCounts.clear();
+        this.templateGuardRecovering.clear();
+        this.pendingRemoteAcks.clear();
         for (const forwarder of this.forwarders.values()) {
             void forwarder.deregister();
         }
@@ -515,6 +587,9 @@ export class CrdtReplicaManager {
     async handleDocumentClosed(filePath: string): Promise<void> {
         this.shadows.delete(filePath);
         this.attaching.delete(filePath);
+        this.clearPendingRemoteAcks(filePath);
+        this.clearReplicaRetryBackoff(filePath);
+        this.templateGuardRecovering.delete(filePath);
         const forwarder = this.forwarders.get(filePath);
         this.forwarders.delete(filePath);
         await forwarder?.deregister();
@@ -588,7 +663,26 @@ export class CrdtReplicaManager {
         );
         try {
             const forwarder = await this.forwarderFor(filePath);
-            await forwarder?.forwardLocalDelta(offset, deleteLen, change.text);
+            if (forwarder) {
+                const replicaText = forwarder.replicaText();
+                if (shouldForwardLocalDelta(replicaText, oldText)) {
+                    await forwarder.forwardLocalDelta(offset, deleteLen, change.text);
+                } else {
+                    this.logger.warn(
+                        `[crdt-replica] local delta found a stale native baseline for ${filePath}; ` +
+                        `shadow_hash=${sha256(oldText)} ` +
+                        `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)} ` +
+                        'recovery=exact_editor_adopt_then_atomic_reregister',
+                    );
+                    await this.adoptExactEditorBaseline(
+                        filePath,
+                        newText,
+                        forwarder,
+                        true,
+                        'local-delta-baseline-diverged',
+                    );
+                }
+            }
         } finally {
             finish();
         }
@@ -619,7 +713,13 @@ export class CrdtReplicaManager {
         if (!installed) {
             const current = this.currentEditorText(filePath);
             if (current != null) {
-                installed = await this.applyCanonicalProjection(filePath, canonical, current);
+                await this.adoptExactEditorBaseline(
+                    filePath,
+                    current,
+                    forwarder,
+                    false,
+                    'replace-delivery-editor-diverged',
+                );
             }
         }
         if (installed) {
@@ -714,47 +814,357 @@ export class CrdtReplicaManager {
             const forwarder = this.forwarders.get(filePath);
             if (!forwarder) continue;
             if (this.hasPendingLocal(filePath)) continue;
+            await this.replayPendingRemoteAcks(filePath, forwarder);
+            if (this.pendingRemoteAckCount(filePath, forwarder) > 0) {
+                this.logger.debug(`[crdt-replica] remote pull deferred for ${filePath}; retained delivery ACK is still pending`);
+                continue;
+            }
             // D2: a replace delivery (out-of-band deletion re-bootstrap) installs the
-            // corrected canonical wholesale; a normal delta batch applies per-update.
+            // corrected canonical wholesale; a normal delta batch merges before one
+            // editor projection so duplicate pull/apply loops cannot amplify work.
             const delivery = await forwarder.pullRemoteDelivery();
+            if (delivery.kind === 'unavailable') {
+                await this.refreshReplicaAfterTransportLoss(filePath, forwarder, delivery.reason);
+                continue;
+            }
             if (delivery.kind === 'replace') {
                 await this.applyReplaceDelivery(filePath, forwarder, delivery.text);
                 continue;
             }
             const updates = delivery.updates;
             if (this.hasPendingLocal(filePath)) continue;
+            const expectedText = this.shadows.get(filePath);
+            if (expectedText === undefined) continue;
+            if (!(await this.editorReplicaBaselineMatches(filePath, forwarder, expectedText))) continue;
+            const peerUpdates: ReplicaRemoteUpdate[] = [];
+            let converged: string | null = null;
             for (const update of updates) {
                 if (this.hasPendingLocal(filePath)) break;
                 if (!shouldApplyRemoteUpdate(update, forwarder.currentClientId)) {
                     const visibleText = this.currentEditorText(filePath) ?? this.shadows.get(filePath);
-                    await forwarder.ackRemoteUpdate(update, visibleText);
+                    if (!(await forwarder.ackRemoteUpdate(update, visibleText))) {
+                        this.rememberPendingRemoteAck(filePath, { forwarder, update });
+                    }
                     continue;
                 }
-                const expectedText = this.shadows.get(filePath);
-                if (expectedText === undefined) continue;
-                if (!(await this.editorReplicaBaselineMatches(filePath, forwarder, expectedText))) continue;
-                const converged = forwarder.applyRemoteUpdate(update.update);
-                if (converged == null) continue;
-                if (this.hasPendingLocal(filePath)) continue;
-                this.advanceNonOperatorProjectionEpoch(filePath);
-                this.applyingRemote.add(filePath);
-                try {
-                    const applied = await this.options.applyText(filePath, converged, expectedText);
-                    if (applied) {
-                        this.shadows.set(filePath, converged);
-                        await forwarder.ackRemoteUpdate(update, converged);
-          } else {
-            const current = this.currentEditorText(filePath);
-            if (current != null) {
-              const projected = await this.applyCanonicalProjection(filePath, converged, current);
-              if (projected) await forwarder.ackRemoteUpdate(update, converged);
+                converged = forwarder.applyRemoteUpdate(update.update);
+                if (converged == null) break;
+                peerUpdates.push(update);
             }
-          }
-                } finally {
-                    this.applyingRemote.delete(filePath);
+            if (converged == null || peerUpdates.length === 0 || this.hasPendingLocal(filePath)) continue;
+
+            const remoteState = this.templateStructureState(converged);
+            if (remoteState !== 'exact') {
+                await this.recoverRejectedRemoteCanonical(
+                    filePath,
+                    expectedText,
+                    converged,
+                    forwarder,
+                    remoteState,
+                );
+                continue;
+            }
+
+            this.advanceNonOperatorProjectionEpoch(filePath);
+            this.applyingRemote.add(filePath);
+            try {
+                let projected = await this.options.applyText(filePath, converged, expectedText);
+                if (!projected) {
+                    const current = this.currentEditorText(filePath);
+                    if (current != null) {
+                        projected = await this.applyCanonicalProjection(filePath, converged, current);
+                    }
                 }
+                const visibleText = this.currentEditorText(filePath);
+                if (projected && visibleText === converged) {
+                    this.shadows.set(filePath, converged);
+                    for (const update of peerUpdates) {
+                        this.rememberPendingRemoteAck(filePath, { forwarder, update });
+                    }
+                    await this.replayPendingRemoteAcks(filePath, forwarder, converged);
+                }
+            } finally {
+                this.applyingRemote.delete(filePath);
             }
         }
+    }
+
+    private remoteAckKey(update: ReplicaRemoteUpdate): string {
+        return `${update.patchId}:${update.generation}`;
+    }
+
+    private rememberPendingRemoteAck(filePath: string, ack: PendingRemoteAck): void {
+        let pending = this.pendingRemoteAcks.get(filePath);
+        if (!pending) {
+            pending = new Map<string, PendingRemoteAck>();
+            this.pendingRemoteAcks.set(filePath, pending);
+        }
+        pending.set(this.remoteAckKey(ack.update), ack);
+        this.scheduleReplicaRetry(filePath, 'delivery-ack-retained');
+    }
+
+    private pendingRemoteAckCount(filePath: string, forwarder: CrdtReplicaForwarder): number {
+        const pending = this.pendingRemoteAcks.get(filePath);
+        if (!pending) return 0;
+        return Array.from(pending.values()).filter((ack) => ack.forwarder === forwarder).length;
+    }
+
+    private clearPendingRemoteAcks(filePath: string): number {
+        const pending = this.pendingRemoteAcks.get(filePath);
+        this.pendingRemoteAcks.delete(filePath);
+        return pending?.size ?? 0;
+    }
+
+    private async replayPendingRemoteAcks(
+        filePath: string,
+        forwarder: CrdtReplicaForwarder,
+        knownVisibleText?: string,
+    ): Promise<number> {
+        const pending = this.pendingRemoteAcks.get(filePath);
+        if (!pending) return 0;
+        for (const [key, ack] of pending) {
+            if (ack.forwarder !== forwarder) pending.delete(key);
+        }
+        if (pending.size === 0) {
+            this.pendingRemoteAcks.delete(filePath);
+            return 0;
+        }
+        const visibleText = knownVisibleText ?? this.currentEditorText(filePath);
+        if (visibleText == null) {
+            this.scheduleReplicaRetry(filePath, 'delivery-ack-editor-unavailable');
+            return 0;
+        }
+        const visibleHash = sha256(visibleText);
+        const updates = Array.from(pending.values())
+            .map((ack) => ack.update)
+            .sort((a, b) => a.generation - b.generation || a.patchId.localeCompare(b.patchId));
+        const candidate = updates[0];
+        const matching = updates.filter((update) => update.expectedContentHash === visibleHash);
+        const acknowledgedThrough = matching.length > 0
+            ? Math.max(...matching.map((update) => update.generation))
+            : candidate.generation;
+        if (!(await forwarder.ackRemoteUpdate(candidate, visibleText))) {
+            this.scheduleReplicaRetry(filePath, 'delivery-ack-pending');
+            return 0;
+        }
+        let acknowledged = 0;
+        for (const [key, ack] of pending) {
+            if (ack.update.generation <= acknowledgedThrough) {
+                pending.delete(key);
+                acknowledged += 1;
+            }
+        }
+        if (pending.size === 0) this.pendingRemoteAcks.delete(filePath);
+        if (this.pendingRemoteAckCount(filePath, forwarder) === 0) this.clearReplicaRetryBackoff(filePath);
+        return acknowledged;
+    }
+
+    private templateStructureState(text: string): TemplateStructureProjectionState {
+        const normalized = this.options.normalizeTemplateStructure
+            ? this.options.normalizeTemplateStructure(text)
+            : text;
+        return templateStructureProjectionState(text, normalized);
+    }
+
+    private async recoverRejectedRemoteCanonical(
+        filePath: string,
+        expectedText: string,
+        remoteText: string,
+        staleForwarder: CrdtReplicaForwarder,
+        remoteState: TemplateStructureProjectionState,
+    ): Promise<boolean> {
+        const editorText = this.currentEditorText(filePath);
+        const editorState = editorText == null ? null : this.templateStructureState(editorText);
+        const decision = remoteTemplateProjectionDecision(
+            remoteState,
+            editorState,
+            editorText === expectedText,
+            this.templateGuardRecovering.has(filePath),
+        );
+        if (decision !== 'adopt-exact-editor-baseline' || editorText == null) {
+            this.logger.warn(
+                `[crdt-replica] template-guard recovery deferred for ${filePath}; ` +
+                `remote_state=${remoteState} editor_state=${editorState ?? 'missing'} ` +
+                `editor_matches_expected=${editorText === expectedText} ` +
+                `recovery_in_flight=${this.templateGuardRecovering.has(filePath)} ` +
+                `remote_hash=${sha256(remoteText)}`,
+            );
+            this.scheduleReplicaRetry(filePath, 'template-guard-proof-missing');
+            return false;
+        }
+        this.templateGuardRecovering.add(filePath);
+        try {
+            if (
+                this.forwarders.get(filePath) !== staleForwarder ||
+                this.hasPendingLocal(filePath) ||
+                this.currentEditorText(filePath) !== editorText
+            ) {
+                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-fence-raced');
+                return false;
+            }
+            if (!(await staleForwarder.pushTextAdopt(editorText))) {
+                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-push-failed');
+                return false;
+            }
+            if (this.hasPendingLocal(filePath) || this.currentEditorText(filePath) !== editorText) {
+                this.scheduleReplicaRetry(filePath, 'template-guard-adopt-editor-advanced');
+                return false;
+            }
+            const replacement = await this.replaceForwarder(filePath, staleForwarder, editorText);
+            if (!replacement) {
+                this.scheduleReplicaRetry(filePath, 'template-guard-reregister-failed');
+                return false;
+            }
+            this.shadows.set(filePath, editorText);
+            this.clearReplicaRetryBackoff(filePath);
+            this.logger.warn(
+                `[crdt-replica] recovered rejected remote canonical for ${filePath}; ` +
+                `remote_state=${remoteState} editor_chars=${editorText.length} ` +
+                `remote_hash=${sha256(remoteText)} editor_hash=${sha256(editorText)} ` +
+                'recovery=exact_editor_adopt_then_atomic_reregister',
+            );
+            this.requestRemoteDrain(filePath);
+            return true;
+        } finally {
+            this.templateGuardRecovering.delete(filePath);
+        }
+    }
+
+    private scheduleReplicaRetry(filePath: string, reason: string): void {
+        if (this.replicaRetryTimers.has(filePath) || this.disposed) return;
+        const failures = (this.replicaRetryFailureCounts.get(filePath) ?? 0) + 1;
+        this.replicaRetryFailureCounts.set(filePath, failures);
+        const delayMs = Math.min(250 * (2 ** Math.min(failures - 1, 12)), 30_000);
+        this.logger.debug(
+            `[crdt-replica] recovery retry scheduled for ${filePath}; ` +
+            `reason=${reason} delay_ms=${delayMs} failures=${failures}`,
+        );
+        const timer = setTimeout(() => {
+            this.replicaRetryTimers.delete(filePath);
+            if (!this.disposed) this.requestRemoteDrain(filePath);
+        }, delayMs);
+        this.replicaRetryTimers.set(filePath, timer);
+    }
+
+    private async adoptExactEditorBaseline(
+        filePath: string,
+        editorText: string,
+        staleForwarder: CrdtReplicaForwarder,
+        allowPendingLocal: boolean,
+        reason: string,
+    ): Promise<boolean> {
+        if (this.templateStructureState(editorText) !== 'exact') {
+            this.scheduleReplicaRetry(filePath, `${reason}-editor-structure-not-exact`);
+            return false;
+        }
+        if (
+            this.forwarders.get(filePath) !== staleForwarder ||
+            (!allowPendingLocal && this.hasPendingLocal(filePath)) ||
+            this.currentEditorText(filePath) !== editorText
+        ) {
+            this.scheduleReplicaRetry(filePath, `${reason}-adopt-fence-raced`);
+            return false;
+        }
+        if (!(await staleForwarder.pushTextAdopt(editorText))) {
+            this.scheduleReplicaRetry(filePath, `${reason}-adopt-push-failed`);
+            return false;
+        }
+        if (
+            this.forwarders.get(filePath) !== staleForwarder ||
+            (!allowPendingLocal && this.hasPendingLocal(filePath)) ||
+            this.currentEditorText(filePath) !== editorText
+        ) {
+            this.scheduleReplicaRetry(filePath, `${reason}-editor-advanced`);
+            return false;
+        }
+        const replacement = await this.replaceForwarder(
+            filePath,
+            staleForwarder,
+            editorText,
+            allowPendingLocal,
+        );
+        if (!replacement) {
+            this.scheduleReplicaRetry(filePath, `${reason}-reregister-failed`);
+            return false;
+        }
+        this.shadows.set(filePath, editorText);
+        this.clearReplicaRetryBackoff(filePath);
+        this.logger.warn(
+            `[crdt-replica] adopted exact live editor baseline for ${filePath}; ` +
+            `reason=${reason} editor_hash=${sha256(editorText)} ` +
+            'recovery=exact_editor_adopt_then_atomic_reregister',
+        );
+        this.requestRemoteDrain(filePath);
+        return true;
+    }
+
+    private clearReplicaRetryBackoff(filePath: string): void {
+        this.replicaRetryFailureCounts.delete(filePath);
+        const timer = this.replicaRetryTimers.get(filePath);
+        if (timer) clearTimeout(timer);
+        this.replicaRetryTimers.delete(filePath);
+    }
+
+    private async refreshReplicaAfterTransportLoss(
+        filePath: string,
+        staleForwarder: CrdtReplicaForwarder,
+        reason: string,
+    ): Promise<void> {
+        const editorText = this.currentEditorText(filePath);
+        const expectedText = this.shadows.get(filePath);
+        if (
+            editorText == null ||
+            expectedText === undefined ||
+            editorText !== expectedText ||
+            this.hasPendingLocal(filePath)
+        ) {
+            this.scheduleReplicaRetry(filePath, 'controller-transport-editor-not-stable');
+            return;
+        }
+        const replacement = await this.replaceForwarder(filePath, staleForwarder, editorText);
+        if (replacement) {
+            this.clearReplicaRetryBackoff(filePath);
+            this.logger.debug(`[crdt-replica] controller transport recovered for ${filePath}; reason=${reason}`);
+            this.requestRemoteDrain(filePath);
+        } else {
+            this.scheduleReplicaRetry(filePath, 'controller-transport-reregister-failed');
+        }
+    }
+
+    private async replaceForwarder(
+        filePath: string,
+        staleForwarder: CrdtReplicaForwarder,
+        editorText: string,
+        allowPendingLocal = false,
+    ): Promise<CrdtReplicaForwarder | null> {
+        if (this.forwarders.get(filePath) !== staleForwarder) return null;
+        const identity = `${this.options.identity}:${filePath}:refresh-${++this.refreshConnectionEpoch}`;
+        const replacement = new CrdtReplicaForwarder(
+            filePath,
+            identity,
+            this.nodeFactory(),
+            this.transport,
+        );
+        if (!(await replacement.register())) return null;
+        await replacement.ensureEditorText(editorText);
+        if (
+            this.forwarders.get(filePath) !== staleForwarder ||
+            this.currentEditorText(filePath) !== editorText ||
+            (!allowPendingLocal && this.hasPendingLocal(filePath))
+        ) {
+            // Registration is asynchronous; fence the actual swap, not only
+            // the earlier adopt proof, against a newly-arrived editor event.
+            await replacement.deregister();
+            return null;
+        }
+        this.forwarders.set(filePath, replacement);
+        const retiredPendingAcks = this.clearPendingRemoteAcks(filePath);
+        await staleForwarder.deregister();
+        this.logger.debug(
+            `[crdt-replica] atomically replaced cached forwarder for ${filePath}; ` +
+            `retired_pending_acks=${retiredPendingAcks}`,
+        );
+        return replacement;
     }
 
     private async editorReplicaBaselineMatches(
@@ -771,30 +1181,46 @@ export class CrdtReplicaManager {
             return false;
         }
         const replicaText = forwarder.replicaText();
-        if (editorText === expectedText && replicaText === expectedText) return true;
-        if (replicaText === expectedText) {
-            this.logger.warn(
-                `[crdt-replica] incoming update deferred while editor buffer is published first for ${filePath}: ` +
-                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} replica_hash=${sha256(replicaText)}`,
-            );
-            await this.applyCanonicalProjection(filePath, expectedText, editorText);
-            return false;
-        }
-        if (replicaText === editorText) {
+        const editorState = this.templateStructureState(editorText);
+        const decision = replicaBaselineDecision(
+            editorState,
+            editorText === expectedText,
+            replicaText === expectedText,
+            replicaText === editorText,
+            this.templateGuardRecovering.has(filePath),
+        );
+        if (decision === 'apply-remote') return true;
+        if (decision === 'realign-shadow') {
             this.logger.warn(
                 `[crdt-replica] incoming update deferred after shadow realignment for ${filePath}: ` +
-                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} replica_hash=${sha256(replicaText)}`,
+                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
+                `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
             );
             this.shadows.set(filePath, editorText);
             this.requestRemoteDrain(filePath);
             return false;
         }
+        if (decision === 'adopt-exact-editor') {
+            this.logger.warn(
+                `[crdt-replica] incoming update deferred while the exact editor baseline replaces a stale native replica for ${filePath}: ` +
+                `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
+                `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
+            );
+            await this.adoptExactEditorBaseline(
+                filePath,
+                editorText,
+                forwarder,
+                false,
+                'remote-delivery-baseline-diverged',
+            );
+            return false;
+        }
         this.logger.warn(
-            `[crdt-replica] incoming update deferred because local replica baseline differs from the authoritative editor buffer for ${filePath}: ` +
-            `editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
+            `[crdt-replica] incoming update deferred because editor adoption lacks a stable exact proof for ${filePath}: ` +
+            `editor_state=${editorState} editor_hash=${sha256(editorText)} expected_hash=${sha256(expectedText)} ` +
             `replica_hash=${replicaText == null ? 'missing' : sha256(replicaText)}`,
         );
-        await this.applyCanonicalProjection(filePath, replicaText ?? expectedText, editorText);
+        this.scheduleReplicaRetry(filePath, 'editor-baseline-proof-missing');
         return false;
     }
 
@@ -804,17 +1230,19 @@ export class CrdtReplicaManager {
         expectedEditorText: string,
     ): Promise<boolean> {
         if (this.hasPendingLocal(filePath)) return false;
+        let projected = false;
         this.advanceNonOperatorProjectionEpoch(filePath);
         this.applyingRemote.add(filePath);
         try {
             if (await this.options.applyText(filePath, canonical, expectedEditorText)) {
                 this.shadows.set(filePath, canonical);
+                projected = true;
                 return true;
             }
             return false;
         } finally {
             this.applyingRemote.delete(filePath);
-            this.requestRemoteDrain(filePath);
+            if (!projected) this.scheduleReplicaRetry(filePath, 'editor-projection-raced');
         }
     }
 

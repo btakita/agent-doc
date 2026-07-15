@@ -2309,6 +2309,7 @@ class PatchWatcher implements vscode.Disposable {
             listDocuments: () => this.currentProjectMarkdownSnapshots(projectRoot),
             currentText: (filePath) => this.currentOpenDocumentText(filePath),
             applyText: (filePath, text, expectedText) => this.applyCrdtReplicaText(filePath, text, expectedText),
+            normalizeTemplateStructure: (text) => native.normalizeTemplateStructure(text, projectRoot),
             logger: {
                 debug: (message) => this.outputChannel.appendLine(message),
                 warn: (message) => this.outputChannel.appendLine(message),

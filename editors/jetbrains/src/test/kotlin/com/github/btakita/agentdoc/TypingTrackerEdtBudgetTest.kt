@@ -327,6 +327,15 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("wholeTextReplaced = event.isWholeTextReplaced") &&
                 source.contains("stale-operator-event-fenced"),
         )
+        val localDeltaBody = source.substringAfter("private fun forwardLocalDeltaFromShadow(")
+            .substringBefore("private fun requestRemoteDrain(")
+        assertTrue(
+            "a local editor delta must verify the native shadow frontier or adopt the exact editor once",
+            localDeltaBody.contains("shouldForwardLocalDeltaUtil(replicaText, beforeText)") &&
+                localDeltaBody.contains("adoptExactEditorBaseline(") &&
+                localDeltaBody.contains("editorText = nextText") &&
+                localDeltaBody.contains("reason = \"local-delta-baseline-diverged\""),
+        )
         assertTrue(
             "forced refresh must register and atomically swap before retiring the cached client",
             source.contains("if (bypassRegisterBackoff)") &&
@@ -334,6 +343,15 @@ class TypingTrackerEdtBudgetTest {
                 source.contains("cached.deregister()") &&
                 source.contains("replacement register failed") &&
                 source.contains("retained cached forwarder"),
+        )
+        val forwarderForBody = source.substringAfter("private fun forwarderFor(")
+            .substringBefore("private fun refreshReplicaAfterTransportLoss(")
+        assertTrue(
+            "replica replacement must revalidate the exact editor at the swap boundary",
+            forwarderForBody.contains("expectedEditorTextAtSwap") &&
+                forwarderForBody.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
+                forwarderForBody.indexOf("editorBufferText(filePath) != expectedEditorTextAtSwap") <
+                forwarderForBody.indexOf("forwarders.replace(filePath, cached, forwarder)"),
         )
         assertTrue(
             "visible editor applies must retain failed delivery ACKs and replay them from the current buffer",
@@ -351,15 +369,24 @@ class TypingTrackerEdtBudgetTest {
                 remoteDrainBody.contains("queueRemoteTextApply(filePath, expectedText, targetText"),
         )
         val remoteApplyBody = source.substringAfter("private fun queueRemoteTextApply")
-            .substringBefore("private fun normalizeRemoteText")
+            .substringBefore("private fun recoverRejectedRemoteCanonical")
         assertFalse(
             "remote CRDT editor apply must not call native template normalization inside invokeAndWait",
             remoteApplyBody.contains("NativePatching.normalizeTemplateStructure"),
         )
         assertTrue(
             "remote CRDT template normalization should run on the replica worker before the EDT apply",
-            source.contains("private fun normalizeRemoteText(") &&
-                source.substringAfter("private fun normalizeRemoteText(").contains("NativePatching.normalizeTemplateStructure(converged)"),
+            source.contains("private fun templateStructureState(") &&
+                source.substringAfter("private fun templateStructureState(").contains("NativePatching.normalizeTemplateStructure(text)"),
+        )
+        val guardRecoveryBody = source.substringAfter("private fun recoverRejectedRemoteCanonical")
+            .substringBefore("private fun scheduleTemplateGuardRecoveryRetry")
+        assertTrue(
+            "template-guard recovery must fence exact editor authority before bounded adopt and atomic replacement",
+            guardRecoveryBody.contains("editorText == expectedText") &&
+                guardRecoveryBody.contains("editorBufferText(filePath) != editorText") &&
+                guardRecoveryBody.contains("staleForwarder.pushTextAdopt(editorText)") &&
+                guardRecoveryBody.contains("replaceCached = true"),
         )
         assertTrue(
             "remote CRDT editor apply should use RelayCell backpressure and schedule bounded EDT work",
@@ -384,7 +411,7 @@ class TypingTrackerEdtBudgetTest {
             "CRDT timing logs should identify slow native/socket/EDT operations",
             source.contains("[crdt-perf]") &&
                 source.contains("remote-apply-edt") &&
-                source.contains("remote-normalize-worker"),
+                source.contains("template-normalize-worker"),
         )
     }
 }

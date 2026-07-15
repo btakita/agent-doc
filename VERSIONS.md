@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.134
+
+- **Live editor authority survives stale replicas and Save echoes (JetBrains plugin 0.2.261; VS Code 0.2.51).** Both adapters verify the native replica against the captured shadow before forwarding a local delta. A mismatch adopts the exact structurally-valid editor once and atomically re-registers instead of projecting stale canonical text over an unsaved edit; saving reflects the same semantic queue identity without replay or duplication.
+- **Realtime, IPC, and cycle behavior now share an executable fault model.** Deterministic generated traces cover retained delivery, duplicate/drop/delay, controller recycle, editor interruption, queue admission, durability-only Save, projection, ACK, and commit. Typed capability gaps distinguish missing Lazily primitives from implementation mismatches, and the Lean safety kernel proves idempotent Save, set-like queue multiplicity, fenced editor adoption, and exact-visible ACK requirements.
+- **Rejected template canonicals recover symmetrically in JetBrains and VS Code.** A valid unchanged editor baseline is adopted through a bounded text transition and atomic replica replacement; invalid, advanced, missing, or recovery-in-flight editor state remains fail-closed with bounded retry.
+
 ## 0.34.133
 
 - **Visible editor proof now settles JetBrains CRDT deliveries (JetBrains plugin 0.2.260).** Remote delivery ACK eligibility is based on the exact visible editor projection, independently of whether disk persistence is deliberately deferred. Genuine editor races back off instead of immediately re-pulling and decoding the same large delivery.

@@ -4,8 +4,13 @@ import {
     CrdtReplicaManager,
     parsePullResponse,
     parseRegisterResponse,
+    replicaBaselineDecision,
+    remoteTemplateProjectionDecision,
     shouldApplyRemoteUpdate,
+    shouldForwardLocalDelta,
+    templateStructureProjectionState,
     type ReplicaNode,
+    type ReplicaPullDelivery,
     type ReplicaRemoteUpdate,
     type ReplicaTransport,
     utf16RangeToCodePoints,
@@ -58,10 +63,16 @@ class FakeTransport implements ReplicaTransport {
     acked: Array<{ patchId: string; generation: number; contentHash?: string }> = [];
     deregistered: string[] = [];
     broadcastGate: Promise<void> | undefined;
+    registerGate: Promise<void> | undefined;
     registerCount = 0;
+    pullCount = 0;
+    unavailablePulls = 0;
+    ackFailures = 0;
+    textAdopts: string[] = [];
 
     async register(): Promise<{ clientId: number; bootstrap?: Uint8Array | null }> {
         this.registerCount += 1;
+        if (this.registerCount > 1 && this.registerGate) await this.registerGate;
         return { clientId: 41 + this.registerCount, bootstrap: Buffer.from([9]) };
     }
 
@@ -71,7 +82,23 @@ class FakeTransport implements ReplicaTransport {
     }
 
     async pullUpdates(): Promise<ReplicaRemoteUpdate[]> {
+        this.pullCount += 1;
         return this.pending;
+    }
+
+    async pullDelivery(): Promise<ReplicaPullDelivery> {
+        this.pullCount += 1;
+        if (this.unavailablePulls > 0) {
+            this.unavailablePulls -= 1;
+            return { kind: 'unavailable', reason: 'controller_socket_unavailable' };
+        }
+        return { kind: 'deltas', updates: this.pending };
+    }
+
+    async pushTextAdopt(_filePath: string, text: string): Promise<boolean> {
+        this.textAdopts.push(text);
+        this.pending = [];
+        return true;
     }
 
     async ackUpdate(
@@ -81,6 +108,10 @@ class FakeTransport implements ReplicaTransport {
         generation: number,
         contentHash?: string,
     ): Promise<boolean> {
+        if (this.ackFailures > 0) {
+            this.ackFailures -= 1;
+            return false;
+        }
         this.acked.push({ patchId, generation, contentHash });
         this.pending = this.pending.filter((update) => update.patchId !== patchId);
         return true;
@@ -152,6 +183,92 @@ describe('crdt replica manager', () => {
         assert.deepStrictEqual(Array.from(transport.broadcasts[0].update), [1, 2, 3]);
     });
 
+    it('adopts an unsaved queue edit once when the native baseline is stale', async () => {
+        const staleNode = new FakeNode('base');
+        const replacementNode = new FakeNode('base\n- queue item');
+        const nodes = [staleNode, replacementNode];
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift()!,
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => true,
+        });
+
+        manager.seedDocument(filePath, 'base');
+        assert.strictEqual(await manager.attachDocument(filePath), true);
+        staleNode.remoteText = 'stale native text';
+        staleNode.applyUpdate(42, Buffer.from([7]));
+        editorText = 'base\n- queue item';
+        await manager.handleLocalChangeDelta(filePath, [
+            { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
+        ]);
+
+        assert.deepStrictEqual(staleNode.locals, []);
+        assert.deepStrictEqual(transport.textAdopts, [editorText]);
+        assert.strictEqual(transport.registerCount, 2);
+        assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
+        manager.dispose();
+    });
+
+    it('revalidates editor authority at the asynchronous replica swap boundary', async () => {
+        const firstEdit = 'base\n- queue item';
+        const latestEdit = `${firstEdit}\n- later item`;
+        const staleNode = new FakeNode('base');
+        const nodes = [
+            staleNode,
+            new FakeNode(firstEdit),
+            new FakeNode(latestEdit),
+        ];
+        const transport = new FakeTransport();
+        let releaseRegister!: () => void;
+        transport.registerGate = new Promise<void>((resolve) => {
+            releaseRegister = resolve;
+        });
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift()!,
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async () => true,
+        });
+
+        manager.seedDocument(filePath, editorText);
+        assert.strictEqual(await manager.attachDocument(filePath), true);
+        staleNode.remoteText = 'stale native text';
+        staleNode.applyUpdate(42, Buffer.from([7]));
+        editorText = firstEdit;
+        const firstAdopt = manager.handleLocalChangeDelta(filePath, [
+            { rangeOffset: 4, rangeLength: 0, text: '\n- queue item' },
+        ]);
+        while (transport.registerCount < 2) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        editorText = latestEdit;
+        releaseRegister();
+        await firstAdopt;
+
+        transport.registerGate = undefined;
+        await manager.handleLocalChangeDelta(filePath, [
+            { rangeOffset: firstEdit.length, rangeLength: 0, text: '\n- later item' },
+        ]);
+
+        assert.deepStrictEqual(transport.textAdopts, [firstEdit, latestEdit]);
+        assert.strictEqual(transport.registerCount, 3);
+        assert.strictEqual(editorText.match(/- queue item/g)?.length, 1);
+        assert.strictEqual(editorText.match(/- later item/g)?.length, 1);
+        manager.dispose();
+    });
+
     it('ACKs a pulled remote update only after the converged text is applied', async () => {
         const node = new FakeNode('base');
         const transport = new FakeTransport();
@@ -190,7 +307,139 @@ describe('crdt replica manager', () => {
         }]);
     });
 
-it('reprojects CPC state over unproven buffer divergence before ACKing', async () => {
+    it('retains a failed ACK frontier and does not pull or decode the delivery again', async () => {
+        const node = new FakeNode('base');
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        let editorText = 'base';
+        transport.ackFailures = 2;
+        transport.pending = [{
+            patchId: 'crdt:1:42:13',
+            origin: 1,
+            target: 42,
+            generation: 13,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
+            update: Buffer.from([13]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => node,
+            listDocuments: () => [],
+            currentText: () => editorText,
+            applyText: async (_file, text) => {
+                editorText = text;
+                return true;
+            },
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates();
+        assert.strictEqual(transport.pullCount, 1);
+        assert.strictEqual(node.updates.length, 1);
+
+        await manager.drainRemoteUpdates();
+        assert.strictEqual(transport.pullCount, 1);
+        assert.strictEqual(node.updates.length, 1);
+
+        await manager.drainRemoteUpdates();
+        assert.strictEqual(transport.pullCount, 2);
+        assert.strictEqual(node.updates.length, 1);
+        manager.dispose();
+    });
+
+    it('repairs a rejected canonical by adopting only the exact unchanged editor baseline', async () => {
+        const first = new FakeNode('base');
+        first.remoteText = 'INVALID_CANONICAL';
+        const replacement = new FakeNode('base');
+        const nodes = [first, replacement];
+        const transport = new FakeTransport();
+        const filePath = '/work/plan.md';
+        transport.pending = [{
+            patchId: 'crdt:1:42:14',
+            origin: 1,
+            target: 42,
+            generation: 14,
+            update: Buffer.from([14]),
+        }];
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => nodes.shift() ?? new FakeNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => {
+                assert.fail('invalid remote canonical must not reach editor projection');
+            },
+            normalizeTemplateStructure: (text) => text === 'INVALID_CANONICAL' ? null : text,
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates();
+
+        assert.deepStrictEqual(transport.textAdopts, ['base']);
+        assert.strictEqual(transport.registerCount, 2);
+        assert.deepStrictEqual(transport.deregistered, [filePath]);
+        manager.dispose();
+    });
+
+    it('re-registers an open replica after controller transport loss', async () => {
+        const transport = new FakeTransport();
+        transport.unavailablePulls = 1;
+        const filePath = '/work/plan.md';
+        const manager = new CrdtReplicaManager({
+            projectRoot: '/work',
+            identity: 'vscode-test',
+            transport,
+            nodeFactory: () => new FakeNode('base'),
+            listDocuments: () => [],
+            currentText: () => 'base',
+            applyText: async () => true,
+        });
+
+        assert.strictEqual(await manager.attachDocument(filePath, 'base'), true);
+        await manager.drainRemoteUpdates();
+
+        assert.strictEqual(transport.registerCount, 2);
+        assert.deepStrictEqual(transport.deregistered, [filePath]);
+        manager.dispose();
+    });
+
+    it('uses the same typed template and baseline decisions as JetBrains', () => {
+        assert.strictEqual(templateStructureProjectionState('raw', 'raw'), 'exact');
+        assert.strictEqual(templateStructureProjectionState('raw', 'fixed'), 'repair-required');
+        assert.strictEqual(templateStructureProjectionState('raw', null), 'invalid');
+        assert.strictEqual(
+            remoteTemplateProjectionDecision('invalid', 'exact', true, false),
+            'adopt-exact-editor-baseline',
+        );
+        assert.strictEqual(
+            remoteTemplateProjectionDecision('invalid', 'exact', false, false),
+            'retry-fail-closed',
+        );
+        assert.strictEqual(
+            remoteTemplateProjectionDecision('repair-required', 'exact', true, true),
+            'retry-fail-closed',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', true, false, false, false),
+            'adopt-exact-editor',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('exact', false, false, true, false),
+            'realign-shadow',
+        );
+        assert.strictEqual(
+            replicaBaselineDecision('repair-required', true, false, false, false),
+            'retry-fail-closed',
+        );
+        assert.strictEqual(shouldForwardLocalDelta('before', 'before'), true);
+        assert.strictEqual(shouldForwardLocalDelta('stale', 'before'), false);
+    });
+
+    it('reprojects CPC state over unproven buffer divergence before ACKing', async () => {
   const node = new FakeNode('base');
   const transport = new FakeTransport();
   const filePath = '/work/plan.md';

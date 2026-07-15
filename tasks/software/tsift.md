@@ -82,12 +82,12 @@ The queue reference `#aqt3` has no matching live backlog item, so it was stale p
 
 
 The Haiven session also passes `session-check` with exactly one boundary. No `agent-doc repair` command and no forced disk write were used; this historical interrupted cycle is crossing the binary-prescribed transactional `write --commit` path once, and future closeout/recovery stays automatic.
-<!-- agent:boundary:4bedbbac -->
+<!-- agent:boundary:5a3c6fb6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue preset="#spec-test-build-install-commit-push" -->
 <!-- /agent:queue -->
 <!--
 https://github.com/chopratejas/headroom

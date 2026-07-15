@@ -234,28 +234,33 @@ pub fn response_already_applied(doc: &str, response: &str) -> bool {
         .any(|window| window == response_lines.as_slice())
 }
 
-/// Accepts the response as applied when the captured `response` had spurious
-/// leading `❯ ` markers that the user has since stripped from the document.
-/// Compares the response's normalized lines against the document after also
-/// stripping a single leading `❯ ` from response lines.
+fn strip_exchange_prompt_prefix(line: String) -> String {
+    let trimmed = line.trim_start();
+    if let Some(stripped) = trimmed.strip_prefix("❯ ") {
+        let indent_len = line.len() - trimmed.len();
+        format!("{}{}", &line[..indent_len], stripped)
+    } else {
+        line
+    }
+}
+
+/// Accepts the response as applied when either the captured `response` or the
+/// materialized document has a transient leading `❯ ` marker that is absent
+/// from the other projection. Compares both sets of normalized lines after
+/// stripping one exchange prompt prefix from each side.
 pub fn response_already_applied_after_prefix_strip(doc: &str, response: &str) -> bool {
     let response_lines: Vec<String> = response
         .lines()
         .filter_map(normalize_response_line)
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if let Some(stripped) = trimmed.strip_prefix("❯ ") {
-                let indent_len = line.len() - trimmed.len();
-                format!("{}{}", &line[..indent_len], stripped)
-            } else {
-                line
-            }
-        })
+        .map(strip_exchange_prompt_prefix)
         .collect();
     if response_lines.is_empty() {
         return false;
     }
-    let doc_lines = normalized_response_lines(doc);
+    let doc_lines: Vec<String> = normalized_response_lines(doc)
+        .into_iter()
+        .map(strip_exchange_prompt_prefix)
+        .collect();
     doc_lines
         .windows(response_lines.len())
         .any(|window| window == response_lines.as_slice())
@@ -730,6 +735,26 @@ mod tests {
             "The document contains the applied body only.\n",
             "No follow-up. <!-- no-pending-capture -->\n",
             "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn patch_wrapped_response_matches_visible_body_with_document_prompt_prefix() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and verified.\n",
+            "- Preserved operator content.\n",
+            "<!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "❯ Implemented and verified.\n",
+            "- Preserved operator content.\n",
             "<!-- /agent:exchange -->\n",
         );
 

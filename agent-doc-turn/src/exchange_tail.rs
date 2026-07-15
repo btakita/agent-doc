@@ -90,7 +90,19 @@ pub fn exchange_tail_has_response_heading(content: &str) -> bool {
 /// Detect a document whose live `agent:exchange` tail ends in a prompt-looking
 /// block with no later assistant response.
 pub fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
+    prompt_only_exchange_tail_with_known_response(doc, None)
+}
+
+/// Detect a prompt-only exchange tail while treating prompt-prefixed lines
+/// proven to belong to a known, fully materialized assistant response as
+/// response prose rather than user input.
+pub fn prompt_only_exchange_tail_with_known_response(
+    doc: &str,
+    known_response: Option<&str>,
+) -> Option<String> {
     let body = exchange_body(doc)?;
+    let known_response = known_response
+        .filter(|response| super::response_replay::response_materialized_in_content(response, doc));
 
     let mut in_fence: Option<&'static str> = None;
     let mut prompt_preview: Option<String> = None;
@@ -133,8 +145,17 @@ pub fn prompt_only_exchange_tail(doc: &str) -> Option<String> {
             continue;
         }
         if text_line_looks_like_prompt_target(trimmed) {
-            if in_assistant_response && !trimmed.starts_with('❯') {
-                continue;
+            if in_assistant_response {
+                if !trimmed.starts_with('❯') {
+                    continue;
+                }
+                if known_response.is_some_and(|response| {
+                    super::response_replay::response_already_applied_after_prefix_strip(
+                        response, trimmed,
+                    )
+                }) {
+                    continue;
+                }
             }
             prompt_preview.get_or_insert_with(|| {
                 trimmed
@@ -301,5 +322,58 @@ mod tests {
         );
 
         assert_eq!(prompt_only_exchange_tail(current), None);
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_settles_prefixed_response_prose_at_boundary() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and committed.\n\n",
+            "Waiting for the editor to restart.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: recovery — gpt-5\n\n",
+            "❯ Implemented and committed.\n\n",
+            "❯ Waiting for the editor to restart.\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            prompt_only_exchange_tail(current).as_deref(),
+            Some("Implemented and committed.")
+        );
+        assert_eq!(
+            prompt_only_exchange_tail_with_known_response(current, Some(response)),
+            None
+        );
+    }
+
+    #[test]
+    fn prompt_only_exchange_tail_keeps_real_prompt_after_response_boundary() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and committed.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: recovery — gpt-5\n\n",
+            "❯ Implemented and committed.\n",
+            "<!-- agent:boundary:tail -->\n",
+            "❯ Please continue with the next repair.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            prompt_only_exchange_tail_with_known_response(current, Some(response)).as_deref(),
+            Some("Please continue with the next repair.")
+        );
     }
 }

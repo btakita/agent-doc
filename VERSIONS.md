@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.129
+
+- **Stale response captures now settle when only the live document carries an exchange prompt prefix.** Semantic response materialization strips a transient `❯ ` prefix symmetrically from captured and visible lines after removing transport wrappers and control markers. An already-visible response therefore refreshes the stale capture baseline and reaches committed closeout instead of retrying, while an absent or rewritten response still fails closed.
+- **A response-internal prompt prefix no longer becomes an unresolved prompt after its response boundary.** Exchange-tail classification now accepts ambiguous `❯ ` prose only when the latest committed capture is fully materialized and contains that line, while retaining prompt-only protection for unmatched text before or after the boundary.
+- **Session-check no longer fights the editor over a healthy post-commit `(HEAD)` annotation.** When live authority is exactly committed Git content plus transient response HEAD markers, closeout accepts the editor projection without writing; stale guard or boundary lineage still takes the existing CRDT settlement path.
+
 ## 0.34.128
 
 - **Whole-document replay repair now recognizes transiently annotated monotonic projections.** The doubled-document live corruption contained one current projection plus one stale projection, but the current copy had editor-facing ` (HEAD)` response annotations and exchange prompt-prefix normalization that the stale copy lacked. Those are already shared semantic-equivalence rules, not operator-content differences. Replay coalescing now compares the code-block-aware transient-heading normalization and exchange-scoped prompt-prefix normalization while retaining the original current superset bytes. Divergent/reordered content still fails closed. A regression combines both transient differences, and the live 99,367-byte corruption artifact is proven to coalesce to one structurally complete projection without writing it.

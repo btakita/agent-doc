@@ -864,11 +864,9 @@ fn captured_baseline_coalesces_to_current(
 
 /// Returns true when the captured `response_body` is still contiguously
 /// present in the current document (modulo blank-line / transient marker
-/// normalization, and modulo `❯ ` prompt-prefix markers stripped by the
-/// user after a JB cache-conflict-induced prefix spill). Defers to
-/// `agent_doc_turn::response_replay::response_already_applied` for the strict match and falls back
-/// to `agent_doc_turn::response_replay::response_already_applied_after_prefix_strip` for the
-/// post-strip recovery path covered by `#adoc-prefix-strip-uncommitted`.
+/// normalization and a transient `❯ ` prompt prefix present on either side).
+/// Materialization is semantic: capture transport wrappers/control markers and
+/// exchange prompt-prefix normalization are not editor-visible response bytes.
 fn response_body_intact_in_current(
     file: &Path,
     response_body: &str,
@@ -878,13 +876,10 @@ fn response_body_intact_in_current(
         return Ok(false);
     }
     let _ = file; // reserved for richer structural checks (#adoc-bdauc stretch goals)
-    if agent_doc_turn::response_replay::response_already_applied(current_file, response_body) {
-        return Ok(true);
-    }
     Ok(
-        agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
-            current_file,
+        agent_doc_turn::response_replay::response_materialized_in_content(
             response_body,
+            current_file,
         ),
     )
 }
@@ -1818,6 +1813,46 @@ mod tests {
         assert!(
             log.contains("capture_baseline_refreshed_for_benign_drift"),
             "prefix-strip refresh should use the same audit event:\n{log}"
+        );
+    }
+
+    #[test]
+    fn validate_replay_adopts_materialized_patch_body_with_visible_prefix_normalization() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        let original = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\nuser prompt\n<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, original).unwrap();
+        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and verified.\n",
+            "- Preserved operator content.\n",
+            "<!-- no-pending-capture -->\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let capture = capture_response(&doc, captured_response).unwrap();
+
+        let materialized = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\nuser prompt\n\n",
+            "### Re: user prompt — gpt-5\n\n",
+            "❯ Implemented and verified.\n",
+            "- Preserved operator content.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, materialized).unwrap();
+        agent_doc_snapshot_io::save(&doc, materialized, agent_doc_ops_log_io::log_op).unwrap();
+
+        validate_replay(&doc, &capture)
+            .expect("materialized patch body must refresh the stale capture baseline");
+
+        let refreshed = load_active(&doc).unwrap().unwrap();
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(agent_doc_hash::content_hash(materialized).as_str())
         );
     }
 

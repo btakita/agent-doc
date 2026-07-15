@@ -234,6 +234,16 @@ fn self_heal_transiently_stale_committed_projection(
     if authority_content == committed_content {
         return Ok(false);
     }
+    if agent_doc_turn::document_drift::authority_is_committed_with_only_head_markers(
+        authority_content,
+        &committed_content,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "session_check_committed_projection_current_head_marker action=accept_without_write",
+        );
+        return Ok(false);
+    }
     let normalized_authority =
         agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
             authority_content,
@@ -1567,5 +1577,49 @@ mod terminal_convergence_tests {
             agent_doc_snapshot_io::load(&file).unwrap().as_deref(),
             Some(committed),
         );
+    }
+
+    #[test]
+    fn session_check_does_not_rewrite_current_head_marker_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let committed = "# Session\n\n### Re: recovery — gpt-5\n\nDone.\n";
+        let authority = "# Session\n\n### Re: recovery — gpt-5 (HEAD)\n\nDone.\n";
+        std::fs::write(&file, committed).unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["init"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.email", "test@example.com"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["config", "user.name", "Test"])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .current_dir(dir.path())
+            .args(["add", "session.md"])
+            .output()
+            .unwrap();
+        let commit = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit", "-m", "clean closeout", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+        std::fs::write(&file, authority).unwrap();
+
+        let healed =
+            self_heal_transiently_stale_committed_projection(&file, authority, &TestEffects)
+                .unwrap();
+
+        assert!(!healed);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), authority);
     }
 }

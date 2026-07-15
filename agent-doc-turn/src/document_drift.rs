@@ -146,6 +146,14 @@ fn normalize_transient_markers(doc: &str) -> String {
     agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(doc)
 }
 
+/// True when editor authority is exactly the committed projection plus one or
+/// more transient response `(HEAD)` annotations. Git intentionally strips
+/// those annotations, while the live editor may display them after closeout.
+pub fn authority_is_committed_with_only_head_markers(authority: &str, committed: &str) -> bool {
+    authority != committed
+        && agent_doc_document::transient_markers::strip_head_markers(authority) == committed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +209,23 @@ mod tests {
 
         assert!(active_session_drift_is_only_exchange_or_backlog_metadata(
             snapshot, current
+        ));
+    }
+
+    #[test]
+    fn committed_head_marker_projection_is_directional() {
+        let committed = "### Re: recovery — gpt-5\n\nDone.\n";
+        let authority = "### Re: recovery — gpt-5 (HEAD)\n\nDone.\n";
+
+        assert!(authority_is_committed_with_only_head_markers(
+            authority, committed
+        ));
+        assert!(!authority_is_committed_with_only_head_markers(
+            committed, authority
+        ));
+        assert!(!authority_is_committed_with_only_head_markers(
+            "### Re: recovery — gpt-5 (HEAD)\n\nRewritten.\n",
+            committed
         ));
     }
 

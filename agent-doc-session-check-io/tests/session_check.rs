@@ -1296,6 +1296,48 @@ Body\n\
             other => panic!("expected prompt-only closeout interruption, got {other:?}"),
         }
     }
+
+    #[test]
+    fn prompt_only_exchange_tail_accepts_prefix_proven_by_committed_capture() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let current = concat!(
+            "---\nagent_doc_session: sid\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: recovery — gpt-5\n\n",
+            "❯ Implemented and committed.\n\n",
+            "❯ Waiting for the editor to restart.\n",
+            "<!-- agent:boundary:tail -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let captured_response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and committed.\n\n",
+            "Waiting for the editor to restart.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        fs::write(&doc, current).unwrap();
+        agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, captured_response).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(current),
+            Some(current),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed_with_current_content(&doc, current).unwrap();
+
+        let rc = agent_doc_run_context_io::cycle_context(doc.clone());
+        assert_eq!(
+            agent_doc_session_check_io::check_prompt_only_exchange_tail_guard(&doc, &rc).unwrap(),
+            GuardResult::None
+        );
+    }
+
     #[test]
     fn prompt_only_exchange_tail_catches_direct_chat_preset_no_patchback() {
         let tmp = tempfile::TempDir::new().unwrap();

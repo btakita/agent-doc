@@ -82,10 +82,22 @@ pub fn check_prompt_only_exchange_tail_guard(
 ) -> Result<GuardResult> {
     let content = rc.doc_content();
     let file_display = file.display().to_string();
+    let committed_response =
+        agent_doc_capture_io::latest_committed(file)?.map(|capture| capture.response_body);
     Ok(
-        agent_doc_workflow::session_check::prompt_only_exchange_tail_guard(&content, &file_display)
-            .map(GuardResult::Error)
-            .unwrap_or(GuardResult::None),
+        agent_doc_turn::exchange_tail::prompt_only_exchange_tail_with_known_response(
+            &content,
+            committed_response.as_deref(),
+        )
+        .map(|prompt| {
+            GuardResult::Error(
+                agent_doc_workflow::session_check::prompt_only_exchange_tail_guard_message(
+                    &prompt,
+                    &file_display,
+                ),
+            )
+        })
+        .unwrap_or(GuardResult::None),
     )
 }
 

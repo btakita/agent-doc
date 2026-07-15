@@ -37,10 +37,31 @@ complete
 Compacted content:
 - Archived 7 response topic(s): Remove "Wiring Instructions (Secure Link)" from the deal Funding Package tab; Loan Package "6/13" should be "13/13" + green/red tab completeness; Remove re-render jank after uploading a file on the lender Lender Documents tab; 4 more
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): Deal-modal tab-switch resize jank + consistent large size; De...
-<!-- agent:boundary:d77565f6 -->
+
+### Re: Is a TMO lender ID absolutely necessary? — opus-4-8
+
+Short answer: **not for a lender to exist or use EFS, but yes at the point EFS hands funding off to TMO.** The field in question is `users.lender_account` — migration `0014_investor_lender_account.sql` literally calls it "the TMO lender account created for an investor." It's the canonical EFS↔TMO key, not an internal EFS id.
+
+**What drives it — is it the TMO API?** Fundamentally yes. TMO identifies a lender by *its own* account number, not by an EFS user id. So the requirement shows up on both directions of the TMO integration:
+- **Push (EFS→TMO):** `tmo_selected_lender_outbox_enqueue_` no-ops without it (`tmo-api/index.ts:414`), and the payload is `gated_by: ['#7a4d','#dzmm']` — the AddLoanFunding field map. TMO can't accept a funding writeback without the lender's TMO account.
+- **Pull (TMO→EFS):** `user_id_by_lender_account_` is the primary, deterministic match key for reconciling TMO fundings back to EFS lenders (`tmo-sync.ts:517-526`).
+
+**Where it's actually hard-gated in EFS:**
+- Revealing wire instructions in the deal marketplace: 409 "A registered lender account is required before wire instructions can be revealed." (`investor/deal_marketplace/index.ts:1109`).
+- Lender pipeline "ready" state: a lender only reaches `lender_ready` / clears `compliance_hold` once `lender_account` is set (`admin/repo.ts:1902,1921`).
+- Admin save of the number: "Lender account number is required." 400 (`admin/user_management/index.ts:237`, `investor_management/index.ts:3189`).
+
+**Where it is NOT required:**
+- A lender can sign up, get accredited, satisfy requirements, browse deals, and express interest with no `lender_account` — they just sit at `requirements_current` under `compliance_hold` rather than `lender_ready`.
+- TMO pull matching has a fuzzy **email fallback** (`user_id_by_lender_email_`) plus an unmatched-funding parking table (`tmo_unmatched_fundings`) for admin binding, so a funding can still be reconciled after the fact without the account pre-set.
+- TMO accounts are created out-of-band — admin-managed via `lender_requests` (migration `0015`, "admin-managed TMO lender creation") — and the result is written back onto the user.
+
+So the "absolutely necessary" requirement is really an EFS product/compliance boundary: don't reveal wire instructions or call a lender fundable until they hold a real TMO lender account — reinforced by the fact that the money actually moves inside TMO keyed by that account. It is not forced on the read/browse/express-interest paths, and the EFS→TMO writeback is currently deferred anyway (`#7a4d`/`#dzmm`).
+<!-- agent:boundary:e40df9a9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+Is it absolutely necessary to have a TMO lender ID? What is this requiremen d
 <!-- /agent:queue -->
 
 ## Notes

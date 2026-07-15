@@ -16,7 +16,13 @@ pub use pending::{clear_pending, save_pending};
 pub use pending::{load_active_pending_response, load_pending_projection_file};
 
 pub trait RepairIoEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn atomic_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<()>;
 
     fn mark_committed_frontmatter(
         &self,
@@ -81,7 +87,13 @@ impl<T> RepairReplayWriteEffects for T where
 }
 
 pub trait RepairTemplateWriteEffects {
-    fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
+    fn atomic_write_if_current(
+        &self,
+        file: &Path,
+        content: &str,
+        expected_current: &str,
+        source: &str,
+    ) -> Result<()>;
 
     fn repair_response_prompt_order_for_file(
         &self,
@@ -1011,7 +1023,12 @@ pub fn repair_template_doc_if_needed(
             }
             None => true,
         };
-        effects.atomic_write(file, &repaired)?;
+        effects.atomic_write_if_current(
+            file,
+            &repaired,
+            doc_content,
+            "repair_template_normalization",
+        )?;
         if save_repaired_snapshot {
             agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
         }
@@ -1121,7 +1138,12 @@ pub fn repair_response_body_prompt_prefixes_if_needed(
         }
         None => true,
     };
-    effects.atomic_write(file, &repaired)?;
+    effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_response_body_prompt_prefixes",
+    )?;
     if save_repaired_snapshot {
         agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
     }
@@ -1160,7 +1182,12 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         }
         None => true,
     };
-    effects.atomic_write(file, &repaired)?;
+    effects.atomic_write_if_current(
+        file,
+        &repaired,
+        doc_content,
+        "repair_duplicate_exchange_scaffold",
+    )?;
     if save_repaired_snapshot {
         agent_doc_snapshot_io::save(file, &repaired, agent_doc_ops_log_io::log_op)?;
     }
@@ -2352,7 +2379,7 @@ pub fn repair_completed_backlog_items(
         repaired = reconciled;
     }
 
-    effects.atomic_write(file, &repaired)?;
+    effects.atomic_write_if_current(file, &repaired, &content, "repair_completed_backlog_reap")?;
 
     let repaired_snapshot = if let Some(snap_content) = agent_doc_snapshot_io::load(file)? {
         let snap_components =
@@ -2453,7 +2480,20 @@ mod tests {
     }
 
     impl RepairIoEffects for TestRepairIoEffects {
-        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+        fn atomic_write_if_current(
+            &self,
+            file: &Path,
+            content: &str,
+            expected_current: &str,
+            _source: &str,
+        ) -> Result<()> {
+            anyhow::ensure!(
+                agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                    file,
+                    "repair_test_atomic_write_if_current",
+                )? == expected_current,
+                "test repair write baseline changed"
+            );
             std::fs::write(file, content)?;
             Ok(())
         }

@@ -479,6 +479,15 @@ that proof. `admin inspect` includes the route-owned supervisor process when the
 target actor has a supervisor lease. Non-JSON inspect output summarizes the same
 state as `freshness=controller:<state>,supervisor:<state>`.
 
+Every controller RPC request stamps the caller's complete binary identity as
+skew-safe optional JSON metadata. A `stale_controller_replacement` shutdown is
+accepted only when that identity is directionally newer than the controller's
+bootstrap identity: a higher dotted release version, or a later executable
+mtime for a same-version reinstall. An older caller adopts a newer controller.
+The controller must not judge replacement freshness only from its own
+process-local executable, because that identity necessarily still matches the
+old bootstrap and would otherwise refuse every legitimate installed successor.
+
 Supervisor auto-install (`AGENT_DOC_SUPERVISOR_AUTO_INSTALL` /
 `agent_doc_supervisor_auto_install`) is a dogfood-only lifecycle policy. The
 idle supervisor may run `make install` only when the served document is an

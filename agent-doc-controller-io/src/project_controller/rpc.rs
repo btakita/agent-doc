@@ -213,17 +213,23 @@ fn request_controller_on_stream_with_timeout<T: DeserializeOwned>(
         .set_recv_timeout(Some(timeout))
         .context("failed to set project controller response timeout")?;
     let (reader_half, mut writer_half) = stream.split();
-    // #af88 B enforcement: stamp the caller's own binary version onto the wire as a
-    // skew-safe extra JSON key (ControllerRequest has no `deny_unknown_fields`, so
-    // older controllers ignore it). A controller whose running version differs can
-    // then refuse write-bearing commands authoritatively instead of relying only on
-    // the mtime/inode staleness heuristic.
+    // #af88 B enforcement: stamp the caller's own binary identity onto the wire as
+    // skew-safe extra JSON keys (ControllerRequest has no `deny_unknown_fields`, so
+    // older controllers ignore them). The full identity lets a same-version newer
+    // install prove that it may replace an older long-lived process without letting
+    // an older caller tear down a newer controller.
     let mut request_value = serde_json::to_value(&request)?;
     if let Some(obj) = request_value.as_object_mut() {
         obj.insert(
             "binary_version".to_string(),
             serde_json::Value::String(identity_version()),
         );
+        if let Ok(identity) = current_binary_identity() {
+            obj.insert(
+                "binary_identity".to_string(),
+                serde_json::to_value(identity)?,
+            );
+        }
     }
     let mut raw = serde_json::to_string(&request_value)?;
     raw.push('\n');
@@ -5746,14 +5752,17 @@ fn active_controller_status_is_adoptable(
             .handoff_state
             .unwrap_or(ControllerHandoffState::Stable)
             == ControllerHandoffState::Stable
-        && !active_controller_status_has_known_binary_mismatch(active_status, current_binary)
+        && !active_controller_status_needs_binary_replacement(active_status, current_binary)
 }
 
-fn active_controller_status_has_known_binary_mismatch(
+fn active_controller_status_needs_binary_replacement(
     active_status: &ControllerStatus,
     current_binary: Option<&ControllerBinaryIdentity>,
 ) -> bool {
-    status::process_binary_is_stale(active_status.controller_binary.as_ref(), current_binary)
+    status::controller_binary_identity_is_newer(
+        current_binary,
+        active_status.controller_binary.as_ref(),
+    )
 }
 
 fn active_controller_status_non_stable_handoff_state(
@@ -6985,18 +6994,20 @@ pub(crate) fn handle_request_locked(
     runtime: &Arc<ControllerRuntime>,
     should_stop: &mut bool,
 ) -> Result<String> {
-    let request: ControllerRequest = serde_json::from_str(line.trim())?;
+    let request_value = serde_json::from_str::<serde_json::Value>(line.trim())?;
+    let request: ControllerRequest = serde_json::from_value(request_value.clone())?;
     // #af88 B enforcement: read the caller's stamped binary version (skew-safe;
     // absent from older clients). A value that differs from this controller's own
     // running version proves this controller is serving a different (stale) binary
     // than the freshly-invoked caller — used to refuse write-bearing commands.
-    let client_binary_version = serde_json::from_str::<serde_json::Value>(line.trim())
-        .ok()
-        .and_then(|v| {
-            v.get("binary_version")
-                .and_then(|b| b.as_str())
-                .map(str::to_string)
-        });
+    let client_binary_version = request_value
+        .get("binary_version")
+        .and_then(|b| b.as_str())
+        .map(str::to_string);
+    let client_binary_identity = request_value
+        .get("binary_identity")
+        .cloned()
+        .and_then(|identity| serde_json::from_value::<ControllerBinaryIdentity>(identity).ok());
     let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
     match request.command.as_str() {
         "status" => Ok(serde_json::to_string(
@@ -7094,7 +7105,15 @@ pub(crate) fn handle_request_locked(
         "shutdown" => {
             let reason = request.reason.as_deref();
             let controller_is_stale = controller_binary_is_stale_for_shutdown(&bootstrap_snapshot);
-            if !controller_is_stale && !shutdown_reason_allows_fresh_controller(reason) {
+            let caller_proves_newer_binary = reason == Some("stale_controller_replacement")
+                && status::controller_binary_identity_is_newer(
+                    client_binary_identity.as_ref(),
+                    bootstrap_snapshot.controller_binary.as_ref(),
+                );
+            if !controller_is_stale
+                && !caller_proves_newer_binary
+                && !shutdown_reason_allows_fresh_controller(reason)
+            {
                 agent_doc_ops_log_io::log_op(
                     &bootstrap_snapshot.project_root,
                     &format!(
@@ -7112,11 +7131,12 @@ pub(crate) fn handle_request_locked(
             agent_doc_ops_log_io::log_op(
                 &bootstrap_snapshot.project_root,
                 &format!(
-                    "controller_shutdown_accepted pid={} generation={} request_reason={} controller_binary_stale={}",
+                    "controller_shutdown_accepted pid={} generation={} request_reason={} controller_binary_stale={} caller_proves_newer_binary={}",
                     bootstrap_snapshot.pid,
                     bootstrap_snapshot.controller_generation,
                     reason.unwrap_or("none"),
                     controller_is_stale,
+                    caller_proves_newer_binary,
                 ),
             );
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
@@ -12395,7 +12415,7 @@ mod tests {
     }
 
     #[test]
-    fn active_controller_adoption_only_rejects_known_binary_mismatch() {
+    fn active_controller_adoption_only_rejects_provably_newer_caller_binary() {
         let current_binary = test_controller_binary_identity();
         let stable = active_controller_status_with_handoff_state(ControllerHandoffState::Stable);
         assert!(active_controller_status_is_adoptable(
@@ -12406,7 +12426,7 @@ mod tests {
             active_controller_status_is_adoptable(&stable, None),
             "callers that cannot resolve their own binary must adopt a stable controller"
         );
-        assert!(!active_controller_status_has_known_binary_mismatch(
+        assert!(!active_controller_status_needs_binary_replacement(
             &stable, None
         ));
 
@@ -12418,7 +12438,7 @@ mod tests {
             active_controller_status_is_adoptable(&missing_recorded_binary, Some(&current_binary)),
             "legacy/stale status records without binary identity are not proof of mismatch"
         );
-        assert!(!active_controller_status_has_known_binary_mismatch(
+        assert!(!active_controller_status_needs_binary_replacement(
             &missing_recorded_binary,
             Some(&current_binary)
         ));
@@ -12429,9 +12449,20 @@ mod tests {
             !active_controller_status_is_adoptable(&stable, Some(&changed_binary)),
             "known stale binary identity must still trigger replacement"
         );
-        assert!(active_controller_status_has_known_binary_mismatch(
+        assert!(active_controller_status_needs_binary_replacement(
             &stable,
             Some(&changed_binary)
+        ));
+
+        let mut older_binary = current_binary.clone();
+        older_binary.modified_secs -= 1;
+        assert!(
+            active_controller_status_is_adoptable(&stable, Some(&older_binary)),
+            "an older caller must adopt a newer stable controller"
+        );
+        assert!(!active_controller_status_needs_binary_replacement(
+            &stable,
+            Some(&older_binary)
         ));
     }
 
@@ -12516,6 +12547,58 @@ mod tests {
 
         assert!(should_stop);
         assert!(response.contains("\"ok\":true"), "{response}");
+    }
+
+    #[test]
+    fn fresh_controller_accepts_stale_replacement_from_provably_newer_caller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut newer_binary = bootstrap.controller_binary.clone().unwrap();
+        newer_binary.modified_secs += 1;
+        let mut should_stop = false;
+
+        let response = handle_request(
+            &(serde_json::json!({
+                "command": "shutdown",
+                "reason": "stale_controller_replacement",
+                "binary_identity": newer_binary,
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+
+        assert!(should_stop);
+        assert!(response.contains("\"ok\":true"), "{response}");
+    }
+
+    #[test]
+    fn fresh_controller_refuses_stale_replacement_from_older_caller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let mut older_binary = bootstrap.controller_binary.clone().unwrap();
+        older_binary.modified_secs -= 1;
+        let mut should_stop = false;
+
+        let err = handle_request(
+            &(serde_json::json!({
+                "command": "shutdown",
+                "reason": "stale_controller_replacement",
+                "binary_identity": older_binary,
+            })
+            .to_string()
+                + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap_err();
+
+        assert!(!should_stop);
+        assert!(format!("{err:#}").contains("shutdown refused"), "{err:#}");
     }
 
     #[test]

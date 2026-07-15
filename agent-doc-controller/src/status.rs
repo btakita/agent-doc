@@ -78,6 +78,48 @@ pub fn process_binary_is_stale(
     matches!((recorded, current), (Some(recorded), Some(current)) if recorded != current)
 }
 
+/// Return true only when `candidate` is provably newer than `recorded`.
+///
+/// Replacement is directional: an older CLI must adopt a newer controller,
+/// while a newer install (including a same-version rebuild with a later mtime)
+/// may recycle the older long-lived process.
+pub fn controller_binary_identity_is_newer(
+    candidate: Option<&ControllerBinaryIdentity>,
+    recorded: Option<&ControllerBinaryIdentity>,
+) -> bool {
+    let (Some(candidate), Some(recorded)) = (candidate, recorded) else {
+        return false;
+    };
+    if candidate.version != recorded.version {
+        return match (
+            normalized_release_version(&candidate.version),
+            normalized_release_version(&recorded.version),
+        ) {
+            (Some(candidate), Some(recorded)) => candidate > recorded,
+            _ => false,
+        };
+    }
+    (candidate.modified_secs, candidate.modified_nanos)
+        > (recorded.modified_secs, recorded.modified_nanos)
+}
+
+fn normalized_release_version(version: &str) -> Option<Vec<u64>> {
+    let normalized = version.strip_prefix('v').unwrap_or(version);
+    let release = normalized
+        .split_once('-')
+        .map(|(release, _)| release)
+        .unwrap_or(normalized);
+    let mut parts = release
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    while parts.last() == Some(&0) {
+        parts.pop();
+    }
+    Some(parts)
+}
+
 pub const fn default_controller_generation() -> u64 {
     1
 }
@@ -908,6 +950,35 @@ mod tests {
         assert!(!process_binary_is_stale(Some(&current), None));
         assert!(!process_binary_is_stale(Some(&current), Some(&current)));
         assert!(process_binary_is_stale(Some(&stale), Some(&current)));
+    }
+
+    #[test]
+    fn binary_replacement_is_directional_and_accepts_same_version_rebuilds() {
+        let recorded = identity("1.2.3", 42);
+        let newer_version = identity("1.2.4", 41);
+        let older_version = identity("1.2.2", 99);
+        let mut newer_build = recorded.clone();
+        newer_build.modified_nanos += 1;
+        let mut older_build = recorded.clone();
+        older_build.modified_nanos -= 1;
+
+        assert!(controller_binary_identity_is_newer(
+            Some(&newer_version),
+            Some(&recorded)
+        ));
+        assert!(!controller_binary_identity_is_newer(
+            Some(&older_version),
+            Some(&recorded)
+        ));
+        assert!(controller_binary_identity_is_newer(
+            Some(&newer_build),
+            Some(&recorded)
+        ));
+        assert!(!controller_binary_identity_is_newer(
+            Some(&older_build),
+            Some(&recorded)
+        ));
+        assert!(!controller_binary_identity_is_newer(None, Some(&recorded)));
     }
 
     #[test]

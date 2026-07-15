@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.111
+
+- **Repair is authoritative-CAS, not a stale whole-buffer merge.** Every repair mutation compares against the exact realtime document image it analyzed, then proves the resulting CRDT authority and disk projection are byte-identical to the intended repaired image before publishing a snapshot or reporting success. A stale IDE/disk projection can no longer resurrect fragmented responses or duplicate `agent:boundary` markers after repair.
+- **Stale controller replacement is directional and works after reinstall.** Controller requests carry the caller's full binary identity. A stale controller accepts replacement only when the caller proves a newer release or a newer same-version binary mtime, while an older caller cannot evict a newer controller. This closes the stale-supervisor recycle refusal that could wedge every later stage of a turn.
+
 ## 0.34.110
 
 - **Session responses are final-only transactions.** Streaming and orchestration keep partial chunks outside the document, bare/non-committing session writes fail before input or mutation, and one complete payload owns response placement, queue/backlog changes, snapshot publication, and commit.

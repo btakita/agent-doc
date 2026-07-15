@@ -375,6 +375,76 @@ mod tests {
     }
 
     #[test]
+    fn repair_fragmented_exchange_uses_live_crdt_baseline_over_stale_disk_projection() {
+        let dir = setup_project();
+        let doc = dir.path().join("session-live-authority.md");
+        let snapshot_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test-live\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: design review — model\n\nOriginal response.\n",
+            "I don't see the diagrams.\n",
+            "<!-- agent:boundary:turn -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let live_content = concat!(
+            "---\nagent_doc_format: template\nagent_doc_session: test-live\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: design review — model\n\nOriginal response.\n",
+            "I don't see the diagrams.\n\n",
+            "How would CAS work?<!-- agent:boundary:turn --><!-- agent:boundary:turn -->\n",
+            "- duplicated partial response line\n\n",
+            "### Re: diagrams — model\n\nUse an explicit dark theme.\n",
+            "How would CAS wo?\n",
+            "### Re: CAS — model\n\nUse a lock around compare-and-delete.\n",
+            "<!-- agent:boundary:turn -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let stale_disk_projection =
+            live_content.replacen("How would CAS wo?", "How would CAS w?", 1);
+        std::fs::write(&doc, stale_disk_projection).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "intellij:repair-live-authority",
+            live_content,
+        );
+
+        let outcome = run(&doc).unwrap();
+        assert_eq!(outcome, RepairOutcome::TemplateNormalized);
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        let authoritative = agent_doc_document_realtime_io::try_resolve_current_document_content(
+            &doc,
+            "repair_live_authority_test",
+        )
+        .unwrap();
+        assert_eq!(authoritative, repaired);
+        assert_eq!(
+            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            repaired
+        );
+        assert_eq!(
+            repaired.matches("<!-- agent:boundary:").count(),
+            1,
+            "{repaired}"
+        );
+        assert!(!repaired.contains("How would CAS wo?"), "{repaired}");
+        assert!(!repaired.contains("How would CAS w?"), "{repaired}");
+        assert!(
+            !repaired.contains("duplicated partial response line"),
+            "{repaired}"
+        );
+        assert!(
+        repaired.contains(
+            "Use a lock around compare-and-delete.\n<!-- agent:boundary:turn -->\n<!-- /agent:exchange -->"
+        ),
+        "{repaired}"
+    );
+    }
+
+    #[test]
     fn repair_reorders_response_before_prompt_tail_when_pending_response_is_visible() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

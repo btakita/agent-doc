@@ -57,11 +57,30 @@ Short answer: **not for a lender to exist or use EFS, but yes at the point EFS h
 - TMO accounts are created out-of-band — admin-managed via `lender_requests` (migration `0015`, "admin-managed TMO lender creation") — and the result is written back onto the user.
 
 So the "absolutely necessary" requirement is really an EFS product/compliance boundary: don't reveal wire instructions or call a lender fundable until they hold a real TMO lender account — reinforced by the fact that the money actually moves inside TMO keyed by that account. It is not forced on the read/browse/express-interest paths, and the EFS→TMO writeback is currently deferred anyway (`#7a4d`/`#dzmm`).
-<!-- agent:boundary:e40df9a9 -->
+
+### Re: Searchable dropdown of TMO lenders for the lender-account field — opus-4-8
+
+Done and deployed. The free-text "TMO lender account" input is now a **searchable dropdown of the LOS/LSS lenders** everywhere an admin enters that account, and it still accepts a manually typed account (so nothing regresses if TMO is unreachable).
+
+**What ships**
+- **`TmoLenderPicker`** (new shared combobox): as you type, it filters TMO lender master records by account, name, or email; pick one and it fills the exact TMO account number. Free-text is preserved, arrow keys + Enter select, Escape closes.
+- Wired into **all four** admin entry points, not just one: the lender-request **Complete Request** card, the user **Lender Profile**, the investor-pipeline **advance-lender** modal, and the deal-detail **Link TMO Account** row.
+- **Backend `GET /api/admin/tmo-lenders`** (admin-guarded) → `tmo_live_lenders_R_` pages `LSS.svc/GetLenders` (`PageSize`/`Offset`), dedupes by account, returns `{account, full_name, rec_id, email}`. When `TMO_API_TOKEN`/`TMO_DATABASE` are unset it returns `configured:false` + empty list (never an error), so the field falls back to plain manual entry.
+
+**Direction note (deliberate):** `docs/TMO/get-lender.md` previously said EFS does *not* wire the LSS lender endpoints. Your request is the explicit direction change, so I wired **`GetLenders` read-only** for this picker and updated the doc. Lender **create/update/delete** in TMO stays manual — I did not wire `NewLender`/`UpdateLender`/`DeleteLender`.
+
+Note "LOS" here: lender master records actually live in TMO's Loan Servicing service (`LSS.svc`), which is what `GetLenders` reads; the picker surfaces those.
+
+**Verification**
+- `make check` green: **1633 pass / 0 fail**, browser + worker bundles built.
+- Added tests: GetLenders paging/dedupe/sort + row normalization, picker source assertions, and updated the existing lender-link-ui markup pins.
+- Committed (`a909426`), pushed, and **deployed to prod** (worker version `bbe1e5f8`). Live-verified: `/api/admin/tmo-lenders` is auth-gated (401, not 404) and the deployed browser bundle contains the picker (`api/admin/tmo-lenders`, `combobox`).
+
+**One thing I can't check from here:** whether prod actually has TMO credentials set so the dropdown returns real lenders — that needs an authenticated admin session. Queued as `#tmo-lender-picker-verify` for a 30-second live check; the field works as manual entry regardless.
+<!-- agent:boundary:6ef090f8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-Is it absolutely necessary to have a TMO lender ID? What is this requiremen d
 <!-- /agent:queue -->
 
 ## Notes

@@ -72,6 +72,12 @@ const CONVERGENCE_GATE_TIMEOUT_MS: u64 = 30_000;
 /// enough to let a saturated controller recover, short enough to keep
 /// queue-drain readiness prompt (~one probe per window per document).
 const IDLE_WATCH_CONTROLLER_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
+/// A quiescent session still polls the authoritative queue head every 500ms so
+/// unsaved editor work starts promptly, but the expensive pane/controller
+/// reconciliation body only needs a periodic liveness pass until work appears.
+const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(5);
+const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn supervisor_background_context_clear_enabled() -> bool {
     false
@@ -84,6 +90,18 @@ fn context_clear_projection_source_allows_supervisor_action(
         projection.source.as_deref(),
         Some(CONTEXT_CLEAR_SOURCE_OPERATOR_DEFERRED | CONTEXT_CLEAR_SOURCE_QUEUE_SLASH)
     )
+}
+
+fn idle_watch_is_quiescent(
+    active_head: Option<&str>,
+    last_dispatched: Option<&str>,
+    actor_ready: bool,
+) -> bool {
+    active_head.is_none()
+        || (actor_ready
+            && active_head
+                .zip(last_dispatched)
+                .is_some_and(|(active, dispatched)| active == dispatched))
 }
 
 /// `#fbwire` Phase 2 — is the session document's current visible text converged
@@ -722,6 +740,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // ~1/30s during a wedge without losing queue-drain readiness.
             let mut controller_degraded_until: Option<std::time::Instant> = None;
             let mut controller_backoff_logged = false;
+            let mut last_quiescent_maintenance: Option<std::time::Instant> = None;
+            let mut last_zombie_reap: Option<std::time::Instant> = None;
             loop {
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
@@ -860,7 +880,49 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     context_reset_in_flight = false;
                     last_context_reset_head = None;
                 }
-                let actor_ready = actor_state_is_ready(&shared);
+                // `#idlequiet`: the former loop ran the entire reconciliation
+                // pipeline every 500ms even when there was no work, issuing a
+                // burst of one-request controller connections and pane probes.
+                // Keep the single authoritative head read prompt, then collapse
+                // the rest to a liveness pass while the session is quiescent.
+                // Binary staleness is checked before this gate on every tick, so
+                // install/recycle remains automatic at every turn stage.
+                let actor_ready_fast = actor_state_is_ready(&shared);
+                let quiescent = idle_watch_is_quiescent(
+                    active_head.as_deref(),
+                    last_dispatched.as_deref(),
+                    actor_ready_fast,
+                );
+                let supervisor_stale_fast = shared.refresh_binary_stale();
+                let now = std::time::Instant::now();
+                let maintenance_due = last_quiescent_maintenance.is_none_or(|last| {
+                    last.elapsed() >= IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL
+                });
+                let zombie_reap_due = last_zombie_reap
+                    .is_none_or(|last| last.elapsed() >= IDLE_WATCH_ZOMBIE_REAP_INTERVAL);
+                if zombie_reap_due {
+                    let reaped = agent_doc_supervisor_process::detached_child::reap_historical_agent_doc_zombies();
+                    last_zombie_reap = Some(now);
+                    if reaped > 0 {
+                        log_event(
+                            &mut session_log,
+                            &format!("idle_queue_watch_reaped_historical_controller_zombies count={reaped}"),
+                        );
+                    }
+                }
+                let urgent_maintenance = supervisor_stale_fast
+                    || context_reset_in_flight
+                    || awaiting_clear_settle
+                    || shared.restart_reexec.load(Ordering::Relaxed);
+                if quiescent && !urgent_maintenance && !maintenance_due {
+                    continue;
+                }
+                if quiescent {
+                    last_quiescent_maintenance = Some(now);
+                } else {
+                    last_quiescent_maintenance = None;
+                }
+                let actor_ready = actor_ready_fast;
                 let ready_busy_reason = if active_head.is_some()
                     && actor_ready
                     && !clear_cooldown_active
@@ -1634,7 +1696,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         path.display()
                     ),
                 }
-                let supervisor_stale = shared.refresh_binary_stale();
+                let supervisor_stale = supervisor_stale_fast;
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without
                 // recomputing it.
@@ -3275,6 +3337,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idle_watch_quiescence_collapses_only_no_work_or_settled_dedup() {
+        assert!(idle_watch_is_quiescent(None, None, true));
+        assert!(idle_watch_is_quiescent(Some("#a"), Some("#a"), true));
+        assert!(!idle_watch_is_quiescent(Some("#a"), None, true));
+        assert!(!idle_watch_is_quiescent(Some("#a"), Some("#a"), false));
+        assert!(!idle_watch_is_quiescent(Some("#new"), Some("#old"), true));
+    }
 
     fn context_clear_projection_with_source(
         source: Option<&str>,

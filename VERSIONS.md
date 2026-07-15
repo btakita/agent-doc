@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.122
+
+- **Quiescent supervisors no longer execute the full idle reconciliation pipeline twice per second.** The idle watch keeps its prompt authoritative queue-head poll and installed-binary freshness check at 500ms, but collapses pane probes and the burst of controller-backed projection reads to a five-second liveness pass when there is no head or the same head has already settled. New work and stale binaries bypass the throttle immediately, preserving prompt dispatch and automatic recycling while removing the idle controller request storm.
+- **Detached controllers cannot resurrect deleted temporary project roots.** Controller startup captures the caller's project-root incarnation before creating bootstrap state and verifies it again before and after publishing the socket. A temp root deleted during detached startup now fails closed instead of being recreated as a permanent orphan controller.
+- **In-place supervisor upgrades reap controller zombies left by earlier reaper threads.** The idle watch periodically reaps only already-exited Linux children whose process name is exactly `agent-doc`; live harness children are excluded. This cleans up historical controller children whose dedicated waiter thread was destroyed by `execve` while retaining the per-child waiter for new launches.
+
 ## 0.34.121
 
 - **Forced IDEA reconnects now make the visible editor and replacement replica one atomic target.** When queue consumption or another post-response mutation advances the retained target, JetBrains compare-and-swaps the reconciled bytes into the open document under the non-operator mutation guard before it registers and swaps the replacement replica. Editor drift and pending local work fail closed, so a target-only replica can no longer ACK while stale IDEA text later replays an older boundary.

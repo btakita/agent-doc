@@ -18,6 +18,49 @@ pub fn reap_detached(child: std::process::Child) {
     let _ = spawn_reaper(child);
 }
 
+/// Reap already-exited `agent-doc` children whose dedicated reaper thread was
+/// lost across an in-place supervisor `execve` upgrade.
+///
+/// A live harness child is never touched: candidates must already be zombies
+/// and their Linux `comm` must be exactly `agent-doc`.
+#[cfg(target_os = "linux")]
+pub fn reap_historical_agent_doc_zombies() -> usize {
+    let children_path = format!("/proc/self/task/{}/children", std::process::id());
+    let Ok(children) = std::fs::read_to_string(children_path) else {
+        return 0;
+    };
+    let mut reaped = 0;
+    for raw_pid in children.split_whitespace() {
+        let Ok(pid) = raw_pid.parse::<libc::pid_t>() else {
+            continue;
+        };
+        let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        if !is_agent_doc_zombie(&comm, &stat) {
+            continue;
+        }
+        let mut status = 0;
+        let waited = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if waited == pid {
+            reaped += 1;
+        }
+    }
+    reaped
+}
+
+#[cfg(target_os = "linux")]
+fn is_agent_doc_zombie(comm: &str, stat: &str) -> bool {
+    let state = stat
+        .rsplit_once(") ")
+        .and_then(|(_, suffix)| suffix.chars().next());
+    comm.trim() == "agent-doc" && state == Some('Z')
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn reap_historical_agent_doc_zombies() -> usize {
+    0
+}
+
 /// Spawn the reaper thread. Returns the [`JoinHandle`] so tests can
 /// deterministically observe that the child was reaped; production callers use
 /// [`reap_detached`] and ignore it. Closing the inherited stdio handles first
@@ -39,6 +82,17 @@ fn spawn_reaper(mut child: std::process::Child) -> Option<std::thread::JoinHandl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn historical_reaper_filters_to_exited_agent_doc_children() {
+        assert!(is_agent_doc_zombie("agent-doc\n", "42 (agent-doc) Z 1 2 3"));
+        assert!(!is_agent_doc_zombie(
+            "agent-doc\n",
+            "42 (agent-doc) S 1 2 3"
+        ));
+        assert!(!is_agent_doc_zombie("claude\n", "42 (claude) Z 1 2 3"));
+    }
     use std::process::{Command, Stdio};
 
     /// A child that has already exited by the time the reaper runs is still a

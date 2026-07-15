@@ -6269,6 +6269,33 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProjectRootIncarnation {
+    inode: Option<u64>,
+}
+
+impl ProjectRootIncarnation {
+    fn capture(project_root: &Path) -> Result<Self> {
+        if !project_root.is_dir() {
+            anyhow::bail!(
+                "project root {} disappeared before controller startup",
+                project_root.display()
+            );
+        }
+        Ok(Self {
+            inode: agent_doc_fs::inode_of_path(project_root),
+        })
+    }
+
+    fn still_matches(self, project_root: &Path) -> bool {
+        project_root.is_dir()
+            && match self.inode {
+                Some(inode) => agent_doc_fs::inode_of_path(project_root) == Some(inode),
+                None => true,
+            }
+    }
+}
+
 pub(crate) fn serve_with_options(
     project_root: &Path,
     launch_mode: LaunchMode,
@@ -6277,6 +6304,11 @@ pub(crate) fn serve_with_options(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
+    // Detached startup races with short-lived callers (especially TempDir-backed
+    // tests). Capture the caller's directory incarnation before any bootstrap
+    // helper can create `.agent-doc`; a deleted root must never be resurrected by
+    // the child and retained forever as an orphan controller.
+    let root_incarnation = ProjectRootIncarnation::capture(project_root)?;
     let public_sock = socket_path(project_root);
     let mut sock = listen_socket.unwrap_or_else(|| public_sock.clone());
     if sock == public_sock
@@ -6314,6 +6346,13 @@ pub(crate) fn serve_with_options(
     if let Some(parent) = sock.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    if !root_incarnation.still_matches(project_root) {
+        let _ = std::fs::remove_file(&sock);
+        anyhow::bail!(
+            "project root {} was replaced during controller startup",
+            project_root.display()
+        );
+    }
     let bootstrap = if let Some(generation) = controller_generation {
         write_bootstrap_with_options(
             project_root,
@@ -6344,6 +6383,14 @@ pub(crate) fn serve_with_options(
         .name(name)
         .create_sync()
         .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    if !root_incarnation.still_matches(project_root) {
+        drop(listener);
+        let _ = std::fs::remove_file(&sock);
+        anyhow::bail!(
+            "project root {} was replaced while publishing the controller socket",
+            project_root.display()
+        );
+    }
     listener
         .set_nonblocking(ListenerNonblockingMode::Accept)
         .context("failed to set project controller listener nonblocking")?;
@@ -13360,6 +13407,23 @@ mod tests {
             .expect("controller should exit after its temp project root is removed");
         assert_eq!(result, Ok(()));
         handle.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn controller_startup_rejects_a_recreated_project_root_incarnation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let incarnation = ProjectRootIncarnation::capture(&project_root).unwrap();
+
+        drop(dir);
+        std::fs::create_dir_all(&project_root).unwrap();
+
+        assert!(
+            !incarnation.still_matches(&project_root),
+            "a detached child must distinguish the caller's deleted TempDir from a same-path directory it recreated"
+        );
+        std::fs::remove_dir(&project_root).unwrap();
     }
 
     #[test]

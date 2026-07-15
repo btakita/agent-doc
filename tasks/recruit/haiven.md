@@ -5,6 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
+queue: start
 ---
 
 ## Status
@@ -799,17 +800,19 @@ Neither changes the headline win: **the goroutine-per-connection cost is elimina
 ### Re: #haivenws marked complete — opus-4-8
 
 Confirmed — closing `#haivenws` (the gobwas/ws + gnet event-loop transport migration for haiven-websocket-hub). Moving it out of the backlog into `agent:done` dated 2026-07-15. Follow-on work stays tracked: `#haivenwsopt` (O(1)-scale refinements — antlabs/timer per-conn wheel, ants dispatch pool, fragmented-handshake hardening) and `#tnpa` (Track C unreliable-network load-test harness).
-<!-- agent:boundary:fc4eef3b -->
+<!-- agent:boundary:77a3a903 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+/goal Implement backlog item(s): #htv4
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#htv4] How does is the server.go module registered in gnet?
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]

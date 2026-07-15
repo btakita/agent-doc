@@ -7,6 +7,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 ## 0.34.125
 
 - **Project-root incarnation checks are safe on filesystems that immediately reuse inode numbers.** Detached controller startup retains an open handle to the caller's original directory until all startup checks finish, preventing the deleted inode from being recycled into a same-path replacement that could otherwise pass an inode-only comparison.
+- **JetBrains forced replica refreshes obey IntelliJ model read access (plugin 0.2.256).** Both delivery-ack recovery and native-library reload capture open `VirtualFile`/`Document` state inside a bounded read action, then perform logging and asynchronous CRDT re-registration after releasing it. This removes the `ThreadingAssertions` exception emitted by 0.2.255 from the background CRDT and library-reload watcher threads without moving full replica work onto the EDT or adding a poller.
 
 ## 0.34.124
 

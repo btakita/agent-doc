@@ -1041,19 +1041,27 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun forceRefreshOpenDocumentReplicas(project: Project, reason: String) {
             val manager = instances[project] ?: return
-            FileEditorManager.getInstance(project).openFiles
-                .asSequence()
-                .filter { it.name.endsWith(".md") }
-                .forEach { file ->
-                    val document = FileDocumentManager.getInstance().getDocument(file) ?: return@forEach
-                    manager.log.info("[crdt-replica] forcing open-document re-register for ${file.name} reason=$reason")
-                    manager.ensureOpenDocumentReplica(
-                        file.path,
-                        document,
-                        await = false,
-                        forceRefresh = true,
-                    )
-                }
+            val openDocuments = ApplicationManager.getApplication().runReadAction<List<Triple<String, String, Document>>> {
+                val fileDocumentManager = FileDocumentManager.getInstance()
+                FileEditorManager.getInstance(project).openFiles
+                    .asSequence()
+                    .filter { it.name.endsWith(".md") }
+                    .mapNotNull { file ->
+                        fileDocumentManager.getDocument(file)?.let { document ->
+                            Triple(file.path, file.name, document)
+                        }
+                    }
+                    .toList()
+            }
+            openDocuments.forEach { (filePath, fileName, document) ->
+                manager.log.info("[crdt-replica] forcing open-document re-register for $fileName reason=$reason")
+                manager.ensureOpenDocumentReplica(
+                    filePath,
+                    document,
+                    await = false,
+                    forceRefresh = true,
+                )
+            }
         }
 
         fun <T> withAgentAppliedEditorMutation(filePath: String, block: () -> T): T {
@@ -1068,13 +1076,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun forceRefreshOpenDocumentReplica(project: Project, filePath: String, reason: String) {
             val manager = instances[project] ?: return
-            val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
-            val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+            val openDocument = ApplicationManager.getApplication().runReadAction<Triple<String, String, Document>?> {
+                val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@runReadAction null
+                val document = FileDocumentManager.getInstance().getDocument(file) ?: return@runReadAction null
+                Triple(file.path, file.name, document)
+            } ?: return
+            val (resolvedFilePath, fileName, document) = openDocument
             manager.log.info(
-                "[crdt-replica] forcing delivery-ack re-register for ${file.name} reason=$reason",
+                "[crdt-replica] forcing delivery-ack re-register for $fileName reason=$reason",
             )
             manager.ensureOpenDocumentReplica(
-                file.path,
+                resolvedFilePath,
                 document,
                 await = false,
                 forceRefresh = true,

@@ -64,26 +64,7 @@ Verification completed:
 Release completed as agent-doc `0.34.89`: commit `7fc71c19` was pushed to `main`, tag `v0.34.89` was pushed, and the GitHub Release completed. The multi-platform trusted-publishing PyPI workflow is still in progress and is non-blocking. A concurrent `0.34.90` release landed as a descendant of `7fc71c19`; it includes this fix and is now the installed local binary. Crates.io accepted the changed `agent-doc-debounce` 0.34.89 package before the newer descendant superseded the remaining older graph publication.
 
 No additional backlog follow-up is needed because the regression is specified, covered, locally installed, pushed, and present in the current successor release.
-
-### Re: agent-doc response integrity and stale-supervisor recovery — gpt-5
-
-Fixed, recovered, installed, and released.
-
-The response path is now final-only. Streaming partials stay in recovery sidecars and can never become visible session-document responses; the final write, structural validation, snapshot, commit, and terminal session-check form one transaction. Mandatory integrity checks reject fragmented component trees, duplicate or inline boundaries, and malformed response structure before commit. Normal closeout no longer depends on repair.
-
-The stale-state causes were fixed across the complete lifecycle:
-
-- Repair now uses exact realtime-authority CAS rather than merging a stale disk buffer.
-- Zero-replica repair can prove and project its retained target without leaving authority and disk split.
-- Multi-stage repair clears all superseded deferred intents, so an intermediate projection cannot replay after commit.
-- `session-check` proves exact authority/disk equality, settles transient-only committed-tail drift from `HEAD`, and fails closed on real content divergence.
-- A committed response retained while the editor has zero registered replicas now resumes automatically through the ordinary CRDT delivery/ACK barrier after replica reattach. It materializes disk only when `HEAD`, canonical target, retained base, hashes, and bytes all match; newer editor text invalidates resumption instead of being overwritten.
-- Stale supervisors are detected and scheduled for safe-boundary recycle at every turn stage. The installed v0.34.115 supervisor recycled automatically during this recovery; a second session-check no longer reported stale binary state.
-
-Haiven is clean without a repair command. Disk, realtime authority, and Git `HEAD` all hash to `ff1a841117dda823c8788299673f0fb7eb058d387727a0f415dcb06cb3495e6b`; the session document is clean, contains exactly one `agent:boundary`, and contains none of the earlier fragment signatures. Its response was already committed, and the previously uncommitted WebSocket design document is now committed as `6d3e6706c` (`docs: clarify WebSocket hub state ownership`). The user’s separately staged `haiven-websocket-hub-takehome-orig.md` remains staged and untouched.
-
-agent-doc releases `0.34.110` through `0.34.115` contain the complete fix sequence. The final implementation commit is `0eb322ac`, installed locally as v0.34.115 and published at https://github.com/btakita/agent-doc/releases/tag/v0.34.115. Full verification passed: 7,639 tests passed, 240 skipped, with `make check` exit 0. The newest CI run was in progress and the Release/PyPI jobs were queued when checked; local verification and release creation succeeded.
-<!-- agent:boundary:ad38e84d -->
+<!-- agent:boundary:e9271713 -->
 <!-- /agent:exchange -->
 
 ## Queue

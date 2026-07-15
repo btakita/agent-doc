@@ -45,6 +45,29 @@ private data class PendingRemoteAck(
     val update: ReplicaRemoteUpdate,
 )
 
+internal data class RemoteAckReplayPlan(
+    val candidate: ReplicaRemoteUpdate,
+    val acknowledgedThroughGeneration: Long?,
+)
+
+/**
+ * Pick one oldest delivery as the cumulative ACK carrier. The controller
+ * matches [visibleContentHash] against the newest represented pending target
+ * and drains the entire prefix atomically, so replaying every historical
+ * generation only creates head-of-line blocking while the editor is typing.
+ */
+internal fun remoteAckReplayPlanUtil(
+    updates: Collection<ReplicaRemoteUpdate>,
+    visibleContentHash: String,
+): RemoteAckReplayPlan? {
+    val candidate = updates.minWithOrNull(compareBy<ReplicaRemoteUpdate> { it.generation }.thenBy { it.patchId })
+        ?: return null
+    val acknowledgedThrough = updates.asSequence()
+        .filter { it.expectedContentHash == visibleContentHash }
+        .maxOfOrNull { it.generation }
+    return RemoteAckReplayPlan(candidate, acknowledgedThrough)
+}
+
 private data class PendingRemoteEditorApply(
     val filePath: String,
     val expectedText: String,
@@ -110,7 +133,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     // A socket/controller recycle must not turn a successful visible apply into a
     // permanently orphaned delivery frontier.
     private val pendingRemoteAckReplays =
-        ConcurrentHashMap<String, ConcurrentHashMap<String, ReplicaRemoteUpdate>>()
+        ConcurrentHashMap<String, ConcurrentHashMap<String, PendingRemoteAck>>()
     private val refreshConnectionEpoch = AtomicLong(0)
     private val disposed = AtomicBoolean(false)
 
@@ -488,7 +511,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     if (forwarder.ackRemoteUpdate(update, visibleText)) {
                         ackCount++
                     } else {
-                        rememberPendingRemoteAck(filePath, update)
+                        rememberPendingRemoteAck(filePath, PendingRemoteAck(forwarder, update))
                     }
                     continue
                 }
@@ -523,27 +546,45 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private fun remoteAckKey(update: ReplicaRemoteUpdate): String =
         "${update.patchId}:${update.generation}"
 
-    private fun rememberPendingRemoteAck(filePath: String, update: ReplicaRemoteUpdate) {
+    private fun rememberPendingRemoteAck(filePath: String, ack: PendingRemoteAck) {
         pendingRemoteAckReplays
-            .computeIfAbsent(filePath) { ConcurrentHashMap() }[remoteAckKey(update)] = update
+            .computeIfAbsent(filePath) { ConcurrentHashMap() }[remoteAckKey(ack.update)] = ack
     }
 
     private fun rememberPendingRemoteAcks(filePath: String, updates: List<PendingRemoteAck>) {
-        for (ack in updates) rememberPendingRemoteAck(filePath, ack.update)
+        for (ack in updates) rememberPendingRemoteAck(filePath, ack)
     }
 
-    private fun clearPendingRemoteAcks(filePath: String) {
-        pendingRemoteAckReplays.remove(filePath)
-    }
+    private fun clearPendingRemoteAcks(filePath: String): Int =
+        pendingRemoteAckReplays.remove(filePath)?.size ?: 0
 
-    private fun replayPendingRemoteAcks(filePath: String, forwarder: CrdtReplicaForwarder): Int {
+    private fun replayPendingRemoteAcks(
+        filePath: String,
+        forwarder: CrdtReplicaForwarder,
+        knownVisibleText: String? = null,
+    ): Int {
         val pending = pendingRemoteAckReplays[filePath] ?: return 0
-        val visibleText = editorBufferText(filePath) ?: return 0
+        // A completed EDT apply may race a forced member replacement. Drop
+        // acknowledgements from the retired identity instead of replaying them
+        // through the replacement member.
+        for ((key, ack) in pending.entries) {
+            if (ack.forwarder !== forwarder) pending.remove(key, ack)
+        }
+        if (pending.isEmpty()) {
+            pendingRemoteAckReplays.remove(filePath, pending)
+            return 0
+        }
+        val visibleText = knownVisibleText ?: editorBufferText(filePath) ?: return 0
+        val plan = remoteAckReplayPlanUtil(
+            pending.values.map { it.update },
+            contentHash(visibleText),
+        ) ?: return 0
+        if (!forwarder.ackRemoteUpdate(plan.candidate, visibleText)) return 0
+
+        val acknowledgedThrough = plan.acknowledgedThroughGeneration ?: plan.candidate.generation
         var acknowledged = 0
-        for ((key, update) in pending.entries) {
-            if (forwarder.ackRemoteUpdate(update, visibleText) && pending.remove(key, update)) {
-                acknowledged++
-            }
+        for ((key, ack) in pending.entries) {
+            if (ack.update.generation <= acknowledgedThrough && pending.remove(key, ack)) acknowledged++
         }
         if (pending.isEmpty()) pendingRemoteAckReplays.remove(filePath, pending)
         return acknowledged
@@ -645,10 +686,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // potentially duplicating content. A true rebootstrap discards the
             // divergent lineage and also retires its stale pending delivery.
             if (forwarders[filePath] === forwarder) {
-                // Re-bootstrap replaces the old member lineage. Its pending ACKs
-                // were retired with that member and must not leak onto the newly
-                // registered replica identity.
-                clearPendingRemoteAcks(filePath)
                 val reattached = forwarderFor(
                     filePath,
                     canonical,
@@ -849,15 +886,16 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         try {
             executor.execute {
                 try {
-                    var acked = 0
-                    if (outcome.applied) {
-                        for (ack in pending.acknowledgements) {
-                            if (ack.forwarder.ackRemoteUpdate(ack.update, outcome.editorText)) {
-                                pendingRemoteAckReplays[pending.filePath]
-                                    ?.remove(remoteAckKey(ack.update), ack.update)
-                                acked++
-                            }
-                        }
+                var acked = 0
+                if (outcome.applied) {
+                    val activeForwarder = forwarders[pending.filePath]
+                    if (activeForwarder != null) {
+                        acked = replayPendingRemoteAcks(
+                            pending.filePath,
+                            activeForwarder,
+                            outcome.editorText,
+                        )
+                    }
                     } else if (outcome.editorText != null) {
                         requestRemoteDrain(pending.filePath, "remote-editor-apply-raced")
                     }
@@ -992,8 +1030,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         if (bypassRegisterBackoff && cached != null) {
             if (forwarders.replace(filePath, cached, forwarder)) {
+                // The replacement is now authoritative. Retire the prior
+                // member's retained ACK frontier only after the successful
+                // swap so a failed registration keeps the working lineage.
+                val retiredPendingAcks = clearPendingRemoteAcks(filePath)
                 cached.deregister()
-                log.info("[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}")
+                log.info(
+                    "[crdt-replica] atomically replaced cached forwarder for ${File(filePath).name}; " +
+                        "retired_pending_acks=$retiredPendingAcks",
+                )
                 return forwarder
             }
             // The manager worker is serialized, but preserve a concurrently

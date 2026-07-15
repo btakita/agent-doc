@@ -32,6 +32,11 @@ projections, and tmux transcript inference.
   single SQLite connection in WAL mode and serializes transactions for actor
   state, lifecycle transitions, dispatch attempts, queue state, projection
   status, admin operations, and crash-recovery markers.
+- Any compatibility call path that opens an independent SQLite connection for
+  an actor-record compare-and-swap must reserve the writer slot before reading
+  the prior generation (`BEGIN IMMEDIATE`). Concurrent session starts then wait
+  through the configured busy timeout instead of deadlocking a deferred
+  read-to-write upgrade with `SQLITE_BUSY`.
 - A session actor exists for each live document generation. It owns closeout
   cycle state, active queue head selection, response/pending mutation ordering,
   and document-level command serialization.

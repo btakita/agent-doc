@@ -28,6 +28,15 @@ class CrdtReplicaReadActionTest {
             "single-document refresh should leave CRDT work outside the read action",
             refreshOne.indexOf("manager.ensureOpenDocumentReplica") > refreshOne.indexOf("val (resolvedFilePath"),
         )
+
+        val forwarderSwap = source.substringAfter("if (forwarders.replace(filePath, cached, forwarder))")
+            .substringBefore("return forwarder")
+        val retireIndex = forwarderSwap.indexOf("clearPendingRemoteAcks(filePath)")
+        assertTrue("a successful replica swap must retire the old ACK frontier", retireIndex >= 0)
+        assertTrue(
+            "ACK retirement must happen before the old member is deregistered",
+            forwarderSwap.indexOf("cached.deregister()") > retireIndex,
+        )
     }
 
     private fun assertReadActionPrecedesDocumentLookup(body: String, label: String) {

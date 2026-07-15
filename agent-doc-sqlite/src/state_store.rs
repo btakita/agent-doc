@@ -1863,7 +1863,13 @@ pub fn store_actor_record_tx(
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
 ) -> Result<Vec<String>> {
-    let tx = conn.transaction()?;
+    // This transaction reads the current actor generation before writing the
+    // replacement record. A deferred SQLite transaction can let two starters
+    // acquire read snapshots and then fail one read-to-write upgrade with
+    // SQLITE_BUSY immediately; busy_timeout cannot resolve that upgrade
+    // deadlock. Reserve the writer slot before reading so concurrent starts
+    // serialize through the configured busy timeout instead.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let previous = load_actor_record_from_db(&tx, &record.document_id)?;
     let prior_generation = previous
         .as_ref()
@@ -2384,6 +2390,50 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_actor_record_waits_for_concurrent_writer_before_reading_cas_state() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut lock_conn = open_state_db(dir.path())?;
+        let mut store_conn = open_state_db(dir.path())?;
+        store_conn.busy_timeout(std::time::Duration::from_secs(2))?;
+
+        let writer =
+            lock_conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let record = ActorRecord {
+            document_id: "tasks/concurrent-start.md".to_string(),
+            session_id: "session-concurrent-start".to_string(),
+            generation: 1,
+            pane_id: "%41".to_string(),
+            window_id: "@41".to_string(),
+            harness: "codex".to_string(),
+            state: ActorState::Ready,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "concurrent_start".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 0,
+                new_generation: 1,
+            },
+        };
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let store = std::thread::spawn(move || -> Result<()> {
+            started_tx
+                .send(())
+                .expect("start signal receiver remains live");
+            store_actor_record_tx(&mut store_conn, None, &record, None, None)?;
+            Ok(())
+        });
+
+        started_rx.recv()?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        writer.commit()?;
+        store.join().expect("store thread must not panic")?;
+
+        let verify = open_state_db(dir.path())?;
+        assert!(load_actor_record_from_db(&verify, "tasks/concurrent-start.md")?.is_some());
+        Ok(())
+    }
 
     #[test]
     fn open_state_db_quarantines_and_rebuilds_a_corrupt_non_sqlite_file() -> Result<()> {

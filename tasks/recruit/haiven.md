@@ -795,7 +795,11 @@ Done. Decision recorded as an ADR and the transport migration is implemented, gr
 2. **Message dispatch** runs inline on the poller goroutine (the `Handle` contract is already non-blocking) rather than through a `panjf2000/ants` pool. Fine for the current model; the pool is the guard if any handler ever risks blocking the loop.
 
 Neither changes the headline win: **the goroutine-per-connection cost is eliminated**, which is what the scale requirement was actually about. `#haivenws` closed.
-<!-- agent:boundary:1b9a3000 -->
+
+### Re: #haivenws marked complete — opus-4-8
+
+Confirmed — closing `#haivenws` (the gobwas/ws + gnet event-loop transport migration for haiven-websocket-hub). Moving it out of the backlog into `agent:done` dated 2026-07-15. Follow-on work stays tracked: `#haivenwsopt` (O(1)-scale refinements — antlabs/timer per-conn wheel, ants dispatch pool, fragmented-handshake hardening) and `#tnpa` (Track C unreliable-network load-test harness).
+<!-- agent:boundary:fc4eef3b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -807,7 +811,6 @@ Neither changes the headline win: **the goroutine-per-connection cost is elimina
 
 <!-- agent:backlog -->
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
-- [x] [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
 - [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role
@@ -823,4 +826,5 @@ Neither changes the headline win: **the goroutine-per-connection cost is elimina
 
 <!-- agent:done -->
 - 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
+- 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 <!-- /agent:done -->

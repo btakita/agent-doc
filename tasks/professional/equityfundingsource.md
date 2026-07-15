@@ -108,12 +108,24 @@ Fixed and redeployed. You're right — I'd sourced the dropdown from `LSS.svc/Ge
 3. **The raw client** `tmo_loan_funding_add_` — what confirm-wire calls under the hood.
 
 **If the goal is just to get the dropdown populated sooner** (before real wires happen), I can add a small admin-only "add funding / link lender" endpoint that writes a `loan_funding` record (optionally pushing `AddLoanFunding` to TMO, or cache-only for seeding) without the full ready-for-funding gate. Want me to wire that? If so, tell me whether it should push to TMO or just seed the local cache.
-<!-- agent:boundary:c189790f -->
+
+### Re: Queue drain — both handled above — opus-4-8
+
+Draining the two queued prompts; both are already resolved in the responses above.
+
+> **Queue prompt:** do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy
+
+Done — picker re-sourced to LOS loan fundings (no LSS), deployed (worker `c379d51b`), `#tmo-lender-picker-verify` closed. Prod cache has 0 fundings so the list is empty until a wire is confirmed.
+
+> **Queue prompt:** Can we create loan funding records in the api?
+
+Answered above: yes, via `PUT /api/admin/funds/:id/confirm-wire` → `AddLoanFunding`, which also writes the `loan_funding` cache row the picker reads. Offered a direct seed/create endpoint — awaiting your go on push-to-TMO vs cache-only.
+<!-- agent:boundary:c7d21b9a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy
-- Can we create loan funding records in the api?
+- ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
+- ~~Can we create loan funding records in the api?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.115
+
+- **Retained committed responses resume automatically after editor reattach.** If closeout reached exact committed CRDT authority while the editor owner temporarily had zero registered replicas, `session-check` now recognizes the exact `HEAD` target plus its content-bearing deferred base, re-enters the ordinary CRDT delivery/ACK barrier after replica registration, materializes disk, and clears the entire deferred lineage. The resumption fails closed if the live editor or disk has advanced beyond that retained base; it never asks an agent to repair or reconstruct the response.
+
 ## 0.34.114
 
 - **Committed transient tails self-heal without repair.** When canonical authority and disk agree on an older deferred projection that differs from committed `HEAD` only by agent-doc transient markers, `session-check` now clears every obsolete deferred intent, CAS-restores the exact committed bytes through editor authority, and proves `HEAD == authority == disk` before success. This removes leaked `no-pending-capture` markers and stale boundary ids automatically while preserving genuine post-commit operator edits.

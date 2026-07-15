@@ -104,6 +104,12 @@ pub trait SessionCheckEffects {
         committed_content: &str,
         expected_current: &str,
     ) -> Result<()>;
+    fn settle_retained_committed_projection(
+        &self,
+        file: &Path,
+        committed_content: &str,
+        expected_disk: &str,
+    ) -> Result<bool>;
     fn repair_committed_historical_snapshot_drift(
         &self,
         file: &Path,
@@ -176,8 +182,31 @@ fn ensure_terminal_authority_disk_convergence(
     file: &Path,
     authority_content: &str,
     disk_content: &str,
+    effects: &impl SessionCheckEffects,
 ) -> Result<()> {
     if authority_content == disk_content {
+        return Ok(());
+    }
+    if agent_doc_git_io::revision::show_head(file)?.as_deref() == Some(authority_content)
+        && effects.settle_retained_committed_projection(file, authority_content, disk_content)?
+    {
+        let settled_authority = crate::resolve_current_document_content(
+            file,
+            "session_check_retained_projection_settled",
+        )?;
+        let settled_disk = crate::resolve_disk_document_content(
+            file,
+            "session_check_retained_projection_settled",
+        )?;
+        anyhow::ensure!(
+            settled_authority == authority_content && settled_disk == authority_content,
+            "[session-check] retained committed projection settlement for {} returned without exact HEAD/authority/disk convergence (head_hash={}, authority_hash={}, disk_hash={})",
+            file.display(),
+            agent_doc_hash::content_hash(authority_content),
+            agent_doc_hash::content_hash(&settled_authority),
+            agent_doc_hash::content_hash(&settled_disk),
+        );
+        agent_doc_snapshot_io::save(file, authority_content, agent_doc_ops_log_io::log_op)?;
         return Ok(());
     }
     let recycle_status =
@@ -276,7 +305,7 @@ pub fn run_with_options(
         crate::resolve_current_document_content(file, "session_check_terminal_convergence")?;
     let disk_content =
         crate::resolve_disk_document_content(file, "session_check_terminal_convergence")?;
-    ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content)?;
+    ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
     self_heal_transiently_stale_committed_projection(file, &authority_content, effects)?;
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
@@ -1437,6 +1466,20 @@ mod terminal_convergence_tests {
             )
         }
 
+        fn settle_retained_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_disk: &str,
+        ) -> Result<bool> {
+            agent_doc_document_realtime_io::settle_retained_committed_projection_through_authority(
+                file,
+                committed_content,
+                expected_disk,
+                "session_check_test_retained_settlement",
+            )
+        }
+
         fn repair_committed_historical_snapshot_drift(
             &self,
             _file: &Path,
@@ -1464,6 +1507,7 @@ mod terminal_convergence_tests {
             &file,
             "canonical response\n<!-- agent:boundary:new -->\n",
             "canonical response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n",
+            &TestEffects,
         )
         .expect_err("session-check must fail when authority and disk differ");
         let message = format!("{err:#}");

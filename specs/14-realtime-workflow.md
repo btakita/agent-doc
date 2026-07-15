@@ -134,6 +134,16 @@ divergent or reordered copies remain ambiguous and must fail closed. The
 coalesced projection is written through CRDT authority before prompt-residue
 classification or dispatch.
 
+An accepted write that reaches canonical CRDT authority while the durable editor
+owner has zero registered replicas remains a content-bearing deferred delivery,
+not a partial response and not a repair request. It records the exact editor/disk
+base and complete target, requests stale-supervisor recovery, and leaves disk
+unchanged. Once a replica reattaches, terminal verification may automatically
+resume that same target through the ordinary CRDT delivery/ACK barrier only when
+canonical authority equals committed `HEAD`, disk still equals the retained base,
+and the retained hashes and bytes match exactly. Any newer editor or disk content
+invalidates automatic resumption and fails closed.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,

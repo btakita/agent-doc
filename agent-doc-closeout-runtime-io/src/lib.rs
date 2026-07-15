@@ -168,6 +168,20 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         )
     }
 
+    fn settle_retained_committed_projection(
+        &self,
+        file: &Path,
+        committed_content: &str,
+        expected_disk: &str,
+    ) -> Result<bool> {
+        agent_doc_document_realtime_io::settle_retained_committed_projection_through_authority(
+            file,
+            committed_content,
+            expected_disk,
+            "session_check_retained_committed_projection_settlement",
+        )
+    }
+
     fn repair_committed_historical_snapshot_drift(
         &self,
         file: &Path,

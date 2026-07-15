@@ -703,6 +703,62 @@ pub fn settle_committed_projection_if_current_through_authority(
     Ok(())
 }
 
+/// Resume a committed target that was durably retained while editor authority
+/// had zero registered replicas.
+///
+/// The retained intent must prove both the current canonical target and the
+/// editor/disk base from which it was computed. The ordinary CRDT write barrier
+/// then delivers that target to the reattached replica and materializes disk.
+/// If the live editor has advanced beyond the retained base, the normal visible
+/// write guard fails closed instead of overwriting unsaved text.
+pub fn settle_retained_committed_projection_through_authority(
+    path: &Path,
+    committed_content: &str,
+    expected_disk: &str,
+    source: &str,
+) -> Result<bool> {
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    if canonical != committed_content || disk != expected_disk {
+        return Ok(false);
+    }
+    let Some(pending) = pending_document_write(path) else {
+        return Ok(false);
+    };
+    let committed_hash = agent_doc_hash::content_hash(committed_content);
+    let disk_hash = agent_doc_hash::content_hash(expected_disk);
+    if pending.target_content != committed_content
+        || !pending.target_hash.eq_ignore_ascii_case(&committed_hash)
+        || !pending.expected_hash.eq_ignore_ascii_case(&disk_hash)
+        || pending.expected_content.as_deref() != Some(expected_disk)
+    {
+        return Ok(false);
+    }
+
+    atomic_write_if_current_through_authority(path, committed_content, expected_disk, source)?;
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    anyhow::ensure!(
+        canonical == committed_content && disk == committed_content,
+        "{source}: retained committed projection for {} did not converge exactly (committed_hash={}, canonical_hash={}, disk_hash={})",
+        path.display(),
+        committed_hash,
+        agent_doc_hash::content_hash(&canonical),
+        agent_doc_hash::content_hash(&disk),
+    );
+    clear_all_deferred_document_write_intents(path, source)?;
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "retained_committed_projection_settled file={} prior_disk_hash={} committed_hash={} deferred_lineage=cleared",
+            path.display(),
+            disk_hash,
+            committed_hash,
+        ),
+    );
+    Ok(true)
+}
+
 /// Repair-only zero-replica recovery.
 ///
 /// Ordinary editor-owned writes must never fall back to disk when the owner has
@@ -3231,6 +3287,74 @@ mod tests {
         assert!(
             pending_document_write(&file).is_none(),
             "a settled committed projection must not retain or uncover an older target"
+        );
+    }
+
+    #[test]
+    fn retained_committed_projection_resumes_after_replica_reattach() {
+        let editor_base = "# Session\n\ncomplete response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n";
+        let committed = "# Session\n\ncomplete response\n<!-- agent:boundary:new -->\n";
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-committed-projection-reattach";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            committed,
+            editor_base,
+            "retained_committed_projection_zero_replica_test",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "zero-replica write should retain the canonical target without projecting disk: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_base);
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_committed_projection_zero_replica_verify",
+            )
+            .unwrap(),
+            committed,
+        );
+        let pending = pending_document_write(&file).expect("retained delivery intent");
+        assert_eq!(pending.expected_content.as_deref(), Some(editor_base));
+        assert_eq!(pending.target_content, committed);
+
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should attach");
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+        assert!(
+            settle_retained_committed_projection_through_authority(
+                &file,
+                committed,
+                editor_base,
+                "retained_committed_projection_reattach_test",
+            )
+            .unwrap(),
+            "matching retained committed lineage should resume after replica reattach"
+        );
+        ack.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_committed_projection_reattach_verify",
+            )
+            .unwrap(),
+            committed,
+        );
+        assert!(
+            pending_document_write(&file).is_none(),
+            "successful reconnect delivery must clear retained lineage"
         );
     }
 

@@ -588,7 +588,38 @@ I rewrote §3 of `tasks/recruit/haiven/haiven-websocket-hub-takehome.md` to make
 
 A message bus removes the need for every node to know every connection when doing topic fan-out, but it does **not** make hub nodes stateless: each node still owns and delivers to its local subscribers.
 
-<!-- agent:boundary:54e779c0 -->
+Please implement the solution in a private github repo. Create a git submodule in agent-loop.
+
+### Re: Implement the hub in a private repo + submodule — opus-4-8
+
+Done. Built the WebSocket Hub from the design doc as a runnable, tested Go project, pushed it to a new **private** GitHub repo, and wired it into agent-loop as a submodule.
+
+- **Repo:** `github.com/btakita/haiven-websocket-hub` (private)
+- **Submodule:** `src/haiven-websocket-hub` (superproject commit `601efc834`)
+
+**What's implemented** — single-node v1, built behind interfaces so multi-node is a drop-in (§2.0b). Each piece maps to a design section:
+
+- Envelope framing + validation (§2.2)
+- Pre-upgrade JWT auth, rejected before the socket exists (§2.1)
+- Two goroutines per connection + bounded send queue (§2.3)
+- Actor-model registry behind an interface, with a compare-and-swap `Unregister` that defeats the reconnect race (§2.3.1, §6.1)
+- `Downstream` / `Sink` interfaces + an in-process chat transport whose `Handle` is non-blocking (§2.4, §4.2)
+- Per-class backpressure policy table — drop-newest / drop-oldest / conflate-by-entity (LWW) / spill / disconnect on a bounded queue (§4.3)
+- Durable-outbox spill + resume-from-cursor for at-least-once classes (§4.3, §6.1)
+- Topic fan-out with membership in the actor and delivery off it (§4.4)
+- Heartbeat ping/pong + read/write deadlines (§4.5)
+- Per-downstream circuit breaker with an injected clock (§6.4)
+- Rate limiting + metrics counters (§4.2, §9)
+
+**Verification:** `go vet` clean; the full suite is green under `go test -race` — envelope validation, breaker state machine, every send-queue overflow policy, registry CAS + topic cleanup, hub fan-out + slow-consumer isolation + at-least-once seq/spill + resume, and an **end-to-end loopback-WebSocket test** (connect → subscribe → fan-out with server-stamped id/corr, auth rejection, unknown-service error frame). `hubd` builds and runs (`make run`, `:8080`, with `/healthz` + `/metrics`).
+
+`README.md` maps every design section to its file; `DESIGN.md` is committed alongside the code. I deferred exactly what §10 says to defer (multi-node routing plane, gRPC/bus transports, binary envelope, exactly-once) — the seams are built, not the machinery.
+
+Two notes:
+
+- I placed the submodule at `src/haiven-websocket-hub` to match this repo's submodule convention. Say the word if you'd rather it live under `tasks/recruit/haiven/`.
+- The outbox is in-memory (`NewMemOutbox`); swapping in SQLite or an append-only log is an interface change, not a hub rewrite.
+<!-- agent:boundary:95e1af69 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -599,6 +630,7 @@ A message bus removes the need for every node to know every connection when doin
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
 - [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role
 - [ ] [#haivenprofiles] Persist Haiven + Craig Fryar profiles as standalone files (tasks/recruit/, mail/contacts/craig-fryar/)

@@ -926,9 +926,13 @@ Implementations must keep tests for these cases:
 as a Lazily deferred-write intent, returns promptly, and does not project to
 disk; the central stale-recycle operation emits an
 `ack_recovery_force_refresh` event for every turn-stage caller, editor
-  reload/controller-replacement handlers rebuild cached open-document
-  forwarders, and later replica bootstrap/publication restores and proves that
-  target;
+reload/controller-replacement handlers rebuild cached open-document
+forwarders, and later replica bootstrap/publication restores and proves that
+target;
+- response-cell retry materialization normalizes transient ` (HEAD)` and
+  boundary annotations, and a latest complete response supersedes only
+  uncommitted assistant-response nodes after the last unchanged committed
+  response while preserving intervening operator prompts and one boundary;
 - an applied relay mutation with an empty target set is not delivery
   convergence;
 - harness Stop-hook recovery cannot commit transcript-shaped or direct-patched

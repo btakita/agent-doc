@@ -146,6 +146,10 @@ fn materialize_response_cell_projection(file: &Path, content: &str) -> Result<St
     Ok(materialized)
 }
 
+fn response_cell_materialized_after_projection(response: &str, content: &str) -> bool {
+    agent_doc_turn::response_replay::response_materialized_in_content(response, content)
+}
+
 fn try_add_response_cell_via_realtime_backbone(
     file: &Path,
     patches: &[template::PatchBlock],
@@ -166,6 +170,7 @@ fn try_add_response_cell_via_realtime_backbone(
         .response_sha256
         .unwrap_or_else(|| agent_doc_hash::content_hash(&response_cell));
     let operation_id = format!("response-cell:{}:{response_sha256}", state.cycle_id);
+    let committed_content = agent_doc_git_io::revision::show_head(file)?;
     let Some(write) = agent_doc_controller_io::project_controller::
         add_response_cell_via_controller_model_for_doc(
             file,
@@ -173,6 +178,7 @@ fn try_add_response_cell_via_realtime_backbone(
             &operation_id,
             &response_sha256,
             &response_cell,
+            committed_content.as_deref(),
             source,
         )?
     else {
@@ -181,7 +187,7 @@ fn try_add_response_cell_via_realtime_backbone(
 
     let materialized = materialize_response_cell_projection(file, &write.content)?;
     anyhow::ensure!(
-        materialized.contains(&response_cell),
+        response_cell_materialized_after_projection(&response_cell, &materialized),
         "response cell {} was not present after acknowledged disk materialization for {}",
         write.cell_id,
         file.display(),
@@ -2706,6 +2712,23 @@ mod tests {
             .is_none()
         );
         assert!(response_cell_from_patchback(&[], "").is_none());
+    }
+
+    #[test]
+    fn response_cell_projection_proof_tolerates_terminal_head_annotation() {
+        let response = "### Re: response cell — gpt-5\n\nApplied.";
+        let materialized = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: response cell — gpt-5 (HEAD)\n\n",
+            "Applied.\n",
+            "<!-- agent:boundary:next -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_cell_materialized_after_projection(
+            response,
+            materialized
+        ));
     }
 
     #[test]

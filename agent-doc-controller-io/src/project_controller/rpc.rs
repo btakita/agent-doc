@@ -3866,6 +3866,8 @@ struct ControllerResponseCellAddPayload {
     operation_id: String,
     response_sha256: String,
     response: String,
+    #[serde(default)]
+    committed_content: Option<String>,
     source: Option<String>,
 }
 
@@ -3877,6 +3879,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
     operation_id: &str,
     response_sha256: &str,
     response: &str,
+    committed_content: Option<&str>,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
@@ -3893,6 +3896,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
         operation_id: operation_id.to_string(),
         response_sha256: response_sha256.to_string(),
         response: response.to_string(),
+        committed_content: committed_content.map(str::to_string),
         source: Some(source.to_string()),
     };
     let result: ControllerResponseCellAddResult = request_controller(
@@ -4802,8 +4806,12 @@ fn handle_response_cell_add_rpc(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("controller_response_cell_add");
-    let write =
-        agent_doc_crdt_relay_io::add_response_cell_for_file(&canonical, &payload.response, source)?;
+    let write = agent_doc_crdt_relay_io::add_response_cell_for_file(
+        &canonical,
+        payload.committed_content.as_deref(),
+        &payload.response,
+        source,
+    )?;
     if let Some(write) = &write {
         agent_doc_cycle_state_io::append_response_cell_added(
             &canonical,

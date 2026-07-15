@@ -1436,6 +1436,7 @@ fn apply_response_cell_on_hub(
     hub: &mut RelayHub,
     file: &Path,
     authority: CrdtAuthority,
+    committed_content: Option<&str>,
     response: &str,
 ) -> Result<ResponseCellRelayWrite> {
     let ready = hub.commit_barrier_under_authority(authority)?;
@@ -1446,7 +1447,15 @@ fn apply_response_cell_on_hub(
         );
     }
     let canonical = hub.canonical_text();
-    let outcome = agent_doc_merge::response_cell::add_response_cell(&canonical, response)?;
+    let outcome = if let Some(committed_content) = committed_content {
+        agent_doc_merge::response_cell::supersede_uncommitted_response_tail(
+            &canonical,
+            committed_content,
+            response,
+        )?
+    } else {
+        agent_doc_merge::response_cell::add_response_cell(&canonical, response)?
+    };
     let (update_bytes, targets) = if outcome.applied {
         let packet = hub.apply_canonical_replace(&canonical, &outcome.content)?;
         (packet.update.len(), packet.targets.len())
@@ -1476,6 +1485,7 @@ fn apply_response_cell_on_hub(
 /// the apply-time canonical instead of a stale caller-provided baseline.
 pub fn add_response_cell_for_file(
     file: &Path,
+    committed_content: Option<&str>,
     response: &str,
     source: &str,
 ) -> Result<Option<ResponseCellRelayWrite>> {
@@ -1485,7 +1495,7 @@ pub fn add_response_cell_for_file(
     }
 
     let Some(result) = with_existing_hub(file, |hub| {
-        apply_response_cell_on_hub(hub, file, authority, response)
+        apply_response_cell_on_hub(hub, file, authority, committed_content, response)
     })?
     else {
         // A durable projection can lag an attached editor that has not yet
@@ -2920,7 +2930,7 @@ mod tests {
             .expect("live editor should register with the relay");
 
         let response = "### Re: operator prompt — gpt-5\n\nDone.";
-        let first = add_response_cell_for_file(&doc, response, "test")
+        let first = add_response_cell_for_file(&doc, None, response, "test")
             .unwrap()
             .expect("editor-attached response add should use the relay");
         assert!(first.applied);
@@ -2967,12 +2977,46 @@ mod tests {
             RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &projection).unwrap();
         assert!(recovered.canonical_text().contains(response));
 
-        let replay = add_response_cell_for_file(&doc, response, "test-replay")
+        let replay = add_response_cell_for_file(&doc, None, response, "test-replay")
             .unwrap()
             .expect("replay should still use the relay");
         assert!(!replay.applied);
         assert_eq!(replay.cell_id, first.cell_id);
         assert_eq!(replay.content, first.content);
+    }
+
+    #[test]
+    fn response_cell_relay_supersedes_restored_uncommitted_tail() {
+        let (_dir, doc) = temp_doc("supersede-response-cell.md");
+        let committed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "### Re: committed — gpt-5 (HEAD)\n\nCommitted.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = committed.replace(
+            "<!-- agent:boundary:old -->",
+            "### Re: stale retry — gpt-5\n\nStale.\n<!-- agent:boundary:new -->",
+        );
+        std::fs::write(&doc, &current).unwrap();
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        register_replica_for_file(&doc, "intellij:supersede-response-cell")
+            .unwrap()
+            .expect("live editor should register with the relay");
+
+        let latest = "### Re: latest retry — gpt-5\n\nLatest.";
+        let write = add_response_cell_for_file(&doc, Some(committed), latest, "test-supersede")
+            .unwrap()
+            .expect("editor-attached response add should use the relay");
+
+        assert!(write.applied);
+        assert!(write.content.contains("Committed."));
+        assert!(!write.content.contains("Stale."));
+        assert!(write.content.contains("Latest."));
+        assert_eq!(write.content.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

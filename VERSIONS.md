@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.119
+
+- **A complete retry now supersedes older uncommitted response tails atomically.** Before adding a response cell, the controller compares the live exchange with `HEAD`, anchors at the last unchanged committed response, removes only later assistant-response nodes, preserves every operator prompt, and emits the latest complete response with one terminal boundary. Interrupted partial/full variants no longer accumulate and do not require `agent-doc repair`.
+- **Response-cell materialization proof is semantic across transient heading markers.** The post-ACK gate now uses the existing normalized response replay proof, so a terminal ` (HEAD)` annotation cannot make an acknowledged response look absent and strand the cycle in `write_applied`.
+- **The parent-submodule Stop-hook regression is self-contained in clean CI.** Its fixture now creates the parent agent-doc project root explicitly instead of passing only when an ambient `/tmp/.agent-doc` happens to exist.
+
 ## 0.34.118
 
 - **Automatic controller recycling now reconnects editor replicas end to end at every turn stage.** The common stale-supervisor/controller recycle operation now emits the existing forced-reregister event for preflight, write/finalize, commit, and session-check callers alike. Both zero-replica timing windows retain the complete target, refuse disk fallback, and make JetBrains or VS Code replace cached open-document forwarders against the new controller before the identical closeout retry.

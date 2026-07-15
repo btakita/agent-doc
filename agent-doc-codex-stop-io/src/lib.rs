@@ -1638,6 +1638,7 @@ Done.\n\
         let sub_src_dir = tempfile::tempdir().unwrap();
         let parent = parent_dir.path().canonicalize().unwrap();
         let sub_src = sub_src_dir.path().canonicalize().unwrap();
+        fs::create_dir_all(parent.join(".agent-doc")).unwrap();
 
         git(&sub_src, &["init"]);
         fs::write(sub_src.join("README.md"), "sub").unwrap();

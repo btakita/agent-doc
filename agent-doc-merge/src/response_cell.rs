@@ -6,7 +6,10 @@
 //! response with the same heading and a different body remains distinct.
 
 use agent_doc_element::element;
-use agent_doc_markdown_ast::exchange_tree::{ExchangeNode, ExchangeNodeKind, parse_exchange_nodes};
+use agent_doc_markdown_ast::exchange_tree::{
+    ExchangeNode, ExchangeNodeKind, parse_exchange_nodes, render_exchange_nodes,
+};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseCellAddOutcome {
@@ -95,6 +98,108 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
     })
 }
 
+fn boundary_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
+}
+
+/// Replace response nodes appended after the last unchanged committed response,
+/// then add the latest complete response as one semantic cell.
+///
+/// This is the normal closeout recovery path when an older retained response is
+/// restored after the next complete response has already been captured. Prompt
+/// nodes are never removed. If the last committed response cannot be found
+/// unchanged in the current document, the operation fails safe to additive
+/// behavior so operator edits to committed history are preserved.
+pub fn supersede_uncommitted_response_tail(
+    doc: &str,
+    committed_doc: &str,
+    response: &str,
+) -> anyhow::Result<ResponseCellAddOutcome> {
+    let committed_components = element::parse(committed_doc)?;
+    let Some(committed_exchange) = committed_components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return add_response_cell(doc, response);
+    };
+    let committed_nodes = parse_exchange_nodes(committed_exchange.content(committed_doc));
+    let committed_response_ids = committed_nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        .map(ExchangeNode::node_id)
+        .collect::<HashSet<_>>();
+    let Some(last_committed_response_id) = committed_nodes
+        .iter()
+        .rev()
+        .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        .map(ExchangeNode::node_id)
+    else {
+        return add_response_cell(doc, response);
+    };
+
+    let components = element::parse(doc)?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
+    let current_nodes = parse_exchange_nodes(exchange.content(doc));
+    let Some(anchor_index) = current_nodes
+        .iter()
+        .rposition(|node| node.node_id() == last_committed_response_id)
+    else {
+        return add_response_cell(doc, response);
+    };
+
+    let mut removed = false;
+    let mut boundary = None;
+    let mut retained = Vec::with_capacity(current_nodes.len());
+    for (index, mut node) in current_nodes.into_iter().enumerate() {
+        for line in &node.lines {
+            if boundary_line(line) {
+                boundary = Some(line.trim().to_string());
+            }
+        }
+        node.lines.retain(|line| !boundary_line(line));
+        let stale_response = index > anchor_index
+            && matches!(node.kind, ExchangeNodeKind::Response { .. })
+            && !committed_response_ids.contains(&node.node_id());
+        if stale_response {
+            removed = true;
+            continue;
+        }
+        if !node.lines.is_empty() {
+            retained.push(node);
+        }
+    }
+    if !removed {
+        return add_response_cell(doc, response);
+    }
+
+    let cleaned_exchange = render_exchange_nodes(&retained);
+    let cleaned_doc = exchange.replace_content(doc, &cleaned_exchange);
+    let mut outcome = add_response_cell(&cleaned_doc, response)?;
+    if let Some(boundary) = boundary {
+        let reparsed = element::parse(&outcome.content)?;
+        let reparsed_exchange = reparsed
+            .iter()
+            .find(|component| component.name == "exchange")
+            .ok_or_else(|| anyhow::anyhow!("document has no agent:exchange component"))?;
+        let mut inner = reparsed_exchange
+            .content(&outcome.content)
+            .trim_end_matches('\n')
+            .to_string();
+        if !inner.is_empty() {
+            inner.push('\n');
+        }
+        inner.push_str(&boundary);
+        inner.push('\n');
+        outcome.content = reparsed_exchange.replace_content(&outcome.content, &inner);
+    }
+    outcome.applied = true;
+    Ok(outcome)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +230,75 @@ mod tests {
         assert!(second.applied);
         assert_ne!(second.cell_id, first.cell_id);
         assert_eq!(second.content.matches("### Re: topic").count(), 2);
+    }
+
+    #[test]
+    fn latest_complete_response_supersedes_uncommitted_response_tail() {
+        let committed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n\n",
+            "### Re: committed — gpt-5 (HEAD)\n\nCommitted.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = committed.replace(
+            "<!-- agent:boundary:committed -->",
+            concat!(
+                "### Re: stale retained — gpt-5\n\nOld response.\n\n",
+                "❯ operator follow-up\n\n",
+                "### Re: interrupted retry — gpt-5\n\nPartial response.\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+        let latest = "### Re: complete retry — gpt-5\n\nComplete response.";
+
+        let outcome = supersede_uncommitted_response_tail(&current, committed, latest).unwrap();
+
+        assert!(outcome.applied);
+        assert!(outcome.content.contains("Committed."));
+        assert!(outcome.content.contains("❯ operator follow-up"));
+        assert!(!outcome.content.contains("Old response."));
+        assert!(!outcome.content.contains("Partial response."));
+        assert_eq!(outcome.content.matches("Complete response.").count(), 1);
+        assert_eq!(outcome.content.matches("agent:boundary:").count(), 1);
+        assert!(
+            outcome.content.find("❯ operator follow-up").unwrap()
+                < outcome.content.find("### Re: complete retry").unwrap()
+        );
+        assert!(
+            outcome.content.find("### Re: complete retry").unwrap()
+                < outcome.content.find("agent:boundary:latest").unwrap()
+        );
+    }
+
+    #[test]
+    fn supersession_fails_safe_when_last_committed_response_was_edited() {
+        let committed = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            "### Re: committed — gpt-5\n\nCommitted.\n<!-- agent:boundary:abc -->",
+        );
+        let current = committed
+            .replace("Committed.", "Operator-edited committed response.")
+            .replace(
+                "<!-- agent:boundary:abc -->",
+                "### Re: pending — gpt-5\n\nPending.\n<!-- agent:boundary:next -->",
+            );
+
+        let outcome = supersede_uncommitted_response_tail(
+            &current,
+            &committed,
+            "### Re: latest — gpt-5\n\nLatest.",
+        )
+        .unwrap();
+
+        assert!(
+            outcome
+                .content
+                .contains("Operator-edited committed response.")
+        );
+        assert!(outcome.content.contains("Pending."));
+        assert!(outcome.content.contains("Latest."));
     }
 
     #[test]

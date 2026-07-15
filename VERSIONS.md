@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.125
+
+- **Project-root incarnation checks are safe on filesystems that immediately reuse inode numbers.** Detached controller startup retains an open handle to the caller's original directory until all startup checks finish, preventing the deleted inode from being recycled into a same-path replacement that could otherwise pass an inode-only comparison.
+
 ## 0.34.124
 
 - **Idle queue observation is change-driven.** Editor-attached supervisors compare a compact CRDT canonical state vector plus liveness/convergence state before materializing markdown; detached or deliberately controller-suppressed sessions compare disk metadata. Full canonical reads, hashing, serialization, and queue parsing now run only after that lazy revision changes, after probe failure, or on a 60-second safety reconciliation.

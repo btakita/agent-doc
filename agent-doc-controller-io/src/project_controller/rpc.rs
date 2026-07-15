@@ -6330,9 +6330,14 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 struct ProjectRootIncarnation {
     inode: Option<u64>,
+    /// Retaining the original directory handle prevents Unix filesystems from
+    /// recycling its inode while detached startup is still deciding whether
+    /// the path names the same root.
+    #[cfg(unix)]
+    _directory: std::fs::File,
 }
 
 impl ProjectRootIncarnation {
@@ -6343,12 +6348,21 @@ impl ProjectRootIncarnation {
                 project_root.display()
             );
         }
+        #[cfg(unix)]
+        let directory = std::fs::File::open(project_root).with_context(|| {
+            format!(
+                "failed to retain project-root incarnation handle for {}",
+                project_root.display()
+            )
+        })?;
         Ok(Self {
             inode: agent_doc_fs::inode_of_path(project_root),
+            #[cfg(unix)]
+            _directory: directory,
         })
     }
 
-    fn still_matches(self, project_root: &Path) -> bool {
+    fn still_matches(&self, project_root: &Path) -> bool {
         project_root.is_dir()
             && match self.inode {
                 Some(inode) => agent_doc_fs::inode_of_path(project_root) == Some(inode),

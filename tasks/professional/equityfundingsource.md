@@ -91,11 +91,29 @@ Fixed and redeployed. You're right — I'd sourced the dropdown from `LSS.svc/Ge
 **Verified**
 - `make check` green (1633 pass / 0 fail); committed `bbfb694`, pushed, **deployed** (worker `c379d51b`). Confirmed live: endpoint 401 auth-gated, and the built worker has **zero** `LSS.svc/GetLenders` references.
 - Checked prod D1 for the `#tmo-lender-picker-verify` populate check: the cache has **18 loans / 10 payment schedules but 0 loan-funding records**. So the dropdown is wired correctly but is **empty right now** because no loans are funded yet in the LOS — as fundings sync in, lenders appear automatically. Until then the field is manual-entry (correct fallback). Closing the verify item; the "does it list names" moment just waits on the first funded loan.
-<!-- agent:boundary:759e2b3e -->
+
+### Re: Can we create loan funding records in the API? — opus-4-8
+
+**Yes — and EFS already does, through one existing admin endpoint.** That's also the exact write that populates the lender dropdown.
+
+**The path that exists today**
+- `PUT /api/admin/funds/:id/confirm-wire` (`admin_funds_by_id_confirm_wire_PUT_`) builds a TMO funding body (LoanNumber, `Account` = the lender's TMO account, AmountFunded, investor name/email/address) and calls `tmo_loan_funding_add_` → `POST /LOS.svc/AddLoanFunding`.
+- On success it **upserts a `loan_funding` tmo_cache row** — the same rows the new lender picker reads. So the moment a wire is confirmed, that lender appears in the dropdown.
+
+**Why prod shows 0 fundings right now:** no fund has reached confirm-wire yet. That endpoint gates on (a) a **fund existing** — i.e. a lender selected and allocated on a deal — and (b) `final_docs_ready_for_funding_at` being set (escrow/title confirmed signed docs ready). Until a deal gets that far, there are no LOS lenders to list. There's also the **pull** side: TMO sync pulls fundings from `LOS.svc/GetLoanFundings` into the same cache, so fundings created directly in TMO show up too.
+
+**So there are three ways a funding record gets created:**
+1. **EFS admin confirm-wire** (above) — the real business flow, pushes to TMO + caches locally.
+2. **Directly in TMO** (LOS) — then EFS's periodic sync pulls it into the cache.
+3. **The raw client** `tmo_loan_funding_add_` — what confirm-wire calls under the hood.
+
+**If the goal is just to get the dropdown populated sooner** (before real wires happen), I can add a small admin-only "add funding / link lender" endpoint that writes a `loan_funding` record (optionally pushing `AddLoanFunding` to TMO, or cache-only for seeding) without the full ready-for-funding gate. Want me to wire that? If so, tell me whether it should push to TMO or just seed the local cache.
+<!-- agent:boundary:c189790f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy
+- Can we create loan funding records in the api?
 <!-- /agent:queue -->
 
 ## Notes
@@ -119,7 +137,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-lender-picker-verify] [recommended] [operator-verify] Confirm the TMO-lender searchable dropdown populates in prod: sign into /admin, open a pending lender request (or a lender's Lender Profile), and check the account field lists real LSS.svc GetLenders lenders. If it stays empty/'TMO is not connected', set TMO_API_TOKEN/TMO_DATABASE prod secrets (picker already degrades to manual entry). Validates #04v8/#jzqj GetLenders read path.
 <!-- /agent:backlog -->
 
 ## Review

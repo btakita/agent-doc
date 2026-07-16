@@ -150,7 +150,36 @@ Did the registry sharding (`#haivensharreg`, now done) — it makes the 100M tes
 **All LOADTEST tables refreshed** on the sharded + randomized build: `mem` (10k/100k/1M), `scale` (5M–100M, all measured), `perf`, `backpressure`, `realistic`. Added a **Methodology** section (distributed lengths + random content) and rewrote the scaling-seams list + a new *Optimizations §4* (registry sharding). The 100M row: **100,000,000 conns in ~106 GiB, built in ~69 s.**
 
 **Shipped:** two commits — `c2b0abc` (memory + scale bench + sims) and `2bc043b` (registry shard + payloads + docs) — pushed to `haiven-websocket-hub`. `make check` (vet + `-race` + build, all 12 packages) green throughout.
-<!-- agent:boundary:e8e703b1 -->
+
+### Re: high-scale perf + realistic (5M–100M) + hardware/OS specs — opus-4-8
+
+Added both. The headline result: **sustained throughput is flat from 5M to 100M held connections** — a large idle population costs RAM, not throughput.
+
+**`perf` at high scale** (`make loadtest-perf-scale`) — a fixed **100k active senders** drive 5M deliveries while the node holds N connections:
+
+| held conns | deliveries/sec | shed | RSS |
+|---|---|---|---|
+| 5M | 2.03 M/s | 0 | 4.7 GiB |
+| 20M | 2.36 M/s | 0 | 18.5 GiB |
+| 50M | 2.40 M/s | 0 | 43.8 GiB |
+| 100M | 2.30 M/s | 0 | 93.7 GiB |
+
+**`realistic` at high scale** (`make loadtest-realistic-scale`) — all five services, 100k active senders:
+
+| held conns | deliveries/sec | shed | RSS |
+|---|---|---|---|
+| 5M | 2.41 M/s | ~445k | 5.1 GiB |
+| 50M | 2.74 M/s | ~470k | 44.3 GiB |
+| 100M | 2.74 M/s | ~470k | 94.5 GiB |
+
+**Why it's flat:** a `SendToTopic` touches one topic's small member set and each connection's send queue is independent — neither scales with the *total* connection count, so a node holding 100M delivers to an active room exactly as fast as one holding 5M. The realistic ~470k shed is the open-loop burst signature (100k senders offer 1M ops instantly; the breaker sheds ~47% to stay alive), identical at every size — a function of the burst, not the scale. To run these I gave `perf`/`realistic` a fixed `-senders` count + the RAM-floor guard.
+
+**Hardware/OS header** added to the top of `LOADTEST.md`: AMD Ryzen 9 9950X3D (16C/32T), 186 GiB RAM, CachyOS / Linux 7.1.3, Go 1.26 — one node, one process.
+
+Committed `cdb6e87`, pushed. `make check` green.
+
+No new actionable follow-ups — the high-scale throughput characterization is complete and the shed behavior is expected (documented open-loop breaker shedding).
+<!-- agent:boundary:cd99d66e -->
 <!-- /agent:exchange -->
 
 ## Queue

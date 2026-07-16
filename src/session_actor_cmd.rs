@@ -4721,9 +4721,10 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             CLEAR_DIRECT_SUBMIT_ACCEPTANCE_TIMEOUT <= Duration::from_secs(1),
             "clear should fail fast instead of holding JB Run Agent Doc behind a long submit proof window"
         );
-        assert!(
+        assert_eq!(
             CLEAR_DIRECT_SUBMIT_MAX_ENTER_RESUBMITS_DEFAULT
-                < agent_doc_controller::dispatch::DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,
+                .cmp(&agent_doc_controller::dispatch::DIRECT_PANE_MAX_ENTER_RESUBMITS_DEFAULT,),
+            std::cmp::Ordering::Less,
             "clear must not reuse dispatch's long stuck-draft recovery budget"
         );
     }

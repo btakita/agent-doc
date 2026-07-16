@@ -1729,14 +1729,15 @@ mod realtime_ipc_cycle_model {
                     self.apply(Action::RegisterReplica);
                     continue;
                 }
-                if self.retained.is_none() && self.delivery.is_none() {
-                    if let Some(response_id) = self.pending_responses.iter().next().copied() {
-                        let already_visible = self.response_cells.contains(&response_id);
-                        let frame = self.make_frame(response_id, Structure::Exact, already_visible);
-                        self.retained = Some(frame);
-                        self.phase = Phase::Captured;
-                        continue;
-                    }
+                if self.retained.is_none()
+                    && self.delivery.is_none()
+                    && let Some(response_id) = self.pending_responses.iter().next().copied()
+                {
+                    let already_visible = self.response_cells.contains(&response_id);
+                    let frame = self.make_frame(response_id, Structure::Exact, already_visible);
+                    self.retained = Some(frame);
+                    self.phase = Phase::Captured;
+                    continue;
                 }
                 if self.retained.is_some() && self.delivery.is_none() && self.ipc.is_empty() {
                     self.apply(Action::SendRetained);

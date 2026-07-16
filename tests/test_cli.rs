@@ -21080,12 +21080,11 @@ fn test_agent_doc_preflight_io_owns_cycle_completion_coordinator() {
         );
     }
 
-    for required_dep in ["agent-doc-repair-io ="] {
-        assert!(
-            preflight_runtime_manifest.contains(required_dep),
-            "agent-doc-preflight-runtime-io should declare cycle-completion runtime dependency: {required_dep}"
-        );
-    }
+    let required_dep = "agent-doc-repair-io =";
+    assert!(
+        preflight_runtime_manifest.contains(required_dep),
+        "agent-doc-preflight-runtime-io should declare cycle-completion runtime dependency: {required_dep}"
+    );
 
     for forbidden in [
         "detect_write_completed_commit_missing(file)?",
@@ -25075,13 +25074,11 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && write_ipc_transport_source.contains("projected_or_sidecar_cycle_id(file)"),
         "agent-doc-write-ipc-io should tag IPC payloads from closeout projections before compatibility cycle sidecars"
     );
-    for forbidden in ["agent_doc_cycle_state_io::load(file)"] {
-        assert!(
-            !write_ipc_io_source.contains(forbidden)
-                && !write_ipc_transport_source.contains(forbidden),
-            "agent-doc-write-ipc-io production payload/diagnostic cycle ids must not use raw compatibility sidecars: {forbidden}"
-        );
-    }
+    let forbidden = "agent_doc_cycle_state_io::load(file)";
+    assert!(
+        !write_ipc_io_source.contains(forbidden) && !write_ipc_transport_source.contains(forbidden),
+        "agent-doc-write-ipc-io production payload/diagnostic cycle ids must not use raw compatibility sidecars: {forbidden}"
+    );
     for forbidden in [
         "std::fs::read_to_string(file)",
         "fs::read_to_string(file)",
@@ -29731,12 +29728,11 @@ fn test_agent_doc_queue_owns_queue_head_classification_policy() {
             "agent-doc-queue-io queue_consume.rs must not re-own or facade queue-head classification: {forbidden_snippet}"
         );
     }
-    for required_snippet in ["answered_free_text_head_node_keys"] {
-        assert!(
-            queue_consume.contains(required_snippet),
-            "agent-doc-queue-io queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
-        );
-    }
+    let required_snippet = "answered_free_text_head_node_keys";
+    assert!(
+        queue_consume.contains(required_snippet),
+        "agent-doc-queue-io queue_consume.rs should call focused queue consumption helpers directly: {required_snippet}"
+    );
 
     for relative_path in [
         "agent-doc-queue-io/src/queue_cmd.rs",

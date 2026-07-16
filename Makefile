@@ -84,7 +84,7 @@ tmux-ci:
 
 # Lint
 clippy:
-	@cargo clippy --quiet -- -D warnings
+	@cargo clippy --quiet --all-targets --all-features -- -D warnings
 
 # Verify package versions match and every agent-doc crate stays private.
 version-sync:

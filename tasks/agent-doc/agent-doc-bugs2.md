@@ -248,21 +248,126 @@ The retained EFS compact later recovered without force-disk or controller interv
 EFS currently has a newer, unrelated captured finalize in `retain_without_mutation`, owned by pane `%26`. I did not run recovery or mutate that foreign-owned document. If Compact Exchange is still desired for Monster Rod Holders, select `tasks/research/monsterrodholders.md` and invoke it once; this historical EFS failure is not evidence that Monster Rod Holders was compacted.
 
 No source change or new backlog item is needed for this duplicate. Session accretion is at warning level (205 exchange lines), but the auto queue is active, so this cycle continues without clearing context.
-### Re: 🚧 📌 JB `Compact Exchange` on monsterrodholders.md — gpt-5
 
-> **Queue prompt:**
->
+❯ > 📌 haiven.md session had a JB `File Cache Conflict`.
+> ```
+❯ > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+❯ >   controller pid, retry the commit):
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+❯ >   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+❯ >   Waiting, then retrying:
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+❯ >   tree? committed? is the editor replica alive?) before any further infra action.
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+❯ >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+> ```
+
+
+❯ > **Queue prompt:**
+❯ >
 > 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
-> ```
+❯ > ```
 > agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-> ```
+❯ > ```
 
 The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
 
 In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
 
 Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
-<!-- agent:boundary:8314ed58 -->
+
+### Re: 🚧 📌 JB `Compact Exchange` on monsterrodholders.md — gpt-5
+
+> **Queue prompt:**
+>
+❯ > 📌 haiven.md session had a JB `File Cache Conflict`.
+> ```
+❯ > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+❯ >   controller pid, retry the commit):
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+❯ >   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+❯ >   Waiting, then retrying:
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+❯ >   tree? committed? is the editor replica alive?) before any further infra action.
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+❯ >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+> ```
+
+
+❯ > **Queue prompt:**
+❯ >
+> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+❯ > ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+❯ > ```
+
+The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
+
+In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
+
+Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
+### Re: ACK wedges, queue resurrection, and cross-document Compact Exchange — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 haiven.md session had a JB `File Cache Conflict`.
+> ```
+> ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+>   controller pid, retry the commit):
+>
+>   Ran 1 shell command
+>
+> ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+>   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+>   Waiting, then retrying:
+>
+>   Ran 1 shell command
+>
+> ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+>   tree? committed? is the editor replica alive?) before any further infra action.
+>
+>   Ran 1 shell command
+>
+> ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+>   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+> ```
+
+> **Also addressed:** 🚧 📌 JB `Compact Exchange` on monsterrodholders.md failed while waiting on the unrelated `equityfundingsource.md` editor ACK.
+
+Fixed and released in agent-doc 0.34.154/0.34.155 and JetBrains plugin 0.2.267.
+
+The incidents had five interacting causes:
+
+1. JetBrains Compact Exchange called `saveAllDocuments()`, so an action on Monster Rod Holders could awaken EFS's retained ACK recovery and fail on that unrelated document. It now saves only the selected target document before routing the compact request; the target's live editor/CRDT remains authoritative.
+2. Pending agent mutations were treated too much like one replaceable result. They are now an ordered durable intent journal. Reconnect replays the monotonic prefix in order, so an earlier backlog add followed by a later mark/consume cannot disappear when ACK settlement is interrupted.
+3. Queue consumption performed repeated head operations against moving snapshots. Multi-head consume is now one atomic read/plan/write transaction, snapshots are projections rather than merge authorities, and deletion tombstones retain the last observed active-ID frontier. A deleted queue item cannot be resurrected by a stale snapshot.
+4. Merge-back lacked a coherent operator-authority rule. When expected versions diverge, agent-doc now reconstructs from the expected base plus durable editor/operator operations, then replays pending agent intents on top. Operator edits—including `queue: stop`—win over stale agent `go`; agent changes are retained separately instead of overwriting the editor buffer.
+5. A cell merge could duplicate the exchange/boundary and then deadlock the integrity gate. Every agent rebase is now structurally validated (at most one boundary and no duplicated exchange). A corrupt agent projection is rebuilt from the clean base plus durable operator operations before pending intents replay.
+
+So yes: the earlier non-monotonic multi-head consume was evidence of a non-coherent resolution strategy. The coherent rule is now “editor/operator operations are authoritative at version conflict; pending agent intents rebase and replay in order,” not whole-buffer ours-wins/theirs-wins. Killing the controller and retrying the same finalize is no longer the recovery contract: the canonical capture and intent journal survive, reconnect settles them exactly once, and `session-check` verifies settlement without force-disk.
+
+I did not reset or write EFS. Its foreign-owned live buffer and buffer-only `queue: stop` were left intact; the new reconstruction path is specifically designed to preserve that operator intent. The full Rust suite passed (7,771 tests) and the TLA+ checks passed. The target-scoped JetBrains regression also passed. Plugin 0.2.267 is installed, but the currently running IDE host still reports 0.2.266, so restart the IDE before live-testing Compact Exchange; `reload-lib` only reloads the native library.
+
+There are no new actionable engineering follow-ups from this incident; the remaining action is the already-tracked live IDE verification after restart.
+<!-- agent:boundary:172199ac -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -307,12 +412,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
 ---
----
-🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+~~~done
+📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
----
+~~~
 - ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
 ---
 ⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
@@ -337,26 +442,20 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
 ---
----
-📌 JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
 - ~~📌 haiven.md response was not committed.~~
-- 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
-- ⏭️ 📌 do [#zqv8]
-- ⏭️ 📌 do [#crde]
-- 📌 do [#steeringobservableset]
+- ~~📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.~~
+- ~~📌 do [#zqv8]~~
+- ~~📌 do [#crde]~~
+- ~~📌 do [#steeringobservableset]~~
 - ~~📌 do [#jbcompactexchange]~~
-- 📌 do [#goal1d0k]
-- 📌 do [#idlewatchturnactive]
-- 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
-- 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#capturebacklogatomic]
+- ⏭️ 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
-- 📌 do [#clippy197cleanup]
+- 🚧 📌 do [#clippy197cleanup]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#restartstderrbleed2]
 - 📌 do [#5bzd]
@@ -400,12 +499,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
 ---
----
-📌 JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
 ~~~done
 📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
 ```
@@ -438,28 +531,35 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
 ---
----
-📌 JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
 - 📌 do [#5qjj]
 - ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
-- 📌 do [#steeringobservableset]
+- ⏭️ 📌 do [#steeringobservableset]
 - ~~📌 do [#jbcompactexchange]~~
-- 📌 do [#goal1d0k]
-- 📌 do [#idlewatchturnactive]
-- 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
-- 📌 do [#zqv8]
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
 - ⏭️ 📌 do [#steeringobservableset]
 - ⏭️ 📌 do [#goal1d0k]
 - ⏭️ 📌 do [#idlewatchturnactive]
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
+---
+🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+```
+---
+- 📌 do [#goal1d0k]
+- 📌 do [#idlewatchturnactive]
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
+- 📌 do [#capturebacklogatomic]
+- 📌 do [#opcapturelazily]
+- 📌 do [#clippy197cleanup]
 - haiven.md response was not committed.
 <!-- /agent:queue -->
 

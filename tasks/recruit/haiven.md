@@ -5,6 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
+queue: start
 ---
 
 ## Status
@@ -179,7 +180,51 @@ Added both. The headline result: **sustained throughput is flat from 5M to 100M 
 Committed `cdb6e87`, pushed. `make check` green.
 
 No new actionable follow-ups — the high-scale throughput characterization is complete and the shed behavior is expected (documented open-loop breaker shedding).
-<!-- agent:boundary:cd99d66e -->
+❯ Why is typing DropNewest and not DropOldest? How would we know when the person stops typing if we use DropNewest?
+### Re: typing DropNewest vs DropOldest — opus-4-8
+
+You've found a real bug, and your second question is the proof of it.
+
+**The stated rationale, and where it breaks.** `typing.go` justifies the policy as: *"Typing is pure fire-and-forget — a dropped indicator is corrected by the next one within a keystroke or two."* That holds for the **mid-stream** `typing=true` frames — they're a redundant stream, so losing one self-corrects. It **fails for the terminal frame**. "Stopped" is the *last* frame in the sequence; there is no next one to correct it.
+
+**What the code actually does** (`hub/sendqueue.go:93-96`):
+
+```go
+case DropNewest:
+    q.dropped.Add(1)
+    q.mu.Unlock()
+    return nil    // the ARRIVING frame is silently discarded; nothing retries it
+```
+
+On a full queue the **newest** — the most truthful frame, possibly the "stopped" — is exactly what gets thrown away. And there is **no typing TTL anywhere in the repo**, so nothing heals it.
+
+So the answer to your second question is: **you wouldn't.** The indicator sticks on "Brian is typing…" until some later unrelated typing burst happens to land. That is the bug.
+
+**Why DropOldest is better** (`sendqueue.go:97-101`): it evicts the *stale queued* frame and enqueues the newest, so the latest state wins and "stopped" survives.
+
+**Why ConflateByEntity is better still** — and it's what presence already uses (`backpressure.go:80`). `sendqueue.go:77-83` replaces the pending frame for the same key **in place, regardless of fill level**:
+
+- newest always wins → "stopped" can't be dropped
+- bounded to one frame per entity → a fast typist can't occupy N queue slots
+- it bypasses the cap entirely, so fullness never drops it
+
+Typing is state-like in exactly the way presence is: only the latest (typing / stopped) per `(topic, client)` matters. It should almost certainly be `{Class: "typing", Overflow: ConflateByEntity, Guarantee: AtMostOnce}` — one line, identical to presence.
+
+**The counter-argument, and why it doesn't rescue the current code.** Discord and Slack make typing indicators **TTL-based**: the client expires the indicator after ~5–10s and the typist sends periodic refreshes, so "stopped" is *implied by silence* rather than delivered reliably. Under that model every frame is redundant and DropNewest is defensible. But this codebase's `typing.go` says the client "signals `typing`/`stopped`" — an **explicit** terminal event — and ships **no TTL**. The policy contradicts the data's semantics.
+
+**What I'd do — both, because they fix different failures:**
+
+- **Conflate** fixes the *dropped* stop (congestion) — the case you identified.
+- **A receiver-side TTL** fixes the *never-sent* stop: if a typist crashes or disconnects mid-keystroke, no "stopped" is ever emitted, and **no queue policy can save you**. This one is needed regardless.
+
+Conflation makes the common case correct and cheap; the TTL is the backstop for the case the server cannot observe.
+
+One caveat worth flagging: switching typing to conflate will **change the `realistic` loadtest numbers** — conflation collapses a burst from one client to its latest, so typing deliveries would fall below the current `5,000 ops × ~250 viewers`. That's a correctness win surfacing as a throughput change, not a regression.
+
+Queued as `#typeconflate` rather than changing it under you, since it's a default-policy decision that also touches the documented benchmark. Say the word and I'll make the switch.
+
+**Unrelated:** `/goal Implement backlog item(s): #49ax` — there is no `#49ax` in this document's backlog, or anywhere under `tasks/`, and the queue drained to empty, so there was nothing to implement. If that id came from another document or was a typo, point me at the right one.
+<!-- agent:boundary:f6a1378d -->
 <!-- /agent:exchange -->
 
 ## Queue

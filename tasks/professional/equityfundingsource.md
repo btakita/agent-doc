@@ -141,7 +141,29 @@ Got it, and this lines up well with what's already in place — a good chunk of 
 - **D2 — push timing at acceptance:** at "accepted", **link-first** — bind to a funding TMO already tracks pre-wire and keep any *new* funding local until wire — vs push a new `AddLoanFunding` to TMO right away. Your "TMO already tracks fundings pre-wire" points at link-first. *(Assume link-first; new fundings push at wire via the existing gated path.)*
 
 Queued **#fundlink1 / #fundlink2** as actionable. Confirm D1/D2 (or just say "assumptions are fine, go") and I'll build phase 1.
-<!-- agent:boundary:36d85ad0 -->
+Let's create the funding when the lender is selected instead of when the loan is accepted...since we need a lender.
+Do we have any access to the lender roster? Can we add lenders from previous fundings? Can we add lenders who have not part of a funding?
+
+My intention is I want the admin to sync a lender with TMO from the lender record and from a deal.
+
+### Re: Create funding on lender-select + lender roster — opus-4-8
+
+**Timing — got it, flipping to create-on-select.** A funding needs a lender, so the funding is materialized the moment a lender is picked/entered in the funding UI — not deferred to loan acceptance. That supersedes the old D2 (link-at-acceptance) and actually simplifies #fundlink1: lender-select *is* the create trigger, still local-first and non-blocking, TMO push stays behind the gated writeback path (#fundlink3). PRD updated (`prds/funding-lender-linking.md`).
+
+**Do we have access to the lender roster?** Yes — but it's EFS-local, not an external master. EFS is LOS-only and deliberately does **not** call `LSS.svc` (no `GetLenders` lender-master; tests enforce it). "Roster" resolves to two sources, both queryable now:
+- **EFS lender-role users** — `SELECT … FROM users WHERE role = 'lender'`, each with `users.lender_account` (the TMO account, may be NULL until an admin creates it). This is the real roster: a lender can be accredited and exist here **with no funding yet**.
+- **Funding-derived lenders** — `tmo_lenders_from_fundings_` over the `loan_funding` cache (TMO sync of `LOS.svc/GetLoanFundings`). Only lenders who've appeared in a funding. **This is the picker's current sole source.**
+
+**Can we add lenders from previous fundings?** Yes — the picker already does exactly this. `GET /api/admin/tmo-lenders` returns the distinct set of lenders across all cached `loan_funding` rows, deduped by TMO account. Any lender who's been in any prior funding is selectable today.
+
+**Can we add lenders who have NOT been part of a funding?** Two ways, one of which is a gap:
+- **Free-text** — the picker keeps free-text entry, so an admin can type a brand-new account/name/email that's never funded. Works today, but that lender won't persist in the dropdown for the next deal.
+- **From the roster** — lender-role users who have a `lender_account` but have never funded. These exist in D1 but the picker **doesn't show them yet** — it only reads funding-derived lenders. That's the one real gap.
+
+Recommendation (**D3**): union the two sources in the picker (`#fundpick-roster` — lender-role users ∪ funding-derived, dedup by account, free-text preserved). That makes "add a lender not part of a funding" work from the roster instead of only free-text, still LOS-only.
+
+Queued **#fundpick-roster** (recommended), **#fundlink1** (revised to create-on-select), **#fundlink2**. Say "go" (or "go, skip roster" if you want free-text-only) and I'll build — #fundpick-roster first since #fundlink1's picker depends on it.
+<!-- agent:boundary:c62e5c20 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

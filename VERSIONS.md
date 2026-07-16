@@ -4,7 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
-## 0.34.144
+## 0.34.145
 
 - **JetBrains no longer recursively refreshes project content after an external agent-doc commit (JetBrains plugin 0.2.264).** VCS signals now dirty only the VCS scope, so an unrelated unsaved agent-document buffer is never pushed into IntelliJ's memory-vs-disk resolver. Remote CRDT delivery refreshes only its clean target file before mutation, revalidates that the document stayed clean, and fails closed to exact-editor-baseline retry when operator memory is unsaved. This also updates the target `VirtualFile` modification stamp before `saveDocument`, eliminating byte-equal-but-stamp-stale conflict dialogs.
 

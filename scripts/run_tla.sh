@@ -27,7 +27,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache)
 for module in "${modules[@]}"; do
     cp "${repo_root}/formal/tla/${module}.tla" "${work_dir}/"
     cp "${repo_root}/formal/tla/${module}.cfg" "${work_dir}/"

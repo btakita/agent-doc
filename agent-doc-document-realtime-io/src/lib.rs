@@ -784,11 +784,16 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                     );
                 }
             };
-            atomic_write_authority_raw(path, &canonical)?;
+            let disk_rewritten = materialize_canonical_disk_projection_if_needed(path, &canonical)?;
+            let transport = if disk_rewritten {
+                "crdt_then_disk_projection"
+            } else {
+                "crdt_editor_saved_projection"
+            };
             agent_doc_ops_log_io::log_op(
                 path,
                 &format!(
-                    "write_authority action=materialized transport=crdt_then_disk_projection len={} hash={} delivery_converged=true",
+                    "write_authority action=materialized transport={transport} len={} hash={} delivery_converged=true disk_rewritten={disk_rewritten}",
                     canonical.len(),
                     relay_write.content_hash,
                 ),
@@ -798,6 +803,22 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
     }
 
     atomic_write_authority_raw(path, content)
+}
+
+/// Materialize the canonical editor frontier only when the editor has not
+/// already saved those exact bytes. Replacing an identical file after the live
+/// JetBrains document ACKed its saved frontier changes the VirtualFile stamp
+/// behind that document and can manufacture a File Cache Conflict despite byte
+/// equality.
+fn materialize_canonical_disk_projection_if_needed(path: &Path, canonical: &str) -> Result<bool> {
+    if std::fs::read(path)
+        .map(|disk| disk == canonical.as_bytes())
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    atomic_write_authority_raw(path, canonical)?;
+    Ok(true)
 }
 
 /// Explicit operator-authorized disk escape hatch. It preserves the same
@@ -3827,6 +3848,15 @@ mod tests {
         assert_eq!(current, target);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("transport=crdt_then_disk_projection"));
+    }
+
+    #[test]
+    fn canonical_disk_projection_is_noop_after_editor_saved_same_bytes() {
+        let canonical = "# Session\n\neditor-saved canonical\n";
+        let (_dir, file, _content) = temp_doc(canonical);
+
+        assert!(!materialize_canonical_disk_projection_if_needed(&file, canonical).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), canonical);
     }
 
     #[test]

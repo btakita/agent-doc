@@ -423,9 +423,15 @@ When the deferred reconnect result differs from the open JetBrains document, a
 forced refresh must install those exact bytes into the visible `Document` before
 registering the replacement replica. Installation is compare-and-swap against the
 editor bytes used to compute the reconnect result, refuses pending local edits or
-later buffer drift, and runs under the non-operator mutation guard. Only after the
-visible buffer and reconnect target agree may registration seed and atomically
-swap the replacement member. This ordering prevents queue-consume or other
+later buffer drift, and runs under the non-operator mutation guard. It refreshes
+the clean target `VirtualFile` stamp before mutation and must save the installed
+canonical bytes through `FileDocumentManager` before registration can advertise
+that frontier. Only after the visible buffer, disk projection, and reconnect
+target agree may registration seed and atomically swap the replacement member.
+After every editor ACK, the controller compares disk bytes and skips its legacy
+atomic projection when the editor already saved the same canonical bytes; an
+identical post-ACK rewrite is forbidden because changing only the file stamp can
+raise JetBrains File Cache Conflict. This ordering prevents queue-consume or other
 post-response targets from being ACKed by a target-only replica while stale IDEA
 text later replays an older boundary or queue state.
 

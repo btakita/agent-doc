@@ -87,9 +87,30 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(helper.contains("targetFile.refresh(false, false)"))
         assertTrue(helper.contains("isDocumentUnsaved(document)"))
         assertTrue(
-            "both delta and REPLACE delivery must refresh the clean target before mutation",
-            crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 3,
+            "delta, REPLACE, and deferred reconnect delivery must refresh the clean target before mutation",
+            crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 4,
         )
+    }
+
+    @Test
+    fun `deferred reconnect saves before replacement registration can ack`() {
+        val crdtReplicaPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val crdtReplica = Files.readString(crdtReplicaPath)
+        val deferredReconnect = functionBody(
+            crdtReplica,
+            "private fun installDeferredReconnectContent(",
+        )
+
+        val refresh = deferredReconnect.indexOf("refreshCleanDocumentBeforeRemoteApply(")
+        val edit = deferredReconnect.indexOf("applyMinimalDocumentEditUtil(")
+        val save = deferredReconnect.lastIndexOf("persistRemoteCrdtTextIfSafe(")
+        assertTrue("deferred reconnect must refresh the clean VFS stamp", refresh >= 0)
+        assertTrue("deferred reconnect must edit only after refreshing", edit > refresh)
+        assertTrue("deferred reconnect must save before it reports installed", save > edit)
+        assertTrue(deferredReconnect.contains("installed = persistRemoteCrdtTextIfSafe("))
     }
 
     @Test

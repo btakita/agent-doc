@@ -401,10 +401,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (hasPendingLocal(filePath)) return false
         var installed = false
         ApplicationManager.getApplication().invokeAndWait {
+            val targetFile = FileDocumentManager.getInstance().getFile(document) ?: return@invokeAndWait
+            if (!refreshCleanDocumentBeforeRemoteApply(filePath, targetFile, document)) {
+                return@invokeAndWait
+            }
             val before = document.text
             if (before == canonical) {
                 shadows[filePath] = canonical
-                installed = true
+                installed = persistRemoteCrdtTextIfSafe(
+                    filePath,
+                    document,
+                    expectedText,
+                    canonical,
+                )
                 return@invokeAndWait
             }
             if (before != expectedText || hasPendingLocal(filePath)) return@invokeAndWait
@@ -415,11 +424,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     applyMinimalDocumentEditUtil(document, before, canonical)
                 }
                 shadows[filePath] = canonical
-                installed = true
-                log.info(
-                    "[crdt-replica] installed deferred reconnect target for ${File(filePath).name} " +
-                        "before replacement registration (${canonical.length} chars)",
+                installed = persistRemoteCrdtTextIfSafe(
+                    filePath,
+                    document,
+                    expectedText,
+                    canonical,
                 )
+                if (installed) {
+                    log.info(
+                        "[crdt-replica] installed and saved deferred reconnect target for ${File(filePath).name} " +
+                            "before replacement registration (${canonical.length} chars)",
+                    )
+                }
             } finally {
                 applyingRemote.remove(filePath)
             }

@@ -69,11 +69,12 @@ use agent_doc_turn_executor::capability_proof::{
 #[cfg(test)]
 use agent_doc_turn_executor::codex_launch::CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER;
 use agent_doc_turn_executor::codex_launch::{
-    CODEX_CHILD_NETWORK_PROBE_MARKER, ManagedCapabilityProofTimings,
+    CODEX_CHILD_NETWORK_PROBE_MARKER, CodexNetworkProbeTransport, ManagedCapabilityProofTimings,
     OPENCODE_CHILD_SSH_PROBE_MARKER, add_dirs_from_args, args_contain_add_dir,
     classify_child_network_probe_failure, classify_child_required_ssh_probe_failure,
     classify_child_writable_root_probe_failure, codex_child_network_probe_prompt,
-    codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe, codex_resume_restart_args,
+    codex_child_writable_roots_probe_prompt, codex_exec_args_for_probe,
+    codex_network_probe_shell_command, codex_network_probe_transport, codex_resume_restart_args,
     codex_text_file_busy_launch_retry_delay, codex_transport_403_429_diagnostic, default_base_args,
     filter_codex_stderr_noise, format_required_ssh_failure, looks_like_codex_transport_403_429,
     looks_like_local_browser_cdp_permission_denied, looks_like_opencode_usage_output,
@@ -295,6 +296,51 @@ fn prove_codex_child_network_access(
         &String::from_utf8_lossy(&output.stderr),
         harness,
     )
+}
+
+fn prove_unrestricted_codex_network_access_with_command(
+    shell_command: &str,
+    env: &std::collections::HashMap<String, String>,
+    harness: &str,
+    probe_timeout: Duration,
+) -> Result<()> {
+    let mut cmd = Command::new(shell_command);
+    cmd.arg("-lc")
+        .arg(codex_network_probe_shell_command())
+        .env_remove("CODEX_CLI")
+        .env_remove("CODEX")
+        .envs(env)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let child = spawn_agent_command(&mut cmd).map_err(|e| {
+        anyhow::anyhow!("failed to start unrestricted {harness} network probe: {e}")
+    })?;
+    let output = wait_with_timeout(child, probe_timeout, "unrestricted network", harness)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        let classification = classify_child_network_probe_failure(&stderr, harness, false);
+        anyhow::bail!(
+            "{classification}: unrestricted {harness} network probe exited nonzero: {}",
+            stderr.trim()
+        );
+    }
+    if !stdout.contains(CODEX_CHILD_NETWORK_PROBE_MARKER) {
+        anyhow::bail!(
+            "unrestricted {harness} network probe completed without marker {CODEX_CHILD_NETWORK_PROBE_MARKER}: {}",
+            stdout.trim()
+        );
+    }
+    Ok(())
+}
+
+fn prove_unrestricted_codex_network_access(
+    env: &std::collections::HashMap<String, String>,
+    harness: &str,
+    probe_timeout: Duration,
+) -> Result<()> {
+    prove_unrestricted_codex_network_access_with_command("sh", env, harness, probe_timeout)
 }
 
 fn prove_opencode_child_network_access(
@@ -611,17 +657,37 @@ pub fn prove_managed_session_capabilities(
         timings.network_host_dns = Some(phase_start.elapsed());
 
         let phase_start = Instant::now();
-        let cache_key = managed_network_child_proof_cache_key(command, args, env, harness);
-        if managed_network_child_proof_is_cached(&cache_key) {
-            network_probe = "child_dns_https_cached";
-        } else {
-            if harness == "opencode" {
-                prove_opencode_child_network_access(command, args, env, harness, probe_timeout)?;
-            } else {
-                prove_codex_child_network_access(command, args, env, harness, probe_timeout)?;
+        match codex_network_probe_transport(harness, args) {
+            CodexNetworkProbeTransport::DirectUnrestrictedShell => {
+                prove_unrestricted_codex_network_access(env, harness, probe_timeout)?;
+                network_probe = "unrestricted_shell_dns_https";
             }
-            remember_managed_network_child_proof(cache_key);
-            network_probe = "child_dns_https";
+            CodexNetworkProbeTransport::ManagedHarnessChild => {
+                let cache_key = managed_network_child_proof_cache_key(command, args, env, harness);
+                if managed_network_child_proof_is_cached(&cache_key) {
+                    network_probe = "child_dns_https_cached";
+                } else {
+                    if harness == "opencode" {
+                        prove_opencode_child_network_access(
+                            command,
+                            args,
+                            env,
+                            harness,
+                            probe_timeout,
+                        )?;
+                    } else {
+                        prove_codex_child_network_access(
+                            command,
+                            args,
+                            env,
+                            harness,
+                            probe_timeout,
+                        )?;
+                    }
+                    remember_managed_network_child_proof(cache_key);
+                    network_probe = "child_dns_https";
+                }
+            }
         }
         timings.network_child = Some(phase_start.elapsed());
     }
@@ -2348,6 +2414,23 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             &env,
             "codex",
             agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn prove_unrestricted_codex_network_access_runs_equivalent_shell_probe() {
+        let (_dir, script) = write_fake_codex_script(&format!(
+            r#"#!/bin/sh
+printf '%s\n' '{}'
+"#,
+            CODEX_CHILD_NETWORK_PROBE_MARKER
+        ));
+        prove_unrestricted_codex_network_access_with_command(
+            &script,
+            &std::collections::HashMap::new(),
+            "codex",
+            Duration::from_secs(2),
         )
         .unwrap();
     }

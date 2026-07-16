@@ -252,7 +252,7 @@ fn parse_sandbox_mode_config(value: &str) -> Option<String> {
     }
 }
 
-fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
+pub fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -281,6 +281,28 @@ fn codex_sandbox_mode_from_args(args: &[String]) -> Option<String> {
         }
     }
     None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexNetworkProbeTransport {
+    /// The live Codex child has no sandbox, so the same DNS/HTTPS command can
+    /// run directly without paying for a second model-backed Codex turn.
+    DirectUnrestrictedShell,
+    /// A Codex/OpenCode child must run the command to prove its sandbox policy.
+    ManagedHarnessChild,
+}
+
+pub fn codex_network_probe_transport(
+    harness: &str,
+    launch_args: &[String],
+) -> CodexNetworkProbeTransport {
+    if harness == "codex"
+        && codex_sandbox_mode_from_args(launch_args).as_deref() == Some("danger-full-access")
+    {
+        CodexNetworkProbeTransport::DirectUnrestrictedShell
+    } else {
+        CodexNetworkProbeTransport::ManagedHarnessChild
+    }
 }
 
 fn record_codex_resume_sandbox_mode(
@@ -428,15 +450,20 @@ pub fn opencode_run_args_for_probe(launch_args: &[String], prompt: String) -> Ve
     args
 }
 
+pub fn codex_network_probe_shell_command() -> &'static str {
+    "set -eu; \
+if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
+else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
+if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
+else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
+printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK"
+}
+
 pub fn codex_child_network_probe_prompt() -> String {
-    "Run exactly this command:\n\n\
-         sh -lc 'set -eu; \
-         if command -v getent >/dev/null 2>&1; then getent hosts github.com >/dev/null; \
-         else python3 -c \"import socket; socket.getaddrinfo(\\\"github.com\\\", 443)\"; fi; \
-         if command -v curl >/dev/null 2>&1; then curl -fsSIL --max-time 10 https://github.com >/dev/null; \
-         else python3 -c \"import urllib.request; urllib.request.urlopen(\\\"https://github.com\\\", timeout=10).close()\"; fi; \
-         printf \"%s%s\\n\" AGENT_DOC_NETWORK _PROBE_OK'"
-        .to_string()
+    format!(
+        "Run exactly this command:\n\nsh -lc '{}'",
+        codex_network_probe_shell_command()
+    )
 }
 
 pub fn opencode_child_network_probe_prompt() -> String {
@@ -1162,6 +1189,29 @@ mod tests {
     #[test]
     fn structural_base_args_include_exec_json_only() {
         assert_eq!(structural_base_args(), strings(&["exec", "--json"]));
+    }
+
+    #[test]
+    fn unrestricted_codex_network_probe_uses_direct_equivalent_shell() {
+        for args in [
+            strings(&["-s", "danger-full-access"]),
+            strings(&["--sandbox=danger-full-access"]),
+            strings(&["-c", "sandbox_mode=\"danger-full-access\""]),
+        ] {
+            assert_eq!(
+                codex_network_probe_transport("codex", &args),
+                CodexNetworkProbeTransport::DirectUnrestrictedShell
+            );
+        }
+        assert_eq!(
+            codex_network_probe_transport("codex", &strings(&["-s", "workspace-write"])),
+            CodexNetworkProbeTransport::ManagedHarnessChild
+        );
+        assert_eq!(
+            codex_network_probe_transport("opencode", &strings(&["-s", "danger-full-access"])),
+            CodexNetworkProbeTransport::ManagedHarnessChild
+        );
+        assert!(codex_child_network_probe_prompt().contains(codex_network_probe_shell_command()));
     }
 
     #[test]

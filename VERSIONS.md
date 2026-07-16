@@ -6,7 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.143
 
-- **JetBrains tab selection now swaps the matching tmux pane on the same editor side.** Automatic exact-visible sync was submitted correctly but then preserved the stale layout because the SQLite migration made safe-passive ownership proof skip every authoritative actor lookup. Controller-owned sync now consumes the authoritative actor row as a local SQLite read, allowing the existing no-autostart atomic swap path to run; standalone passive CLI sync still avoids a nested Project Controller RPC. Regression coverage keeps the two proof modes distinct.
+- **JetBrains tab selection now swaps the matching tmux pane on the same editor side.** Automatic exact-visible sync was submitted correctly but then preserved the stale layout because the SQLite migration made safe-passive ownership proof skip every authoritative actor lookup. Controller-owned sync now consumes the authoritative actor row as a local SQLite read, allowing the existing no-autostart atomic swap path to run; standalone passive CLI sync still avoids a nested Project Controller RPC. Unit and TLA+ regression coverage keep the two proof modes distinct, prove the visible/stashed pane partition, and require controller-local sync liveness without permitting autostart.
 
 ## 0.34.142
 

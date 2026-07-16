@@ -69,7 +69,7 @@ The patch watcher receives document updates from `agent-doc write --ipc` and app
 **Delivery and receipt protocol:**
 - On successful file-IPC application: publish a lazily visible-write receipt for `patch_id`, then delete the patch JSON file. Deletion is only the file-delivery signal; the receipt/projection is the closeout proof.
 - On failure: leave the file in place and log a warning. The CLI will time out and exit with code 75 (`EX_TEMPFAIL`).
-- For typed `save_document` recovery, the editor must save the already-open buffer through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`. This operation is allowed to call the editor save API, but must not replace the document buffer, write `.agent-doc/ack-content`, or replay `fullContent`. Missing receipt support is an incompatible plugin/native-library version error.
+- For typed `save_document` recovery, the editor must save the already-open buffer through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`. This operation is allowed to call the editor save API, but must not replace the document buffer, select/open/focus an editor tab, write `.agent-doc/ack-content`, or replay `fullContent`. Missing receipt support is an incompatible plugin/native-library version error.
 
 **File-not-found retry:**
 - If the target file is not found in the editor's VFS, wait 200ms, refresh VFS, and try once more.
@@ -245,7 +245,7 @@ Three states must be reconciled:
 - VS Code accepts the same payload from `.agent-doc/patches/save-document.signal`; the binary uses that file signal when no socket listener is active.
 - The receiver must locate an already-open markdown document for `file`, wait for typing idle, save through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`.
 - The receiver must reject missing documents, non-markdown targets, active-typing timeout, failed saves, and missing receipt support without writing `.agent-doc/ack-content`. The binary treats an absent lazily visible-write receipt/projection as an unproven flush.
-- This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, reconnect reread repair, or legacy `fullContent` redelivery.
+- This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, editor selection/focus changes, reconnect reread repair, or legacy `fullContent` redelivery.
 
 ### 4.3 CRDT State Exchange
 

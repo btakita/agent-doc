@@ -207,10 +207,13 @@ mod crdt_lineage_fence_model {
         DeliverCurrent,
         RestartMatchingProjection,
         RestartMismatchedProjection,
+        RequestEditorSave,
+        EditorNativeSave,
+        OperatorAdvanceAfterSaveRequest,
         Commit,
     }
 
-    const ACTIONS: [Action; 8] = [
+    const ACTIONS: [Action; 11] = [
         Action::OperatorDelete,
         Action::CaptureAgentIntent,
         Action::ReplaceAndRebase,
@@ -218,6 +221,9 @@ mod crdt_lineage_fence_model {
         Action::DeliverCurrent,
         Action::RestartMatchingProjection,
         Action::RestartMismatchedProjection,
+        Action::RequestEditorSave,
+        Action::EditorNativeSave,
+        Action::OperatorAdvanceAfterSaveRequest,
         Action::Commit,
     ];
 
@@ -231,6 +237,8 @@ mod crdt_lineage_fence_model {
         stale_frame_pending: bool,
         current_frame_pending: bool,
         ack_cursor: u8,
+        disk_has_agent_intent: bool,
+        editor_save_requested: bool,
         committed: bool,
         corrupted: bool,
     }
@@ -283,10 +291,36 @@ mod crdt_lineage_fence_model {
                         self.current_frame_pending = true;
                     }
                 }
+                Action::RequestEditorSave
+                    if self.pending_agent_intent
+                        && self.agent_intent_applied
+                        && !self.current_frame_pending
+                        && !self.disk_has_agent_intent =>
+                {
+                    self.editor_save_requested = true;
+                }
+                Action::EditorNativeSave
+                    if self.editor_save_requested
+                        && self.agent_intent_applied
+                        && !self.current_frame_pending =>
+                {
+                    self.disk_has_agent_intent = true;
+                    self.editor_save_requested = false;
+                }
+                Action::OperatorAdvanceAfterSaveRequest
+                    if self.editor_save_requested && self.pending_agent_intent =>
+                {
+                    // A newer operator cut invalidates the old save proof. The
+                    // durable agent intent must rebase and request another save.
+                    self.agent_intent_applied = false;
+                    self.current_frame_pending = true;
+                    self.editor_save_requested = false;
+                }
                 Action::Commit
                     if self.pending_agent_intent
                         && self.agent_intent_applied
-                        && !self.current_frame_pending =>
+                        && !self.current_frame_pending
+                        && self.disk_has_agent_intent =>
                 {
                     self.committed = true;
                     self.pending_agent_intent = false;
@@ -305,8 +339,8 @@ mod crdt_lineage_fence_model {
                 "deleted queue item resurrected: {self:?}"
             );
             assert!(
-                !self.committed || self.agent_intent_applied,
-                "commit lost pending agent intent: {self:?}"
+                !self.committed || (self.agent_intent_applied && self.disk_has_agent_intent),
+                "commit preceded the exact native editor save: {self:?}"
             );
             if self.pending_agent_intent && self.lineage > 0 {
                 assert!(
@@ -332,10 +366,11 @@ mod crdt_lineage_fence_model {
     #[test]
     fn exhaustive_lineage_recovery_interleavings_preserve_monotonic_progress() {
         let mut visited = BTreeSet::new();
-        explore(World::initial(), 12, &mut visited);
+        explore(World::initial(), 18, &mut visited);
         assert!(visited.iter().any(|world| world.committed));
         assert!(visited.iter().any(|world| world.ack_cursor >= 2));
         assert!(visited.iter().any(|world| world.lineage >= 2));
+        assert!(visited.iter().any(|world| world.editor_save_requested));
     }
 }
 

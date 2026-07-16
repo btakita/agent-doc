@@ -233,6 +233,17 @@ fn spawn_crdt_delivery_pump(
                             );
                             return;
                         }
+                        // Model the editor's native save as a separate step
+                        // after delivery ACK. Production settlement must still
+                        // observe the exact disk projection and revalidate the
+                        // canonical editor version before it can commit.
+                        if let Err(err) = std::fs::write(&canonical, replica.text()) {
+                            eprintln!(
+                                "test CRDT delivery pump failed to save {}: {err:#}",
+                                canonical.display()
+                            );
+                            return;
+                        }
                     }
                 }
                 Ok(None) => return,

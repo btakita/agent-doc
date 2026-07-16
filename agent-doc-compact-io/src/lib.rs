@@ -556,10 +556,10 @@ pub fn run_in_controller(
         return Ok(());
     }
 
-    // `#jb-compact-editor-buffer-flush`: the editor-IPC convergence in
-    // `apply_compacted_document` updated only the live editor's in-memory buffer;
-    // the plugin never saves. Flush it to disk NOW — before the re-read below and
-    // the commit — so the working-tree file holds the compacted content. Otherwise
+    // `#jb-compact-editor-buffer-flush`: CRDT convergence now requests and proves
+    // the owning editor's native save. Keep this older targeted flush as a
+    // defense-in-depth path for legacy editor-IPC convergence that updated only
+    // the live in-memory buffer. Flush it before the re-read and commit. Otherwise
     // the selective commit compares the stale pre-compact working tree against the
     // compacted snapshot, treats the snapshot as historical exchange drift, and
     // repairs it back to HEAD, leaving HEAD and disk pre-compact (the "JB Compact
@@ -4091,9 +4091,13 @@ mod tests {
 
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("compact_editor_buffer_flush")
+            (ops_log.contains("compact_editor_buffer_flush")
                 && (ops_log.contains("transport=save_document")
-                    || ops_log.contains("transport=already_disk")),
+                    || ops_log.contains("transport=already_disk")))
+                || (ops_log.contains("native_editor_save_settled")
+                    && ops_log.contains("transport=crdt_editor_native_save"))
+                || ops_log.contains("compact_writeback file=")
+                    && ops_log.contains("transport=crdt_relay"),
             "compact --commit must converge the editor buffer to disk:\n{ops_log}"
         );
     }

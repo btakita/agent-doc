@@ -6,6 +6,34 @@ import org.junit.Test
 
 class TmuxPaneFocusSyncTest {
     @Test
+    fun `active editor selection outranks background tmux document changes`() {
+        assertEquals(
+            true,
+            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
+                projectWindowActive = true,
+                editorDocumentPath = "/repo/tasks/haiven-websocket-hub-takehome-v2.md",
+                tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+        assertEquals(
+            false,
+            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
+                projectWindowActive = false,
+                editorDocumentPath = "/repo/tasks/haiven-websocket-hub-takehome-v2.md",
+                tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+        assertEquals(
+            false,
+            TmuxPaneFocusSync.shouldPreserveActiveEditorSelection(
+                projectWindowActive = true,
+                editorDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                tmuxDocumentPath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+        )
+    }
+
+    @Test
     fun `focus state extracts document only from active agent doc window`() {
         val json = """
             {

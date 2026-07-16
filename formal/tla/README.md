@@ -28,7 +28,11 @@ external request.
 - a whole-document replacement preserves durable pending agent intent;
 - stale-lineage frames cannot corrupt or resurrect canonical content;
 - quarantined stale frames eventually advance the ACK cursor; and
-- commit is impossible until the retained agent intent is applied.
+- delivery ACK and native editor save are distinct transitions;
+- an operator advance between save request and save invalidates the old proof
+  without losing the durable agent intent; and
+- commit is impossible until the retained agent intent is applied and the exact
+  still-current editor version is saved to disk.
 
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream

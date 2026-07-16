@@ -1649,7 +1649,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), canonical);
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("preflight_exact_document_replay action=converged transport=crdt"));
-        assert!(ops.contains("transport=crdt_then_disk_projection"));
+        assert!(ops.contains("transport=crdt_editor_native_save"));
+        assert!(ops.contains("disk_rewritten=false"));
 
         std::fs::remove_file(&doc).unwrap();
     }

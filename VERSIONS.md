@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.158
+
+- **A converged CRDT delivery ACK no longer writes the session file behind an active editor.** The binary asks the owning editor to save its already-authoritative buffer, requires disk to contain that exact editor version, and revalidates the canonical version before settlement. A newer operator edit invalidates the old proof while preserving the durable agent intent for rebase; a missing save keeps the same capture retained. This removes the direct-disk race that caused JetBrains File Cache Conflict, stale-disk restoration, and retained closeout wedges.
+- **Background tmux/controller work no longer steals the active JetBrains editor selection (JetBrains plugin 0.2.269).** While the project window is active, its selected Markdown editor outranks a different tmux document reported by the polling mirror. Tmux-to-editor following resumes after the operator actually leaves the IDE for tmux, so recovery of `agent-doc-bugs2.md` cannot switch an operator away from another document.
+- **The formal and executable recovery models now separate delivery ACK, native editor save, and commit.** `CrdtLineageFence.tla` and the exhaustive Rust SimWorld explore save requests, exact saves, and operator advances between request and save, and prove commit requires the exact saved editor version in addition to the existing lineage, tombstone, and pending-intent invariants.
+
 ## 0.34.157
 
 - **Retained-capture recovery now runs before the terminal authority/disk divergence guard as well as before integrity failure.** Live recovery of `agent-doc-bugs2.md` showed a second valid state: replica replacement had already removed the duplicate boundary, so integrity passed, while the clean response remained retained only in canonical editor authority. `session-check` now gives that resumable captured/write-applied/abandoned cycle one exact-once replay, re-resolves and revalidates both projections, and only then applies the generic divergence refusal. A focused regression proves divergent authority triggers replay while converged authority never does.

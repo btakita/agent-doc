@@ -8,6 +8,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.wm.WindowManager
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -92,6 +93,24 @@ class TmuxPaneFocusSync private constructor(
         }
         if (!shouldSelectTmuxDocument(documentPath, lastDocumentPath)) return
 
+        val editorFocusedMdPath = manager.selectedTextEditor?.virtualFile
+            ?.takeIf { it.name.endsWith(".md") }?.path
+            ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }?.path
+
+        // The command plane can move tmux focus while recovering a different
+        // document. Tmux state is not operator intent while the project window
+        // remains active: keep the selected editor authoritative and retry the
+        // mirror only after the operator actually leaves the IDE for tmux.
+        val projectWindowActive = WindowManager.getInstance().getFrame(project)?.isActive == true
+        if (shouldPreserveActiveEditorSelection(
+                projectWindowActive = projectWindowActive,
+                editorDocumentPath = editorFocusedMdPath,
+                tmuxDocumentPath = documentPath,
+            )
+        ) {
+            return
+        }
+
         // #tmuxmirrorcrossroot: never yank the editor selection across project
         // roots. When the operator is actively focused on a markdown doc owned by a
         // different agent-doc project than the tmux-focused session (observed: a
@@ -99,9 +118,6 @@ class TmuxPaneFocusSync private constructor(
         // has agent-doc-bugs2.md active), mirroring the foreign window's focus would
         // steal their selection. Record the tmux focus so a later same-root change
         // still mirrors, but do not move the editor now.
-        val editorFocusedMdPath = manager.selectedTextEditor?.virtualFile
-            ?.takeIf { it.name.endsWith(".md") }?.path
-            ?: manager.selectedFiles.firstOrNull { it.name.endsWith(".md") }?.path
         if (!shouldMirrorTmuxFocusToEditor(
                 tmuxFocusedDocRoot = NativePatching.resolveProjectPath(documentPath)?.first,
                 editorFocusedDocRoot = editorFocusedMdPath
@@ -186,6 +202,14 @@ class TmuxPaneFocusSync private constructor(
             documentPath: String?,
             lastDocumentPath: String?,
         ): Boolean = documentPath != null && documentPath != lastDocumentPath
+
+        internal fun shouldPreserveActiveEditorSelection(
+            projectWindowActive: Boolean,
+            editorDocumentPath: String?,
+            tmuxDocumentPath: String,
+        ): Boolean = projectWindowActive &&
+            !editorDocumentPath.isNullOrBlank() &&
+            editorDocumentPath != tmuxDocumentPath
 
         internal fun decideEditorFocusIntent(
             tmuxDocumentPath: String,

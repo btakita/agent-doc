@@ -76,7 +76,7 @@ When you're ready, here's the order they should ship in (all grounded in `fundin
 3. **`#fundlink2`** (link existing TMO funding) — surface `tmo_unmatched_fundings` for the loan and bind via `admin_tmo_unmatched_funding_bind_` so an accepted loan reuses a pre-wire TMO funding instead of creating a duplicate (also closes the #5q7z duplicate-funding gap).
 
 1 → 2 → 3 is the dependency order: the FK gives the binding, the card populates the per-vesting TMO mapping, and the link step reuses what TMO already tracks. Say "go" (all, or one at a time) and I'll start at the top.
-<!-- agent:boundary:5b1c7abb -->
+<!-- agent:boundary:18a5e81b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -86,8 +86,8 @@ When you're ready, here's the order they should ship in (all grounded in `fundin
 - ~~do [#h8rz]~~
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
-- ⏭️ do [#lender-sync-tmo-ui]
-- 🚧 Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.
+- ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
 <!-- /agent:queue -->
 
 ## Notes

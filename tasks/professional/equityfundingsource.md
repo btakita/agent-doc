@@ -253,7 +253,7 @@ There is **no `GetLenders` / lender-master endpoint in LOS.** TMO *does* have a 
 So the mechanism you're describing is live, not a gap.
 
 **One inherent limitation to be aware of:** because lenders are derived from fundings, a lender who exists in TMO but has **never funded a loan** won't appear in the picker — there's no funding row to surface them. That's a consequence of LOS not having a lender directory, not a bug. If we ever need pre-funding lenders (e.g. onboard-a-new-lender-before-first-deal), the options are (a) enable/query LSS for its lender master, or (b) let admins enter a lender's TMO `Account` manually (the picker already accepts a typed account). Neither is queued today; flag it if you want an item.
-<!-- agent:boundary:68fd7047 -->
+<!-- agent:boundary:5234e768 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

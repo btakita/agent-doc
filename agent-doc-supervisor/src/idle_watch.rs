@@ -8,9 +8,10 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Scalar gate for a supervisor-owned captured-finalize resume. The effectful
-/// idle watch supplies these facts; this pure policy prevents recovery from
-/// competing with a live agent turn, editor typing, an IPC handler, or another
-/// resume worker.
+/// idle watch supplies these facts. A durable captured operation already owns
+/// the closeout lease, so recovery must remain live even while the harness turn
+/// is blocked by its Stop hook. Typing, IPC, controller pressure, maintenance,
+/// and another resume worker remain the actual concurrency gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapturedFinalizeResumeFacts {
     pub captured_operation_present: bool,
@@ -25,7 +26,6 @@ pub struct CapturedFinalizeResumeFacts {
 
 pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts) -> bool {
     facts.captured_operation_present
-        && facts.actor_ready
         && !facts.editor_typing
         && facts.ipc_inflight == 0
         && !facts.worker_in_flight
@@ -138,11 +138,13 @@ mod tests {
     #[test]
     fn captured_finalize_resume_requires_a_quiet_single_flight_boundary() {
         assert!(captured_finalize_resume_should_start(ready_resume_facts()));
-        for blocked in [
+        assert!(captured_finalize_resume_should_start(
             CapturedFinalizeResumeFacts {
                 actor_ready: false,
                 ..ready_resume_facts()
-            },
+            }
+        ));
+        for blocked in [
             CapturedFinalizeResumeFacts {
                 editor_typing: true,
                 ..ready_resume_facts()

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.138
+
+- **A Stop-hook-blocked turn no longer starves its binary-owned closeout worker.** Once a response has a durable capture identity, the supervisor may resume it while the harness actor is still active; editor typing, IPC in-flight work, controller pressure, urgent maintenance, and the keyed single-flight worker remain fail-closed gates. This removes the circular wait where the actor could not become idle because Stop required the very convergence that the idle-only worker was waiting to perform.
+
 ## 0.34.137
 
 - **Captured closeout status is binary-owned end to end.** `editor_convergence_required` no longer records or prints a manual `write --commit` recovery command, and terminal authority/disk divergence now schedules replica settlement while declaring `session-check` status-only. Regression tests reject guidance that would stack another finalize/write operation or elect force-disk over the retained capture.

@@ -217,7 +217,7 @@ Committed + pushed (EFS `90fdcc6`), `make check` green (1638 tests, 0 fail; buil
 Vestings sort first so the roster name/email wins; still LOS-only, no LSS, and the picker keeps free-text for a brand-new account.
 
 Practical note: this surfaces vestings **once they're mapped** to a TMO account, which happens through `#lender-sync-tmo`'s endpoint — and the admin UI to drive that (`#lender-sync-tmo-ui`) is still queued. So until that UI ships (or accounts are set via the endpoint directly), the union's vesting side is empty and the picker behaves as before. Next in queue: **#fundlink1 → #fundlink2 → #lender-sync-tmo-ui**.
-<!-- agent:boundary:9efc50ac -->
+<!-- agent:boundary:9d637ff1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -252,7 +252,6 @@ After 20:30
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lender-sync-tmo-ui] #lender-sync-tmo-ui — UI for per-vesting TMO sync: a vestings card on the admin lender/user detail with a TmoLenderPicker + 'Sync with TMO' per vesting, calling PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account. Backend shipped EFS 010a371. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
-- [ ] [#h8rz] [recommended] #fundpick-roster — union the lender picker sources: GET /api/admin/tmo-lenders returns lender-role users (users.lender_account) ∪ funding-derived lenders (tmo_lenders_from_fundings_), deduped by account, free-text preserved, so never-funded lenders are selectable. LOS-only, no LSS. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#fundlink1] — create funding on lender-select (not at acceptance): when a lender is picked/entered in the funding UI, create the funds row + loan_funding cache row for that lender, no ready-for-funding gate, non-blocking. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding (reuse tmo_unmatched_fundings bind). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->

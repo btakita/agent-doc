@@ -37,7 +37,7 @@ complete
 Compacted content:
 - Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown of TMO lenders for the lender-account field; LOS lenders only; 11 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Remove "Wiring Instructions (Secure Link)" from the deal Fundi...
-<!-- agent:boundary:0a67338d -->
+<!-- agent:boundary:ab3d5013 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -48,7 +48,6 @@ Compacted content:
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
 - ⏭️ do [#lender-sync-tmo-ui]
-- ⏭️ do [#fundlink2]
 <!-- /agent:queue -->
 
 ## Notes

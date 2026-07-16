@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.144
+
+- **JetBrains no longer recursively refreshes project content after an external agent-doc commit (JetBrains plugin 0.2.264).** VCS signals now dirty only the VCS scope, so an unrelated unsaved agent-document buffer is never pushed into IntelliJ's memory-vs-disk resolver. Remote CRDT delivery refreshes only its clean target file before mutation, revalidates that the document stayed clean, and fails closed to exact-editor-baseline retry when operator memory is unsaved. This also updates the target `VirtualFile` modification stamp before `saveDocument`, eliminating byte-equal-but-stamp-stale conflict dialogs.
+
 ## 0.34.143
 
 - **JetBrains tab selection now swaps the matching tmux pane on the same editor side.** Automatic exact-visible sync was submitted correctly but then preserved the stale layout because the SQLite migration made safe-passive ownership proof skip every authoritative actor lookup. Controller-owned sync now consumes the authoritative actor row as a local SQLite read, allowing the existing no-autostart atomic swap path to run; standalone passive CLI sync still avoids a nested Project Controller RPC. Unit and TLA+ regression coverage keep the two proof modes distinct, prove the visible/stashed pane partition, and require controller-local sync liveness without permitting autostart.

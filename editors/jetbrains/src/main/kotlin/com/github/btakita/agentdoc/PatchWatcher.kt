@@ -1915,11 +1915,15 @@ class PatchWatcher(private val project: Project) : Disposable {
         vcsRefreshAlarm.cancelAllRequests()
         vcsRefreshAlarm.addRequest({
             try {
-                // Refresh VFS first so IntelliJ sees the new git state on disk
-                LocalFileSystem.getInstance().refresh(true)
-                // Then mark VCS dirty to re-compute git gutter annotations
+                // Re-compute git gutter annotations without recursively refreshing
+                // project content. Open agent-doc Documents may intentionally be
+                // unsaved while CRDT/editor delivery converges; a workspace-wide
+                // VFS refresh turns that safe transient state into IntelliJ's
+                // memory-vs-disk File Cache Conflict dialog. Content-bearing apply
+                // paths refresh only their clean target file immediately before
+                // Document API mutation.
                 VcsDirtyScopeManager.getInstance(project).markEverythingDirty()
-                LOG.info("[vcs] Triggered VFS + VCS refresh after external commit (debounced)")
+                LOG.info("[vcs] Triggered VCS dirty-scope refresh after external commit without content VFS refresh (debounced)")
             } catch (e: Exception) {
                 LOG.warn("[vcs] Failed to refresh VCS state", e)
             }

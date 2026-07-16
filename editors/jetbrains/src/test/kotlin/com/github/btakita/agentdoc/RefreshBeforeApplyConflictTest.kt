@@ -58,6 +58,41 @@ class RefreshBeforeApplyConflictTest {
     }
 
     @Test
+    fun `vcs refresh signal never recursively refreshes project content`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val patchWatcher = Files.readString(patchWatcherPath)
+        val refreshVcs = functionBody(patchWatcher, "private fun refreshVcs()")
+
+        assertFalse(
+            "a VCS signal must not refresh every open content file behind unsaved editors",
+            refreshVcs.contains("LocalFileSystem.getInstance().refresh"),
+        )
+        assertTrue(refreshVcs.contains("VcsDirtyScopeManager.getInstance(project).markEverythingDirty()"))
+        assertTrue(refreshVcs.contains("without content VFS refresh"))
+    }
+
+    @Test
+    fun `remote crdt apply refreshes only a clean target before save`() {
+        val crdtReplicaPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val crdtReplica = Files.readString(crdtReplicaPath)
+        val helper = functionBody(crdtReplica, "private fun refreshCleanDocumentBeforeRemoteApply(")
+
+        assertTrue(helper.contains("shouldRefreshVfsBeforeApplyUtil"))
+        assertTrue(helper.contains("targetFile.refresh(false, false)"))
+        assertTrue(helper.contains("isDocumentUnsaved(document)"))
+        assertTrue(
+            "both delta and REPLACE delivery must refresh the clean target before mutation",
+            crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 3,
+        )
+    }
+
+    @Test
     fun `jetbrains prompt poller is removed`() {
         val promptPollerPaths = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PromptPoller.kt"),
@@ -167,5 +202,24 @@ class RefreshBeforeApplyConflictTest {
             )
             idx = source.indexOf(refreshToken, idx + refreshToken.length)
         }
+    }
+
+    private fun functionBody(source: String, signature: String): String {
+        val start = source.indexOf(signature)
+        assertTrue("missing function signature: $signature", start >= 0)
+        val brace = source.indexOf('{', start)
+        assertTrue("missing function body: $signature", brace >= 0)
+        var depth = 0
+        for (index in brace until source.length) {
+            when (source[index]) {
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return source.substring(start, index + 1)
+                }
+            }
+        }
+        fail("unterminated function body: $signature")
+        return ""
     }
 }

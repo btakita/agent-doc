@@ -12,6 +12,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFile
 import io.github.lazily.IngressOutcome
 import io.github.lazily.MergePolicy
 import java.io.File
@@ -773,6 +774,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 try {
                     val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeAndWait
                     val document = FileDocumentManager.getInstance().getDocument(targetFile) ?: return@invokeAndWait
+                    if (!refreshCleanDocumentBeforeRemoteApply(filePath, targetFile, document)) {
+                        deferredEditorText = document.text
+                        return@invokeAndWait
+                    }
                     val before = document.text
                     if (before == canonical) {
                         shadows[filePath] = canonical
@@ -1087,6 +1092,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
             val document = FileDocumentManager.getInstance().getDocument(targetFile)
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
+            if (!refreshCleanDocumentBeforeRemoteApply(pending.filePath, targetFile, document)) {
+                return completeRemoteEditorApply(
+                    pending,
+                    RemoteEditorApplyOutcome(false, document.text),
+                    started,
+                )
+            }
             val before = document.text
             if (before == pending.targetText) {
                 shadows[pending.filePath] = pending.targetText
@@ -1150,6 +1162,36 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.warn("[crdt-replica] raw disk read failed for $filePath: ${e.message}")
             null
         }
+
+    /**
+     * Synchronize the target file's VFS stamp before a remote CRDT edit is
+     * installed and saved. IntelliJ resolves save conflicts by modification
+     * stamp, not by comparing the bytes that [readRawDiskText] validated. An
+     * external agent-doc write can therefore leave a clean Document with a
+     * stale VirtualFile stamp; editing first and saving second would arm the
+     * File Cache Conflict dialog even when disk still equals [expectedText].
+     *
+     * Refreshing an unsaved Document is the inverse hazard: it immediately
+     * asks IntelliJ to choose between operator memory and disk. Fail closed in
+     * that case and let the exact editor baseline flow through the CRDT retry.
+     */
+    private fun refreshCleanDocumentBeforeRemoteApply(
+        filePath: String,
+        targetFile: VirtualFile,
+        document: Document,
+    ): Boolean {
+        val fileDocumentManager = FileDocumentManager.getInstance()
+        if (!shouldRefreshVfsBeforeApplyUtil(fileDocumentManager.isDocumentUnsaved(document))) {
+            log.debug("[crdt-replica] remote apply deferred before VFS refresh because the editor is unsaved for $filePath")
+            return false
+        }
+        targetFile.refresh(false, false)
+        if (fileDocumentManager.isDocumentUnsaved(document)) {
+            log.warn("[crdt-replica] remote apply deferred because the editor became unsaved during the clean VFS refresh for $filePath")
+            return false
+        }
+        return true
+    }
 
     private fun persistRemoteCrdtTextIfSafe(
         filePath: String,

@@ -423,11 +423,35 @@ same-target finalize retry cannot lose or duplicate the response. Recovery is
 bounded and automatic; it must not require closing the editor tab, recycling the
 controller, or choosing between force-disk and an uncommitted response.
 
+Deferred agent mutations are an ordered, content-bearing intent journal rather
+than one replaceable whole-document target. Each entry retains its expected cut
+and target bytes. Reconnect replays every entry in order over the current
+operator cut, and convergence of entry N settles only the journal prefix through
+N; a late ACK for an older entry cannot clear a newer mutation. This is required
+for same-component changes such as backlog add followed by backlog mark: even if
+the later target was composed from a stale base, replay preserves both changes.
+When an unacknowledged response is already visible with later operator text, that
+response intent counts as applied before later entries are replayed, so an
+ours-wins exchange conflict cannot erase the operator text.
+
 All generic realtime merges on this path—settled-operator rebase, deferred-target
 composition, and reconnect—canonicalize boundary control state from the newest
 target branch after the CRDT merge. A valid target boundary is the singleton
 boundary in the result and is placed at exchange end; a non-template, malformed,
 or boundary-free target cannot cause normalization to mint or strip a boundary.
+Every effective agent target is then structurally validated: it must contain no
+duplicate exchange component and at most one boundary marker. Invalid targets
+remain retained and are never delivered.
+
+The live editor document is normally the current text authority, but authority
+for concurrent operator intent is the durable editor-op stream—not agent-written
+projection bytes that happen to be present in that buffer. If a prior agent
+projection structurally poisons the editor document (for example, duplicated
+exchange content or boundary markers), reconnect rebuilds the operator cut by
+replaying captured editor ops over the intent's expected base, validates that
+cut, and then replays the deferred agent-intent journal. Thus an operator-only
+`queue: stop` survives while duplicated agent content is discarded. This repair
+is automatic and does not require or authorize a force-disk reset.
 
 When the deferred reconnect result differs from the open JetBrains document, a
 forced refresh must install those exact bytes into the visible `Document` before

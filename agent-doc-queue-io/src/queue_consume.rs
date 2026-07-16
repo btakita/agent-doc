@@ -24,6 +24,7 @@ use agent_doc_queue::{
     },
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
+        queue_prompt_text_is_free_text,
     },
 };
 
@@ -96,7 +97,7 @@ use agent_doc_queue::{
         cycle_answered_foreign_exchange_prompt, queue_consumption_allowed_for_response,
         should_consume_queue_prompt_for_write,
     },
-    queue_response::{queue_head_is_bare_do_directive, queue_prompt_text_is_free_text},
+    queue_response::queue_head_is_bare_do_directive,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +119,21 @@ pub fn consume_queue_prompt_with_outcome(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, &[], false, effects)
+    consume_queue_prompts_with_options(file, &[], 1, false, effects)
+}
+
+/// Consume up to `count` leading free-text prompts in one revision-pinned
+/// read/plan/write transaction. This is deliberately not implemented as a loop
+/// of one-head writes: an editor ACK may be asynchronous, and re-resolving
+/// authority between iterations can otherwise select the same logical head
+/// repeatedly.
+pub fn consume_free_text_queue_prompts_with_outcome(
+    file: &Path,
+    count: usize,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_options(file, &[], count.max(1), skip_visible_guard, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_with_outcome(
@@ -126,7 +141,7 @@ pub fn consume_queue_prompts_for_done_ids_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, done_ids, false, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, false, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
@@ -134,7 +149,7 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, done_ids, true, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, true, effects)
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -148,12 +163,22 @@ pub fn consume_queue_prompt_force_disk(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_outcome(file, &[], true, effects)
+    consume_queue_prompts_with_options(file, &[], 1, true, effects)
 }
 
 pub fn consume_queue_prompts_with_outcome(
     file: &Path,
     done_ids: &[String],
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, effects)
+}
+
+fn consume_queue_prompts_with_options(
+    file: &Path,
+    done_ids: &[String],
+    free_text_count: usize,
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
@@ -165,7 +190,15 @@ pub fn consume_queue_prompts_with_outcome(
     } else {
         effects.current_document_content(file, "queue_consume")?
     };
-    let Some(plan) = plan_queue_prompt_consumption(file, &content, done_ids)? else {
+    let snapshot_content = load_snapshot_recovery_only(file, "queue consume planning");
+    let Some(plan) = plan_queue_prompt_consumption_with_snapshot_and_count(
+        file,
+        &content,
+        snapshot_content.as_deref(),
+        done_ids,
+        free_text_count,
+    )?
+    else {
         return Ok(None);
     };
 
@@ -839,6 +872,22 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
     snapshot_content: Option<&str>,
     done_ids: &[String],
 ) -> Result<Option<QueueConsumptionPlan>> {
+    plan_queue_prompt_consumption_with_snapshot_and_count(
+        file,
+        content,
+        snapshot_content,
+        done_ids,
+        1,
+    )
+}
+
+pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
+    file: &Path,
+    content: &str,
+    snapshot_content: Option<&str>,
+    done_ids: &[String],
+    requested_free_text_count: usize,
+) -> Result<Option<QueueConsumptionPlan>> {
     let (fm, _) = frontmatter::parse(content)?;
     if fm.queue_active != Some(true) {
         return Ok(None);
@@ -1037,7 +1086,16 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
         }
     }
 
-    let consume_count = leading_done_consume_count.max(1);
+    let requested_free_text_count = requested_free_text_count.max(1);
+    let requested_texts = first_n_queue_prompt_texts(&entries, requested_free_text_count);
+    let free_text_prefix_count = requested_texts
+        .iter()
+        .take_while(|text| queue_prompt_text_is_free_text(content, text))
+        .count();
+    // Preserve the fail-closed active-queue guard: an active component with no
+    // prompt is malformed, while a first id-backed prompt is classified below
+    // and left untouched without an explicit done/ack signal.
+    let consume_count = leading_done_consume_count.max(free_text_prefix_count).max(1);
     let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
@@ -1120,47 +1178,55 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
                 .context("queue consume: failed to parse snapshot queue")?;
             let snap_has_auto = agent_doc_queue::document_queue::has_auto_attr(&snap_queue.attrs);
             let snapshot_consumed_texts = first_n_queue_prompt_texts(&snap_entries, consume_count);
-            let snapshot_node_keys = queue_prompt_node_keys_for_count(snap, consume_count)?;
-            if snapshot_consumed_texts.len() != consumed_texts.len() {
-                log_snapshot_recovery_warning(
-                    file,
-                    "queue consume snapshot sync",
-                    format!(
-                        "snapshot has {} prompt(s) available but document consumed {}",
-                        snapshot_consumed_texts.len(),
-                        consumed_texts.len()
-                    ),
-                );
-                return Ok(None);
-            }
             let norm = |texts: &[String]| {
                 texts
                     .iter()
                     .map(|text| strip_priority_markers(text))
                     .collect::<Vec<_>>()
             };
-            if norm(&snapshot_consumed_texts) != norm(&consumed_texts) {
+            let snapshot_heads_match = snapshot_consumed_texts.len() == consumed_texts.len()
+                && norm(&snapshot_consumed_texts) == norm(&consumed_texts);
+            if !snapshot_heads_match {
                 log_snapshot_recovery_warning(
                     file,
                     "queue consume snapshot sync",
                     format!(
-                        "snapshot head prompts {:?} do not match document head prompts {:?}",
+                        "snapshot head prompts {:?} do not match editor-authoritative document head prompts {:?}; rebasing snapshot queue projection onto the document result",
                         snapshot_consumed_texts, consumed_texts
                     ),
                 );
-                return Ok(None);
-            }
-            let snap_completed_entries =
-                agent_doc_queue::document_queue::mark_first_n_prompts_completed(
-                    &snap_entries,
-                    consume_count,
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_consume_snapshot_rebased file={} authority=editor_document consumed={} recovery=replace_snapshot_queue_projection",
+                        file.display(),
+                        consume_count,
+                    ),
                 );
-            let snap_remaining =
-                agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
-            let snap_new_entries = if snap_remaining == 0 {
-                Vec::new()
+            }
+            let (snap_new_entries, snapshot_node_keys) = if snapshot_heads_match {
+                let snap_completed_entries =
+                    agent_doc_queue::document_queue::mark_first_n_prompts_completed(
+                        &snap_entries,
+                        consume_count,
+                    );
+                let snap_remaining =
+                    agent_doc_queue::document_queue::prompts(&snap_completed_entries).len();
+                let snap_new_entries = if snap_remaining == 0 {
+                    Vec::new()
+                } else {
+                    snap_completed_entries
+                };
+                (
+                    snap_new_entries,
+                    Some(queue_prompt_node_keys_for_count(snap, consume_count)?),
+                )
             } else {
-                snap_completed_entries
+                // The document/editor cut is authoritative. The snapshot is a
+                // recovery projection, so a stale snapshot head is rebased to
+                // the exact post-consume document queue rather than vetoing the
+                // mutation or preserving a second head authority.
+                (new_entries.clone(), None)
             };
             if snap_new_entries != new_entries {
                 let snap_remaining_prompts =
@@ -1179,12 +1245,21 @@ pub fn plan_queue_prompt_consumption_with_snapshot(
                 );
             }
 
-            let mut new_snap =
-                if drained || snap_new_entries != new_entries || !snapshot_node_keys.ast_backed {
-                    snap_queue.replace_content(snap, &new_body)
-                } else {
-                    consume_queue_nodes_by_key(snap, &snapshot_node_keys.keys)?
-                };
+            let mut new_snap = if drained
+                || snap_new_entries != new_entries
+                || snapshot_node_keys
+                    .as_ref()
+                    .is_none_or(|keys| !keys.ast_backed)
+            {
+                snap_queue.replace_content(snap, &new_body)
+            } else {
+                consume_queue_nodes_by_key(
+                    snap,
+                    &snapshot_node_keys
+                        .expect("matching snapshot heads have node keys")
+                        .keys,
+                )?
+            };
             if drained {
                 if snap_has_auto
                     && let Ok(sc2) = element::parse(&new_snap)
@@ -1863,6 +1938,48 @@ mod core_tests {
     }
 
     #[test]
+    fn multi_head_plan_is_atomic_and_rebases_stale_snapshot_to_editor_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: batch\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- editor head one\n",
+            "- editor head two\n",
+            "- do [#keep]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n- [ ] [#keep] still open\n<!-- /agent:backlog -->\n",
+        );
+        let stale_snapshot = content.replace("editor head one", "stale snapshot head");
+        std::fs::write(&doc, content).unwrap();
+
+        let plan = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            Some(&stale_snapshot),
+            &[],
+            8,
+        )
+        .unwrap()
+        .expect("leading free-text prefix should plan");
+
+        assert_eq!(
+            plan.consumed_texts,
+            vec!["editor head one".to_string(), "editor head two".to_string()]
+        );
+        assert!(plan.new_document.contains("~editor head one~"));
+        assert!(plan.new_document.contains("~editor head two~"));
+        assert!(plan.new_document.contains("- do [#keep]"));
+        assert!(
+            !plan.new_snapshot.contains("stale snapshot head"),
+            "snapshot is a projection and must rebase to the editor-authoritative queue"
+        );
+        assert!(plan.new_snapshot.contains("~editor head one~"));
+        assert!(plan.save_snapshot);
+    }
+
+    #[test]
     fn queue_consume_records_proof_ledger_before_and_after_mutation() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -2222,15 +2339,16 @@ mod core_tests {
         );
         let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
         assert!(
-            snap_result.contains("- handle the old request"),
-            "diverged recovery snapshot is left unchanged for later reconciliation:\n{snap_result}"
+            !snap_result.contains("- handle the old request")
+                && snap_result.contains("handle the new live-buffer request"),
+            "the stale snapshot queue must rebase to the editor-authoritative consume result:\n{snap_result}"
         );
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
             ops_log.contains("snapshot_recovery_warning")
                 && ops_log.contains("snapshot head prompts"),
-            "the skipped snapshot sync must be logged for forensics:\n{ops_log}"
+            "the snapshot rebase must be logged for forensics:\n{ops_log}"
         );
     }
 

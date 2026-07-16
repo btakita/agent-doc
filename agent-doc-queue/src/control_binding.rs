@@ -14,8 +14,12 @@ pub fn explicit_queue_go_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    attrs.contains_key("go")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go"))
+    // Stop is the safety-dominant control. A stale `go` token in the marker
+    // must not override an operator-authored `queue: stop` recovered from the
+    // editor op stream (and vice versa).
+    !explicit_queue_stop_mode(attrs, frontmatter_queue)
+        && (attrs.contains_key("go")
+            || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go")))
 }
 
 pub fn explicit_queue_start_mode(
@@ -134,6 +138,12 @@ fn queue_binding_target(
         || current.has_auto;
     if !has_current_control && previous.is_none() {
         return None;
+    }
+
+    if current.marker_mode == Some(QueueBindingMode::Stop)
+        || current.frontmatter_mode == Some(QueueBindingMode::Stop)
+    {
+        return Some(QueueBindingMode::Stop);
     }
 
     let marker_changed = previous.is_some_and(|prev| current.marker_mode != prev.marker_mode);
@@ -272,6 +282,28 @@ mod tests {
         assert!(changed);
         assert!(updated.contains("queue: stop\n"));
         assert!(updated.contains("<!-- agent:queue -->"));
+    }
+
+    #[test]
+    fn stop_dominates_conflicting_go_without_snapshot() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let (updated, changed) = converge_queue_control_binding_content(content, None).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: stop\n"));
+        assert!(updated.contains("<!-- agent:queue -->"));
+        let components = agent_doc_element::element::parse(&updated).unwrap();
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        assert!(!explicit_queue_go_mode(&queue.attrs, Some("stop")));
     }
 
     #[test]

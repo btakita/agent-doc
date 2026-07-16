@@ -1541,10 +1541,16 @@ pub fn apply_canonical_replace_if_attached(
                         {
                             content.to_string()
                         } else {
+                            let editor_cut = editor_operator_cut_for_agent_rebase(
+                                file,
+                                expected_current,
+                                &relay_text,
+                                source,
+                            );
                             let merged = agent_doc_merge::crdt::merge_by_component(
                                     Some(&base_state),
                                     content,
-                                    &relay_text,
+                                    &editor_cut,
                                 )
                                 .with_context(|| {
                                     format!(
@@ -1552,10 +1558,14 @@ pub fn apply_canonical_replace_if_attached(
                                         file.display()
                                     )
                                 })?;
-                            agent_doc_template::canonicalize_boundary_after_document_merge(
-                                &merged, content,
-                            )
+                            canonicalize_and_validate_agent_rebase(&merged, content, file, source)?
                         };
+                        let effective_target = canonicalize_and_validate_agent_rebase(
+                            &effective_target,
+                            content,
+                            file,
+                            source,
+                        )?;
 
                         // Buffer authority and delivery health are separate:
                         // keep the live IDE PID as the disk fence, but do not
@@ -1757,6 +1767,70 @@ pub fn apply_canonical_replace_if_attached(
     }
 }
 
+fn agent_projection_integrity_valid(content: &str) -> bool {
+    let boundary_singleton = content.matches("<!-- agent:boundary:").count() <= 1
+        && agent_doc_template::collapse_adjacent_boundary_markers(content)
+            .is_ok_and(|normalized| normalized == content);
+    let single_exchange = agent_doc_template::repair_duplicate_exchange_opener(content)
+        .ok()
+        .flatten()
+        .is_none();
+    boundary_singleton && single_exchange
+}
+
+/// Resolve the operator-authored editor cut independently from agent projection
+/// bytes. A live IDE buffer normally wins as-is. If it is structurally poisoned
+/// by a prior non-operator CPC projection (duplicate boundary/exchange), and the
+/// durable operator-op stream can be replayed exactly from the expected base,
+/// use that replay as the authoritative editor branch. This preserves operator
+/// text such as `queue: stop` without accepting duplicated agent content.
+fn editor_operator_cut_for_agent_rebase(
+    file: &Path,
+    expected_base: &str,
+    observed_editor: &str,
+    source: &str,
+) -> String {
+    let Ok(Some(ops)) = agent_doc_op_capture_io::editor_ops_for_base(file, expected_base) else {
+        return observed_editor.to_string();
+    };
+    let Some(operator_cut) = agent_doc_merge::crdt::replay_editor_ops(expected_base, &ops) else {
+        return observed_editor.to_string();
+    };
+    if operator_cut == observed_editor || agent_projection_integrity_valid(observed_editor) {
+        return observed_editor.to_string();
+    }
+    if !agent_projection_integrity_valid(&operator_cut) {
+        return observed_editor.to_string();
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_operator_cut_reconstructed file={} ops={} observed_hash={} operator_hash={} reason=invalid_non_operator_editor_projection recovery=replay_operator_ops_then_agent_intents",
+            file.display(),
+            ops.len(),
+            agent_doc_hash::content_hash(observed_editor),
+            agent_doc_hash::content_hash(&operator_cut),
+        ),
+    );
+    operator_cut
+}
+
+fn canonicalize_and_validate_agent_rebase(
+    merged: &str,
+    response_branch: &str,
+    file: &Path,
+    source: &str,
+) -> Result<String> {
+    let canonical =
+        agent_doc_template::canonicalize_boundary_after_document_merge(merged, response_branch);
+    anyhow::ensure!(
+        agent_projection_integrity_valid(&canonical),
+        "{source}: refusing structurally invalid agent rebase for {} (duplicate exchange or boundary marker); pending intents remain retained",
+        file.display(),
+    );
+    Ok(canonical)
+}
+
 fn atomic_write_authority_raw(path: &Path, content: &str) -> Result<()> {
     use std::io::Write;
 
@@ -1927,6 +2001,32 @@ pub fn pending_document_write(
         .document
         .pending_write
         .clone()
+}
+
+/// Ordered deferred agent changes for `file`. Newer targets are normally
+/// cumulative, but retaining each intent lets reconnect replay an earlier
+/// same-component mutation (for example `--backlog-add`) even if a later
+/// whole-document merge accidentally omitted it.
+pub fn pending_document_write_journal(
+    file: &Path,
+) -> Vec<agent_doc_state_backbone::DocumentWriteIntentProjection> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Vec::new();
+    };
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let Some(document) =
+        agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+            .ok()
+            .and_then(|projection| projection.document(&document_hash).cloned())
+    else {
+        return Vec::new();
+    };
+    if document.document.pending_write_journal.is_empty() {
+        document.document.pending_write.into_iter().collect()
+    } else {
+        document.document.pending_write_journal
+    }
 }
 
 /// Return the independent durable candidate created by an external disk write
@@ -2126,10 +2226,8 @@ fn ensure_deferred_document_write_intent(
                         file.display()
                     )
                 })?;
-                target_content = agent_doc_template::canonicalize_boundary_after_document_merge(
-                    &target_content,
-                    content,
-                );
+                target_content =
+                    canonicalize_and_validate_agent_rebase(&target_content, content, file, source)?;
                 // Preserve the original editor cut as the merge base across a
                 // chain of canonical target refinements (commit boundary moves,
                 // marker cleanup, compaction). Re-basing on the prior target would
@@ -2253,61 +2351,105 @@ pub fn deferred_document_write_reconnect_content(
             }
         }
     }
-    let Some(pending) = pending_document_write(file) else {
+    let pending_journal = pending_document_write_journal(file);
+    let Some(pending) = pending_journal.last().cloned() else {
         return Ok(None);
     };
     if editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
         return Ok(Some(pending.target_content));
     }
 
-    let legacy_disk_base = std::fs::read_to_string(file).ok().filter(|disk| {
-        agent_doc_hash::content_hash(disk).eq_ignore_ascii_case(&pending.expected_hash)
-    });
-    let base = pending
-        .expected_content
-        .clone()
-        .filter(|content| {
-            agent_doc_hash::content_hash(content).eq_ignore_ascii_case(&pending.expected_hash)
-        })
-        .or(legacy_disk_base)
+    let disk_content = std::fs::read_to_string(file).ok();
+    let mut merged = editor_content.to_string();
+    for (intent_index, intent) in pending_journal.iter().enumerate() {
+        let merge_base = intent
+            .expected_content
+            .clone()
+            .filter(|content| {
+                agent_doc_hash::content_hash(content).eq_ignore_ascii_case(&intent.expected_hash)
+            })
+            .or_else(|| {
+                disk_content.as_ref().and_then(|disk| {
+                    agent_doc_hash::content_hash(disk)
+                        .eq_ignore_ascii_case(&intent.expected_hash)
+                        .then(|| disk.clone())
+                })
+            })
+            .with_context(|| {
+                format!(
+                    "deferred write {} for {} has no content-bearing merge base",
+                    intent.intent_id,
+                    file.display()
+                )
+            })?;
+        if intent_index == 0 {
+            merged = editor_operator_cut_for_agent_rebase(
+                file,
+                &merge_base,
+                &merged,
+                "editor_reconnect",
+            );
+        }
+        let merged_hash = agent_doc_hash::content_hash(&merged);
+        if merged_hash.eq_ignore_ascii_case(&intent.target_hash) {
+            continue;
+        }
+        if merged_hash.eq_ignore_ascii_case(&intent.expected_hash) {
+            merged = intent.target_content.clone();
+            continue;
+        }
+
+        // A timed-out delivery can already be visible in the editor with newer
+        // operator text even though its ACK never settled.  Treat that intent
+        // as applied before replaying later journal entries; merging it again
+        // from the older expected cut makes the exchange component conflict
+        // with the operator edit and the component merge's ours-wins policy
+        // would erase that edit.
+        let target_introduces_response =
+            !agent_doc_document_realtime::write_policy::buffer_presents_reference_response(
+                &intent.target_content,
+                &merge_base,
+            );
+        if target_introduces_response
+            && agent_doc_document_realtime::write_policy::buffer_presents_reference_response(
+                &intent.target_content,
+                &merged,
+            )
+        {
+            continue;
+        }
+
+        let editor_reconciled =
+            agent_doc_merge::response_cell::reconcile_superseded_response_targets(
+                &merged,
+                &merge_base,
+                &intent.target_content,
+            )?
+            .unwrap_or_else(|| merged.clone());
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
+        merged = agent_doc_merge::crdt::merge_by_component(
+            Some(&base_state),
+            &intent.target_content,
+            &editor_reconciled,
+        )
         .with_context(|| {
             format!(
-                "deferred write {} for {} has no content-bearing merge base",
-                pending.intent_id,
+                "failed to replay deferred agent change {} over editor content for {}",
+                intent.intent_id,
                 file.display()
             )
         })?;
-    if editor_hash.eq_ignore_ascii_case(&pending.expected_hash) {
-        return Ok(Some(pending.target_content));
+        merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
+            .ok()
+            .flatten()
+            .unwrap_or(merged);
+        merged = canonicalize_and_validate_agent_rebase(
+            &merged,
+            &intent.target_content,
+            file,
+            "editor_reconnect",
+        )?;
     }
-
-    let editor_content = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
-        editor_content,
-        &base,
-        &pending.target_content,
-    )?
-    .unwrap_or_else(|| editor_content.to_string());
-    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&base).encode_state();
-    let merged = agent_doc_merge::crdt::merge_by_component(
-        Some(&base_state),
-        &pending.target_content,
-        &editor_content,
-    )
-    .with_context(|| {
-        format!(
-            "failed to merge reappearing editor content with deferred write {} for {}",
-            pending.intent_id,
-            file.display()
-        )
-    })?;
-    let merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
-        .ok()
-        .flatten()
-        .unwrap_or(merged);
-    let merged = agent_doc_template::canonicalize_boundary_after_document_merge(
-        &merged,
-        &pending.target_content,
-    );
     if agent_doc_hash::content_hash(&merged).eq_ignore_ascii_case(&pending.target_hash) {
         return Ok(Some(pending.target_content));
     }
@@ -3862,6 +4004,56 @@ mod tests {
         (dir, file, canonical)
     }
 
+    #[test]
+    fn invalid_agent_projection_reconstructs_operator_cut_from_durable_ops() {
+        let base = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:queue go -->\n- work\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _) = temp_doc(base);
+        let go_offset = base.find("queue: go").unwrap() + "queue: ".len();
+        let base_hash = agent_doc_hash::content_hash(base);
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &base_hash,
+            agent_doc_merge::crdt::EditorOp::Delete {
+                offset: go_offset,
+                len: 2,
+            },
+        )
+        .unwrap();
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &base_hash,
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: go_offset,
+                text: "stop".to_string(),
+            },
+        )
+        .unwrap();
+        let operator_cut = base.replacen("queue: go", "queue: stop", 1);
+        let poisoned = format!(
+            "{operator_cut}\n<!-- agent:exchange -->\n### Re: duplicated agent projection\n\nDuplicate.\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n"
+        );
+        let duplicate_boundary = operator_cut.replacen(
+            "<!-- /agent:exchange -->",
+            "### Re: duplicated tail\n\nDuplicate.\n<!-- agent:boundary:def456 -->\n<!-- /agent:exchange -->",
+            1,
+        );
+
+        assert!(!agent_projection_integrity_valid(&poisoned));
+        assert!(!agent_projection_integrity_valid(&duplicate_boundary));
+        let recovered =
+            editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect");
+        assert_eq!(recovered, operator_cut);
+        assert!(recovered.contains("queue: stop"));
+        assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+    }
+
     fn seed_reliable_sync_open(file: &std::path::Path, tag: &str) {
         let document_hash = agent_doc_hash::document_id_for_path(file);
         agent_doc_reliable_sync_io::global_liveness_plane()
@@ -4630,6 +4822,61 @@ mod tests {
         assert!(!pending.target_content.contains("agent:boundary:first"));
         assert!(!pending.target_content.contains("agent:boundary:base"));
         assert_eq!(pending.target_content.matches("agent:boundary:").count(), 1);
+    }
+
+    #[test]
+    fn reconnect_replays_each_deferred_backlog_change_in_order() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fundlink2] existing\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let added = base.replace(
+            "<!-- /agent:backlog -->",
+            "- [ ] [#fund-vesting-fk] answer vesting question\n<!-- /agent:backlog -->",
+        );
+        // This later target was independently composed from the same editor
+        // base and therefore lacks the earlier add—the exact ACK-wedge failure
+        // that used to lose `--backlog-add`.
+        let marked = base.replace("- [ ] [#fundlink2]", "- [x] [#fundlink2]");
+        let (_dir, file, _) = temp_doc(base);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for (event_id, intent_id, target) in [
+            ("deferred-add", "intent-add", added.as_str()),
+            ("deferred-mark", "intent-mark", marked.as_str()),
+        ] {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: intent_id.to_string(),
+                    expected_hash: agent_doc_hash::content_hash(base),
+                    expected_content: Some(base.to_string()),
+                    target_hash: agent_doc_hash::content_hash(target),
+                    target_content: target.to_string(),
+                    source: "test".to_string(),
+                    reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                },
+            );
+            agent_doc_controller_io::project_controller::append_state_event(
+                file.parent().unwrap(),
+                &event,
+            )
+            .unwrap();
+        }
+
+        let journal = pending_document_write_journal(&file);
+        assert_eq!(journal.len(), 2);
+        let reconnected = deferred_document_write_reconnect_content(&file, base)
+            .unwrap()
+            .expect("journal should replay over the editor base");
+        assert!(reconnected.contains("[#fund-vesting-fk]"));
+        assert!(reconnected.contains("- [x] [#fundlink2]"));
+        assert_eq!(reconnected.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

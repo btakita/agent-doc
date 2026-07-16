@@ -1142,6 +1142,16 @@ impl DocumentStateProjection {
                     // never replace or clear the other.
                     self.document.pending_external_disk = Some(pending);
                 } else {
+                    self.document
+                        .seed_pending_write_journal_from_legacy_projection();
+                    if !self
+                        .document
+                        .pending_write_journal
+                        .iter()
+                        .any(|existing| existing.intent_id == pending.intent_id)
+                    {
+                        self.document.pending_write_journal.push(pending.clone());
+                    }
                     self.document.pending_write = Some(pending);
                 }
             }
@@ -1150,7 +1160,24 @@ impl DocumentStateProjection {
                 target_hash,
                 ..
             } => {
-                if self.document.pending_write.as_ref().is_some_and(|pending| {
+                self.document
+                    .seed_pending_write_journal_from_legacy_projection();
+                if let Some(index) =
+                    self.document
+                        .pending_write_journal
+                        .iter()
+                        .position(|pending| {
+                            pending.intent_id == *intent_id && pending.target_hash == *target_hash
+                        })
+                {
+                    // Each newer deferred target is composed from every older
+                    // retained agent intent. Convergence of that target settles
+                    // the whole included prefix while preserving any later
+                    // intent that raced ahead of the ACK.
+                    self.document.pending_write_journal.drain(..=index);
+                    self.document.pending_write =
+                        self.document.pending_write_journal.last().cloned();
+                } else if self.document.pending_write.as_ref().is_some_and(|pending| {
                     pending.intent_id == *intent_id && pending.target_hash == *target_hash
                 }) {
                     self.document.pending_write = None;
@@ -2057,6 +2084,12 @@ pub struct DocumentProjection {
     pub latest_authority: Option<DocumentAuthorityProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_write: Option<DocumentWriteIntentProjection>,
+    /// Ordered durable agent-write intents. `pending_write` remains the newest
+    /// compatibility projection; this journal keeps each composed change
+    /// independently observable and recoverable until an ACK settles the target
+    /// that includes it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_write_journal: Vec<DocumentWriteIntentProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_external_disk: Option<DocumentWriteIntentProjection>,
 }
@@ -2074,6 +2107,14 @@ pub struct DocumentWriteIntentProjection {
 }
 
 impl DocumentProjection {
+    fn seed_pending_write_journal_from_legacy_projection(&mut self) {
+        if self.pending_write_journal.is_empty()
+            && let Some(pending) = self.pending_write.clone()
+        {
+            self.pending_write_journal.push(pending);
+        }
+    }
+
     fn apply_authority(
         &mut self,
         authority: DocumentAuthority,
@@ -5460,6 +5501,68 @@ mod tests {
                 .pending_write
                 .is_none()
         );
+    }
+
+    #[test]
+    fn deferred_agent_changes_are_journaled_and_settle_monotonically() {
+        let mut ledger = EventLedger::new();
+        for (intent, target) in [("intent-1", "target-1"), ("intent-2", "target-2")] {
+            ledger.append(state_event(
+                format!("deferred-{intent}"),
+                StateFact::DocumentWriteDeferred {
+                    document_hash: "doc-a".into(),
+                    intent_id: intent.into(),
+                    expected_hash: "base".into(),
+                    expected_content: Some("editor base".into()),
+                    target_hash: target.into(),
+                    target_content: format!("composed {target}"),
+                    source: "finalize".into(),
+                    reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+                },
+            ));
+        }
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.document.pending_write_journal.len(), 2);
+        assert_eq!(
+            projected
+                .document
+                .pending_write
+                .as_ref()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("intent-2")
+        );
+
+        // A late ACK for the older target settles only the prefix it proves;
+        // the newer composed target remains pending.
+        ledger.append(state_event(
+            "converged-intent-1",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "intent-1".into(),
+                target_hash: "target-1".into(),
+                source: "editor_ack".into(),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert_eq!(projected.document.pending_write_journal.len(), 1);
+        assert_eq!(
+            projected.document.pending_write_journal[0].intent_id,
+            "intent-2"
+        );
+
+        ledger.append(state_event(
+            "converged-intent-2",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "intent-2".into(),
+                target_hash: "target-2".into(),
+                source: "editor_ack".into(),
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        assert!(projected.document.pending_write_journal.is_empty());
+        assert!(projected.document.pending_write.is_none());
     }
 
     #[test]

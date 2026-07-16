@@ -4066,6 +4066,27 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         }
     }
 
+    // Retain the final editor-authoritative queue frontier independently of the
+    // committed snapshot. A queue head may be added after the snapshot and then
+    // deleted by the operator before another commit; without this frontier the
+    // backlog mirror mistakes that deletion for "never mirrored" and resurrects
+    // the head on the next pass.
+    let observed_active_queue_ids: std::collections::HashSet<String> = activation
+        .entries_after
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+            )
+        })
+        .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+        .collect();
+    agent_doc_queue_io::queue_tombstone::record_observed_active_ids(
+        file,
+        &observed_active_queue_ids,
+    );
+
     // Build output
     let queue_prompts: Vec<String> = if activation.active {
         agent_doc_queue::document_queue::prompts(&activation.entries_after)

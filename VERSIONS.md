@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.154
+
+- **Corrupted editor projections recover without sacrificing operator intent.** When agent-written CRDT content duplicates an exchange or boundary, reconnect reconstructs the operator cut from durable editor ops over the expected base, validates it, and replays agent intents; buffer-only directives such as `queue: stop` survive without a force-disk reset.
+- **Deferred agent mutations are now an ordered, content-bearing journal.** Every pending change is replayed in order and ACKs settle only the proven prefix, so a later backlog mark cannot erase an earlier backlog add and an already-visible unacknowledged response cannot erase newer operator text.
+- **Multi-head free-text consume is one monotonic transaction.** `queue consume --count N` plans one leading free-text prefix from one editor-authoritative cut and writes once, stopping before id-backed work; a stale snapshot is rebased as a projection instead of vetoing progress or repeatedly selecting the same head.
+- **Queue deletions and stop controls remain monotonic across snapshot lag.** Tombstones retain the last observed editor-authoritative id frontier, preventing a newly-added-then-deleted queue item from being resurrected by backlog mirroring, and explicit `stop` now dominates conflicting stale `go` state.
+
 ## 0.34.153
 
 - **Editor-delivery recovery now distinguishes a live IDE buffer from a live plugin worker.** Maintained JetBrains and VS Code plugins heartbeat from their delivery execution context; stale workers are removed from routing while their unsaved buffers remain authoritative, the exact response target stays retained, and safe-checkpoint hot-reexec breaks the former open-cycle/ACK circular wait without force-disk recovery.

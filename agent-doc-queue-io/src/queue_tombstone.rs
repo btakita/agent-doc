@@ -22,8 +22,34 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use agent_doc_queue::backlog_sync::reconcile_queue_tombstones;
+use serde::{Deserialize, Serialize};
 
 const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct QueueTombstoneState {
+    #[serde(default)]
+    tombstones: Vec<String>,
+    /// Last editor-authoritative active-id frontier observed after queue
+    /// maintenance. This closes the snapshot gap: a head introduced after the
+    /// last committed snapshot can still be recognized as operator-deleted on
+    /// the next pass.
+    #[serde(default)]
+    observed_active_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum StoredQueueTombstones {
+    Legacy(Vec<String>),
+    State(QueueTombstoneState),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LoadedQueueTombstones {
+    tombstones: HashSet<String>,
+    observed_active_ids: HashSet<String>,
+}
 
 /// `<project_root>/.agent-doc/queue-tombstones/<sha256_hash>.json`, mirroring the
 /// snapshot/pending/crdt sidecar convention. Falls back to the document's parent
@@ -43,28 +69,43 @@ fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
 /// Load the persisted operator-delete tombstone set (lowercased ids). Returns an
 /// empty set when the sidecar is absent or unreadable — tombstones are advisory,
 /// so a missing/corrupt file never blocks the mirror.
-fn load(doc: &Path) -> HashSet<String> {
+fn load(doc: &Path) -> LoadedQueueTombstones {
     let Some(path) = tombstone_path_for(doc) else {
-        return HashSet::new();
+        return LoadedQueueTombstones::default();
     };
     let Ok(bytes) = std::fs::read(&path) else {
-        return HashSet::new();
+        return LoadedQueueTombstones::default();
     };
-    match serde_json::from_slice::<Vec<String>>(&bytes) {
-        Ok(ids) => ids.into_iter().map(|id| id.to_ascii_lowercase()).collect(),
+    match serde_json::from_slice::<StoredQueueTombstones>(&bytes) {
+        Ok(StoredQueueTombstones::Legacy(ids)) => LoadedQueueTombstones {
+            tombstones: ids.into_iter().map(|id| id.to_ascii_lowercase()).collect(),
+            observed_active_ids: HashSet::new(),
+        },
+        Ok(StoredQueueTombstones::State(state)) => LoadedQueueTombstones {
+            tombstones: state
+                .tombstones
+                .into_iter()
+                .map(|id| id.to_ascii_lowercase())
+                .collect(),
+            observed_active_ids: state
+                .observed_active_ids
+                .into_iter()
+                .map(|id| id.to_ascii_lowercase())
+                .collect(),
+        },
         Err(e) => {
             eprintln!(
                 "[preflight] queue: ignoring unreadable tombstone sidecar {}: {e}",
                 path.display()
             );
-            HashSet::new()
+            LoadedQueueTombstones::default()
         }
     }
 }
 
 /// Persist the tombstone set (sorted for stable diffs). Best-effort: a write
 /// failure is logged but never fatal.
-fn save(doc: &Path, ids: &HashSet<String>) {
+fn save(doc: &Path, state: &LoadedQueueTombstones) {
     let Some(path) = tombstone_path_for(doc) else {
         return;
     };
@@ -77,9 +118,15 @@ fn save(doc: &Path, ids: &HashSet<String>) {
         );
         return;
     }
-    let mut sorted: Vec<&String> = ids.iter().collect();
-    sorted.sort();
-    match serde_json::to_vec_pretty(&sorted) {
+    let mut tombstones: Vec<String> = state.tombstones.iter().cloned().collect();
+    tombstones.sort();
+    let mut observed_active_ids: Vec<String> = state.observed_active_ids.iter().cloned().collect();
+    observed_active_ids.sort();
+    let stored = QueueTombstoneState {
+        tombstones,
+        observed_active_ids,
+    };
+    match serde_json::to_vec_pretty(&stored) {
         Ok(bytes) => {
             if let Err(e) = std::fs::write(&path, bytes) {
                 eprintln!(
@@ -111,16 +158,38 @@ pub fn reconcile_for_file(
     current_active_ids: &HashSet<String>,
 ) -> HashSet<String> {
     let previous = load(doc);
+    let mut deletion_anchors = snapshot_active_ids.clone();
+    deletion_anchors.extend(previous.observed_active_ids.iter().cloned());
     let tomb = reconcile_queue_tombstones(
-        &previous,
-        snapshot_active_ids,
+        &previous.tombstones,
+        &deletion_anchors,
         current_all_ids,
         current_active_ids,
     );
-    if tomb != previous {
-        save(doc, &tomb);
+    let next = LoadedQueueTombstones {
+        tombstones: tomb.clone(),
+        observed_active_ids: current_active_ids.clone(),
+    };
+    if next != previous {
+        save(doc, &next);
     }
     tomb
+}
+
+/// Persist the final editor-authoritative active-id frontier after automatic
+/// queue maintenance has finished. The next preflight can then distinguish a
+/// genuine operator deletion from an id that simply never appeared in the last
+/// committed snapshot.
+pub fn record_observed_active_ids(doc: &Path, current_active_ids: &HashSet<String>) {
+    let mut state = load(doc);
+    let normalized = current_active_ids
+        .iter()
+        .map(|id| id.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if state.observed_active_ids != normalized {
+        state.observed_active_ids = normalized;
+        save(doc, &state);
+    }
 }
 
 #[cfg(test)]
@@ -145,12 +214,12 @@ mod tests {
         assert!(tomb.contains("a"), "deleted active id must be tombstoned");
         assert!(!tomb.contains("b"));
         // Persisted.
-        assert!(load(&doc).contains("a"));
+        assert!(load(&doc).tombstones.contains("a"));
 
         // Operator re-adds #a (active again) → tombstone clears.
         let tomb2 = reconcile_for_file(&doc, &set(&["b"]), &set(&["a", "b"]), &set(&["a", "b"]));
         assert!(!tomb2.contains("a"), "re-added id clears its tombstone");
-        assert!(!load(&doc).contains("a"));
+        assert!(!load(&doc).tombstones.contains("a"));
     }
 
     #[test]
@@ -167,6 +236,21 @@ mod tests {
         assert!(
             !tomb.contains("a"),
             "a struck/consumed id is not an operator delete"
+        );
+    }
+
+    #[test]
+    fn observed_frontier_detects_delete_missing_from_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "x").unwrap();
+
+        record_observed_active_ids(&doc, &set(&["late"]));
+        let tomb = reconcile_for_file(&doc, &set(&[]), &set(&[]), &set(&[]));
+        assert!(
+            tomb.contains("late"),
+            "an editor-deleted head remains provable even when the snapshot lagged its addition"
         );
     }
 }

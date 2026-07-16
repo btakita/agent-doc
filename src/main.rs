@@ -997,6 +997,7 @@ fn queue_command_consume_outcome(
 ) -> agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
     agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome {
         consumed_text: outcome.consumed_text,
+        consumed_count: outcome.consumed_count,
         remaining: outcome.remaining,
         drained: outcome.drained,
     }
@@ -1023,23 +1024,29 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         )
     }
 
-    fn consume_queue_prompt_force_disk(
+    fn consume_free_text_queue_prompts_force_disk(
         &self,
         file: &Path,
+        count: usize,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
             file,
+            count,
+            true,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
     }
 
-    fn consume_queue_prompt_with_outcome(
+    fn consume_free_text_queue_prompts_with_outcome(
         &self,
         file: &Path,
+        count: usize,
     ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
-        agent_doc_queue_io::queue_consume::consume_queue_prompt_with_outcome(
+        agent_doc_queue_io::queue_consume::consume_free_text_queue_prompts_with_outcome(
             file,
+            count,
+            false,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))

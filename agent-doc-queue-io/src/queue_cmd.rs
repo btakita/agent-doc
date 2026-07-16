@@ -30,6 +30,7 @@ pub struct ConsumeOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueCommandConsumeOutcome {
     pub consumed_text: String,
+    pub consumed_count: usize,
     pub remaining: usize,
     pub drained: bool,
 }
@@ -45,13 +46,15 @@ pub trait QueueCommandEffects {
         reason: &str,
     ) -> Result<()>;
 
-    fn consume_queue_prompt_force_disk(
+    fn consume_free_text_queue_prompts_force_disk(
         &self,
         file: &Path,
+        count: usize,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
-    fn consume_queue_prompt_with_outcome(
+    fn consume_free_text_queue_prompts_with_outcome(
         &self,
         file: &Path,
+        count: usize,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
     fn strike_orphan_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
     fn acknowledge_open_id_backed_queue_head(&self, file: &Path, id: &str) -> Result<bool>;
@@ -87,67 +90,53 @@ pub fn consume_with_options(
     // return / `bail!`).
     let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
     let target = count.max(1);
-    let mut struck: Vec<String> = Vec::new();
-    let mut last_remaining = 0usize;
-    let mut drained = false;
-
-    for _ in 0..target {
-        let content = effects.current_document_content(file, "queue_consume_classify")?;
-        match classify_active_queue_head(&content)? {
-            ActiveQueueHeadKind::None => break, // no queue component or no prompt left to strike
-            ActiveQueueHeadKind::IdBacked => {
-                if struck.is_empty() {
-                    bail!(
-                        "{}: queue head is an id-backed directive, not a free-text prompt. \
-                        If it represents completed or gated work, reap it through the normal closeout with \
-                        `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
-                        If it is only an acknowledgement/correction for still-open work, use \
-                        `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
-                        the backlog item. Otherwise leave it queued.",
-                        file.display()
-                    );
-                }
-                // Already struck some free-text heads this run; stop cleanly at
-                // the first id-backed head rather than desyncing it.
-                break;
-            }
-            ActiveQueueHeadKind::FreeText => {}
+    let content = effects.current_document_content(file, "queue_consume_classify")?;
+    match classify_active_queue_head(&content)? {
+        ActiveQueueHeadKind::None => {}
+        ActiveQueueHeadKind::IdBacked => {
+            bail!(
+                "{}: queue head is an id-backed directive, not a free-text prompt. \
+                 If it represents completed or gated work, reap it through the normal closeout with \
+                 `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
+                 If it is only an acknowledgement/correction for still-open work, use \
+                 `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
+                 the backlog item. Otherwise leave it queued.",
+                file.display()
+            );
         }
-        let outcome = if options.force_disk {
-            effects.consume_queue_prompt_force_disk(file)?
-        } else {
-            effects.consume_queue_prompt_with_outcome(file)?
-        };
-        match outcome {
-            Some(outcome) => {
-                struck.push(outcome.consumed_text);
-                last_remaining = outcome.remaining;
-                if outcome.drained {
-                    drained = true;
-                    break;
-                }
-            }
-            None => break,
-        }
+        ActiveQueueHeadKind::FreeText => {}
     }
+    let outcome = if matches!(
+        classify_active_queue_head(&content)?,
+        ActiveQueueHeadKind::FreeText
+    ) {
+        if options.force_disk {
+            effects.consume_free_text_queue_prompts_force_disk(file, target)?
+        } else {
+            effects.consume_free_text_queue_prompts_with_outcome(file, target)?
+        }
+    } else {
+        None
+    };
 
-    if struck.is_empty() {
-        println!(
+    match outcome {
+        None => println!(
             "{}: no free-text queue head to consume (queue inactive, empty, or id-backed head).",
             file.display()
-        );
-    } else {
-        println!(
-            "{}: consumed {} free-text queue head(s) (remaining: {}){}",
-            file.display(),
-            struck.len(),
-            last_remaining,
-            if drained {
-                ", drained — cleared queue_active"
-            } else {
-                ""
-            }
-        );
+        ),
+        Some(outcome) => {
+            println!(
+                "{}: consumed {} free-text queue head(s) (remaining: {}){}",
+                file.display(),
+                outcome.consumed_count,
+                outcome.remaining,
+                if outcome.drained {
+                    ", drained — cleared queue_active"
+                } else {
+                    ""
+                }
+            );
+        }
     }
     Ok(())
 }
@@ -291,17 +280,35 @@ mod tests {
     struct FakeEffects;
 
     impl FakeEffects {
-        fn strike_free_text_head(file: &Path) -> Result<Option<QueueCommandConsumeOutcome>> {
-            let content = std::fs::read_to_string(file)?;
-            let Some(head) = active_queue_head_text(&content)? else {
+        fn strike_free_text_heads(
+            file: &Path,
+            count: usize,
+        ) -> Result<Option<QueueCommandConsumeOutcome>> {
+            let mut updated = std::fs::read_to_string(file)?;
+            let mut consumed = Vec::new();
+            for _ in 0..count.max(1) {
+                let Some(head) = active_queue_head_text(&updated)? else {
+                    break;
+                };
+                if !matches!(
+                    classify_active_queue_head(&updated)?,
+                    ActiveQueueHeadKind::FreeText
+                ) {
+                    break;
+                }
+                let needle = format!("- {head}");
+                let replacement = format!("- ~{head}~");
+                updated = updated.replacen(&needle, &replacement, 1);
+                consumed.push(head);
+            }
+            let Some(first) = consumed.first().cloned() else {
                 return Ok(None);
             };
-            let needle = format!("- {head}");
-            let replacement = format!("- ~{head}~");
-            let updated = content.replacen(&needle, &replacement, 1);
+            // One write proves the batch is planned from one authoritative cut.
             std::fs::write(file, &updated)?;
             Ok(Some(QueueCommandConsumeOutcome {
-                consumed_text: head,
+                consumed_text: first,
+                consumed_count: consumed.len(),
                 remaining: usize::from(active_queue_head_text(&updated)?.is_some()),
                 drained: false,
             }))
@@ -324,18 +331,20 @@ mod tests {
             Ok(())
         }
 
-        fn consume_queue_prompt_force_disk(
+        fn consume_free_text_queue_prompts_force_disk(
             &self,
             file: &Path,
+            count: usize,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
-            Self::strike_free_text_head(file)
+            Self::strike_free_text_heads(file, count)
         }
 
-        fn consume_queue_prompt_with_outcome(
+        fn consume_free_text_queue_prompts_with_outcome(
             &self,
             file: &Path,
+            count: usize,
         ) -> Result<Option<QueueCommandConsumeOutcome>> {
-            Self::strike_free_text_head(file)
+            Self::strike_free_text_heads(file, count)
         }
 
         fn strike_orphan_id_backed_queue_head(&self, _file: &Path, _id: &str) -> Result<bool> {

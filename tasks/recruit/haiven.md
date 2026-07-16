@@ -224,17 +224,66 @@ One caveat worth flagging: switching typing to conflate will **change the `reali
 Queued as `#typeconflate` rather than changing it under you, since it's a default-policy decision that also touches the documented benchmark. Say the word and I'll make the switch.
 
 **Unrelated:** `/goal Implement backlog item(s): #49ax` — there is no `#49ax` in this document's backlog, or anywhere under `tasks/`, and the queue drained to empty, so there was nothing to implement. If that id came from another document or was a typo, point me at the right one.
-<!-- agent:boundary:f6a1378d -->
+Do both. do [#typeconflate]. Would a message recipt from the user effectively be a stop message or does it not properly support a user sending a message and immediately typing a new message?
+
+### Re: message-receipt as a stop signal — opus-4-8
+
+**Done — both landed** (`96deb9f`, gitlink `f8d31cb8c`). And your instinct on the receipt is right: it does **not** properly support send-then-immediately-retype.
+
+**Short answer:** a message receipt is a useful *optimization*, not a stop signal. It's only safe **because** the TTL/refresh loop corrects it — which is exactly why you need the TTL you just asked for.
+
+**Why it breaks.** There is **no cross-service ordering** between chat and typing in this hub:
+
+- `Handle` is non-blocking for every downstream — it enqueues onto that service's own queue and returns. Chat and typing then drain through **separate worker pools**, so which one reaches `SendToTopic` first is a goroutine race.
+- `Seq` is per `(client, service)` (`h.seqs.next(c.clientID, env.Service)`), so chat's sequence says nothing about typing's — and typing is at-most-once, so it gets **no seq at all**.
+- `TS` is stamped in `stampOutbound` at *fan-out* time, not client-send time, at ms granularity. Two frames from one client in the same millisecond can be stamped out of order.
+
+So for "send M, then immediately type again":
+
+```
+client:  typing=true → message M → typing=true (new draft)
+wire:    message M and typing may arrive in EITHER order
+```
+
+If the new `typing=true` overtakes M, a receipt-clears-indicator client does: show typing → receive M → **clear it** — while the user is actively typing. That's the inverse of the original bug: stuck *off* instead of stuck *on*.
+
+**Why it's still fine in practice:** the typist refreshes while typing, so the wrongly-cleared indicator comes back on the next refresh (sub-second). The receipt is a latency optimization over waiting for the next refresh; the refresh/TTL loop is what makes it *correct*. Without the TTL loop it's just a race with no corrector — which is the state the code was in before this change.
+
+So: **use the receipt to clear early, but never rely on it.** Don't try to fix the ordering (a cross-service clock/seq would couple chat's durable spill path to typing's fire-and-forget path for no real gain) — let the refresh correct it.
+
+### What shipped
+
+| | |
+|---|---|
+| **Policy** | `typing` → `ConflateByEntity` (`backpressure.go`). `conflateKeyFor` already yields `typing\|topic\|client`, so latest-wins replaces the pending frame **in place regardless of fill** — the stop can't be dropped, and a fast typist can't occupy N slots. |
+| **TTL** | Service-side sweeper: every live indicator carries a deadline; once it lapses without a refresh the service emits `{"typing":false,"reason":"timeout"}`. `DefaultTTL = 6s`, `NewWithTTL` for tests. |
+
+The TTL is server-side deliberately: conflation can't deliver a frame that was never produced, and a **crashed typist never sends a stop at all**. Making the server the authority on when typing ended covers that; a client-side expiry is then just defense-in-depth.
+
+**The bug, reproduced.** `TestTypingConflatesLatestPerEntity` sends 50 refreshes + a stop to a cap-1 queue. I verified it **fails under the old policy**, and the failure output is your exact scenario:
+
+```
+conflated frame = {...,"payload":{"typing":true}}, want the terminal stop to win
+```
+
+The stale refresh survived; the stop was discarded. Under conflate the stop wins.
+
+Also: `TestTypingConflatesPerClientNotPerTopic` (two typists in a room don't collapse), `TestSweeperSynthesizesStopOnTTL`, `TestExplicitStopRetiresIndicator` (no duplicate synthetic stop). `TestSlowConsumerDoesNotStarveOthers` was retargeted to the **default** class — still drop-newest — so that starvation invariant keeps its coverage rather than being quietly deleted.
+
+**One correction to what I told you last cycle:** I said conflation would change the `realistic` loadtest typing counts. **It didn't** — deliveries are identical (96,500 / 965,000). The suite drains send queues immediately, so a same-key frame is rarely pending to conflate against; conflation only bites when a subscriber is actually behind, which is precisely when you want it. `docs/LOADTEST.md` policy wording and the README updated. `make check` green with `-race` (182 tests, incl. e2e).
+<!-- agent:boundary:defbf5f6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- What is the difference between ConflateByEntity and DropOldest?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]

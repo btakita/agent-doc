@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.156
+
+- **Whole-document CRDT replacements now fence obsolete replicas by lineage instead of union-merging their stale Yjs updates into a new document.** Registration returns the canonical lineage; JetBrains and VS Code attach it to every durable document-op frame; replacements rotate it; and stale or legacy frames after rotation are terminally quarantined while their reliable-sync cursor still advances. This prevents the observed full-exchange duplication, duplicate boundary markers, deleted-queue resurrection, and unbounded ACK retry after an editor/model rebase.
+- **CRDT lineage survives process recycling without being mistaken for a different projection.** The relay persists lineage beside the Yrs checkpoint with the exact projection hash, restores it only on a hash match, and fails closed to a fresh lineage after an incomplete or mismatched checkpoint. Retained agent intent remains independently durable and can be replayed over the editor-authoritative projection.
+- **Session repair can resume a retained captured response before a corrupted projection trips the integrity gate.** `session-check` now performs the existing lossless capture recovery once for captured/write-applied/abandoned cycles, then revalidates the reconstructed authority. This removes the circular wedge where duplicate boundaries prevented the only safe non-force-disk repair.
+- **The concurrency contract is now executable.** `CrdtLineageFence.tla` exhaustively checks the bounded control-state model for monotonic queue deletion, no stale-lineage corruption, commit-after-apply, operator-intent preservation, durable pending agent intent, and eventual stale-frame quarantine/ACK. A matching exhaustive Rust `SimWorld` model explores all reachable action schedules in normal tests. JetBrains plugin `0.2.268` carries the lineaged transport.
+
 ## 0.34.155
 
 - **JetBrains Compact Exchange no longer wakes unrelated document recovery (JetBrains plugin 0.2.267).** The action saves only its selected Markdown document before routing instead of calling `saveAllDocuments()`, so a retained EFS ACK recovery cannot make a Monster Rod Holders compact fail with EFS's delivery error. A target-save failure is logged and compaction continues from live editor/CRDT authority.

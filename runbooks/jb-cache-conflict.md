@@ -8,6 +8,12 @@ Captured-response recovery is also editor-authoritative. The final capture store
 
 When IntelliJ has a session document open, an older or degraded write path can surface a **File Cache Conflict** dialog because the editor cache disagrees with a competing disk or legacy IPC mutation. The current attached-document path prevents that race by treating CRDT delivery as the only visible-document mutation plane.
 
+Durable CRDT deltas are lineage-scoped. A whole-buffer editor adoption or
+canonical reconstruction rotates the lineage; replay from the pre-rebuild
+outbox is quarantined and ACKed instead of union-merged. This is the boundary
+that prevents a stale replica from duplicating an exchange or resurrecting an
+operator-deleted queue item after recovery.
+
 ## External Disk Pending Lifecycle
 
 Any filesystem change observed while at least one editor buffer is open is a pending disk candidate, regardless of whether agent-doc, Git, a formatter, or another process wrote it. The file watcher records the exact disk bytes in Lazily but does not route them into canonical CRDT state. The authority order is live editor/CRDT, then disk when no editor exists, then Git only as historical recovery evidence.

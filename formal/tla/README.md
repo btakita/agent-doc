@@ -1,7 +1,7 @@
 # TLA+ / PlusCal model checks
 
-The models are authored as concurrent PlusCal algorithms and translated in a
-temporary directory on every test run.
+The models are authored as concurrent PlusCal algorithms or direct TLA+ state
+machines and checked in a temporary directory on every test run.
 
 `AgentDocCloseout.tla` checks:
 
@@ -20,7 +20,15 @@ temporary directory on every test run.
   stale visible actor while preserving a unique visible/stashed partition;
 - neither request autostarts an actor; and
 - fair execution eventually applies the controller-local request and blocks the
-  external request.
+external request.
+
+`CrdtLineageFence.tla` exhaustively checks the finite recovery control state:
+
+- queue tombstones and editor-authored deletions never regress;
+- a whole-document replacement preserves durable pending agent intent;
+- stale-lineage frames cannot corrupt or resurrect canonical content;
+- quarantined stale frames eventually advance the ACK cursor; and
+- commit is impossible until the retained agent intent is applied.
 
 Run `make tla`. Set `TLA_TOOLS_JAR=/path/to/tla2tools.jar` to use an existing
 TLA+ tools installation. Otherwise the runner downloads the pinned upstream

@@ -5768,6 +5768,8 @@ fn controller_crdt_replica_data(
                 Some((client_id, bootstrap)) => Ok(serde_json::json!({
                     "client_id": client_id,
                     "bootstrap_b64": base64_standard_encode(&bootstrap),
+                    "lineage": agent_doc_crdt_relay_io::current_lineage_for_file(canonical)?
+                        .context("registered replica is missing its canonical lineage")?,
                 })),
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
@@ -8408,9 +8410,11 @@ fn handle_reliable_sync(
     // `#docop-plane` P2b: a document-op frame folds into the relay canonical so a
     // connected editor's ops feed it even when its CRDT member registration lapsed
     // (`live_editors == 0`). Inert for liveness-only frames (no document-op node) and
-    // when no path is supplied. Idempotent + commutative, so a duplicate/out-of-order
-    // frame converges. Serving the fed canonical (removing the frozen-canonical read) is
-    // the separate P3 authority flip — this only keeps the canonical fed.
+    // when no path is supplied. A frame is idempotent + commutative only inside its
+    // registered whole-document lineage; obsolete lineages are terminally quarantined
+    // before the durable receiver cursor advances. Serving the fed canonical (removing
+    // the frozen-canonical read) is the separate P3 authority flip — this only keeps the
+    // canonical fed.
     // `#reattach-adopt` (bounded, runaway-safe): a TEXT-adopt frame rebuilds the canonical
     // from the editor's document text (O(text), self-echo-guarded). This is the path the
     // new one-shot-on-reattach plugin uses. Checked first.
@@ -8449,15 +8453,18 @@ fn handle_reliable_sync(
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_document_op_frame(&message)
     {
-        let ops = decoded.with_context(|| {
+        let batch = decoded.with_context(|| {
             format!("reliable_sync_document_op_frame_malformed hash={document_hash}")
         })?;
-        let delta = agent_doc_merge::crdt_sync::encode_update_ops(&ops).with_context(|| {
+        let delta = agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
             format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
         })?;
-        agent_doc_crdt_relay_io::apply_document_op_delta_for_file(file, &delta).with_context(
-            || format!("reliable_sync_document_op_fold_failed hash={document_hash}"),
-        )?;
+        agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
+            file,
+            batch.lineage.as_deref(),
+            &delta,
+        )
+        .with_context(|| format!("reliable_sync_document_op_fold_failed hash={document_hash}"))?;
     }
 
     // P4 receive durability boundary: every document-side effect above completes

@@ -748,9 +748,11 @@ describe('crdt replica IPC response parsing', () => {
             data: {
                 client_id: 42,
                 bootstrap_b64: Buffer.from([1, 2]).toString('base64'),
+                lineage: 'lineage-42',
             },
         });
         assert.deepStrictEqual(register && Array.from(register.bootstrap ?? []), [1, 2]);
+        assert.strictEqual(register?.lineage, 'lineage-42');
 
         const pull = parsePullResponse({
             ok: true,

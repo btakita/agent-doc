@@ -64,10 +64,12 @@ class CrdtReplicaForwarderTest {
         private val refuseRegister: Boolean = false,
         private val clientId: Long = 42L,
         private val bootstrap: ByteArray? = null,
+        private val lineage: String? = "lineage-test",
     ) : ReplicaTransport {
         var registered = false
         var deregistered = false
         val sentUpdates = mutableListOf<ByteArray>()
+        val sentLineages = mutableListOf<String?>()
         val pendingUpdates = mutableListOf<ReplicaRemoteUpdate>()
         val ackedUpdates = mutableListOf<String>()
         val ackedContentHashes = mutableListOf<String?>()
@@ -75,11 +77,16 @@ class CrdtReplicaForwarderTest {
         override fun register(filePath: String, identity: String): ReplicaRegisterAck? {
             if (refuseRegister) return null
             registered = true
-            return ReplicaRegisterAck(clientId, bootstrap)
+            return ReplicaRegisterAck(clientId, bootstrap, lineage)
         }
 
         override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
             sentUpdates.add(update)
+        }
+
+        override fun pushDocumentOps(filePath: String, lineage: String?, deltaJson: String): Boolean {
+            sentLineages.add(lineage)
+            return true
         }
 
         override fun pullUpdates(filePath: String, identity: String): List<ReplicaRemoteUpdate> =
@@ -157,6 +164,7 @@ class CrdtReplicaForwarderTest {
         assertEquals("FROM-A", node.text())
         assertEquals(1, transport.sentUpdates.size)
         assertEquals("FROM-A", String(transport.sentUpdates[0]))
+        assertEquals(listOf("lineage-test"), transport.sentLineages)
     }
 
     @Test

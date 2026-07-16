@@ -192,6 +192,150 @@ mod capture_compact_closeout_model {
     }
 }
 
+/// Exhaustive executable reference model for the lineage fence. This is kept
+/// independent of transport timing so every reachable ordering of replacement,
+/// stale replay, restart, current delivery, and commit is checked cheaply.
+mod crdt_lineage_fence_model {
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        OperatorDelete,
+        CaptureAgentIntent,
+        ReplaceAndRebase,
+        DeliverStale,
+        DeliverCurrent,
+        RestartMatchingProjection,
+        RestartMismatchedProjection,
+        Commit,
+    }
+
+    const ACTIONS: [Action; 8] = [
+        Action::OperatorDelete,
+        Action::CaptureAgentIntent,
+        Action::ReplaceAndRebase,
+        Action::DeliverStale,
+        Action::DeliverCurrent,
+        Action::RestartMatchingProjection,
+        Action::RestartMismatchedProjection,
+        Action::Commit,
+    ];
+
+    #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+    struct World {
+        lineage: u8,
+        queue_visible: bool,
+        queue_tombstone: bool,
+        pending_agent_intent: bool,
+        agent_intent_applied: bool,
+        stale_frame_pending: bool,
+        current_frame_pending: bool,
+        ack_cursor: u8,
+        committed: bool,
+        corrupted: bool,
+    }
+
+    impl World {
+        fn initial() -> Self {
+            Self {
+                queue_visible: true,
+                ..Self::default()
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::OperatorDelete if self.queue_visible => {
+                    self.queue_visible = false;
+                    self.queue_tombstone = true;
+                    self.stale_frame_pending = true;
+                }
+                Action::CaptureAgentIntent => {
+                    self.pending_agent_intent = true;
+                    if self.lineage > 0 && !self.agent_intent_applied {
+                        self.current_frame_pending = true;
+                    }
+                }
+                Action::ReplaceAndRebase if self.queue_tombstone && self.lineage == 0 => {
+                    self.lineage = 1;
+                    self.agent_intent_applied = self.pending_agent_intent;
+                    self.current_frame_pending = self.pending_agent_intent;
+                }
+                Action::DeliverStale if self.stale_frame_pending && self.lineage > 0 => {
+                    // Production outcome: StaleLineage/LegacyQuarantined. The
+                    // frame is terminally consumed without touching content.
+                    self.stale_frame_pending = false;
+                    self.ack_cursor = self.ack_cursor.saturating_add(1);
+                }
+                Action::DeliverCurrent if self.current_frame_pending => {
+                    self.current_frame_pending = false;
+                    self.agent_intent_applied = true;
+                    self.ack_cursor = self.ack_cursor.saturating_add(1);
+                }
+                Action::RestartMatchingProjection => {
+                    // Projection hash + lineage metadata match: preserve epoch.
+                }
+                Action::RestartMismatchedProjection if self.lineage > 0 => {
+                    // Fail closed: mint another lineage. Pending old frames can
+                    // only be quarantined; durable agent intent remains journaled.
+                    self.lineage = self.lineage.saturating_add(1);
+                    if self.pending_agent_intent && !self.agent_intent_applied {
+                        self.current_frame_pending = true;
+                    }
+                }
+                Action::Commit
+                    if self.pending_agent_intent
+                        && self.agent_intent_applied
+                        && !self.current_frame_pending =>
+                {
+                    self.committed = true;
+                    self.pending_agent_intent = false;
+                }
+                _ => {}
+            }
+        }
+
+        fn assert_invariants(&self) {
+            assert!(!self.corrupted, "stale replay corrupted the canonical: {self:?}");
+            assert!(
+                !self.queue_tombstone || !self.queue_visible,
+                "deleted queue item resurrected: {self:?}"
+            );
+            assert!(
+                !self.committed || self.agent_intent_applied,
+                "commit lost pending agent intent: {self:?}"
+            );
+            if self.pending_agent_intent && self.lineage > 0 {
+                assert!(
+                    self.agent_intent_applied || self.current_frame_pending,
+                    "replacement lost the durable pending agent change: {self:?}"
+                );
+            }
+        }
+    }
+
+    fn explore(world: World, depth: usize, visited: &mut BTreeSet<World>) {
+        world.assert_invariants();
+        if depth == 0 || !visited.insert(world.clone()) {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1, visited);
+        }
+    }
+
+    #[test]
+    fn exhaustive_lineage_recovery_interleavings_preserve_monotonic_progress() {
+        let mut visited = BTreeSet::new();
+        explore(World::initial(), 12, &mut visited);
+        assert!(visited.iter().any(|world| world.committed));
+        assert!(visited.iter().any(|world| world.ack_cursor >= 2));
+        assert!(visited.iter().any(|world| world.lineage >= 2));
+    }
+}
+
 /// Interaction model for the live failure observed in JetBrains: a response is
 /// accepted while Compact Exchange/finalize waits on delivery, external CRDT
 /// events arrive during ACK backoff, and the controller may recycle before the

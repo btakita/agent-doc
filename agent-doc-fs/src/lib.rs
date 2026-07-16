@@ -175,6 +175,13 @@ pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, CRDT_DIR, "yrs")
 }
 
+/// Metadata paired with the `.yrs` recovery projection. It records the opaque
+/// CRDT lineage plus the projection hash so durable document-op frames can be
+/// replayed after a controller restart only onto the history that produced them.
+pub fn crdt_lineage_path_for(doc: &Path) -> Result<PathBuf> {
+    hashed_state_path(doc, CRDT_DIR, "lineage.json")
+}
+
 /// Compute `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
 pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path_with_suffix(doc, CRDT_DIR, "overlay.yrs")

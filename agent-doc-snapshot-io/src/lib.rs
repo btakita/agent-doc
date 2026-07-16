@@ -644,12 +644,16 @@ pub fn save_multinode_crdt(doc: &Path, state: &[u8]) -> Result<()> {
 /// Delete all CRDT state sidecars for a document. Idempotent.
 pub fn delete_crdt(doc: &Path) -> Result<()> {
     let path = agent_doc_fs::crdt_path_for(doc)?;
+    let lineage_path = agent_doc_fs::crdt_lineage_path_for(doc)?;
     let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
     let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-    if path.exists() || overlay_path.exists() || nodes_path.exists() {
+    if path.exists() || lineage_path.exists() || overlay_path.exists() || nodes_path.exists() {
         with_crdt_lock(doc, || {
             if path.exists() {
                 std::fs::remove_file(&path)?;
+            }
+            if lineage_path.exists() {
+                std::fs::remove_file(&lineage_path)?;
             }
             if overlay_path.exists() {
                 std::fs::remove_file(&overlay_path)?;

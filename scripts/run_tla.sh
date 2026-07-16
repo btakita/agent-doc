@@ -27,7 +27,7 @@ printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence)
 for module in "${modules[@]}"; do
     cp "${repo_root}/formal/tla/${module}.tla" "${work_dir}/"
     cp "${repo_root}/formal/tla/${module}.cfg" "${work_dir}/"
@@ -35,8 +35,10 @@ done
 
 (
     cd "${work_dir}"
-    for module in "${modules[@]}"; do
-        java -XX:+UseParallelGC -cp "${tools_jar}" pcal.trans "${module}.tla"
-        java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto "${module}.tla"
-    done
+for module in "${modules[@]}"; do
+    if grep -Eq '\(\* --(fair )?algorithm' "${module}.tla"; then
+      java -XX:+UseParallelGC -cp "${tools_jar}" pcal.trans "${module}.tla"
+    fi
+java -XX:+UseParallelGC -cp "${tools_jar}" tlc2.TLC -workers auto "${module}.tla"
+done
 )

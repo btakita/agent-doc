@@ -11,6 +11,7 @@ import {
 export interface ReplicaRegisterAck {
     clientId: number;
     bootstrap?: Uint8Array | null;
+    lineage?: string | null;
 }
 
 export interface ReplicaRemoteUpdate {
@@ -25,7 +26,7 @@ export interface ReplicaRemoteUpdate {
 export interface ReplicaTransport {
     register(filePath: string, identity: string): Promise<ReplicaRegisterAck | null>;
     broadcastUpdate(filePath: string, identity: string, update: Uint8Array): Promise<void>;
-    pushDocumentOps?(filePath: string, deltaJson: string): Promise<boolean>;
+    pushDocumentOps?(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean>;
     pushTextAdopt?(filePath: string, text: string): Promise<boolean>;
     flushDocumentOps?(filePath: string): void;
     pullUpdates(filePath: string, identity: string): Promise<ReplicaRemoteUpdate[]>;
@@ -192,6 +193,7 @@ export function parseRegisterResponse(response: ControllerResponse): ReplicaRegi
     return {
         clientId,
         bootstrap: decodeBase64(response.data.bootstrap_b64),
+        lineage: typeof response.data.lineage === 'string' ? response.data.lineage : null,
     };
 }
 
@@ -256,8 +258,9 @@ export class ControllerSocketReplicaTransport implements ReplicaTransport {
         }));
     }
 
-    async pushDocumentOps(filePath: string, deltaJson: string): Promise<boolean> {
-        return reliableSyncDocumentOpPush(this.projectRoot, filePath, deltaJson);
+    async pushDocumentOps(filePath: string, lineage: string | null, deltaJson: string): Promise<boolean> {
+        const payload = lineage == null ? deltaJson : JSON.stringify({ lineage, delta_json: deltaJson });
+        return reliableSyncDocumentOpPush(this.projectRoot, filePath, payload);
     }
 
     async pushTextAdopt(filePath: string, text: string): Promise<boolean> {
@@ -383,6 +386,7 @@ export class CrdtReplicaForwarder {
     attached = false;
     private clientId = 0;
     private pushedVersion: Uint8Array | null = null;
+    private lineage: string | null = null;
 
     constructor(
         private readonly filePath: string,
@@ -399,6 +403,7 @@ export class CrdtReplicaForwarder {
         const ack = await this.transport.register(this.filePath, this.identity);
         if (!ack) return false;
         this.clientId = ack.clientId;
+        this.lineage = ack.lineage ?? null;
         if (!this.node.open(ack.clientId, ack.bootstrap)) return false;
         this.attached = true;
         this.pushedVersion = this.node.stateVector?.() ?? new Uint8Array();
@@ -425,7 +430,11 @@ export class CrdtReplicaForwarder {
         const update = this.node.diff?.(frontier) ?? this.node.encodeState();
         if (!update) return;
         const durable = this.transport.pushDocumentOps
-            ? await this.transport.pushDocumentOps(this.filePath, Buffer.from(update).toString('utf8'))
+            ? await this.transport.pushDocumentOps(
+                this.filePath,
+                this.lineage,
+                Buffer.from(update).toString('utf8'),
+            )
             : true;
         if (durable) this.pushedVersion = this.node.stateVector?.() ?? this.pushedVersion;
         await this.transport.broadcastUpdate(this.filePath, this.identity, update);
@@ -482,6 +491,7 @@ export class CrdtReplicaForwarder {
         await this.transport.deregister(this.filePath, this.identity);
         this.node.close(this.clientId);
         this.pushedVersion = null;
+        this.lineage = null;
         this.attached = false;
     }
 }

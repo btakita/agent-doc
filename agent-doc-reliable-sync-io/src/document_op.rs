@@ -35,7 +35,8 @@
 //! gate.
 
 use anyhow::{Result, anyhow};
-use lazily::{CrdtOp, CrdtSync, IpcMessage, IpcValue, NodeId, TextCrdt, TextOp, WireStamp};
+use lazily::{CrdtOp, CrdtSync, IpcMessage, IpcValue, NodeId, NodeKey, TextCrdt, TextOp, WireStamp};
+use serde::{Deserialize, Serialize};
 
 /// Reserved graph node id carrying document-op deltas. Mirrors
 /// [`super::liveness`]'s `LIVENESS_NODE = NodeId(u64::MAX)`; one below it so the two
@@ -49,13 +50,35 @@ const DOCUMENT_OP_NODE: NodeId = NodeId(u64::MAX - 1);
 /// controller routes it to `adopt_editor_full_state_for_file`, not the fold path.
 const DOCUMENT_OP_ADOPT_NODE: NodeId = NodeId(u64::MAX - 2);
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentOpBatch {
+    pub lineage: Option<String>,
+    pub ops: Vec<TextOp>,
+}
+
+/// String-safe envelope passed through the existing FFI ABI. Keeping the
+/// lineage beside (rather than inside) the compact delta lets old binaries
+/// continue parsing unwrapped deltas during a rolling plugin upgrade.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineagedDocumentOpJson {
+    pub lineage: String,
+    pub delta_json: String,
+}
+
 /// Encode a `TextCrdt` delta (a [`TextCrdt::delta_since`] op list) as a reliable-sync
 /// frame. A whole-state snapshot is `delta_since(&TextVersionVector::new())`.
 pub fn encode_document_op_frame(ops: &[TextOp]) -> Result<IpcMessage> {
+    encode_document_op_frame_in_lineage(None, ops)
+}
+
+pub fn encode_document_op_frame_in_lineage(
+    lineage: Option<&str>,
+    ops: &[TextOp],
+) -> Result<IpcMessage> {
     let bytes = agent_doc_merge::crdt_sync::encode_update_ops(ops)?;
     let op = CrdtOp {
         node: DOCUMENT_OP_NODE,
-        key: None,
+        key: lineage.map(NodeKey::new).transpose()?,
         // The carriage stamp is unused by the fold (each `TextOp` carries its own
         // `OpId`); zero is a stable, deterministic placeholder — same as liveness.
         stamp: WireStamp {
@@ -75,12 +98,17 @@ pub fn encode_document_op_frame(ops: &[TextOp]) -> Result<IpcMessage> {
 /// JSON buffer) and encode it as a document-op frame. `None` is the canonical
 /// empty-delta no-op.
 pub fn encode_document_op_json_frame(delta_json: &str) -> Result<Option<IpcMessage>> {
+    let envelope = serde_json::from_str::<LineagedDocumentOpJson>(delta_json).ok();
+    let (lineage, delta_json) = match envelope.as_ref() {
+        Some(envelope) => (Some(envelope.lineage.as_str()), envelope.delta_json.as_str()),
+        None => (None, delta_json),
+    };
     let ops = agent_doc_merge::crdt_sync::decode_update_ops(delta_json.as_bytes())
         .map_err(|error| anyhow!("parse delta update: {error}"))?;
     if ops.is_empty() {
         Ok(None)
     } else {
-        encode_document_op_frame(&ops).map(Some)
+        encode_document_op_frame_in_lineage(lineage, &ops).map(Some)
     }
 }
 
@@ -91,7 +119,7 @@ pub fn encode_document_op_json_frame(delta_json: &str) -> Result<Option<IpcMessa
 /// elsewhere); `Some(Err)` for a document-op-tagged op whose inline bytes are
 /// malformed (never a silent drop). The `SharedBlob` transport is not used here, so a
 /// `SharedBlob` op on the document-op node is treated as malformed.
-pub fn decode_document_op_frame(message: &IpcMessage) -> Option<Result<Vec<TextOp>>> {
+pub fn decode_document_op_frame(message: &IpcMessage) -> Option<Result<DocumentOpBatch>> {
     let IpcMessage::CrdtSync(sync) = message else {
         return None;
     };
@@ -106,9 +134,15 @@ pub fn decode_document_op_frame(message: &IpcMessage) -> Option<Result<Vec<TextO
     Some(decode_document_ops(&ops))
 }
 
-fn decode_document_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
+fn decode_document_ops(ops: &[&CrdtOp]) -> Result<DocumentOpBatch> {
     let mut out = Vec::new();
+    let mut lineage: Option<String> = None;
     for op in ops {
+        let op_lineage = op.key.as_ref().map(|key| key.as_str().to_string());
+        if !out.is_empty() && op_lineage != lineage {
+            return Err(anyhow!("document-op frame mixed canonical lineages"));
+        }
+        lineage = op_lineage;
         let IpcValue::Inline(bytes) = &op.state else {
             return Err(anyhow!(
                 "document-op frame carried a non-inline (SharedBlob) op state"
@@ -118,7 +152,7 @@ fn decode_document_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
             .map_err(|e| anyhow!("document-op frame inline decode failed: {e}"))?;
         out.extend(batch);
     }
-    Ok(out)
+    Ok(DocumentOpBatch { lineage, ops: out })
 }
 
 /// Encode an editor's **full-state adopt** frame (`#reattach-adopt`): `ops` is the
@@ -275,7 +309,7 @@ impl CanonicalFold {
     /// (never a silent drop). Returns whether the visible canonical text changed.
     pub fn ingest(&mut self, message: &IpcMessage) -> Result<bool> {
         match decode_document_op_frame(message) {
-            Some(ops) => Ok(self.doc.apply_delta(&ops?)),
+            Some(batch) => Ok(self.doc.apply_delta(&batch?.ops)),
             None => Ok(false),
         }
     }
@@ -315,7 +349,8 @@ mod tests {
         let decoded = decode_document_op_frame(&frame)
             .expect("is a document-op frame")
             .expect("decodes");
-        assert_eq!(decoded, ops, "round-trip preserves the op list verbatim");
+        assert_eq!(decoded.lineage, None);
+        assert_eq!(decoded.ops, ops, "round-trip preserves the op list verbatim");
     }
 
     #[test]
@@ -328,7 +363,7 @@ mod tests {
             .unwrap()
             .expect("non-empty compact frame");
         assert_eq!(
-            decode_document_op_frame(&compact_frame).unwrap().unwrap(),
+            decode_document_op_frame(&compact_frame).unwrap().unwrap().ops,
             ops
         );
 
@@ -337,9 +372,27 @@ mod tests {
             .unwrap()
             .expect("non-empty legacy frame");
         assert_eq!(
-            decode_document_op_frame(&legacy_frame).unwrap().unwrap(),
+            decode_document_op_frame(&legacy_frame).unwrap().unwrap().ops,
             ops
         );
+    }
+
+    #[test]
+    fn lineaged_string_ffi_envelope_round_trips() {
+        let src = TextCrdt::from_str(CANON_PEER, "lineaged delta\n");
+        let ops = src.delta_since(&lazily::TextVersionVector::new());
+        let compact = agent_doc_merge::crdt_sync::encode_update_ops(&ops).unwrap();
+        let envelope = serde_json::to_string(&LineagedDocumentOpJson {
+            lineage: "epoch-7".into(),
+            delta_json: String::from_utf8(compact).unwrap(),
+        })
+        .unwrap();
+        let frame = encode_document_op_json_frame(&envelope)
+            .unwrap()
+            .expect("non-empty lineaged frame");
+        let decoded = decode_document_op_frame(&frame).unwrap().unwrap();
+        assert_eq!(decoded.lineage.as_deref(), Some("epoch-7"));
+        assert_eq!(decoded.ops, ops);
     }
 
     #[test]
@@ -365,7 +418,8 @@ mod tests {
         assert_eq!(
             decode_document_op_frame(&fold)
                 .expect("is fold")
-                .expect("decodes"),
+                .expect("decodes")
+                .ops,
             ops
         );
         assert!(

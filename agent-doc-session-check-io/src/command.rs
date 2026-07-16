@@ -309,17 +309,42 @@ pub fn run_with_options(
     {
         eprintln!("[session-check] WARNING: {message}");
     }
+    // A retained delivery can be validly reconstructable even when a stale
+    // post-replacement IPC delta duplicated the exchange. Repair that known,
+    // evidence-backed overapplication before the generic integrity gate;
+    // otherwise the duplicate boundary marker prevents the recovery routine
+    // that knows how to remove it from ever running.
+    self_heal_late_ipc_overapplication(file, effects)?;
     // `session-check` is the final proof boundary. It must not report a clean
     // cycle for a document whose component tree cannot be parsed, regardless
     // of lifecycle sidecar state.
     let integrity_content =
         crate::resolve_current_document_content(file, "session_check_integrity_gate")?;
-    agent_doc_lint_io::validate_integrity_on_content_with_logger(
+    let integrity = agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
         &integrity_content,
         agent_doc_ops_log_io::log_op,
-    )?;
-    self_heal_late_ipc_overapplication(file, effects)?;
+    );
+    if let Err(error) = integrity {
+        // A stale cross-lineage delta can corrupt the visible projection after
+        // the response was durably captured but before ACK. The retained
+        // capture owns the lossless reconstruction recipe, so give it one
+        // idempotent resume before returning the generic integrity error. This
+        // breaks the former cycle: integrity blocked the only recovery capable
+        // of restoring integrity.
+        if !resume_captured_finalize_before_integrity(file, effects)? {
+            return Err(error);
+        }
+        let recovered = crate::resolve_current_document_content(
+            file,
+            "session_check_integrity_gate_after_captured_resume",
+        )?;
+        agent_doc_lint_io::validate_integrity_on_content_with_logger(
+            file,
+            &recovered,
+            agent_doc_ops_log_io::log_op,
+        )?;
+    }
     let authority_content =
         crate::resolve_current_document_content(file, "session_check_terminal_convergence")?;
     let disk_content =
@@ -599,6 +624,33 @@ pub fn run_with_options(
             println!("{}", message);
             std::process::exit(1);
         }
+    }
+}
+
+fn resume_captured_finalize_before_integrity(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<bool> {
+    let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let resumable = cycle_state.as_ref().is_some_and(|state| {
+        matches!(
+            state.phase,
+            CyclePhase::ResponseCaptured | CyclePhase::WriteApplied | CyclePhase::Abandoned
+        )
+    });
+    if !resumable {
+        return Ok(false);
+    }
+    match effects.resume_captured_finalize(file)? {
+        CapturedFinalizeResumeOutcome::Committed | CapturedFinalizeResumeOutcome::Superseded => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                "session_check_integrity_recovered_from_retained_capture",
+            );
+            Ok(true)
+        }
+        CapturedFinalizeResumeOutcome::NotApplicable
+        | CapturedFinalizeResumeOutcome::Retained { .. } => Ok(false),
     }
 }
 

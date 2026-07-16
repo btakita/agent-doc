@@ -397,8 +397,19 @@ Path (`plan-crdt-scramble-and-disk-propagation.md`, Phase C/D):
    already equals the canonical; (b) never clobbers unsaved operator edits
    (fail-open); (c) otherwise installs the canonical wholesale via a minimal edit
    (preserving cursor/undo) and re-bootstraps the native replica so later deltas are
-   relative to the corrected state. The `ReplicaPullDelivery` type (`Deltas` |
-   `Replace`) is mirrored across both frontends per the Editor Parity Requirement.
+relative to the corrected state. The `ReplicaPullDelivery` type (`Deltas` |
+`Replace`) is mirrored across both frontends per the Editor Parity Requirement.
+
+**CRDT lineage fence.** Additive updates are commutative and idempotent only
+inside the canonical history from which they were produced. Every replica
+registration therefore returns an opaque `lineage`; JetBrains and VS Code attach
+it to each durable document-op frame. Whole-document rebuild/adopt operations
+rotate the lineage. A receiver applies only a matching-lineage frame. A stale
+lineage, or an unscoped legacy frame after rotation, is terminally quarantined
+and ACKed so retry cannot duplicate the exchange, resurrect a queue tombstone,
+or wedge the reliable-sync cursor. The lineage is checkpointed beside the `.yrs`
+projection with that projection's SHA-256; recovery preserves it only when the
+hash matches and otherwise mints a new fail-closed lineage.
 
    **Content-qualified ACK.** Every delta item also carries the SHA-256
    `expected_content_hash` of the canonical visible target. After applying the

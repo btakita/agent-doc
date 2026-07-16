@@ -185,11 +185,30 @@ pub enum DiskChangeOutcome {
     BaselineDeferred,
 }
 
+/// Result of admitting a durable document-op batch into the canonical CRDT.
+/// Additive updates are idempotent only inside one CRDT lineage; a batch from
+/// an obsolete lineage is terminally quarantined so reliable-sync can advance
+/// its ACK cursor without corrupting the replacement canonical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentOpDeltaOutcome {
+    Applied { changed: bool },
+    StaleLineage,
+    LegacyQuarantined,
+}
+
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
 pub struct RelayHub {
     /// The CPC-owned canonical replica (the hub / git-checkpoint authority).
     canonical: ReplicaState,
     canonical_id: u64,
+    /// Opaque identity of the current additive CRDT history. Rotated whenever
+    /// the canonical is replaced from text/full-state rather than advanced by
+    /// an update from that history.
+    lineage: String,
+    /// Rolling-upgrade compatibility for plugins that predate lineage-tagged
+    /// document-op frames. Once a replacement rotates lineage, untagged frames
+    /// are ambiguous and must be quarantined.
+    legacy_document_ops_allowed: bool,
     members: HashMap<u64, Member>,
     awareness: AwarenessChannel,
     /// The document text this hub last committed to disk (`#staleinmem`). `None`
@@ -228,6 +247,15 @@ pub struct RelayHub {
 }
 
 impl RelayHub {
+    fn mint_lineage() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    fn rotate_lineage(&mut self) {
+        self.lineage = Self::mint_lineage();
+        self.legacy_document_ops_allowed = false;
+    }
+
     /// Build the thread-safe reactive liveness core shared by every constructor:
     /// a `ThreadSafeContext`, an on-demand `client_id -> live` cell family, a membership
     /// epoch cell, and the derived live-member count slot.
@@ -289,6 +317,8 @@ impl RelayHub {
         Self {
             canonical: ReplicaState::new(canonical_id),
             canonical_id,
+            lineage: Self::mint_lineage(),
+            legacy_document_ops_allowed: true,
             members: HashMap::new(),
             awareness: AwarenessChannel::new(),
             last_committed_text: None,
@@ -315,6 +345,17 @@ impl RelayHub {
     /// restart. At most one flush is lost; live editors re-sync their newer ops on
     /// reconnect. The projection is a recovery input, never authority.
     pub fn recover_from_projection(canonical_id: u64, projection: &[u8]) -> Result<Self> {
+        Self::recover_from_projection_with_lineage(canonical_id, projection, None)
+    }
+
+    /// Recover a hub while preserving the lineage paired with the durable
+    /// projection. When no matching metadata exists, mint a fresh lineage so
+    /// obsolete durable deltas fail closed.
+    pub fn recover_from_projection_with_lineage(
+        canonical_id: u64,
+        projection: &[u8],
+        lineage: Option<&str>,
+    ) -> Result<Self> {
         let canonical = ReplicaState::from_encoded(canonical_id, projection)?;
         // Seed the committed baseline from the recovered text so the very first
         // commit barrier after a restart can already detect an out-of-band disk
@@ -323,8 +364,15 @@ impl RelayHub {
         let last_committed_text = Some(canonical.text());
         let mut hub = Self::new(canonical_id);
         hub.canonical = canonical;
+        if let Some(lineage) = lineage.filter(|value| !value.is_empty()) {
+            hub.lineage = lineage.to_string();
+        }
         hub.last_committed_text = last_committed_text;
         Ok(hub)
+    }
+
+    pub fn lineage(&self) -> &str {
+        &self.lineage
     }
 
     /// The canonical (authoritative) converged text.
@@ -595,6 +643,7 @@ impl RelayHub {
         }
         let before = self.canonical.state_vector();
         self.canonical = ReplicaState::from_text(self.canonical_id, text);
+        self.rotate_lineage();
         self.last_committed_text = None;
         let out = self.canonical.diff(&before)?;
         let mut targets: Vec<u64> = self
@@ -631,6 +680,7 @@ impl RelayHub {
         }
         let before = self.canonical.state_vector();
         self.canonical = adopted;
+        self.rotate_lineage();
         // The adopted state is not a committed-to-disk baseline; clear the marker so
         // `#staleinmem` re-detects on the next commit rather than trusting stale text.
         self.last_committed_text = None;
@@ -686,6 +736,31 @@ impl RelayHub {
         };
         self.enqueue_delivery(&packet);
         Ok(packet)
+    }
+
+    /// Apply a durable editor delta only when its lineage identifies the
+    /// canonical history it was produced from. Mismatches are terminal
+    /// quarantine outcomes rather than errors: retrying the same stale frame
+    /// cannot make it safe and would wedge the reliable-sync ACK frontier.
+    pub fn apply_document_op_delta_in_lineage(
+        &mut self,
+        lineage: Option<&str>,
+        delta: &[u8],
+    ) -> Result<DocumentOpDeltaOutcome> {
+        match lineage {
+            Some(lineage) if lineage != self.lineage => {
+                return Ok(DocumentOpDeltaOutcome::StaleLineage);
+            }
+            None if !self.legacy_document_ops_allowed => {
+                return Ok(DocumentOpDeltaOutcome::LegacyQuarantined);
+            }
+            _ => {}
+        }
+        let before = self.canonical.text();
+        self.apply_document_op_delta(delta)?;
+        Ok(DocumentOpDeltaOutcome::Applied {
+            changed: self.canonical.text() != before,
+        })
     }
 
     /// The canonical replica's encoded state — the bootstrap snapshot a freshly
@@ -1039,6 +1114,7 @@ impl RelayHub {
         }
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
+        self.rotate_lineage();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -1078,6 +1154,7 @@ impl RelayHub {
         }
         let bootstrap = fresh.encode_state();
         self.canonical = fresh;
+        self.rotate_lineage();
         let ids: Vec<u64> = self.members.keys().copied().collect();
         for id in ids {
             let replica = ReplicaState::from_encoded(id, &bootstrap)?;
@@ -1416,6 +1493,45 @@ mod tests {
             "same-text adopt is a no-op"
         );
         assert_eq!(hub.canonical_text(), "hello\n");
+    }
+
+    #[test]
+    fn replacement_rotates_lineage_and_quarantines_stale_durable_deltas() {
+        let mut hub = RelayHub::from_text(1, "clean\n");
+        let old_lineage = hub.lineage().to_string();
+        let stale_editor =
+            ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let stale_frontier = stale_editor.state_vector();
+        stale_editor.apply_local_edit(6, 0, "resurrected\n");
+        let stale_delta = stale_editor.diff(&stale_frontier).unwrap();
+
+        hub.adopt_editor_text("rebuilt\n").unwrap();
+        assert_ne!(hub.lineage(), old_lineage);
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(Some(&old_lineage), &stale_delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::StaleLineage
+        );
+        assert_eq!(hub.canonical_text(), "rebuilt\n");
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(None, &stale_delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::LegacyQuarantined
+        );
+        assert_eq!(hub.canonical_text(), "rebuilt\n");
+
+        let current_lineage = hub.lineage().to_string();
+        let current_editor =
+            ReplicaState::from_encoded(3, &hub.canonical_encoded_state()).unwrap();
+        let current_frontier = current_editor.state_vector();
+        current_editor.apply_local_edit(8, 0, "current\n");
+        let current_delta = current_editor.diff(&current_frontier).unwrap();
+        assert_eq!(
+            hub.apply_document_op_delta_in_lineage(Some(&current_lineage), &current_delta)
+                .unwrap(),
+            DocumentOpDeltaOutcome::Applied { changed: true }
+        );
+        assert_eq!(hub.canonical_text(), "rebuilt\ncurrent\n");
     }
 
     #[test]

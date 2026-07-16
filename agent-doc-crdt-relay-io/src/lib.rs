@@ -56,16 +56,68 @@ use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
 use agent_doc_document_realtime::crdt_relay::{
-    AwarenessState, DiskChangeOutcome, PendingReplicaUpdate, RelayHub, ReplicaDeliverySnapshot,
-    mint_client_id,
+    AwarenessState, DiskChangeOutcome, DocumentOpDeltaOutcome, PendingReplicaUpdate, RelayHub,
+    ReplicaDeliverySnapshot, mint_client_id,
 };
 use agent_doc_document_realtime::watch_authority::{
     WatchAction, WatchDelivery, decide_watch_action,
 };
 use lazily::DurableOutbox;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CrdtLineageMetadata {
+    projection_sha256: String,
+    lineage: String,
+}
+
+fn projection_sha256(projection: &[u8]) -> String {
+    Sha256::digest(projection)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn load_matching_crdt_lineage(file: &Path, projection: &[u8]) -> Result<Option<String>> {
+    let path = agent_doc_fs::crdt_lineage_path_for(file)?;
+    let Some(bytes) = agent_doc_snapshot_io::read_crdt_state_file(&path, "CRDT lineage metadata")?
+    else {
+        return Ok(None);
+    };
+    // A torn or older sidecar must not wedge recovery. Treat it exactly like a
+    // projection mismatch: mint a new lineage and quarantine unscoped/stale
+    // replicas until they register again.
+    let Ok(metadata) = serde_json::from_slice::<CrdtLineageMetadata>(&bytes) else {
+        return Ok(None);
+    };
+    if metadata.projection_sha256 == projection_sha256(projection) {
+        Ok(Some(metadata.lineage))
+    } else {
+        Ok(None)
+    }
+}
+
+fn write_crdt_lineage_metadata(file: &Path, projection: &[u8], lineage: &str) -> Result<()> {
+    let path = agent_doc_fs::crdt_lineage_path_for(file)?;
+    let metadata = CrdtLineageMetadata {
+        projection_sha256: projection_sha256(projection),
+        lineage: lineage.to_string(),
+    };
+    let bytes = serde_json::to_vec(&metadata)?;
+    agent_doc_snapshot_io::write_crdt_state_file(&path, &bytes)
+}
+
+fn save_crdt_projection_with_lineage(
+    file: &Path,
+    projection: &[u8],
+    lineage: &str,
+) -> Result<()> {
+    agent_doc_snapshot_io::save_crdt(file, projection)?;
+    write_crdt_lineage_metadata(file, projection, lineage)
+}
 
 /// Stable event kinds written to `.agent-doc/crdt-replica-events/`.
 /// Strings are a wire encoding only; producers select a closed enum variant.
@@ -1630,7 +1682,8 @@ fn apply_response_cell_on_hub(
     // make the CRDT mutation restart-durable first.  Persisting while the hub is
     // locked also prevents two concurrent response cells from writing recovery
     // projections out of canonical order.
-    agent_doc_snapshot_io::save_crdt(file, &hub.projection_bytes())?;
+    let projection = hub.projection_bytes();
+    save_crdt_projection_with_lineage(file, &projection, hub.lineage())?;
     Ok(ResponseCellRelayWrite {
         applied: outcome.applied,
         cell_id: outcome.cell_id,
@@ -1979,7 +2032,12 @@ pub fn recover_hub_from_disk(file: &Path, projection: &[u8]) -> Result<()> {
             return Ok(());
         }
     }
-    let hub = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, projection)?;
+    let lineage = load_matching_crdt_lineage(file, projection)?;
+    let hub = RelayHub::recover_from_projection_with_lineage(
+        CANONICAL_CLIENT_ID,
+        projection,
+        lineage.as_deref(),
+    )?;
     let mut registry = hub_registry()
         .lock()
         .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
@@ -2090,8 +2148,13 @@ fn checkpoint_durable_projection_for_file_with_mode(
         );
     }
 
-    let Some((projection, canonical_text)) =
-        with_existing_hub(file, |hub| (hub.projection_bytes(), hub.canonical_text()))?
+    let Some((projection, canonical_text, lineage)) = with_existing_hub(file, |hub| {
+        (
+            hub.projection_bytes(),
+            hub.canonical_text(),
+            hub.lineage().to_string(),
+        )
+    })?
     else {
         return defer_or_fail_durable_projection_checkpoint(
             file,
@@ -2103,7 +2166,10 @@ fn checkpoint_durable_projection_for_file_with_mode(
     let path = agent_doc_fs::crdt_path_for(file)?;
     let changed =
         agent_doc_snapshot_io::with_crdt_lock_labeled(file, "durable_recycle_checkpoint", || {
-            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&path, &projection)
+            let changed =
+                agent_doc_snapshot_io::write_crdt_state_file_if_changed(&path, &projection)?;
+            write_crdt_lineage_metadata(file, &projection, &lineage)?;
+            Ok(changed)
         })?;
     let text_len = canonical_text.len();
     let text_hash = agent_doc_hash::content_hash(&canonical_text);
@@ -2675,25 +2741,42 @@ pub fn adopt_editor_text_for_file(file: &Path, text: &str) -> Result<Option<bool
 /// applying the delta is idempotent + commutative, so a duplicate / out-of-order /
 /// stale frame converges rather than corrupting the canonical.
 pub fn apply_document_op_delta_for_file(file: &Path, delta: &[u8]) -> Result<Option<bool>> {
-    let Some(changed) = with_existing_hub(file, |hub| {
-        let before = hub.canonical_text();
-        hub.apply_document_op_delta(delta)
-            .map(|_| hub.canonical_text() != before)
+    Ok(apply_document_op_delta_for_file_in_lineage(file, None, delta)?.map(|outcome| {
+        matches!(outcome, DocumentOpDeltaOutcome::Applied { changed: true })
+    }))
+}
+
+/// Lineage-fenced durable document-op ingest. Stale/ambiguous frames are
+/// terminally quarantined so reliable-sync can ACK them instead of retrying
+/// forever or union-applying an obsolete CRDT history.
+pub fn apply_document_op_delta_for_file_in_lineage(
+    file: &Path,
+    lineage: Option<&str>,
+    delta: &[u8],
+) -> Result<Option<DocumentOpDeltaOutcome>> {
+    let Some(outcome) = with_existing_hub(file, |hub| {
+        hub.apply_document_op_delta_in_lineage(lineage, delta)
     })?
     else {
         return Ok(None);
     };
-    let changed = changed?;
+    let outcome = outcome?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_document_op_delta_applied file={} authority=multi_replica changed={} delta_len={}",
+            "crdt_document_op_delta_ingested file={} authority=multi_replica outcome={:?} frame_lineage={} delta_len={}",
             file.display(),
-            changed,
+            outcome,
+            lineage.unwrap_or("legacy-unscoped"),
             delta.len(),
         ),
     );
-    Ok(Some(changed))
+    Ok(Some(outcome))
+}
+
+/// Current canonical lineage returned to a newly registered editor.
+pub fn current_lineage_for_file(file: &Path) -> Result<Option<String>> {
+    with_existing_hub(file, |hub| hub.lineage().to_string())
 }
 
 pub fn reconcile_disk_projection_for_file(file: &Path, projection: &[u8]) -> Result<Option<bool>> {
@@ -3063,6 +3146,34 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "# {name}\n\nbody").unwrap();
         (dir, path)
+    }
+
+    #[test]
+    fn durable_lineage_metadata_is_bound_to_exact_projection() {
+        let (_dir, doc) = temp_doc("lineage-projection.md");
+        let projection = RelayHub::from_text(CANONICAL_CLIENT_ID, "projection one\n")
+            .projection_bytes();
+        write_crdt_lineage_metadata(&doc, &projection, "lineage-one").unwrap();
+        assert_eq!(
+            load_matching_crdt_lineage(&doc, &projection).unwrap().as_deref(),
+            Some("lineage-one")
+        );
+
+        let replacement = RelayHub::from_text(CANONICAL_CLIENT_ID, "projection two\n")
+            .projection_bytes();
+        assert_eq!(
+            load_matching_crdt_lineage(&doc, &replacement).unwrap(),
+            None,
+            "metadata from a different projection must fail closed"
+        );
+
+        let lineage_path = agent_doc_fs::crdt_lineage_path_for(&doc).unwrap();
+        std::fs::write(lineage_path, b"{torn").unwrap();
+        assert_eq!(
+            load_matching_crdt_lineage(&doc, &projection).unwrap(),
+            None,
+            "malformed metadata must mint a fresh lineage instead of wedging startup"
+        );
     }
 
     fn seed_live_reliable_sync_open(file: &str) {

@@ -44,6 +44,7 @@ class CrdtReplicaForwarder(
 ) {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaForwarder::class.java)
     private var pushedVersion: ByteArray? = null
+    private var lineage: String? = null
 
     /** True once [register] succeeded and the replica is bound. */
     @Volatile
@@ -77,7 +78,8 @@ class CrdtReplicaForwarder(
                 log.warn("[crdt-replica] transport.register returned null for ${File(filePath).name}; reason=${transport.lastRegisterError() ?: "unknown"}")
                 return false
             }
-            clientId = ack.clientId
+        clientId = ack.clientId
+        lineage = ack.lineage
             val openStarted = System.nanoTime()
             val opened = node.open(ack.clientId, ack.bootstrap)
             logSlow("native.open", openStarted, details = "bootstrap_bytes=${ack.bootstrap?.size ?: 0} ok=$opened")
@@ -138,7 +140,7 @@ class CrdtReplicaForwarder(
         val diffStarted = System.nanoTime()
         val update = node.diff(frontier) ?: return 0
         logSlow("native.diff", diffStarted, details = "reason=$reason update_bytes=${update.size}")
-        val durable = transport.pushDocumentOps(filePath, update.toString(Charsets.UTF_8))
+        val durable = transport.pushDocumentOps(filePath, lineage, update.toString(Charsets.UTF_8))
         if (durable) pushedVersion = node.stateVector()
         val broadcastStarted = System.nanoTime()
         transport.broadcastUpdate(filePath, identity, update)
@@ -248,6 +250,7 @@ class CrdtReplicaForwarder(
         val closeStarted = System.nanoTime()
         node.close(clientId)
         pushedVersion = null
+        lineage = null
         logSlow("native.close", closeStarted)
         attached = false
     }
@@ -270,7 +273,11 @@ class CrdtReplicaForwarder(
 }
 
 /** The CPC `register` ack: the minted client-id + canonical bootstrap state. */
-data class ReplicaRegisterAck(val clientId: Long, val bootstrap: ByteArray?)
+data class ReplicaRegisterAck(
+    val clientId: Long,
+    val bootstrap: ByteArray?,
+    val lineage: String? = null,
+)
 
 /** One queued CPC-to-editor CRDT update owned by this replica. */
 data class ReplicaRemoteUpdate(
@@ -321,7 +328,7 @@ interface ReplicaTransport {
     fun broadcastUpdate(filePath: String, identity: String, update: ByteArray)
 
     /** Durable document-op plane; default success keeps test transports thin. */
-    fun pushDocumentOps(filePath: String, deltaJson: String): Boolean = true
+    fun pushDocumentOps(filePath: String, lineage: String?, deltaJson: String): Boolean = true
 
     /** Bounded reattach-only adopt; default false means unsupported by a test transport. */
     fun pushTextAdopt(filePath: String, text: String): Boolean = false
@@ -389,8 +396,9 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
             return null
         }
         val bootstrap = data.get("bootstrap_b64")?.asString?.let { decodeBase64(it) }
+        val lineage = data.get("lineage")?.asString
         lastRegisterError = null
-        return ReplicaRegisterAck(clientId, bootstrap)
+        return ReplicaRegisterAck(clientId, bootstrap, lineage)
     }
 
     override fun broadcastUpdate(filePath: String, identity: String, update: ByteArray) {
@@ -400,10 +408,18 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
         send(request)
     }
 
-    override fun pushDocumentOps(filePath: String, deltaJson: String): Boolean {
+    override fun pushDocumentOps(filePath: String, lineage: String?, deltaJson: String): Boolean {
         val lib = AgentDocLib.get() ?: return false
+        val payload = if (lineage == null) {
+            deltaJson
+        } else {
+            JsonObject().apply {
+                addProperty("lineage", lineage)
+                addProperty("delta_json", deltaJson)
+            }.toString()
+        }
         return try {
-            lib.agent_doc_reliable_sync_document_op_push(projectRoot, filePath, deltaJson) == 0
+            lib.agent_doc_reliable_sync_document_op_push(projectRoot, filePath, payload) == 0
         } catch (e: Throwable) {
             log.warn("[document-op] durable push failed for ${File(filePath).name}: ${e.message}")
             false

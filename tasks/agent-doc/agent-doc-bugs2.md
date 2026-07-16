@@ -186,7 +186,7 @@ Resolved by the same installed convergence fix.
 The historical `Compact Exchange` failure surfaced from `monsterrodholders.md`, but its blocked delivery target was the open `equityfundingsource.md` editor. JetBrains plugin `0.2.264` removes the two paths that could strand that target: workspace-wide VFS refresh behind unsaved buffers, and CRDT save through a stale `VirtualFile` stamp. The restarted IDEA instance is registered live on `0.2.264`.
 
 The canonical compact result in that error was already retained on the CRDT/Lazily plane. It did not require force-disk, controller termination, or response replay. This queue item is closed by the shipped fix; I did not initiate a new Compact Exchange against either separate session.
-<!-- agent:boundary:bad38b3a -->
+<!-- agent:boundary:14b5b181 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -262,21 +262,21 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ---
 - ~~📌 haiven.md response was not committed.~~
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
-- ⏭️ 📌 do [#zqv8]
-- ⏭️ 📌 do [#crde]
-- ⏭️ 📌 do [#steeringobservableset]
-- ⏭️ 📌 do [#jbcompactexchange]
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
+- 📌 do [#zqv8]
+- 📌 do [#crde]
+- 📌 do [#steeringobservableset]
+- 📌 do [#jbcompactexchange]
+- 📌 do [#goal1d0k]
+- 📌 do [#idlewatchturnactive]
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - 📌 do [#tmuxfocusfollow]
@@ -325,7 +325,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
@@ -337,7 +337,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ~~~
 - ~~In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
-- haiven.md response was not committed.
 - 📌 t
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 ---
@@ -364,7 +363,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
@@ -473,7 +472,7 @@ What are #next-steps to fix bugs?
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
 - [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
-- [ ] 🚧 [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
+- [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md

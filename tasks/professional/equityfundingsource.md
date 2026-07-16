@@ -106,7 +106,6 @@ One caveat on scope: I verified via `make check` + the worker bundle, not agains
 - ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~
 - ⏭️ do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
 - go...do options 1 -> 2 -> 3
-- do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
 <!-- /agent:queue -->
 
 ## Notes
@@ -130,8 +129,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-sync-tmo-ui] #lender-sync-tmo-ui — UI for per-vesting TMO sync: a vestings card on the admin lender/user detail with a TmoLenderPicker + 'Sync with TMO' per vesting, calling PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account. Backend shipped EFS 010a371. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md. (Kept open — operator-deferred ⏭️; 2026-07-16 cycle answered the vesting-binding design question instead. Still actionable; relates to #fund-vesting-fk.)
-- [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding (reuse tmo_unmatched_fundings bind). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding. Surface+bind SHIPPED (EFS 71327b0, reuses tmo_unmatched_fundings bind). REMAINING = PRD D4 conflict resolution (operator 2026-07-16): on bind, the TMO funding is the SOURCE OF TRUTH and must OVERRIDE conflicting funds fields (amount, account, dates, status) from the pulled loan_funding cache row instead of preserving local values, recording what it overrode for audit. Pull/bind direction only — NOT gated on #dzmm/#7a4d (those gate the EFS→TMO push, #fundlink3). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 
 ## Review

@@ -870,12 +870,80 @@ Done — implemented and committed. My earlier snippet referenced `s.eng` before
 Verified green: `go build ./...` OK, `go vet ./...` clean, `go test ./...` all pass (incl. the e2e `test` package that drives the gnet server, 1.5s).
 
 Committed: submodule `9c21567` on `main`; superproject gitlink bump `ed3de970e`.
-<!-- agent:boundary:e6b874cc -->
+I just handcoded a change `captured := slices.Clone(frame)` as a modern alternative to:
+```
+		captured := make([]byte, len(frame))
+		copy(captured, frame)
+```
+
+Please note this detail in the change log for my report. Please also run through the codebase and prefer slices.Clone over make + copy.
+commit + push
+
+Please also note that an assumption is using go >=1.26.4..to support slices.Clone.
+
+### Re: slices.Clone sweep + change log, commit + push — opus-4-8
+
+Done. Your `captured := slices.Clone(frame)` at `hub/conn.go:66` is correct and builds.
+
+**Codebase sweep** (`make + copy` → `slices.Clone`, Go 1.26 so 1.21+ is fine):
+- `hub/conn.go` `Feed` — `payload := slices.Clone(buf[ws.HeaderSize(header):total])` (the subslice length equals `header.Length`, so it is an exact clone; masking still happens in place on the fresh copy).
+- `hub/outbox.go` `Append` — `cp := slices.Clone(frame)` (added the `slices` import).
+- Left alone: `hub/registry.go` topic fan-out builds `make([]*Conn, 0, len(set))` then `append`s a filtered set — that is a rebuild, not a clone, so `slices.Clone` does not apply.
+
+**Change log:** added a `## Change Log` section to `DESIGN.md` (the report ships with the repo) noting both this `slices.Clone` modernization and the earlier `Engine.Stop` migration.
+
+**Verified:** `go build`/`go vet` clean, `go test ./...` all pass (incl. the e2e `test` package driving the gnet server).
+
+**Committed + pushed:**
+- Submodule `a1c466a` on `main` → pushed to `github.com:btakita/haiven-websocket-hub` (`94ddaa8..a1c466a`).
+- Superproject gitlink bump `f8a483b66`; pushing `agent-loop` main next (fast-forward).
+In the assumptions list, please not whatever
+
+In the assumptions list, please not whatever
+
+### Re: slices.Clone sweep, change log, Go-version note, commit + push — opus-4-8
+
+Done, committed, and pushed to GitHub.
+
+**slices.Clone sweep** (Go 1.26.4, so 1.21+ `slices.Clone` is available):
+- `hub/conn.go:66` `Conn.enqueue` — your `captured := slices.Clone(frame)` (correct, builds).
+- `hub/conn.go` `Conn.Feed` — `payload := slices.Clone(buf[ws.HeaderSize(header):total])` (subslice length equals `header.Length`, an exact clone; masking still happens in place on the fresh copy).
+- `hub/outbox.go` `memOutbox.Append` — `cp := slices.Clone(frame)` (added `slices` import).
+- Left as-is: `hub/registry.go` topic fan-out — `make([]*Conn, 0, len(set))` + `append` is a filtered rebuild, not a clone.
+
+**Change log** (`DESIGN.md`, ships with the repo): documented the `slices.Clone` modernization, the earlier `Engine.Stop` migration, and the **assumption** that the build targets the `go.mod`-pinned toolchain `go 1.26.4` (slices.Clone is stdlib since 1.21, so the pin is the assumed baseline).
+
+**Verified:** `go build`/`go vet` clean, `go test ./...` all pass (incl. e2e).
+
+**Committed + pushed to `github.com:btakita/haiven-websocket-hub` (`main`):**
+- `a1c466a` slices.Clone frame snapshots + DESIGN change log
+- `bfeb360` Go 1.26.4 toolchain assumption note
+
+Superproject gitlink bumps `f8a483b66` + `67d0e3c75`; pushing `agent-loop` main next (fast-forward).
+
+### Re: slices.Clone sweep, change log, Go-version note, commit + push — opus-4-8
+
+Done, committed, and pushed to GitHub.
+
+**slices.Clone sweep** (Go 1.26.4, so 1.21+ `slices.Clone` is available):
+- `hub/conn.go:66` `Conn.enqueue` — your `captured := slices.Clone(frame)` (correct, builds).
+- `hub/conn.go` `Conn.Feed` — `payload := slices.Clone(buf[ws.HeaderSize(header):total])` (subslice length equals `header.Length`, an exact clone; masking still happens in place on the fresh copy).
+- `hub/outbox.go` `memOutbox.Append` — `cp := slices.Clone(frame)` (added `slices` import).
+- Left as-is: `hub/registry.go` topic fan-out — `make([]*Conn, 0, len(set))` + `append` is a filtered rebuild, not a clone.
+
+**Change log** (`DESIGN.md`, ships with the repo): documented the `slices.Clone` modernization, the earlier `Engine.Stop` migration, and the assumption that the build targets the `go.mod`-pinned toolchain `go 1.26.4` (slices.Clone is stdlib since 1.21).
+
+**Verified:** `go build`/`go vet` clean, `go test ./...` all pass (incl. e2e).
+
+**Committed + pushed to `github.com:btakita/haiven-websocket-hub` (`main`):** `a1c466a` (slices.Clone + DESIGN change log), `bfeb360` (Go 1.26.4 assumption). Superproject gitlink bumps `f8a483b66` + `67d0e3c75` pushed to `agent-loop` main.
+<!-- agent:boundary:a79c0e7a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+writeNext
+c.writing.CompareAndSwap(false, true)
 <!-- /agent:queue -->
 
 ## Backlog

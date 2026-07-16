@@ -93,7 +93,7 @@ So I recorded it as **PRD decision D4** and put the implementation on `#fundlink
 Worth flagging: **D4 governs the pull/bind direction only, so it is _not_ blocked by #dzmm/#7a4d.** Those gate the EFS→TMO *push* (`#fundlink3`). That means the TMO-wins bind is implementable now — it doesn't have to wait on the TMO write field map. Say go and I'll take `#fundlink2`.
 
 One caveat on scope: I verified via `make check` + the worker bundle, not against the live portal — driving the real card needs a seeded lender with vestings. If you want live confirmation before this counts as shipped, say so and I'll run the local portal recipe.
-<!-- agent:boundary:452b3844 -->
+<!-- agent:boundary:9f1a1e6c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

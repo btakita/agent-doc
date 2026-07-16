@@ -5,7 +5,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -271,19 +271,59 @@ The stale refresh survived; the stop was discarded. Under conflate the stop wins
 Also: `TestTypingConflatesPerClientNotPerTopic` (two typists in a room don't collapse), `TestSweeperSynthesizesStopOnTTL`, `TestExplicitStopRetiresIndicator` (no duplicate synthetic stop). `TestSlowConsumerDoesNotStarveOthers` was retargeted to the **default** class — still drop-newest — so that starvation invariant keeps its coverage rather than being quietly deleted.
 
 **One correction to what I told you last cycle:** I said conflation would change the `realistic` loadtest typing counts. **It didn't** — deliveries are identical (96,500 / 965,000). The suite drains send queues immediately, so a same-key frame is rarely pending to conflate against; conflation only bites when a subscriber is actually behind, which is precisely when you want it. `docs/LOADTEST.md` policy wording and the README updated. `make check` green with `-race` (182 tests, incl. e2e).
-<!-- agent:boundary:defbf5f6 -->
+
+
+### Re: ConflateByEntity vs DropOldest — opus-4-8
+
+> **Queue prompt:** What is the difference between ConflateByEntity and DropOldest?
+
+(Persisting this properly — it was auto-struck as answered, but the answer had only reached the console, so it never existed in the document.)
+
+They differ on three axes: **when they act**, **what they evict**, and **what they bound**.
+
+**DropOldest** (`sendqueue.go:97-101`) acts **only when the queue is full**. It evicts the *oldest* frame — whatever it is, and **whoever it belongs to** — then enqueues the newcomer. It is positional/FIFO and entity-blind. It bounds the **queue**.
+
+**ConflateByEntity** (`sendqueue.go:77-83`) acts **regardless of fill level**. If a frame with the same key is already pending it replaces it **in place**:
+
+```go
+if el, ok := q.byKey[conflateKey]; ok {
+    el.Value = queued{frame: frame, conflateKey: conflateKey}  // queue does not grow
+    return nil
+}
+```
+
+The key is `service|topic|subject` (`conflateKeyFor`). It bounds **per entity** — each entity costs exactly one slot, so the queue can never exceed the number of distinct entities.
+
+**The difference that actually matters: collateral damage.** Three typists, cap-2 queue, A's "stopped" arrives:
+
+| | DropOldest | ConflateByEntity |
+|---|---|---|
+| what gets evicted | the oldest frame — possibly **B's** typing | **A's own** stale refresh |
+| B's indicator | corrupted (its frame was evicted) | untouched |
+| queue growth from A | grows to cap, then evicts | never grows past 1 slot |
+
+DropOldest would save A's stop by destroying B's — entity-blind eviction lets one chatty entity starve another. Conflate replaces only the sender's own stale value.
+
+A subtlety in conflate's favour: because it swaps `el.Value` on an existing list element, the entity **keeps its original queue position** but gets the **newest content** — latest-state delivery costs nothing in fairness.
+
+**They do meet at one point:** conflate with a *new* key on a *full* queue degrades to drop-oldest (`sendqueue.go:97-98`) — the only case where conflate evicts someone else.
+
+**So:** DropOldest is right when frames are not per-entity state and you just want the most recent N from a stream. ConflateByEntity is right when the data *is* per-entity state — typing and presence both — where only the latest per entity matters and no entity should crowd out another. That is why `#typeconflate` moved typing onto it rather than onto DropOldest, even though DropOldest would also have saved the stop.
+
+---
+
+**Session-doc recovery note.** The closeout thrash was a corrupted live editor buffer, not the work: a CRDT merge had duplicated the **entire document into itself** (62,804 B vs 31,402 B on disk; every component ×2; two identical boundary markers), so the integrity gate correctly rejected every write and disk never advanced. I verified before recommending the tab close that the only line present in the buffer but absent from disk was my own `[x] [#typeconflate]` flip — **no operator text was ever at risk**. Closing the tab retired the bad buffer; the plugin also came back at **0.2.271** (was 0.2.270 against a cdylib older than the "Lazily is the sole live editor authority" source change), and preflight then reaped the pending `typeconflate` on its own. I deliberately never ran `--force-disk` or `make install` over the concurrent agent-doc session's in-flight work.
+<!-- agent:boundary:f89fd4e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- What is the difference between ConflateByEntity and DropOldest?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 - [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
@@ -301,6 +341,7 @@ Also: `TestTypingConflatesPerClientNotPerTopic` (two typists in a room don't col
 <!-- agent:done -->
 - 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
 - 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
+- 2026-07-16 [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
 <!-- /agent:done -->
 
 

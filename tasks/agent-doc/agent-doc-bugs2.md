@@ -88,22 +88,48 @@ The release is agent-doc `0.34.136` at submodule commit `a979baafa`. I did not r
 JetBrains and VS Code are at behavior parity for deferred reconnect, visible-buffer rebootstrap, exact candidate proof, save-flush resolution, and no component merge of disk candidates. The JetBrains 0.2.262 artifact is installed, but this preflight reports the currently running IDEA process still has 0.2.261 loaded. Because 0.2.262 was installed after your last restart, one additional IDEA restart is required to activate the Kotlin plugin update. The native library reload/recycle was already broadcast; no waiting or controller-kill loop is needed.
 
 Verification is green locally: the full suite passed 7,713 tests with 240 skipped, VS Code passed 158 tests, JetBrains `test buildPlugin` passed, Lean `lake build` passed, and skill generation/install passed 82 tests. The single requested CI inspection showed the new 0.34.136 CI run in progress, not red; per policy I did not poll it. The repository policy now explicitly says to inspect CI once and fix it only when that inspection is red.
-<!-- agent:boundary:a7e19ce2 -->
+
+### Re: interrupted Claude turn and Compact Exchange — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+> ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+> ```
+
+This failure chain is fixed and released in agent-doc `v0.34.140` at `fdb8b3f5c`, with JetBrains plugin `0.2.263`. The agent-loop superproject now points to it at `dfd141613`.
+
+An interrupted harness turn and an active captured response are now treated as separate state. Compact Exchange remains a controller-owned transaction while the prior turn is winding down: it composes any exact active capture into the compact archive instead of discarding the capture or requiring another agent response. Closeout recognizes that exact response in the archive, so it no longer emits the false “captured response missing from staged snapshot” refusal.
+
+The 8-second editor ACK deadline is no longer reported as a failed command when canonical CRDT authority still retains the exact compacted target and asynchronous recovery was accepted. The command returns retained success while the editor reconnect continues. Canonical loss, a mismatched receipt, or a missing recovery signal still fails closed. This means the banner may wait for the controller result, but a delayed ACK alone no longer authorizes deleting the prompt, force-writing disk, killing the controller, or asking the agent to retry finalize.
+
+The other churn paths are closed as well:
+
+- JetBrains external CRDT events cannot bypass the retained-ACK backoff and start another drain storm.
+- Controller commit uses the same socket that proved liveness, eliminating the probe/reconnect recycle race; stale socket files are reaped on startup.
+- Repeated finalize attempts are semantic no-ops once the exact response exists: they emit no second CRDT update, preserve intervening operator prompts, supersede stale uncommitted response tails, and leave one response plus one boundary.
+- Compact/finalize overlap, delayed ACK, external events, controller recycle, stale sockets, canonical loss, archive materialization, and exact retry behavior are covered by exhaustive SimWorld schedules. Lean proves the archive, retained-delivery, retry-admission, and same-stream safety conditions.
+
+Local verification passed 7,725 tests with 240 skipped, plus the Lean, focused controller/compact/realtime/response-cell, and JetBrains tests. The one-shot CI inspection found the `v0.34.140` run in progress rather than red.
+
+One live prerequisite remains visible in this cycle: IDEA is still running JetBrains plugin `0.2.261`, not the shipped `0.2.263`. Install/update the `0.2.263` plugin and restart IDEA before judging the live banner/ACK behavior; otherwise the old Kotlin adapter can still reproduce the event-storm side of the incident. After that update, rerun Compact Exchange once. Do not kill the controller, use force-disk, or submit another finalize for a retained target.
+<!-- agent:boundary:2fc3a77a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~/goal Implement backlog item(s): #z5ar~~
 - ~~Editor document selection auto-sync with tmux pane is inconsistent.~~
----
-🚧 📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+~~~done
+📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
 ```
----
+~~~
 - ~~re: realtime steering, please immediately commit exchange prompts with the prefix so the diff can detect additional steering changes.~~
 ---
-📌 haiven.md thrash issue:
+🚧 📌 haiven.md thrash issue:
 ```
 ● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
   reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
@@ -139,7 +165,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ---
-- 📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.
+- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
 ---
 📌 haiven.md thrash issue:
 ```
@@ -180,7 +206,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 haiven.md response was not committed.
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - ⏭️ 📌 do [#zqv8]
-- 📌 do [#crde]
+- ⏭️ 📌 do [#crde]
 - 📌 do [#steeringobservableset]
 - 📌 do [#jbcompactexchange]
 - 📌 do [#goal1d0k]
@@ -205,12 +231,59 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#staleplugindeploy]
----
+~~~done
 📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
 ```
+~~~
 ---
+📍 haiven.md thrash issue:
+```
+● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
+  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
+  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
+```
+---
+---
+⏭️ 📍 haiven.md session had a JB `File Cache Conflict`.
+```
+● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+  controller pid, retry the commit):
+
+  Ran 1 shell command
+
+● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+  Waiting, then retrying:
+
+  Ran 1 shell command
+
+● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+  tree? committed? is the editor replica alive?) before any further infra action.
+
+  Ran 1 shell command
+
+● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+```
+---
+---
+📍 JB `Compact Exchange` on monsterrodholders.md
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+```
+---
+~~~done
+📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+```
+~~~
+- ~~In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
+- haiven.md response was not committed.
+- t
+- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 ---
 📍 haiven.md thrash issue:
 ```
@@ -249,80 +322,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 - do [#5qjj]
-- In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.
-- haiven.md response was not committed.
-- t
-- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
-- 📌 do [#zqv8]
----
-In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
-```
----
----
-haiven.md thrash issue:
-```
-● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
-  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
-  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
-```
----
----
-haiven.md session had a JB `File Cache Conflict`.
-```
-● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-  controller pid, retry the commit):
-
-  Ran 1 shell command
-
-● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-  Waiting, then retrying:
-
-  Ran 1 shell command
-
-● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-  tree? committed? is the editor replica alive?) before any further infra action.
-
-  Ran 1 shell command
-
-● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-```
----
----
-JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
-- do [#zqv8]
-- do [#crde]
-- do [#steeringobservableset]
-- do [#jbcompactexchange]
-- do [#goal1d0k]
-- do [#idlewatchturnactive]
-- do [#jblocalhistverify]
-- do [#compactcrdtretry]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
-- do [#tmuxfocusfollow]
-- do [#clippy197cleanup]
-- do [#jbtsiftnosub2verify]
-- do [#restartstderrbleed2]
-- do [#5bzd]
-- do [#sidecarstate]
-- do [#64we]
-- do [#adstatechart2]
-- do [#adstatechart3]
-- do [#adstatechartkt]
-- do [#adstatechartjs]
-- do [#ipcauthority]
-- do [#ipcliveness]
-- do [#ipcverhandshake]
-- do [#ipcpostcommitinv]
-- do [#staleplugindeploy]
 <!-- /agent:queue -->
 
 ## Notes

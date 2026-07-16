@@ -205,16 +205,29 @@ Built the backend contract for syncing a lender's vestings to TMO. Committed + p
 **Note on the existing UI:** the admin lender-*request* page already has a single "Sync with TMO" + account picker, but it assigns one `user.lender_account` — it can't represent Mark Leonard's four vestings. The per-vesting UI is queued as **#lender-sync-tmo-ui**.
 
 Still open (shapes the *picker* inside that UI, not the endpoint): whether TMO exposes a LOS lender-list API for autocomplete, or the admin types the account per vesting. Next in queue: **#lender-sync-tmo-ui → #fundpick-roster → #fundlink1 → #fundlink2**.
-<!-- agent:boundary:577af8da -->
+
+### Re: Shipped #fundpick-roster — picker unions vestings + fundings — opus-4-8
+
+Committed + pushed (EFS `90fdcc6`), `make check` green (1638 tests, 0 fail; build + build:worker ok).
+
+`GET /api/admin/tmo-lenders` now unions two EFS-local sources, deduped by TMO account:
+- **Vesting-mapped lenders** — `lender_vesting_tmo_lenders_R_`: active `lender_vestings` with a non-null `tmo_lender_account` (from `#lender-sync-tmo`), joined to the lender's `users` row for name/email. This surfaces a lender who has a **synced vesting but no funding yet** — the "add a lender not part of a funding" case.
+- **Funding-derived lenders** — the existing `loan_funding` tmo_cache set.
+
+Vestings sort first so the roster name/email wins; still LOS-only, no LSS, and the picker keeps free-text for a brand-new account.
+
+Practical note: this surfaces vestings **once they're mapped** to a TMO account, which happens through `#lender-sync-tmo`'s endpoint — and the admin UI to drive that (`#lender-sync-tmo-ui`) is still queued. So until that UI ships (or accounts are set via the endpoint directly), the union's vesting side is empty and the picker behaves as before. Next in queue: **#fundlink1 → #fundlink2 → #lender-sync-tmo-ui**.
+<!-- agent:boundary:9efc50ac -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
 - ~~Can we create loan funding records in the api?~~
-- ⏭️ do [#lender-sync-tmo]
+- ~~do [#lender-sync-tmo]~~
 - ⏭️ do [#h8rz]
 - ⏭️ do [#fundlink1]
 - ⏭️ do [#fundlink2]
+- 🚧 do [#lender-sync-tmo-ui]
 <!-- /agent:queue -->
 
 ## Notes
@@ -238,6 +251,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lender-sync-tmo-ui] #lender-sync-tmo-ui — UI for per-vesting TMO sync: a vestings card on the admin lender/user detail with a TmoLenderPicker + 'Sync with TMO' per vesting, calling PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account. Backend shipped EFS 010a371. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#h8rz] [recommended] #fundpick-roster — union the lender picker sources: GET /api/admin/tmo-lenders returns lender-role users (users.lender_account) ∪ funding-derived lenders (tmo_lenders_from_fundings_), deduped by account, free-text preserved, so never-funded lenders are selectable. LOS-only, no LSS. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#fundlink1] — create funding on lender-select (not at acceptance): when a lender is picked/entered in the funding UI, create the funds row + loan_funding cache row for that lender, no ready-for-funding gate, non-blocking. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding (reuse tmo_unmatched_fundings bind). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.

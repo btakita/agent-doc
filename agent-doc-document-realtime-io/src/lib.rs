@@ -1985,6 +1985,20 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
     boundary_singleton && single_exchange
 }
 
+/// Normalize the narrow structural transient produced when a retained response
+/// replay duplicates response cells and/or protocol boundary markers. This is
+/// deliberately pure: callers validate and write the returned target through
+/// the current document authority before entering their generic integrity gate.
+pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Option<String> {
+    if agent_projection_integrity_valid(content) {
+        return None;
+    }
+    let normalized = agent_doc_merge::response_cell::deduplicate_response_cells(content)
+        .ok()
+        .flatten()?;
+    (normalized != content && agent_projection_integrity_valid(&normalized)).then_some(normalized)
+}
+
 fn validate_canonical_document_target(file: &Path, content: &str, source: &str) -> Result<()> {
     if let Some(reason) = agent_doc_element::element::structural_corruption_reason(content) {
         anyhow::bail!(
@@ -2900,8 +2914,9 @@ pub fn clear_pending_external_disk_decision_after_editor_propagation(
     Ok(true)
 }
 
-/// Clear the pending editor decision when the last editor closes. Disk then
-/// becomes the current replica; callers record that authority after this step.
+/// Clear the pending external-disk decision when the last editor closes.  The
+/// explicit close path projects the closing editor/CRDT cut before recording
+/// disk authority, so an older external candidate can no longer displace it.
 pub fn clear_pending_external_disk_decision_on_last_editor_close(
     file: &Path,
     source: &str,
@@ -2913,10 +2928,145 @@ pub fn clear_pending_external_disk_decision_on_last_editor_close(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "external_disk_editor_decision file={} intent_id={} decision=last_editor_closed prior_target_hash={} pending_cleared=true authority=disk",
+            "external_disk_editor_decision file={} intent_id={} decision=last_editor_closed prior_target_hash={} pending_cleared=true authority=closing_editor_projection",
             file.display(),
             pending.intent_id,
             pending.target_hash,
+        ),
+    );
+    Ok(true)
+}
+
+/// Materialize the final CRDT/editor authority after an explicit last-editor
+/// close notification.
+///
+/// A generic zero-member relay quorum is not visible-write proof: the IDE may
+/// merely be stale or disconnected while still holding an unsaved buffer.  An
+/// explicit close notification plus a reliable-sync `false` liveness fact is
+/// different.  It is the ownership handoff from the closing editor to disk, so
+/// the binary must rebase every retained agent intent over the closing CRDT cut
+/// and atomically project that canonical result.  This is deliberately the only
+/// zero-member path that can write disk without operator `--force-disk`.
+pub fn materialize_last_editor_close_through_authority(file: &Path, source: &str) -> Result<bool> {
+    if agent_doc_reliable_sync_io::plane_editor_live_for_path(&file.to_string_lossy())
+        != Some(false)
+    {
+        return Ok(false);
+    }
+    let base_dir = agent_doc_project_root_io::project_root_containing(file)
+        .unwrap_or_else(|| file.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let file_key = file.to_string_lossy().to_string();
+    let owned_file = file.to_path_buf();
+    let owned_source = source.to_string();
+    agent_doc_queue_io::write_queue::run_serialized_with(
+        &SESSION_ACTOR_WRITE_QUEUE,
+        &base_dir,
+        &file_key,
+        agent_doc_document_realtime::session_ops::SessionOpKind::Lifecycle,
+        move || materialize_last_editor_close_in_owner(&owned_file, &owned_source),
+    )?
+}
+
+fn materialize_last_editor_close_in_owner(file: &Path, source: &str) -> Result<bool> {
+    let path = file.to_string_lossy();
+    if agent_doc_reliable_sync_io::plane_editor_live_for_path(&path) != Some(false) {
+        return Ok(false);
+    }
+
+    let disk_before = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to read {} on last editor close",
+            file.display()
+        )
+    })?;
+    // The reliable-sync close fact intentionally flips ordinary reads to disk
+    // authority.  This handoff still needs the just-closed Lazily cut, so read
+    // the retained CRDT model explicitly (recovering its durable projection if
+    // this process does not host the controller hub).
+    let observed =
+        agent_doc_crdt_relay_io::current_text_for_file_with_authority_recovering_projection(
+            file,
+            agent_doc_document_realtime::crdt_authority::CrdtAuthority::MultiReplica,
+        )?;
+    let (closing_cut, relay_status, relay_members) = match observed {
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text, live_editors, ..
+        } => (text, "current", live_editors),
+        agent_doc_crdt_relay_io::CurrentText::Detached => (disk_before.clone(), "detached", 0),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            (disk_before.clone(), "missing_replica", 0)
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            (disk_before.clone(), "sync_pending", 0)
+        }
+    };
+
+    // The editor cut wins an unresolved external disk candidate on explicit
+    // close.  Retained agent intents are then replayed over that exact cut.
+    clear_pending_external_disk_decision_on_last_editor_close(file, source)?;
+    let target =
+        deferred_document_write_reconnect_content(file, &closing_cut)?.unwrap_or(closing_cut);
+    validate_canonical_document_target(file, &target, source)?;
+
+    // Serialize the authority handoff with every other writer and revalidate
+    // both liveness and disk bytes at the mutation fence.
+    if agent_doc_reliable_sync_io::plane_editor_live_for_path(&path) != Some(false) {
+        anyhow::bail!(
+            "{source}: editor reattached before last-close projection for {}",
+            file.display()
+        );
+    }
+    let disk_at_mutation = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to re-read {} at last-close mutation fence",
+            file.display()
+        )
+    })?;
+    if disk_at_mutation != disk_before {
+        anyhow::bail!(
+            "{source}: disk changed during last-close authority handoff for {}; retained intents remain available for retry",
+            file.display()
+        );
+    }
+    let wrote = target != disk_before;
+    if wrote {
+        atomic_write_authority_raw(file, &target)?;
+    }
+    let final_disk = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to verify {} after last-close projection",
+            file.display()
+        )
+    })?;
+    if final_disk != target {
+        anyhow::bail!(
+            "{source}: last-close disk projection verification failed for {}",
+            file.display()
+        );
+    }
+
+    let target_hash = agent_doc_hash::content_hash(&target);
+    if let Some(pending) = pending_document_write(file) {
+        if !pending.target_hash.eq_ignore_ascii_case(&target_hash) {
+            anyhow::bail!(
+                "{source}: retained intent advanced during last-close projection for {}; projected_hash={} pending_hash={}",
+                file.display(),
+                target_hash,
+                pending.target_hash,
+            );
+        }
+        clear_deferred_document_write_intent(file, &pending.target_hash, source)?;
+    }
+    record_disk_replica_authority(file, source, &target);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "last_editor_close_retained_projection_materialized file={} content_hash={} wrote={} relay_status={} relay_members={} authority=disk",
+            file.display(),
+            target_hash,
+            wrote,
+            relay_status,
+            relay_members,
         ),
     );
     Ok(true)
@@ -4296,6 +4446,28 @@ mod tests {
     }
 
     #[test]
+    fn response_replay_boundary_duplication_is_recoverable_before_integrity_gate() {
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let normalized = normalize_recoverable_response_replay_duplication(duplicated)
+            .expect("duplicate response-replay boundary should be recoverable");
+
+        assert!(agent_projection_integrity_valid(&normalized));
+        assert_eq!(normalized.matches("agent:boundary:").count(), 1);
+        assert!(normalized.contains("agent:boundary:latest"));
+        assert!(normalized.contains("❯ operator prompt"));
+        assert!(normalized.contains("Retained response."));
+    }
+
+    #[test]
     fn malformed_canonical_target_is_rejected_before_relay_mutation() {
         let baseline = concat!(
             "<!-- agent:exchange -->\n",
@@ -4842,6 +5014,64 @@ mod tests {
             .expect("deferred write should merge with later editor text");
         assert!(merged.contains("agent:boundary:deferred"));
         assert!(merged.contains("operator note"));
+    }
+
+    #[test]
+    fn explicit_last_editor_close_projects_retained_response_over_unsaved_queue_deletion() {
+        let baseline = concat!(
+            "---\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: base — gpt-5\n\nBase response.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#deleted-unsaved]\n",
+            "- do [#kept]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let editor_cut = baseline.replace("- do [#deleted-unsaved]\n", "");
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: retained — gpt-5\n\nRetained response.\n<!-- /agent:exchange -->",
+        );
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-last-close-unsaved-delete";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("closing editor replica should attach");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let replica_text = replica.text();
+        replica.apply_local_edit(0, replica_text.len() as u32, &editor_cut);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &file,
+            identity,
+            &replica.encode_state(),
+        )
+        .unwrap()
+        .expect("unsaved deletion should publish to Lazily");
+        assert!(agent_doc_crdt_relay_io::deregister_replica_for_file(&file, identity).unwrap());
+
+        let err = atomic_write_through_authority(&file, &target).unwrap_err();
+        assert!(format!("{err:#}").contains("await_editor_replica_no_disk_write"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        assert!(pending_document_write(&file).is_some());
+
+        seed_reliable_sync_close(&file, identity);
+        assert_eq!(
+            agent_doc_reliable_sync_io::plane_editor_live_for_path(&file.to_string_lossy()),
+            Some(false),
+        );
+        assert!(materialize_last_editor_close_through_authority(&file, "last_close_test").unwrap());
+
+        let projected = std::fs::read_to_string(&file).unwrap();
+        assert!(projected.contains("Retained response."));
+        assert!(projected.contains("do [#kept]"));
+        assert!(
+            !projected.contains("deleted-unsaved"),
+            "the closing editor's queue tombstone must be monotonic:\n{projected}"
+        );
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

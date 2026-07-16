@@ -1,5 +1,21 @@
 # Real-Time Workflow Authority
 
+## Monotonic response transactions
+
+Lazily owns both operator edits and unsealed agent response checkpoints. A
+checkpoint is a cumulative semantic cell, not a whole-document candidate and not
+a live-buffer sidecar. A newer checkpoint supersedes only response nodes absent
+from the committed exchange anchor; operator prompt nodes and unsaved queue
+deletions remain authoritative.
+
+The explicit close of the last editor replica first publishes the exact final
+buffer cut, then releases the replica. If no replica remains, the binary projects
+that retained cut to disk; zero-member delivery alone is never visible-write
+proof. A reconnect/replay transient containing duplicate response cells or
+standalone protocol boundaries is normalized through Lazily before the generic
+integrity gate. Malformed component structure and inline boundary text continue
+to fail closed.
+
 This spec is the canonical workflow authority for live session documents. It is
 implementation-independent: editor plugins, CRDT transports, IPC payloads,
 snapshots, harness hooks, and direct CLI calls may change only if they preserve
@@ -1020,7 +1036,7 @@ The following are correctness violations:
 Claude Code, Codex, OpenCode, Cursor, editor actions, Stop hooks, and direct
 terminal runs all share the same boundary:
 
-- response persistence goes through `agent-doc finalize` or
+- turn resolution goes through `agent-doc respond` (`finalize` alias) or
   `agent-doc write --commit`;
 - hooks may recover an interrupted turn only by replaying through the binary
   write/commit path;

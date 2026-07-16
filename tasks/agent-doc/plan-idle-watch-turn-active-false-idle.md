@@ -7,7 +7,7 @@ is **periodically re-added to the pane input while the turn is still running**.
 The supervisor idle-queue watch dispatches the file drain trigger into a busy
 pane, repeatedly.
 
-## Diagnosis (code-confirmed, incident-log pending)
+## Diagnosis (confirmed and fixed, 2026-07-16)
 
 The pure dispatch decision is correct — `idle_queue_drain_decision`
 (`agent-doc-queue/src/queue.rs:132`) already returns `SkipTurnActive` when
@@ -40,37 +40,23 @@ dispatch, `last_dispatched` is set, but the marker stays cleared/mismatched, and
 the trigger fires again whenever the head text or a `last_dispatched` reset
 (SkipNoActiveHead on a torn head read) re-opens the gate.
 
-## Why not blind-fix now
+## Resolution
 
-Each false-idle branch exists deliberately (TTL self-heals a missed `Stop` hook;
-pane-mismatch fails safe on reroute; ready-prompt is a legitimate idle proof).
-Tightening any of them without the incident `ops.log` risks regressing the
-supervisor idle-detection that many invariants depend on. The fix needs the
-`ops.log` from a real incident to identify which branch fired.
+The live incident confirmed branch 3: a ready-prompt redraw can be visible while
+the owned turn marker still names the active pane. Ready text alone is not a
+terminal lifecycle event, so it must not erase stronger, matching turn evidence.
 
-## Next step (forensic)
+`turn_active_for_owned_pane_with_idle_evidence` now keeps a fresh marker active
+when it belongs to the owned pane, even if a ready prompt is visible. The marker
+retires on an explicit Stop/idle lifecycle transition; its TTL remains the
+bounded fallback for a missed terminal hook. Pane mismatch continues to fail
+safe, so rerouting semantics are unchanged.
 
-From an `sampleportal.md` incident, capture:
-
-```
-tsift --envelope digest-runner --kind log --path . \
-  --shell-command 'rg -n "idle_queue_watch_drain|turn_active|turn-active|owned_pane_ready_busy|read_turn_active" .agent-doc/logs/ops.log | tail -200'
-```
-
-Correlate each `idle_queue_watch_drain` dispatch with the concurrent
-`turn_active=` value and the marker pane vs `owned_pane` to pin the branch, then:
-
-- Branch 1 → have the running cycle **refresh** the marker on a heartbeat (not
-  just write-once at turn start) so long turns stay busy; keep the TTL self-heal.
-- Branch 2 → resolve the marker/owned-pane comparison through the same pane
-  identity the router uses (canonical `%id`), or fall back to `true` on a
-  proven-live owned pane when the marker pane is a known alias.
-- Branch 3 → require the ready-prompt clear to also observe pane-idle evidence
-  (busy-cue absent for N ticks) before clearing, so a mid-turn composer redraw
-  cannot clear a live marker.
-
-Add deterministic SimWorld coverage for the chosen branch (the fixture already
-exercises `supervisor_idle_queue_tick` / `turn_active_for_owned_pane_with_idle_evidence`).
+Regression coverage
+`idle_queue_turn_active_gate_keeps_owned_marker_despite_ready_prompt_redraw`
+models the exact failure: matching live marker + ready-prompt redraw must remain
+turn-active and suppress idle-watch queue injection. Existing tests continue to
+cover actual idle retirement, TTL expiry, and pane mismatch.
 
 ## Not a lazily-rs bug
 

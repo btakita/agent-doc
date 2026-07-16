@@ -103,7 +103,7 @@ use anyhow::Context;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -2149,7 +2149,13 @@ enum Commands {
         #[arg(long)]
         commit: bool,
     },
-    /// Append an assistant response and require the cycle to reach a committed state
+    /// Persist a cumulative complete response section without sealing the cycle
+    ResponseCheckpoint {
+        /// Path to the session document
+        file: PathBuf,
+    },
+    /// Persist the complete response and resolve the cycle to a committed state
+    #[command(name = "respond", visible_alias = "finalize")]
     Finalize {
         #[command(flatten)]
         args: WriteArgs,
@@ -4123,6 +4129,13 @@ fn try_main() -> anyhow::Result<()> {
             }
             PluginAction::List => plugin::list(),
         },
+        Commands::ResponseCheckpoint { file } => {
+            let mut response = String::new();
+            std::io::stdin()
+                .read_to_string(&mut response)
+                .context("failed to read response checkpoint from stdin")?;
+            agent_doc_write_runtime_io::checkpoint_response(&file, &response)
+        }
         Commands::Write { args, commit } => {
             let lint_override = match args.lint.as_deref() {
                 None => None,

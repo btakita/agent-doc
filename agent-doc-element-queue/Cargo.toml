@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-queue"
-version = "0.34.161"
+version = "0.34.162"
 edition = "2024"
 description = "Queue element descriptor for agent-doc"
 license = "MIT"
@@ -11,6 +11,6 @@ publish = false
 name = "agent_doc_element_queue"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.161" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.162" }
 lazily = { version = "0.40.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

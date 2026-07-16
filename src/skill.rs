@@ -1930,7 +1930,7 @@ mod tests {
             assert!(content.contains(
                 "Every appended `agent-doc` session response is one complete, validated write+commit"
             ));
-            assert!(content.contains("agent-doc finalize <FILE>"));
+            assert!(content.contains("agent-doc respond <FILE>"));
             assert!(content.contains("agent-doc write --commit <FILE>"));
             assert!(content.contains("agent-doc session-check <FILE>"));
             assert!(content.contains("bare `agent-doc write`"));
@@ -2055,7 +2055,7 @@ mod tests {
         assert!(content.contains("/agent-doc <FILE>"));
         assert!(content.contains("agent-doc skill install --harness opencode"));
         assert!(content.contains("installed OpenCode skill"));
-        assert!(content.contains("agent-doc finalize <FILE>"));
+        assert!(content.contains("agent-doc respond <FILE>"));
         assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
         assert!(content.contains(&format!("agent-doc-version: \"{VERSION}\"")));
         assert!(!content.contains("TRIGGER: user invokes /agent-doc <file>."));
@@ -2458,7 +2458,7 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("Operator-visible document text is authoritative"));
         assert!(SKILL_TEMPLATE.contains("content_ours"));
         assert!(SKILL_TEMPLATE.contains(
-            "Snapshots and partial captures are backup/audit state, not hot-path authority"
+            "Snapshots and incomplete token captures are backup/audit state, not hot-path authority"
         ));
         assert!(SKILL_TEMPLATE.contains("fail closed or retry through the editor"));
     }
@@ -2474,7 +2474,8 @@ mod tests {
             SKILL_TEMPLATE
                 .contains("Do not manually patch the final assistant response into the document")
         );
-        assert!(SKILL_TEMPLATE.contains("agent-doc write --commit <FILE>` completes"));
+        assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));
+        assert!(SKILL_TEMPLATE.contains("binary resolves and commits the turn"));
         assert!(
             SKILL_TEMPLATE
                 .contains("stage and commit only the intended non-session repo files first")
@@ -2515,8 +2516,8 @@ mod tests {
     }
 
     #[test]
-    fn bundled_skill_contains_finalize_commit_invariant() {
-        assert!(SKILL_TEMPLATE.contains("agent-doc finalize <FILE>"));
+    fn bundled_skill_contains_binary_owned_respond_commit_invariant() {
+        assert!(SKILL_TEMPLATE.contains("agent-doc respond <FILE>"));
         assert!(
             SKILL_TEMPLATE
                 .contains("unless the user explicitly told you to leave the response uncommitted")
@@ -2525,8 +2526,9 @@ mod tests {
         assert!(SKILL_TEMPLATE.contains("agent-doc session-check <FILE>"));
         assert!(SKILL_TEMPLATE.contains("final document-mutation boundary for the cycle"));
         assert!(SKILL_TEMPLATE.contains(
-            "After `finalize` / `write --commit`, do not start more long-running task work"
+            "After `respond` / `write --commit`, do not start more long-running task work"
         ));
+        assert!(SKILL_TEMPLATE.contains("`finalize` is its compatibility alias"));
     }
 
     #[test]
@@ -2904,7 +2906,7 @@ mod tests {
         assert!(content.contains(
             "Every appended `agent-doc` session response is one complete, validated write+commit"
         ));
-        assert!(content.contains("agent-doc finalize <FILE>"));
+        assert!(content.contains("agent-doc respond <FILE>"));
         assert!(content.contains("agent-doc write --commit <FILE>"));
         assert!(content.contains("bare `agent-doc write`"));
         assert!(content.contains("keep the active session document out of that manual git commit"));
@@ -3063,7 +3065,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".codex/skills/agent-doc/SKILL.md")).unwrap();
 
         for content in [&claude, &codex, &opencode] {
-            assert!(content.contains("agent-doc finalize <FILE>"));
+            assert!(content.contains("agent-doc respond <FILE>"));
             assert!(content.contains("Use `agent-doc write --commit <FILE>`"));
             assert!(content.contains("requires the cycle to reach `committed`"));
             assert!(content.contains("agent-doc session-check <FILE>"));

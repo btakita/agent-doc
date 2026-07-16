@@ -565,19 +565,12 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
     if agent_doc_reliable_sync_io::plane_editor_live_for_path(path) == Some(false) {
         let file = std::path::Path::new(path);
         if let Err(err) =
-            agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_last_editor_close(
+            agent_doc_document_realtime_io::materialize_last_editor_close_through_authority(
                 file,
                 "last_editor_closed",
             )
         {
-            eprintln!("[ffi] clear pending external disk decision failed for {path}: {err}");
-        }
-        if let Ok(disk) = std::fs::read_to_string(file) {
-            agent_doc_document_realtime_io::record_disk_replica_authority(
-                file,
-                "last_editor_closed",
-                &disk,
-            );
+            eprintln!("[ffi] last editor close projection failed for {path}: {err:#}");
         }
     }
 }

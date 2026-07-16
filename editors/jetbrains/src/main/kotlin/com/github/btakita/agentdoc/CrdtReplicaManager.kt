@@ -29,6 +29,7 @@ private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
+private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
@@ -447,6 +448,37 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         executor.execute { attach() }
         return true
+    }
+
+    /**
+     * Publish the exact closing editor cut through the same serialized Lazily
+     * replica worker as every preceding local delta, then retire that replica.
+     * The reliable-sync close fact is emitted only after this returns true, so
+     * the controller can hand authority to disk without losing a last unsaved
+     * deletion that was still waiting behind the debounce worker.
+     */
+    private fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
+        return try {
+            executor.submit<Boolean> {
+                val text = ApplicationManager.getApplication().runReadAction<String> { document.text }
+                val forwarder = forwarderFor(filePath, text) ?: return@submit false
+                forwarder.ensureEditorText(text)
+                shadows[filePath] = text
+                clearLocalPending(filePath)
+                if (forwarders.remove(filePath, forwarder)) {
+                    forwarder.deregister()
+                }
+                true
+            }.get(CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            log.warn(
+                "[crdt-replica] closing editor cut publish timed out for $filePath after ${CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS}ms",
+            )
+            false
+        } catch (e: Exception) {
+            log.warn("[crdt-replica] closing editor cut publish failed for $filePath: ${e.message}")
+            false
+        }
     }
 
     private fun installDeferredReconnectContent(
@@ -1739,6 +1771,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val manager = managerForFilePath(filePath)
                 ?: return false
             return manager.ensureOpenDocumentReplica(filePath, document, editorText, await, forceRefresh)
+        }
+
+        fun publishClosingDocumentCut(filePath: String, document: Document): Boolean {
+            val manager = managerForFilePath(filePath) ?: return false
+            return manager.publishClosingDocumentCut(filePath, document)
         }
 
         fun isApplyingRemote(filePath: String): Boolean =

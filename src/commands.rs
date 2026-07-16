@@ -165,6 +165,16 @@ fn all_commands() -> Vec<CommandInfo> {
         "Append assistant response (reads from stdin)",
     ));
     cmds.push(cmd(
+        "/agent-doc response-checkpoint",
+        "<FILE>",
+        "Persist a cumulative complete response section without sealing the cycle",
+    ));
+    cmds.push(cmd(
+        "/agent-doc respond",
+        "<FILE> [write flags...]",
+        "Persist the complete response and let the binary seal and commit the turn (`finalize` alias kept)",
+    ));
+    cmds.push(cmd(
         "/agent-doc repair",
         "<FILE>",
         "Repair orphaned response / stale document cycle and auto-close git-backed repairs (`recover` alias kept)",

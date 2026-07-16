@@ -119,6 +119,24 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // editor is active, the CRDT relay is the authority and disk is not read as
     // a substitute; with no editor attached, disk is the fallback replica.
     let mut content = resolve_current_preflight_document(file, "initial")?;
+    // A retained response replay may transiently duplicate only response cells
+    // and/or protocol boundary markers. Normalize that evidence-backed shape
+    // through Lazily before the generic integrity gate; otherwise the gate
+    // blocks the recovery that can safely collapse it.
+    if let Some(normalized) =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&content)
+    {
+        agent_doc_document_realtime_io::atomic_write_through_authority(file, &normalized)?;
+        content = resolve_current_preflight_document(file, "after_response_replay_dedup")?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "preflight_response_replay_duplication_self_healed file={} content_hash={}",
+                file.display(),
+                agent_doc_hash::content_hash(&content),
+            ),
+        );
+    }
     // A preflight may perform recovery and queue/backlog maintenance. Refuse
     // every mutation when the authoritative document is already structurally
     // invalid; recovery must never normalize corruption into a new baseline.
@@ -5156,5 +5174,41 @@ mod tests {
         assert!(err.to_string().contains("[integrity-gate] INTERRUPTED"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), malformed);
         assert!(!dir.path().join(".agent-doc").exists());
+    }
+
+    #[test]
+    fn preflight_normalizes_duplicate_response_replay_boundary_before_integrity_gate() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let clean = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:clean -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let duplicated = clean.replace(
+            "<!-- agent:boundary:clean -->",
+            concat!(
+                "<!-- agent:boundary:stale -->\n",
+                "### Re: retained — gpt-5\n\nRetained response.\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+        std::fs::write(&doc, clean).unwrap();
+        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "preflight-boundary-dedup",
+            &duplicated,
+        );
+
+        run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
+
+        let current = resolve_current_preflight_document(&doc, "test_boundary_dedup").unwrap();
+        assert_eq!(current.matches("agent:boundary:").count(), 1);
+        assert!(current.contains("agent:boundary:latest"));
+        assert!(current.contains("❯ operator prompt"));
+        assert!(current.contains("Retained response."));
     }
 }

@@ -32674,8 +32674,11 @@ fn test_cli_init_file_lazy_project_init() {
 fn assert_operator_authority_instructions(content: &str, surface: &str) {
     assert!(
         content.contains("Preserve user edits")
-            && content.contains("final `agent-doc finalize --stream` transaction"),
-        "{surface} should tell agents to preserve user edits through one final transaction"
+            && content.contains("Lazily-owned semantic response checkpoints")
+            && content.contains("agent-doc respond --stream")
+            && content.contains("finalize")
+            && content.contains("compatibility alias"),
+        "{surface} should preserve user edits through checkpoints and binary-owned turn resolution"
     );
     assert!(
         content.contains("Operator-visible document text is authoritative"),
@@ -32690,7 +32693,7 @@ fn assert_operator_authority_instructions(content: &str, surface: &str) {
     );
     assert!(
         content.contains(
-            "Snapshots and partial captures are backup/audit state, not hot-path authority"
+            "Snapshots and incomplete token captures are backup/audit state, not hot-path authority"
         ),
         "{surface} should keep snapshots out of hot-path document authority"
     );
@@ -32862,8 +32865,8 @@ fn test_skill_md_contains_required_steps() {
         );
     }
     assert!(
-        content.contains("agent-doc finalize <FILE>"),
-        "SKILL.md should use finalize for the normal response cycle"
+        content.contains("agent-doc respond <FILE>"),
+        "SKILL.md should use binary-owned respond for the normal response cycle"
     );
     assert!(
         content.contains("agent-doc session-check <FILE>"),
@@ -32871,9 +32874,9 @@ fn test_skill_md_contains_required_steps() {
     );
     assert!(
         content.contains(
-            "The response persistence command is the final document-mutation boundary for the cycle"
+            "The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle"
         ),
-        "SKILL.md should treat response persistence as the close-out boundary"
+        "SKILL.md should delegate turn resolution to the binary closeout boundary"
     );
     assert!(
         content.contains("Imperative edits are executable directives"),
@@ -33108,9 +33111,13 @@ fn test_skill_md_references_valid_commands() {
 
     // Tokens that are not subcommands but are valid in SKILL.md:
     // - `submit` is the skill's invocation name (used in the title/heading)
+    // - `finalize` is the compatibility alias for the primary `respond` command
     // - flags like `--version`, `--help` are valid options, not subcommands
     let allowed_non_subcommands: std::collections::HashSet<&str> =
-        ["submit", "--version", "--help"].iter().copied().collect();
+        ["submit", "finalize", "--version", "--help"]
+            .iter()
+            .copied()
+            .collect();
 
     // Extract all `agent-doc <word>` patterns from SKILL.md
     let mut invalid_refs: Vec<String> = Vec::new();

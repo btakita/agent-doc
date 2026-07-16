@@ -342,6 +342,22 @@ pub fn strike_answered_free_text_queue_heads(
         Some(content) => content,
         None => effects.force_disk_document_content(file, "free_text_queue_strike force_disk")?,
     };
+    // A captured/console response is only an intent.  Queue completion requires
+    // proof that the same response is present in the authoritative document cut
+    // we are about to mutate.  Without this fence a retained write can time out,
+    // leave the response absent, and still auto-strike its prompt (#ftstrike).
+    if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &content) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "free_text_head_strike_deferred file={} reason=response_not_materialized response_hash={} authority_hash={}",
+                file.display(),
+                agent_doc_hash::content_hash(response_body),
+                agent_doc_hash::content_hash(&content),
+            ),
+        );
+        return Ok(0);
+    }
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
         return Ok(0);
@@ -2852,16 +2868,20 @@ mod core_tests {
     fn strike_answered_free_text_heads_strikes_behind_id_head_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
-        let content = concat!(
-            "---\nqueue_active: true\n---\n\n",
-            "<!-- agent:queue go -->\n",
-            "- do [#fullboundary]\n",
-            "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
-            "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
-            "<!-- /agent:queue -->\n",
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "- do [#fullboundary]\n",
+                "- :pushpin: JB `Run Agent Doc` is stalled on this document when I tried to start the queue run. No notification.\n",
+                "- :pushpin: My free-text queue items are not immediately struck as if they are addressed.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            FTSTRIKE_RESPONSE,
         );
-        std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
 
         let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
         assert_eq!(struck, 2, "both answered free-text heads must be struck");
@@ -2902,11 +2922,36 @@ mod core_tests {
             "the note must not be duplicated on re-strike:\n{after_again}"
         );
         // Zero-drift: nothing was written into an exchange component.
+        let exchange = element::parse(&after_again)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap();
         assert!(
-            !after_again.contains("auto-struck")
-                || !after_again.contains("<!-- agent:exchange -->"),
-            "this fixture has no exchange; note must never target exchange:\n{after_again}"
+            !exchange.content(&after_again).contains("auto-struck"),
+            "the auto-strike note must never target exchange:\n{after_again}"
         );
+    }
+
+    #[test]
+    fn answered_free_text_head_waits_until_response_is_materialized() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "The response was printed to the console but never landed here.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 My free-text queue items are not immediately struck as if they are addressed.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
+
+        assert_eq!(struck, 0);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]

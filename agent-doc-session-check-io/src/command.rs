@@ -309,6 +309,10 @@ pub fn run_with_options(
     {
         eprintln!("[session-check] WARNING: {message}");
     }
+    // A retained response replay can duplicate only semantic response cells or
+    // protocol boundary markers. Collapse that narrow, lossless transient
+    // before the generic gate so integrity does not block its own recovery.
+    self_heal_response_replay_duplication(file, effects)?;
     // A retained delivery can be validly reconstructable even when a stale
     // post-replacement IPC delta duplicated the exchange. Repair that known,
     // evidence-backed overapplication before the generic integrity gate;
@@ -930,6 +934,40 @@ fn self_heal_late_ipc_overapplication(
         &overapplication.remediated_content,
         agent_doc_ops_log_io::log_op,
     )?;
+    Ok(true)
+}
+
+fn self_heal_response_replay_duplication(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<bool> {
+    let current = crate::resolve_current_document_content(
+        file,
+        "session_check_response_replay_dedup_current",
+    )?;
+    let Some(normalized) =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&current)
+    else {
+        return Ok(false);
+    };
+    effects.atomic_write(file, &normalized)?;
+    let settled = crate::resolve_current_document_content(
+        file,
+        "session_check_response_replay_dedup_settled",
+    )?;
+    anyhow::ensure!(
+        settled == normalized,
+        "[session-check] response replay deduplication for {} returned without exact authority convergence",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "session_check_response_replay_duplication_self_healed file={} content_hash={}",
+            file.display(),
+            agent_doc_hash::content_hash(&settled),
+        ),
+    );
     Ok(true)
 }
 
@@ -1963,6 +2001,31 @@ mod terminal_convergence_tests {
 
         assert!(!healed);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), authority);
+    }
+
+    #[test]
+    fn session_check_self_heals_duplicate_response_replay_boundary_before_integrity() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, duplicated).unwrap();
+
+        assert!(self_heal_response_replay_duplication(&file, &TestEffects).unwrap());
+
+        let healed = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(healed.matches("agent:boundary:").count(), 1);
+        assert!(healed.contains("agent:boundary:latest"));
+        assert!(healed.contains("❯ operator prompt"));
+        assert!(healed.contains("Retained response."));
+        agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
     }
 
     #[test]

@@ -2,6 +2,22 @@
 
 # Closeout Commands
 
+## Response checkpoints and sealing
+
+`response-checkpoint <FILE>` reads a cumulative response from stdin and accepts
+only semantically complete assistant response nodes. It evaluates the response
+cell against the apply-time Lazily canonical document, replaces the prior
+uncommitted response tail, preserves every operator prompt, and materializes the
+acknowledged projection. It does not mark the response `write_applied`, consume
+queue heads, apply backlog/done mutations, update the baseline, or commit.
+
+`respond` is the primary spelling for the binary-owned seal transition;
+`finalize` remains a compatibility alias. The seal
+captures the complete cumulative response, records the durable response-cell
+receipt, applies closeout mutations, and commits exactly once. Harnesses should
+invoke sealing automatically at turn end; response text need not wait until that
+transition to become document-visible.
+
 This file covers binary-owned response persistence: commit boundaries, patch/write semantics, recovery, and post-write session validation.
 
 ## Harness-neutral closeout
@@ -228,9 +244,9 @@ must preserve its records and retry later.
 - **Prompt-edit-resilient anchoring (`#patchback-prompt-edit-resilience`).** The anchored exchange append locates the insertion point by exact match of the baseline (`original_doc`) unresolved tail against the current document — the fast path. When the operator edits the prompt between baseline capture and closeout (a typo fix, or adding/removing the `❯ ` prefix), that exact match no longer holds. Instead of failing closed (which forces manual baseline-drop + prefix-repair retries), the append falls back to **position-based** anchoring when the unresolved tail is a single prompt block: because the boundary has already been repositioned to the end of the component, the sole (possibly edited) prompt is the trailing content of the user region, so the response anchors at its end. Only the genuinely ambiguous multi-prompt-edit case fails closed, and it does so with an actionable `re-run agent-doc preflight to refresh the baseline` diagnostic rather than the prior cryptic "failed to locate unresolved prompt tail" error.
 - Response-replay / stale-cycle recovery hash matching is immune to queue churn. The normalized hashes used to decide whether a `preflight_started`/committed cycle is safely recoverable neutralize the `agent:queue` component body, its opening-tag attributes (for example `auto`), and the `queue_active:` frontmatter flag before hashing, because queue maintenance rewrites those on essentially every cycle independently of the response body (which always targets `exchange`/`output`). Store-side (`cycle_state`) and compare-side (`repair`) normalization must stay identical so queue-only churn produces a hash match while a genuine response-body change still fails closed. This keeps the recurring `stuck_captured_cycle` symptom from wedging an IPC-owned document (#adoc-queue-ipc-buffer-divergence root cause #4).
 
-## finalize
+## respond (`finalize` compatibility alias)
 
-`agent-doc finalize <FILE> [write flags...]`
+`agent-doc respond <FILE> [write flags...]`
 
 - Strict happy-path closeout for session responses.
 - Validates git-backed context before mutation, runs the normal write pipeline, and only enters the commit closeout after the write path succeeds or performs an explicit empty-response recovery. Pre-write guard failures must leave the document, snapshot, queue, and active cycle open for retry instead of committing an unanswered cycle, and must emit a typed FlowCore `closeout/pre_write_guard` blocked event for operator forensics. Successful closeout still fails unless the final cycle state is `committed`.

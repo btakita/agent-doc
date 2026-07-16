@@ -276,6 +276,10 @@ object TypingTracker : DocumentListener {
     fun clearOpenDocumentReport(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
         val filePath = file.path
+        val closingDocument = com.intellij.openapi.application.ApplicationManager.getApplication()
+            .runReadAction<com.intellij.openapi.editor.Document?> {
+                FileDocumentManager.getInstance().getDocument(file)
+            }
         pendingContentReports.computeIfPresent(filePath) { _, state ->
             synchronized(state) {
                 state.future?.cancel(false)
@@ -283,12 +287,21 @@ object TypingTracker : DocumentListener {
             }
             null
         }
-        // #falsetyping-guard: a closed document has no unsaved operator edits to
-        // protect; drop any stale local-edit marker so a reopened buffer starts
-        // from the conservative-but-current provenance.
-        unsyncedLocalEditPaths.remove(filePath)
         contentReportExecutor.execute {
             val lib = AgentDocLib.get() ?: return@execute
+            // Closing a tab does not imply saving its Document. Publish the
+            // exact final cut through the serialized Lazily replica worker
+            // before releasing liveness; otherwise a queued deletion can be
+            // resurrected from disk during retained-response recovery.
+            if (closingDocument != null &&
+                !CrdtReplicaManager.publishClosingDocumentCut(filePath, closingDocument)
+            ) {
+                LOG.warn(
+                    "[native] final Lazily editor cut was not published for $filePath; " +
+                        "retaining editor authority instead of emitting a lossy close",
+                )
+                return@execute
+            }
             try {
                 lib.agent_doc_plugin_owner_release(filePath, EditorIdentity.id)
             } catch (_: UnsatisfiedLinkError) {
@@ -299,8 +312,9 @@ object TypingTracker : DocumentListener {
             } catch (_: UnsatisfiedLinkError) {
             // Older cdylib without per-editor reliable-sync close support.
             } catch (_: NoSuchMethodError) {
-            // Older cdylib without per-editor reliable-sync close support.
+                // Older cdylib without per-editor reliable-sync close support.
             }
+            unsyncedLocalEditPaths.remove(filePath)
         }
     }
 

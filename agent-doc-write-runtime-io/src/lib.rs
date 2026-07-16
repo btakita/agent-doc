@@ -459,6 +459,12 @@ pub fn run_command_with_response(
     result
 }
 
+/// Persist a cumulative, semantically complete response into the live document
+/// without applying closeout mutations or committing the cycle.
+pub fn checkpoint_response(file: &Path, response: &str) -> Result<()> {
+    run_entry::checkpoint_response(file, response)
+}
+
 pub fn run_command_with_empty_response_recovery(
     options: CommandOptions,
     commit_mode: CommitMode,

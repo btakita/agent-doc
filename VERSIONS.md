@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.162
+
+- **Response persistence is now incremental at semantic boundaries.** `response-checkpoint` writes cumulative, complete `### Re:` cells into Lazily without queue/backlog mutation or commit; later checkpoints replace the prior uncommitted tail. `respond` is now the primary binary-owned exact-once turn-resolution command, with `finalize` retained as a compatibility alias rather than a distinct phase or the first document write.
+- **Retained response replay can no longer wedge behind its own integrity gate.** Duplicate response cells and standalone boundary-only transients normalize through the current document authority before preflight/session-check validation; boundary examples inside fenced code remain untouched, and malformed component structure or inline protocol markers still fail closed. A new TLA+ response-transaction model checks monotonic checkpoints, repeated operator typing, normalization-before-seal, and commit gating.
+- **Editor close and queue closeout preserve operator intent.** JetBrains 0.2.272 publishes the exact serialized final document cut before releasing the last replica; the binary materializes that retained cut without treating zero members as delivery proof. Free-text heads cannot auto-strike until their response is actually present, and idle prompt redraws cannot falsely retire a live owned turn.
+
 ## 0.34.161
 
 - **Retained captures now rebase over the current Lazily/CPC editor authority before settlement.** Recovery preserves unsaved or newly saved operator text, replays the same content-bearing intent journal, delivers the response once, and requests the plugin's native save automatically; it never asks for Ctrl+S, preflight repair, recapture, or force-disk recovery.

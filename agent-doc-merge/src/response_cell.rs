@@ -103,6 +103,62 @@ fn boundary_line(line: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
 }
 
+#[derive(Debug, Default)]
+struct MarkdownFence {
+    delimiter: Option<(char, usize)>,
+}
+
+impl MarkdownFence {
+    /// Return whether `line` is a protocol boundary while tracking fenced code.
+    /// Boundary-looking examples inside code blocks are document content, not
+    /// recovery metadata, and must never be removed by replay normalization.
+    fn is_protocol_boundary(&mut self, line: &str) -> bool {
+        let outside_fence = self.delimiter.is_none();
+        let trimmed = line.trim_start();
+        let delimiter = trimmed.chars().next().and_then(|character| {
+            matches!(character, '`' | '~').then(|| {
+                let count = trimmed
+                    .chars()
+                    .take_while(|candidate| *candidate == character)
+                    .count();
+                (character, count)
+            })
+        });
+
+        if let Some((character, count)) = delimiter.filter(|(_, count)| *count >= 3) {
+            match self.delimiter {
+                None => self.delimiter = Some((character, count)),
+                Some((open_character, open_count))
+                    if character == open_character
+                        && count >= open_count
+                        && trimmed.chars().skip(count).all(char::is_whitespace) =>
+                {
+                    self.delimiter = None;
+                }
+                Some(_) => {}
+            }
+        }
+
+        outside_fence && boundary_line(line)
+    }
+}
+
+fn take_protocol_boundaries(
+    lines: Vec<String>,
+    fence: &mut MarkdownFence,
+) -> (Vec<String>, Vec<String>) {
+    let mut retained = Vec::with_capacity(lines.len());
+    let mut boundaries = Vec::new();
+    for line in lines {
+        if fence.is_protocol_boundary(&line) {
+            boundaries.push(line.trim().to_string());
+        } else {
+            retained.push(line);
+        }
+    }
+    (retained, boundaries)
+}
+
 /// Remove repeated response nodes with the same body-aware identity.
 ///
 /// Response cells are idempotent: replaying the same heading and body is a
@@ -123,13 +179,16 @@ pub fn deduplicate_response_cells(doc: &str) -> anyhow::Result<Option<String>> {
     let mut boundary = None;
     let mut removed = false;
     let mut retained = Vec::with_capacity(nodes.len());
+    let mut fence = MarkdownFence::default();
     for mut node in nodes {
-        for line in &node.lines {
-            if boundary_line(line) {
-                boundary = Some(line.trim().to_string());
+        let (lines, boundaries) = take_protocol_boundaries(node.lines, &mut fence);
+        node.lines = lines;
+        for candidate in boundaries {
+            if boundary.is_some() {
+                removed = true;
             }
+            boundary = Some(candidate);
         }
-        node.lines.retain(|line| !boundary_line(line));
         if matches!(node.kind, ExchangeNodeKind::Response { .. })
             && !response_ids.insert(node.node_id())
         {
@@ -179,13 +238,13 @@ fn supersede_response_tail_after_anchor(
     let mut removed = false;
     let mut boundary = None;
     let mut retained = Vec::with_capacity(current_nodes.len());
+    let mut fence = MarkdownFence::default();
     for (index, mut node) in current_nodes.into_iter().enumerate() {
-        for line in &node.lines {
-            if boundary_line(line) {
-                boundary = Some(line.trim().to_string());
-            }
+        let (lines, boundaries) = take_protocol_boundaries(node.lines, &mut fence);
+        node.lines = lines;
+        for candidate in boundaries {
+            boundary = Some(candidate);
         }
-        node.lines.retain(|line| !boundary_line(line));
         let stale_response = index > anchor_index
             && matches!(node.kind, ExchangeNodeKind::Response { .. })
             && !retained_response_ids.contains(&node.node_id());
@@ -228,14 +287,17 @@ fn supersede_response_tail_after_anchor(
     Ok(Some(outcome))
 }
 
-/// Replace response nodes appended after the last unchanged committed response,
-/// then add the latest complete response as one semantic cell.
+/// Replace response nodes appended after the last unchanged committed exchange
+/// node, then add the latest complete response as one semantic cell.
 ///
 /// This is the normal closeout recovery path when an older retained response is
 /// restored after the next complete response has already been captured. Prompt
 /// nodes are never removed. If the last committed response cannot be found
 /// unchanged in the current document, the operation fails safe to additive
-/// behavior so operator edits to committed history are preserved.
+/// behavior so operator edits to committed history are preserved. Anchoring on
+/// any committed exchange node (rather than requiring an older response) also
+/// makes the first response in a document replaceable by a later cumulative
+/// semantic checkpoint.
 pub fn supersede_uncommitted_response_tail(
     doc: &str,
     committed_doc: &str,
@@ -254,18 +316,13 @@ pub fn supersede_uncommitted_response_tail(
         .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
         .map(ExchangeNode::node_id)
         .collect::<HashSet<_>>();
-    let Some(last_committed_response_id) = committed_nodes
-        .iter()
-        .rev()
-        .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-        .map(ExchangeNode::node_id)
-    else {
+    let Some(last_committed_node_id) = committed_nodes.last().map(ExchangeNode::node_id) else {
         return add_response_cell(doc, response);
     };
 
     if let Some(outcome) = supersede_response_tail_after_anchor(
         doc,
-        &last_committed_response_id,
+        &last_committed_node_id,
         &committed_response_ids,
         response,
     )? {
@@ -345,20 +402,18 @@ pub fn reconcile_superseded_response_targets(
         .intersection(&latest_response_ids)
         .cloned()
         .collect::<HashSet<_>>();
-    let replacement_nodes = latest_nodes
-        .iter()
-        .skip(latest_anchor_index + 1)
-        .filter(|node| {
-            matches!(node.kind, ExchangeNodeKind::Response { .. })
-                && !prior_response_ids.contains(&node.node_id())
-        })
-        .cloned()
-        .map(|mut node| {
-            node.lines.retain(|line| !boundary_line(line));
-            node
-        })
-        .filter(|node| !node.lines.is_empty())
-        .collect::<Vec<_>>();
+    let mut replacement_nodes = Vec::new();
+    let mut fence = MarkdownFence::default();
+    for mut node in latest_nodes.into_iter().skip(latest_anchor_index + 1) {
+        let (lines, _) = take_protocol_boundaries(node.lines, &mut fence);
+        node.lines = lines;
+        if matches!(node.kind, ExchangeNodeKind::Response { .. })
+            && !prior_response_ids.contains(&node.node_id())
+            && !node.lines.is_empty()
+        {
+            replacement_nodes.push(node);
+        }
+    }
     if replacement_nodes.is_empty() {
         return Ok(None);
     }
@@ -427,6 +482,54 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_boundaries_without_duplicate_responses_are_collapsed() {
+        let duplicated = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "<!-- agent:boundary:stale -->\n",
+                "### Re: retained — gpt-5\n\nRetained response.\n",
+                "<!-- agent:boundary:latest -->",
+            ),
+        );
+
+        let deduplicated = deduplicate_response_cells(&duplicated)
+            .unwrap()
+            .expect("duplicate protocol boundaries should be normalized");
+
+        assert_eq!(deduplicated.matches("agent:boundary:").count(), 1);
+        assert!(deduplicated.contains("agent:boundary:latest"));
+        assert_eq!(deduplicated.matches("Retained response.").count(), 1);
+        assert!(deduplicated.contains("❯ operator prompt"));
+    }
+
+    #[test]
+    fn boundary_examples_inside_fenced_code_are_not_recovery_metadata() {
+        let document = DOC.replace(
+            "<!-- agent:boundary:abc -->",
+            concat!(
+                "### Re: example — gpt-5\n\n",
+                "```markdown\n",
+                "<!-- agent:boundary:example -->\n",
+                "```\n",
+                "<!-- agent:boundary:real -->",
+            ),
+        );
+
+        assert_eq!(deduplicate_response_cells(&document).unwrap(), None);
+
+        let duplicated = document.replace(
+            "<!-- agent:boundary:real -->",
+            "<!-- agent:boundary:stale -->\n<!-- agent:boundary:real -->",
+        );
+        let normalized = deduplicate_response_cells(&duplicated)
+            .unwrap()
+            .expect("the duplicate protocol boundary should be normalized");
+        assert!(normalized.contains("<!-- agent:boundary:example -->"));
+        assert!(normalized.contains("<!-- agent:boundary:real -->"));
+        assert!(!normalized.contains("<!-- agent:boundary:stale -->"));
+    }
+
+    #[test]
     fn latest_complete_response_supersedes_uncommitted_response_tail() {
         let committed = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -472,6 +575,37 @@ mod tests {
         assert_eq!(replay.content, outcome.content);
         assert_eq!(replay.content.matches("Complete response.").count(), 1);
         assert_eq!(replay.content.matches("agent:boundary:").count(), 1);
+    }
+
+    #[test]
+    fn cumulative_checkpoint_supersedes_first_uncommitted_response() {
+        let first = supersede_uncommitted_response_tail(
+            DOC,
+            DOC,
+            "### Re: checkpoint — gpt-5\n\nFirst complete section.",
+        )
+        .unwrap();
+        assert!(first.applied);
+
+        let latest = supersede_uncommitted_response_tail(
+            &first.content,
+            DOC,
+            concat!(
+                "### Re: checkpoint — gpt-5\n\nFirst complete section.\n\n",
+                "### Re: follow-up — gpt-5\n\nSecond complete section.",
+            ),
+        )
+        .unwrap();
+
+        assert!(latest.applied);
+        assert_eq!(latest.content.matches("First complete section.").count(), 1);
+        assert_eq!(
+            latest.content.matches("Second complete section.").count(),
+            1
+        );
+        assert_eq!(latest.content.matches("### Re:").count(), 2);
+        assert!(latest.content.contains("❯ operator prompt"));
+        assert_eq!(latest.content.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

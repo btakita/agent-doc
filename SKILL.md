@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>. Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "<file>"
-agent-doc-version: "0.34.161"
+agent-doc-version: "0.34.162"
 ---
 
 # agent-doc
@@ -33,7 +33,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 ## Hot Path Digest
 
 - **Document is the UI** — user edits ARE the prompt; respond in the document and console.
-- **Harness-native `agent-doc` entrypoints start the binary-owned response cycle** — treat `/agent-doc <FILE>`, `agent-doc <FILE>`, or equivalent as executable workflow start, not a generic document-editing request. Do not manually patch the final assistant response into the document, and do not report success before `agent-doc finalize <FILE>` or `agent-doc write --commit <FILE>` completes. Response text visible in the console but absent from the session document is a closeout violation — the response does not exist until it crosses `finalize` or `write --commit`. Codex/OpenCode/direct-exec paths also run `agent-doc session-check <FILE>`.
+- **Harness-native `agent-doc` entrypoints start the binary-owned response cycle** — treat `/agent-doc <FILE>`, `agent-doc <FILE>`, or equivalent as executable workflow start, not a generic document-editing request. Do not manually patch the final assistant response into the document, and do not report success before the binary resolves and commits the turn through `agent-doc respond <FILE>` (`finalize` compatibility alias) or `agent-doc write --commit <FILE>`. A semantically complete response checkpoint may already exist in Lazily/the document, but it is not proof that queue/backlog closeout or commit ran. Codex/OpenCode/direct-exec paths also run `agent-doc session-check <FILE>`.
 - **Imperative edits are executable directives** — `do #id`, `fix this`, `run tests`, `build + install`, `commit + push`, and similar edits authorize repo work. Do not require the same instruction to be repeated in chat.
 - **Project-scoped remote hosts** — globally approved SSH commands, ambient SSH config, and unrelated project history are not evidence that a named remote host belongs to the current document's project. Use a named remote host only when the current user prompt, this session document/frontmatter, project-local `.agent-doc/config.toml`, or project-local runbooks explicitly identify it; otherwise ask or record a follow-up to confirm the intended host.
 - **Missed response repair is not child-agent dispatch** — when preflight/commit says the prior response is already committed and no new assistant body exists, recover through `agent-doc write --commit <FILE>` instead of rerunning an empty response cycle.
@@ -42,7 +42,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`).
 - **Dispatch proof language must preserve scope** — when reading route diagnostics, `proof=accepted proof_scope=accepted_only` means pane-input acceptance only. Do not describe Claude Code/OpenCode dispatch-only routes as consumed/submitted unless logs show dispatch-start proof.
 - **Starting actor reroutes are prompt-gated** — if route diagnostics mention a `starting` authoritative actor, treat dispatch as valid only after the live pane shows a harness-specific dispatch-ready prompt; otherwise the route path must fail closed before input.
 - **Rare routing / tmux / startup-miss invariants live in runbooks** — consult [runbooks/harness-invocation.md](runbooks/harness-invocation.md), [runbooks/commit.md](runbooks/commit.md), and [runbooks/code-enforced-directives.md](runbooks/code-enforced-directives.md) for route/start/sync/session-check or sibling `src/tmux-router` work.
-- Preserve user edits through the single final `agent-doc finalize --stream` transaction. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots and partial captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Stream useful progress only to the console, never into the document.
+- Preserve user edits through Lazily-owned semantic response checkpoints and the final seal. Operator-visible document text is authoritative: never recover, patch, or hook-closeout by replacing it with `content_ours`, a snapshot, or a lazily visible-write receipt if that would drop operator text. Snapshots and incomplete token captures are backup/audit state, not hot-path authority; fail closed or retry through the editor instead. Checkpoint only complete `### Re:` sections with balanced fences/markers; stream incomplete progress only to the console.
 
 ## Workflow
 
@@ -104,23 +104,23 @@ Full detail (cross-document rule, icebox, `agent:done`): [runbooks/respond.md](r
 
 ### 2. Persist the response (MANDATORY — never skip)
 
-Complete requested implementation, verification, build/install, and local inspection **before** this step. The response persistence command is the final document-mutation boundary for the cycle, not an intermediate progress checkpoint. For the normal cycle, pipe the response through `agent-doc finalize --stream` so write+commit happen in one binary-owned path. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
+Complete requested implementation, verification, build/install, and local inspection **before** this step. Complete response sections may already have crossed `agent-doc response-checkpoint <FILE>`; this step asks the binary to resolve the cumulative response, apply queue/backlog mutations, and commit once. For the normal cycle, pipe the response through `agent-doc respond --stream`. `finalize` remains an accepted compatibility alias, not a distinct required phase. **This step is MANDATORY every cycle unless the user explicitly told you to leave the response uncommitted.**
 
 **Agent harnesses own full-suite verification:** if you changed code, tests, build logic, or instruction surfaces, run the full project verification suite explicitly after edits and before `finalize` / `write --commit`. Do not rely on a pre-commit hook. Do not waive red suites as "unrelated" or "flaky".
 
 **Tmux CI review for test-bearing turns:** when the cycle runs tests or changes test/build/instruction surfaces, inspect the latest CI tmux-test result. Check the latest run status with `gh run list --workflow CI --limit 1`; if it is already red after runner startup, run `make tmux-ci` locally, fix it, and add deterministic SimWorld coverage for the regression class. If the latest run is queued or in progress, record that it is still pending and continue the turn from local verification evidence instead of waiting for CI to finish. Do not use `gh run watch` as a closeout gate unless the user explicitly asks. An empty-step job with no logs because GitHub never started a runner (for example billing/spending-limit exhaustion) is an external CI-start blocker, not a code/tmux regression; record the annotation and continue with local evidence.
 
-After `finalize` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for explicit closeout.
+The `respond` command is the binary-owned turn-resolution and final document-mutation boundary for the cycle (`finalize` is its compatibility alias). After `respond` / `write --commit`, do not start more long-running task work for that same turn. Codex hooks in `.codex/hooks.json` and `.codex/config.toml` are a fail-closed backstop, not a replacement for binary-owned closeout.
 
 ```bash
-cat <<'RESPONSE' | agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
+cat <<'RESPONSE' | agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill
 <template mode: wrap response in `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` (BOTH markers); inline mode: plain text, no markers>
 RESPONSE
 ```
 
 **IMPORTANT — patch markers:** template-mode responses MUST include both the opening AND closing `<!-- patch:exchange -->` … `<!-- /patch:exchange -->` markers, or the write is rejected (`malformed template patchback`) / lost (`0 template patches found`). **Do NOT use the Edit tool for write-back** (concurrent-edit "file modified" errors).
 
-`finalize` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `write --commit` shares that fail-closed boundary for repair writes.
+`respond` requires the cycle to reach `committed` and post-commit `session-check` to pass; on any `session-check` interruption, continue recovery instead of reporting success. `finalize` is its compatibility alias, and `write --commit` shares that fail-closed boundary for repair writes.
 
 **Manual repair / missed patchback rule (all harnesses):** if the user's prompt is already present in the document, do **not** patch the assistant response directly into the file. Use `agent-doc write --commit <FILE>` so repair crosses the normal snapshot/commit boundary in one path. Do not document or follow a manual-repair flow that stops after bare `agent-doc write`. Direct file patching is only acceptable for inserting a missing user prompt into `exchange` before the response exists. **Captured finalize is binary-owned (all harnesses):** invoke `finalize` once for a response. After the binary durably captures it, `controller_model_backpressure`, a pending ACK, CAS race, or retained visible response is owned by the keyed supervisor worker and harness closeout hook. Do not recapture, re-answer, alternate `finalize` with `write --commit`, kill the controller, or elect `--force-disk`; observe the terminal `session-check` result while the binary resumes the same capture with bounded retry and exact-once commit semantics. An external disk change under a live editor is a separate Lazily decision: exact accept plus replica propagation, a newer editor edit, an exact editor save-flush, or final editor close resolves it. The agent never component-merges that disk candidate.
 

@@ -152,6 +152,71 @@ fn response_cell_materialized_after_projection(response: &str, content: &str) ->
     agent_doc_turn::response_replay::response_materialized_in_content(response, content)
 }
 
+/// Persist a cumulative response checkpoint without sealing or committing the
+/// active cycle. Checkpoints contain only complete assistant response nodes; the
+/// response-cell merge supersedes an older uncommitted checkpoint while
+/// preserving every operator prompt in the apply-time canonical document.
+pub fn checkpoint_response(file: &Path, response: &str) -> Result<()> {
+    let response = agent_doc_turn::response_text::strip_assistant_heading(response);
+    anyhow::ensure!(!response.trim().is_empty(), "empty response checkpoint");
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        .ok_or_else(|| anyhow::anyhow!("response checkpoint requires an active preflight cycle"))?;
+    anyhow::ensure!(
+        state.is_open(),
+        "response checkpoint requires an open cycle; current phase is {:?}",
+        state.phase
+    );
+
+    let response_sha256 = agent_doc_hash::content_hash(&response);
+    let operation_id = format!("response-checkpoint:{}:{response_sha256}", state.cycle_id);
+    let committed_content = agent_doc_git_io::revision::show_head(file)?;
+    let Some(write) = agent_doc_controller_io::project_controller::
+        checkpoint_response_cell_via_controller_model_for_doc(
+            file,
+            &state.cycle_id,
+            &operation_id,
+            &response_sha256,
+            &response,
+            committed_content.as_deref(),
+            "response_checkpoint",
+        )?
+    else {
+        anyhow::bail!(
+            "response checkpoint requires the live controller/Lazily document model; use finalize for a headless document"
+        );
+    };
+
+    let materialized = materialize_response_cell_projection(file, &write.content)?;
+    anyhow::ensure!(
+        response_cell_materialized_after_projection(&response, &materialized),
+        "response checkpoint was not present after acknowledged materialization for {}",
+        file.display(),
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "response_checkpoint_materialized file={} cycle_id={} operation_id={} cell_id={} applied={} response_sha256={} content_hash={}",
+            file.display(),
+            state.cycle_id,
+            operation_id,
+            write.cell_id,
+            write.applied,
+            response_sha256,
+            agent_doc_hash::content_hash(&materialized),
+        ),
+    );
+    eprintln!(
+        "[write] response checkpoint {} ({})",
+        write.cell_id,
+        if write.applied {
+            "advanced"
+        } else {
+            "unchanged"
+        }
+    );
+    Ok(())
+}
+
 fn try_add_response_cell_via_realtime_backbone(
     file: &Path,
     patches: &[template::PatchBlock],

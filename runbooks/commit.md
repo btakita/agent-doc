@@ -7,19 +7,19 @@ A harness-native `agent-doc` entrypoint (`/agent-doc <FILE>` in Claude Code, `ag
 
 ## Default Paths
 
-- **Normal session response:** use `agent-doc finalize <FILE>` with the same write flags you would otherwise pass to `agent-doc write`.
+- **Normal session response:** use `agent-doc respond <FILE>` with the same write flags you would otherwise pass to `agent-doc write`; `finalize` remains a compatibility alias.
 - **Manual repair / missed patchback:** when the user prompt is already present in the document, use `agent-doc write --commit <FILE>`.
 
 ## Normal Happy Path
 
-- Finish the turn's requested implementation / verification / build-install work before the response-persistence command. `finalize` is the close-out boundary, not a mid-turn checkpoint.
-- The default response-cycle command is `agent-doc finalize <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
-- `finalize` is the binary-owned happy path: it writes the response, runs commit, and fails closed unless the cycle reaches `committed`.
-- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `finalize` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
-- Use `finalize` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
+- Finish the turn's requested implementation / verification / build-install work before the turn-resolution command. `response-checkpoint` may persist earlier complete sections; `respond` is the close-out boundary, not the first document write.
+- The default response-cycle command is `agent-doc respond <FILE> --baseline-file <preflight.baseline_file> --stream --origin skill`.
+- `respond` is the binary-owned happy path: it resolves the response, runs commit, and fails closed unless the cycle reaches `committed`; `finalize` is the same command's compatibility alias.
+- If the turn also includes ordinary repo `commit + push`, keep the active session document out of that manual git commit. Resolve the exact intended non-session path set first, run stage commands only for that set, stop immediately if any stage step fails, verify `git diff --cached --name-only` (or a stricter submodule-pointer inspection) still matches the intended set, then commit only that validated non-session set before `respond` or `write --commit` creates the session-document closeout commit. Push only after the binary-owned closeout so the response commit is included.
+- Use `respond` for the normal preflight → respond → persist flow across Claude Code, Codex, OpenCode, Cursor, and generic harnesses. Harness-specific command dispatch lives in `harness-invocation.md`.
 - For direct-exec harness paths such as Codex and OpenCode, run `agent-doc session-check <FILE>` immediately after the persistence command returns. A nonzero check means the cycle is still open, so do not report success.
 - Do **not** describe a normal harness-native `agent-doc` turn as successful while also saying the response is still uncommitted, unless the user explicitly requested that exception.
-- After `finalize` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
+- After `respond` returns, do not continue with more long-running task work for that same turn. Only `session-check`, failure recovery, and final reporting should remain.
 - When the turn resolves a `do [#id]` / `do #id` directive whose target is an open `agent:backlog` item, that id must reach a lifecycle outcome in the same closeout (`--done <id>`, `--backlog-gate <id>`, or an explicit kept-open `--backlog-edit`). `session-check` fails closed if the directive cleared the queue but left the target `[ ]` in `agent:backlog` (`#do-id-closeout-open-backlog`); see `pending-ops.md`.
 - Reserve `--backlog-gate <id>` for implementation-complete work awaiting review/external validation. If a `do [#id]` cycle gates its target but the response says the work is blocked / still needs future action, `session-check` fails closed (`#blocked-closeout-followup-capture`) unless the cycle keeps the id open with the narrowed next step (`--backlog-edit`), adds a new follow-up (`--backlog-add*`), or states an explicit "no additional backlog follow-up is needed because …" justification; see `pending-ops.md`.
 

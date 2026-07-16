@@ -137,6 +137,17 @@ class TypingTrackerEdtBudgetTest {
             clearBody.substringBefore("contentReportExecutor.execute").contains("AgentDocLib.get()"),
         )
         assertTrue(
+            "file-close cleanup must publish the exact closing Lazily cut before releasing authority",
+            clearBody.contains("CrdtReplicaManager.publishClosingDocumentCut(filePath, closingDocument)") &&
+                clearBody.indexOf("publishClosingDocumentCut") <
+                clearBody.indexOf("agent_doc_plugin_owner_release"),
+        )
+        assertTrue(
+            "a failed final publish must retain editor authority instead of emitting a lossy close",
+            clearBody.contains("retaining editor authority instead of emitting a lossy close") &&
+                clearBody.contains("return@execute"),
+        )
+        assertTrue(
             "open-document reporting should reuse the coalesced v2 full-content reporter",
             tracker.contains("fun reportOpenMarkdownDocuments(project: Project)") &&
                 tracker.contains("FileEditorManager.getInstance(project).openFiles") &&

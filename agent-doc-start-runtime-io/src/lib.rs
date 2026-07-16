@@ -337,25 +337,19 @@ fn clear_turn_status_title_for_owned_pane(file: &Path, shared: &SupervisorShared
 fn turn_active_for_owned_pane_with_idle_evidence(
     file: &Path,
     shared: &SupervisorShared,
-    prompt_visible: bool,
-    session_log: &mut Option<std::fs::File>,
+    _prompt_visible: bool,
+    _session_log: &mut Option<std::fs::File>,
 ) -> bool {
     let Some(marker) = agent_doc_turn_status_io::read_turn_active_marker_for_file(file) else {
         return false;
     };
     match owned_pane_id(shared) {
-        Some(pane) if marker.pane == pane => {
-            if prompt_visible && actor_state_is_ready(shared) {
-                clear_matching_turn_status_projection(
-                    file,
-                    shared,
-                    "ready_prompt_visible",
-                    session_log,
-                );
-                return false;
-            }
-            true
-        }
+        // The harness-owned marker is stronger evidence than a rendered ready
+        // prompt. Harnesses can redraw a composer between tool calls while the
+        // turn is still live; clearing here let idle-watch inject another
+        // drain trigger into that active turn. The Stop/idle hook owns normal
+        // retirement, and the marker TTL remains the missed-hook fail-safe.
+        Some(pane) if marker.pane == pane => true,
         Some(_) => false,
         None => true,
     }
@@ -2622,7 +2616,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_queue_turn_active_gate_repairs_ready_prompt_marker_for_owned_pane() {
+    fn idle_queue_turn_active_gate_keeps_owned_marker_despite_ready_prompt_redraw() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("task.md");
@@ -2640,15 +2634,15 @@ mod tests {
         );
         let mut session_log = None;
 
-        assert!(!turn_active_for_owned_pane_with_idle_evidence(
+        assert!(turn_active_for_owned_pane_with_idle_evidence(
             &doc,
             &shared,
             true,
             &mut session_log,
         ));
         assert!(
-            agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_none(),
-            "ready prompt evidence should remove the stale owned marker"
+            agent_doc_turn_status_io::read_turn_active_marker(dir.path()).is_some(),
+            "a transient ready prompt must not retire a harness-owned active-turn marker"
         );
     }
 

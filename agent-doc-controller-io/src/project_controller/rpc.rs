@@ -4101,6 +4101,8 @@ struct ControllerResponseCellAddPayload {
     response: String,
     #[serde(default)]
     committed_content: Option<String>,
+    #[serde(default)]
+    checkpoint_only: bool,
     source: Option<String>,
 }
 
@@ -4113,6 +4115,53 @@ pub fn add_response_cell_via_controller_model_for_doc(
     response_sha256: &str,
     response: &str,
     committed_content: Option<&str>,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
+    response_cell_via_controller_model_for_doc(
+        doc,
+        cycle_id,
+        operation_id,
+        response_sha256,
+        response,
+        committed_content,
+        false,
+        source,
+    )
+}
+
+/// Persist a cumulative, semantically complete response checkpoint without
+/// advancing the response cycle to `write_applied`. A later sealed response uses
+/// the ordinary add path, records the durable closeout fact, and commits.
+pub fn checkpoint_response_cell_via_controller_model_for_doc(
+    doc: &Path,
+    cycle_id: &str,
+    operation_id: &str,
+    response_sha256: &str,
+    response: &str,
+    committed_content: Option<&str>,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
+    response_cell_via_controller_model_for_doc(
+        doc,
+        cycle_id,
+        operation_id,
+        response_sha256,
+        response,
+        committed_content,
+        true,
+        source,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn response_cell_via_controller_model_for_doc(
+    doc: &Path,
+    cycle_id: &str,
+    operation_id: &str,
+    response_sha256: &str,
+    response: &str,
+    committed_content: Option<&str>,
+    checkpoint_only: bool,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::ResponseCellRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
@@ -4130,6 +4179,7 @@ pub fn add_response_cell_via_controller_model_for_doc(
         response_sha256: response_sha256.to_string(),
         response: response.to_string(),
         committed_content: committed_content.map(str::to_string),
+        checkpoint_only,
         source: Some(source.to_string()),
     };
     let result: ControllerResponseCellAddResult = request_controller(
@@ -5066,7 +5116,9 @@ fn handle_response_cell_add_rpc(
         &payload.response,
         source,
     )?;
-    if let Some(write) = &write {
+    if let Some(write) = &write
+        && !payload.checkpoint_only
+    {
         agent_doc_cycle_state_io::append_response_cell_added(
             &canonical,
             &payload.cycle_id,

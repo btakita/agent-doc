@@ -186,7 +186,29 @@ Resolved by the same installed convergence fix.
 The historical `Compact Exchange` failure surfaced from `monsterrodholders.md`, but its blocked delivery target was the open `equityfundingsource.md` editor. JetBrains plugin `0.2.264` removes the two paths that could strand that target: workspace-wide VFS refresh behind unsaved buffers, and CRDT save through a stale `VirtualFile` stamp. The restarted IDEA instance is registered live on `0.2.264`.
 
 The canonical compact result in that error was already retained on the CRDT/Lazily plane. It did not require force-disk, controller termination, or response replay. This queue item is closed by the shipped fix; I did not initiate a new Compact Exchange against either separate session.
-<!-- agent:boundary:fd3abf15 -->
+
+### Re: Haiven Compact Exchange, File Cache Conflict, and editor-pane sync — gpt-5
+
+> **Queue prompt:** 📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+> ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+> ```
+
+The newest File Cache Conflict was not Haiven: IDEA logged `equityfundingsource.md` at 00:18:20 (`documentStamp=18747`, `oldFileStamp=18540`). The trace exposed one remaining race: deferred reconnect installed the canonical CRDT text and registered its replacement replica without saving the IntelliJ `Document`; after ACK convergence, the controller projected the same bytes to disk, changing only the file stamp behind an unsaved buffer.
+
+Fixed and active in agent-doc `0.34.145` / JetBrains `0.2.265`:
+
+- deferred reconnect now refreshes only a clean target, installs the canonical text, and saves it before replacement registration can count as an ACK;
+- the controller byte-compares the post-ACK disk projection and skips an identical atomic rewrite;
+- the old project-wide VFS refresh remains removed;
+- preflight recovered the interrupted stale cycle, and the supposedly lost Haiven prompt remained present in the durable queue/CRDT state (quoted above);
+- automatic editor-tab selection now performs the same authoritative tmux pane swap as manual `Sync Tmux Layout`; `#tmuxfocusfollow` is closed;
+- the concrete Compact Exchange ACK failure is closed as `#jbcompactexchange`. The distinct concurrent-typing CAS case remains honestly tracked as `#compactcrdtretry` rather than being overclaimed.
+
+Regression coverage is green: the JetBrains source-policy test covers all delta, REPLACE, and deferred-reconnect save paths; Rust proves an editor-saved canonical projection is a no-op; and the new `JetBrainsFileCache.tla` model proves no cache conflict, saved-canonical-before-ACK, stamp alignment, and zero redundant controller rewrites under concurrent VFS refresh. The existing passive tmux TLA+ model also remains green. Alloy is not needed here: these are temporal ordering/liveness invariants, which TLA+ models directly; Alloy would add value later for arbitrary-N static topology or schema constraints.
+
+Released commit: `42c8b8a34` (`v0.34.145`). Full `make check`, JetBrains `test buildPlugin`, install, and local version checks passed. CI was in progress at the required one-time inspection.
+<!-- agent:boundary:169ca6c8 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -272,14 +294,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#zqv8]
 - 📌 do [#crde]
 - 📌 do [#steeringobservableset]
-- 📌 do [#jbcompactexchange]
+- ~~📌 do [#jbcompactexchange]~~
 - 📌 do [#goal1d0k]
 - 📌 do [#idlewatchturnactive]
 - 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
-- 📌 do [#tmuxfocusfollow]
+- ~~📌 do [#tmuxfocusfollow]~~
 - 📌 do [#clippy197cleanup]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#restartstderrbleed2]
@@ -369,6 +391,15 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 - 📌 do [#5qjj]
+- ⏭️ 📌 do [#zqv8]
+- ⏭️ 📌 do [#crde]
+- ⏭️ 📌 do [#steeringobservableset]
+- ~~📌 do [#jbcompactexchange]~~
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
+- haiven.md response was not committed.
 <!-- /agent:queue -->
 
 ## Notes

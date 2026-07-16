@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.139
+
+- **The Stop hook resumes a retained editor-convergence capture even when its route-owned supervisor still runs an older inode.** The hook invokes the freshly installed binary's keyed strict-repair path before returning the status-only block. This is a version-independent liveness boundary: it preserves editor authority, never recaptures the response, and never elects force-disk; an absent capture or unresolved convergence still fails closed with the original response retained.
+
 ## 0.34.138
 
 - **A Stop-hook-blocked turn no longer starves its binary-owned closeout worker.** Once a response has a durable capture identity, the supervisor may resume it while the harness actor is still active; editor typing, IPC in-flight work, controller pressure, urgent maintenance, and the keyed single-flight worker remain fail-closed gates. This removes the circular wait where the actor could not become idle because Stop required the very convergence that the idle-only worker was waiting to perform.

@@ -271,7 +271,7 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 }
 
 #[test]
-fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
+fn codex_hook_cli_resumes_original_capture_over_editor_convergence_block() {
     let (tmp, doc) = setup_template_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
     init_git_repo(tmp.path(), &doc);
@@ -321,21 +321,22 @@ fn codex_hook_cli_does_not_replay_over_editor_convergence_block() {
         .write_stdin(stop_payload.to_string())
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"decision\":\"block\""))
-        .stdout(predicate::str::contains("editor_convergence_required"))
-        .stdout(predicate::str::contains("operator_text_authority_v1"))
-        .stdout(predicate::str::contains("Do not send the final answer yet"));
+        .stdout(predicate::str::contains("\"continue\":true"));
 
-    let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-    let pending = fs::read_to_string(&pending_path).unwrap();
+    let committed = fs::read_to_string(&doc).unwrap();
     assert!(
-        pending.contains("### Re: retained — gpt-5"),
-        "Stop hook must retain the editor retry patch:\n{pending}"
+        committed.contains("### Re: retained — gpt-5"),
+        "Stop hook must commit the original retained capture:\n{committed}"
     );
     assert!(
-        !pending.contains("stale stop payload"),
-        "Stop hook must not overwrite the retained patch while editor convergence is blocked:\n{pending}"
+        !committed.contains("stale stop payload"),
+        "Stop hook must not replace the retained capture with its stale assistant payload:\n{committed}"
     );
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", doc.to_str().unwrap()])
+        .assert()
+        .success();
 }
 
 #[test]

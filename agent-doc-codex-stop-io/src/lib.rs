@@ -164,7 +164,12 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
             // route-owned supervisor continues the same operation after this hook
             // returns if convergence takes longer.
             let editor_convergence_blocked = is_editor_convergence_required_interruption(&reason);
-            if !editor_convergence_blocked && try_resume_captured_finalize_in_hook(&file) {
+            // The hook executes the freshly-installed binary even when the
+            // route-owned supervisor still has an older inode. Resume the
+            // existing keyed capture here as the version-independent liveness
+            // boundary; strict repair preserves editor authority and never
+            // recaptures or elects force-disk.
+            if try_resume_captured_finalize_in_hook(&file) {
                 return apply_stop(input);
             }
             if editor_convergence_blocked {

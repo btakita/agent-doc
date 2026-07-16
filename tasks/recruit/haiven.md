@@ -92,7 +92,65 @@ Yes — and I did it two ways, which together push `hub` to **100%** (overall no
 **2. Deterministic coverage of the exact branch.** The catch: that concurrent test hits the lost-wakeup *window* only *probabilistically* (it's a few instructions wide), so it does not reliably cover the re-arm line for coverage purposes — which is the whole reason I'd flagged it as race-only. To close that deterministically I extracted the empty-pop re-arm out of `writeNext` into `Conn.rearmIfRefilled()` — a small refactor that also names the concept — and `TestRearmIfRefilled` drives it directly: set the drain-owner flag (as if a drain just popped empty), enqueue a "late" frame into the window, call `rearmIfRefilled`, and assert it re-acquires and drains it (plus the no-refill case just clears the flag).
 
 So the race is now both **exercised for real** (concurrency + `-race`) and **pinned deterministically** (unit test), rather than left to chance. The only branches still under 100% are `cmd/hubd.main()` (the process entrypoint — subprocess-only) and one HTTP-bind-error log line; the earlier `auth` non-`MapClaims` guard remains a defensive branch `jwt.Parse` can't produce.
-<!-- agent:boundary:fa2a445d -->
+❯ Please add 5M, 10M, 20M, 50M, 100M connection benchmarks.
+### Re: 5M–100M connection benchmarks + reducing memory — opus-4-8
+
+The two asks turned into one arc: **cut per-connection memory, and 100M became reachable on a single box — measured, not projected.**
+
+**Memory reduction (`hub/`, all behavior-preserving; full suite + `-race` green):**
+- Send queue now allocates its `list.List` and conflation map **lazily** — an idle connection carries neither.
+- Deleted a **dead `signal` channel + `notify()`** — a leftover from the pre-gnet write-pump era that nothing received on (one channel alloc per conn, gone).
+- `Conn.subs`: `map[string]struct{}` → **`[]string`** (a client has a handful of topics; a slice is one small alloc, not a map header + bucket).
+- `Conn.inbound`: releases its buffer backing once fully drained.
+
+Re-measured at 1M conns: **738 B heap / 1.13 KiB RSS per conn** (was 1.19 KiB / 1.53 KiB) — **−39% heap, −26% RSS, −28% heap objects.**
+
+**Scale benchmark** (`cmd/loadtest -suite=scale`, `make loadtest-scale`) — a RAM-floor-guarded run that stops accepting before the box swaps/OOMs, then projects the target and reports nodes-needed. Measured single-node ceiling on the 186 GiB box:
+
+| target | materialized | connect | RSS | RSS/conn |
+|--------|------|---------|-----|----------|
+| 5M | 5,000,000 | 15.7 s | 5.07 GiB | 1.06 KiB |
+| 10M | 10,000,000 | 32.1 s | 10.2 GiB | 1.05 KiB |
+| 20M | 20,000,000 | 66.5 s | 19.9 GiB | 1.02 KiB |
+| 50M | 50,000,000 | 2m53 s | 47.5 GiB | 1020 B |
+| **100M** | **100,000,000** | **5m58 s** | **100.8 GiB** | **1.04 KiB** |
+
+**100,000,000 live connections on one node in ~101 GiB, every count materialized for real** (each a `*hub.Conn` fed a real subscribe frame through the full server-side path). You cut memory → 100M fit. The suite also frames it honestly: connections are node-local state (design §3), so at ~1 KiB/conn a 64 GiB node holds ~65M and 100M is **2 shards** — the number it prints for any `-node-ram-gib`.
+
+### Re: Simulation tests — lane isolation, all services, full mix — opus-4-8
+
+Added deterministic sims (fixed schedules, no flakes):
+
+- **`hub/sim_test.go` — lane isolation** (`TestSimLaneIsolationNoCrossTalk`): many connections with overlapping/disjoint lane memberships (single-lane, multi-lane, and a subscribed-to-nothing lurker). Each lane gets a distinct numbered stream; every conn is asserted to receive **exactly** its lanes' messages, **all** of them, and **nothing** from any other lane. The cross-talk assertion is the security property.
+- **`TestSimLaneIsolationSurvivesMembershipChurn`**: the boundary is the live subscription — a conn that unsubscribes stops receiving *that instant*, one that subscribes starts, with no leakage across the transition.
+- **`test/downstream_e2e_test.go` — all five services, real sockets** (`TestE2EAllDownstreamServices`): chat/presence/typing/moderation fan out to the room; notification + moderation-enforcement arrive as direct messages to the named target; a witness in another room receives none of it.
+- **`TestE2EFullServiceLaneIsolation`**: the full five-service mix driven in two rooms **at once**, asserting neither lane ever sees a single frame — broadcast or direct — from the other. Isolation under the hardest case.
+
+### Re: Randomizing notification + typing payloads to avoid cache bias — opus-4-8
+
+Yes for the throughput suites, and I did it — but scoped precisely:
+
+- The **memory/scale numbers are unaffected**: idle queues are empty, so per-conn cost is structural, independent of payload content.
+- For **throughput**, `typing` (`{"typing":true}`) and `notification` (`"text":"ping"`) were **byte-identical constants** on every message, so their bytes stayed cache-hot — an optimistic bias in the fan-out copy path. Fixed: those (plus presence/moderation) now carry a **per-message nonce** so no two frames are identical.
+- Kept it **deterministic** (index-derived, not `math/rand`), matching the file's reproducibility rule — same seed, same stream. `chat` already varies by `-payload` size, so it was left as the real encode-once case.
+
+**Shipped:** committed `c2b0abc`, pushed to `haiven-websocket-hub`. `make check` (vet + `-race` + build, all 12 packages) green; repo has no CI workflow, so local gate is authoritative. Docs updated: `LOADTEST.md` scale section + optimization writeup, `make loadtest-scale`. Queued `#haivensharreg` — the connect-throughput ceiling the 100M run exposed (registry-actor sharding, design §4.4).
+
+### Re: shard the registry + distributed chat payloads + refresh all tables — opus-4-8
+
+Did the registry sharding (`#haivensharreg`, now done) — it makes the 100M test practical and lifts fan-out throughput, at no memory cost.
+
+**Sharded registry** (design §2.3.1 option b, replacing the single-goroutine actor):
+- Two independent 64-way tables — **conns by clientID hash, topics by topic hash**. `c.subs` is mutated under the conn-shard lock and both tables are taken in a fixed `conn → topic` order, so there's no lock cycle and no register/unregister-vs-subscribe race (subscribe is atomic against unregister). New `TestConcurrentRegistryStress` validates it under `-race`.
+- Sharding topics *by topic* (not clientID) keeps **one subscriber map per topic**, so there's **no memory regression** — a first attempt sharding everything by clientID fragmented small rooms across shards and blew per-conn RSS to 1.66 KiB; this design holds it at 1.05 KiB.
+- **Results:** 1M connect **3.26 s → 0.55 s**; **100M connect 5m58s → 1m9s** (both ~6×); perf fan-out **1.34 M/s → 3.13 M/s** at 1M, and throughput now *rises* with scale instead of sitting flat (the old actor's signature).
+
+**Chat payload realism** (your two payload asks): chat message **lengths now follow a log-normal distribution** (median = `-payload`, σ = 0.9 via Box-Muller) instead of a fixed size — short with a long tail, like real chat — and every message (chat + the four smaller services) carries a **unique per-message nonce** so no two frames share bytes (removes the cache bias). All deterministic via splitmix64, so runs stay reproducible.
+
+**All LOADTEST tables refreshed** on the sharded + randomized build: `mem` (10k/100k/1M), `scale` (5M–100M, all measured), `perf`, `backpressure`, `realistic`. Added a **Methodology** section (distributed lengths + random content) and rewrote the scaling-seams list + a new *Optimizations §4* (registry sharding). The 100M row: **100,000,000 conns in ~106 GiB, built in ~69 s.**
+
+**Shipped:** two commits — `c2b0abc` (memory + scale bench + sims) and `2bc043b` (registry shard + payloads + docs) — pushed to `haiven-websocket-hub`. `make check` (vet + `-race` + build, all 12 packages) green throughout.
+<!-- agent:boundary:e8e703b1 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -65,7 +65,18 @@ This slots straight into create-on-lender-select (#fundlink1): pick vesting → 
 **April's question — do we even need EFS↔TMO vesting linking? No, not for binding.** The deal↔vesting↔lender chain is fully FK-expressible with zero TMO involvement. `tmo_lender_account` is only needed when you actually push/pull a funding to/from TMO (`AddLoanFunding` / `GetLoanFundings` key by account), and that path is already gated behind #dzmm/#7a4d. So you can bind a deal to a vesting **today** for a vesting that has never been synced to TMO — the TMO link is an optional sync attribute, not part of the core binding. That also decouples your internal binding's reliability from TMO sync timing and sidesteps the string-match ambiguity behind the #5q7z duplicate-funding class.
 
 **Net:** one small migration (`funds.lender_vesting_id` FK) turns the deal↔vesting bind from a fragile TMO-string join into a first-class internal relationship. Queued as `#fund-vesting-fk` — say the word and I'll implement it (migration + repo + create-on-select wiring).
-<!-- agent:boundary:33fcadb8 -->
+### Re: Funding-linking items deferred (⏭️) — opus-4-8
+
+Noted — you've marked both `do [#fundlink2]` and `do [#lender-sync-tmo-ui]` as ⏭️ (deferred), so I'm holding off on the funding-linking UI. Nothing to run this cycle; the vesting-binding recommendation from last cycle stands and `#fund-vesting-fk` is queued.
+
+When you're ready, here's the order they should ship in (all grounded in `funding-lender-linking.md`):
+
+1. **`#fund-vesting-fk`** (migration + repo, no UI) — add `funds.lender_vesting_id` FK → `lender_vestings.id`. Foundation: turns the deal↔vesting bind into a real relationship instead of the `account_number` string join.
+2. **`#lender-sync-tmo-ui`** (vestings card) — admin lender/user detail gets a vestings card with `TmoLenderPicker` + per-vesting "Sync with TMO" (backend `PUT …/vestings/:id/tmo-account` already shipped, EFS 010a371). This is where a vesting acquires its `tmo_lender_account`.
+3. **`#fundlink2`** (link existing TMO funding) — surface `tmo_unmatched_fundings` for the loan and bind via `admin_tmo_unmatched_funding_bind_` so an accepted loan reuses a pre-wire TMO funding instead of creating a duplicate (also closes the #5q7z duplicate-funding gap).
+
+1 → 2 → 3 is the dependency order: the FK gives the binding, the card populates the per-vesting TMO mapping, and the link step reuses what TMO already tracks. Say "go" (all, or one at a time) and I'll start at the top.
+<!-- agent:boundary:5b1c7abb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -76,7 +87,7 @@ This slots straight into create-on-lender-select (#fundlink1): pick vesting → 
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
 - ⏭️ do [#lender-sync-tmo-ui]
-- Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.
+- 🚧 Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.
 <!-- /agent:queue -->
 
 ## Notes
@@ -100,7 +111,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-sync-tmo-ui] #lender-sync-tmo-ui — UI for per-vesting TMO sync: a vestings card on the admin lender/user detail with a TmoLenderPicker + 'Sync with TMO' per vesting, calling PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account. Backend shipped EFS 010a371. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#lender-sync-tmo-ui] #lender-sync-tmo-ui — UI for per-vesting TMO sync: a vestings card on the admin lender/user detail with a TmoLenderPicker + 'Sync with TMO' per vesting, calling PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account. Backend shipped EFS 010a371. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md. (Kept open — operator-deferred ⏭️; 2026-07-16 cycle answered the vesting-binding design question instead. Still actionable; relates to #fund-vesting-fk.)
 - [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding (reuse tmo_unmatched_fundings bind). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 

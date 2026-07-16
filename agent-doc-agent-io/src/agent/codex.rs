@@ -63,6 +63,9 @@ use super::{Agent, AgentResponse};
 use agent_doc_frontmatter::frontmatter::{CodexNetworkAccess, Frontmatter};
 use agent_doc_git_io::dirs::{append_workspace_access_args, workspace_access_dirs_for_doc};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent, parse_codex_line};
+use agent_doc_turn_executor::capability_proof::{
+    ManagedProofContractInputs, managed_proof_contract,
+};
 #[cfg(test)]
 use agent_doc_turn_executor::codex_launch::CODEX_CHILD_WRITABLE_ROOT_PROBE_MARKER;
 use agent_doc_turn_executor::codex_launch::{
@@ -513,6 +516,71 @@ pub fn managed_capability_contract_required_for_doc_and_harness(
                 .is_some_and(args_contain_add_dir))
 }
 
+pub fn managed_capability_proof_contract(
+    command: &str,
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    fm: &Frontmatter,
+    global_config: &agent_doc_config::Config,
+    harness: &str,
+) -> String {
+    let network_required =
+        resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
+            == CodexNetworkAccess::Enabled;
+    let writable_roots = if harness == "codex" {
+        add_dirs_from_args(args)
+    } else {
+        Vec::new()
+    };
+    let writable_root_contract = writable_root_contract_id(&writable_roots);
+    managed_proof_contract(ManagedProofContractInputs {
+        harness,
+        command,
+        args,
+        env,
+        network_required,
+        required_ssh_targets: &fm.required_ssh_targets,
+        writable_root_contract: writable_root_contract.as_deref(),
+    })
+}
+
+pub fn preserved_managed_capability_proof_event(
+    command: &str,
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+    fm: &Frontmatter,
+    global_config: &agent_doc_config::Config,
+    harness: &str,
+) -> String {
+    let network_required =
+        resolve_codex_network_access(fm.codex_network_access, global_config.codex_network_access)
+            == CodexNetworkAccess::Enabled;
+    let writable_roots = if harness == "codex" {
+        add_dirs_from_args(args)
+    } else {
+        Vec::new()
+    };
+    let writable_root_contract = writable_root_contract_id(&writable_roots);
+    let proof_contract =
+        managed_capability_proof_contract(command, args, env, fm, global_config, harness);
+    format!(
+        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}{} proof_contract={} source=reexec_preserved_child",
+        harness,
+        proof_status_label(network_required, network_required),
+        if network_required {
+            "preserved_child_reexec"
+        } else {
+            "not_required"
+        },
+        fm.required_ssh_targets.len(),
+        normalized_writable_root_strings(&writable_roots).len(),
+        writable_root_contract
+            .map(|contract| format!(" writable_root_contract={contract}"))
+            .unwrap_or_default(),
+        proof_contract,
+    )
+}
+
 pub fn prove_managed_session_capabilities(
     command: &str,
     args: &[String],
@@ -583,6 +651,8 @@ pub fn prove_managed_session_capabilities(
         Vec::new()
     };
     let writable_root_contract = writable_root_contract_id(&writable_roots);
+    let proof_contract =
+        managed_capability_proof_contract(command, args, env, fm, global_config, harness);
     let phase_start = Instant::now();
     for root in &writable_roots {
         prove_writable_root(root)?;
@@ -598,7 +668,7 @@ pub fn prove_managed_session_capabilities(
     timings.total = total_start.elapsed();
 
     Ok(Some(format!(
-        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}{} {}",
+        "{}_capability_proof status=proven network={} network_probe={} ssh_targets={} writable_roots={}{} proof_contract={} {}",
         harness,
         proof_status_label(network_required, network_required),
         network_probe,
@@ -607,6 +677,7 @@ pub fn prove_managed_session_capabilities(
         writable_root_contract
             .map(|contract| format!(" writable_root_contract={contract}"))
             .unwrap_or_default(),
+        proof_contract,
         timings.event_fields()
     )))
 }
@@ -2044,13 +2115,16 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
         let fm = Frontmatter::default();
         let env = std::collections::HashMap::new();
         let expected_contract = writable_root_contract_id(&[root]).unwrap();
+        let config = agent_doc_config::Config::default();
+        let expected_proof_contract =
+            managed_capability_proof_contract(&script, &args, &env, &fm, &config, "codex");
 
         let event = prove_managed_session_capabilities(
             &script,
             &args,
             &env,
             &fm,
-            &agent_doc_config::Config::default(),
+            &config,
             "codex",
             agent_doc_turn_executor::capability_proof::DEFAULT_MANAGED_PROOF_PROBE_TIMEOUT,
         )
@@ -2061,6 +2135,16 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{}}}}'
             event.contains(&format!("writable_root_contract={expected_contract}")),
             "{event}"
         );
+        assert!(
+            event.contains(&format!("proof_contract={expected_proof_contract}")),
+            "{event}"
+        );
+
+        let preserved =
+            preserved_managed_capability_proof_event(&script, &args, &env, &fm, &config, "codex");
+        assert!(preserved.contains("source=reexec_preserved_child"));
+        assert!(preserved.contains(&format!("writable_root_contract={expected_contract}")));
+        assert!(preserved.contains(&format!("proof_contract={expected_proof_contract}")));
     }
 
     #[test]

@@ -1193,6 +1193,14 @@ fn supervisor_perform_reexec(
         for (key, value) in state.to_env() {
             cmd.env(key, value);
         }
+        if let Some(contract) = shared.proven_capability_proof_contract() {
+            cmd.env(
+                agent_doc_supervisor_process::REEXEC_CAPABILITY_PROOF_CONTRACT_ENV,
+                contract,
+            );
+        } else {
+            cmd.env_remove(agent_doc_supervisor_process::REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
+        }
         let err = cmd.exec();
         attempts.push(format!(
             "{note} path={} exists_before={exists_before} errno={:?} ({err})",
@@ -1212,6 +1220,7 @@ fn supervisor_perform_reexec(
 
 struct ManagedCapabilityProofTask {
     proof_epoch: u64,
+    proof_contract: String,
     harness_binary: String,
     args: Vec<String>,
     env: std::collections::HashMap<String, String>,
@@ -1226,6 +1235,7 @@ fn spawn_managed_capability_proof_thread(
 ) -> std::thread::JoinHandle<()> {
     let ManagedCapabilityProofTask {
         proof_epoch,
+        proof_contract,
         harness_binary,
         args,
         env,
@@ -1266,13 +1276,12 @@ fn spawn_managed_capability_proof_thread(
                     &global_config,
                     &harness_binary,
                     policy.probe_timeout,
-                ) {
-                    Ok(Some(event)) => {
-                        if !shared.set_capability_proof_gate_for_epoch(
-                            proof_epoch,
-                            CapabilityProofGate::Proven,
-                            None,
-                        ) {
+            ) {
+                Ok(Some(event)) => {
+                    if !shared.set_capability_proof_proven_for_epoch(
+                        proof_epoch,
+                        proof_contract.clone(),
+                    ) {
                             return;
                         }
                         if !shared.capability_proof_epoch_current(proof_epoch) {
@@ -1625,6 +1634,9 @@ pub(crate) struct SupervisorShared {
     capability_proof_gate: AtomicU8,
     capability_proof_epoch: AtomicU64,
     capability_proof_error: Mutex<Option<String>>,
+    /// Exact successful proof contract eligible for a same-child hot-reexec
+    /// handoff. Cleared whenever the gate is not `Proven`.
+    capability_proof_contract: Mutex<Option<String>>,
 }
 
 impl SupervisorShared {
@@ -1681,6 +1693,7 @@ impl SupervisorShared {
             capability_proof_gate: AtomicU8::new(CapabilityProofGate::NotRequired as u8),
             capability_proof_epoch: AtomicU64::new(0),
             capability_proof_error: Mutex::new(None),
+            capability_proof_contract: Mutex::new(None),
         }
     }
 
@@ -1704,8 +1717,24 @@ impl SupervisorShared {
 
     fn set_capability_proof_gate(&self, gate: CapabilityProofGate, error: Option<String>) {
         *self.capability_proof_error.lock().unwrap() = error;
+        if gate != CapabilityProofGate::Proven {
+            *self.capability_proof_contract.lock().unwrap() = None;
+        }
         self.capability_proof_gate
             .store(gate as u8, Ordering::Relaxed);
+    }
+
+    fn set_capability_proof_proven(&self, contract: String) {
+        *self.capability_proof_error.lock().unwrap() = None;
+        *self.capability_proof_contract.lock().unwrap() = Some(contract);
+        self.capability_proof_gate
+            .store(CapabilityProofGate::Proven as u8, Ordering::Relaxed);
+    }
+
+    fn proven_capability_proof_contract(&self) -> Option<String> {
+        (self.capability_proof_gate() == CapabilityProofGate::Proven)
+            .then(|| self.capability_proof_contract.lock().unwrap().clone())
+            .flatten()
     }
 
     fn next_capability_proof_epoch(&self) -> u64 {
@@ -1804,6 +1833,14 @@ impl SupervisorShared {
             return false;
         }
         self.set_capability_proof_gate(gate, error);
+        true
+    }
+
+    fn set_capability_proof_proven_for_epoch(&self, epoch: u64, contract: String) -> bool {
+        if !self.capability_proof_epoch_current(epoch) {
+            return false;
+        }
+        self.set_capability_proof_proven(contract);
         true
     }
 
@@ -3062,6 +3099,21 @@ mod tests {
             None,
         ));
         assert_eq!(shared.capability_proof_gate(), CapabilityProofGate::Proven);
+    }
+
+    #[test]
+    fn capability_proof_contract_handoffs_only_while_gate_is_proven() {
+        let shared = SupervisorShared::new("test", "test-instance".to_string());
+        shared.set_capability_proof_proven("contract-a".to_string());
+        assert_eq!(
+            shared.proven_capability_proof_contract().as_deref(),
+            Some("contract-a")
+        );
+
+        shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
+        assert_eq!(shared.proven_capability_proof_contract(), None);
+        shared.set_capability_proof_gate(CapabilityProofGate::Failed, Some("denied".to_string()));
+        assert_eq!(shared.proven_capability_proof_contract(), None);
     }
     #[test]
     fn auto_trigger_clear_command_bypasses_dispatch_gate_and_submits_enter() {

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.150
+
+- **Supervisor hot-reexec no longer launches redundant managed capability probes for the child it preserves.** A proven gate now hands an exact hash of the harness command, launch args, resolved environment, network requirement, SSH targets, and writable-root contract to the replacement binary. The replacement reuses it only when that same child survived and the current contract matches, records a new post-start `status=proven source=reexec_preserved_child` event, and otherwise runs the bounded probe normally. This prevents repeated 45-second Codex proof timeouts and retries from turning a healthy adopted session `blocked` after every local install/recycle while retaining fail-closed behavior for a fresh child or changed capability contract.
+
 ## 0.34.149
 
 - **Concurrent repair no longer retires a captured response whose editor delivery is still in flight.** Stale-capture policy now treats the retained document-write slot as durable ownership evidence, so a reused response heading cannot misclassify the exact active capture as a superseded captured-only orphan.

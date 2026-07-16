@@ -39,6 +39,7 @@ impl SupervisorProcessCommand {
 
 pub const REEXEC_CHILD_PID_ENV: &str = "AGENT_DOC_REEXEC_CHILD_PID";
 pub const REEXEC_MASTER_FD_ENV: &str = "AGENT_DOC_REEXEC_MASTER_FD";
+pub const REEXEC_CAPABILITY_PROOF_CONTRACT_ENV: &str = "AGENT_DOC_REEXEC_CAPABILITY_PROOF_CONTRACT";
 pub const ROUTE_BIN_ENV: &str = "AGENT_DOC_ROUTE_BIN";
 
 pub fn agent_doc_start_bin() -> String {

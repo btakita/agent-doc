@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use std::collections::HashMap;
+
 /// Default number of managed-capability-proof attempts (the failing attempt
 /// plus retries) before the dispatch gate commits to `Failed`.
 pub const DEFAULT_MANAGED_PROOF_MAX_ATTEMPTS: u32 = 3;
@@ -85,6 +87,60 @@ pub enum ProofRetryDecision {
     Retry { backoff: Duration },
     /// Stop retrying; set the dispatch gate to `Failed`.
     GiveUp,
+}
+
+/// Exact launch/capability facts covered by a successful managed proof.
+///
+/// The resulting fingerprint is safe to hand across a supervisor `execve`:
+/// it contains no raw environment values, and a replacement supervisor may
+/// reuse it only while adopting the same still-live harness child.
+pub struct ManagedProofContractInputs<'a> {
+    pub harness: &'a str,
+    pub command: &'a str,
+    pub args: &'a [String],
+    pub env: &'a HashMap<String, String>,
+    pub network_required: bool,
+    pub required_ssh_targets: &'a [String],
+    pub writable_root_contract: Option<&'a str>,
+}
+
+pub fn managed_proof_contract(inputs: ManagedProofContractInputs<'_>) -> String {
+    let mut env_pairs: Vec<_> = inputs.env.iter().collect();
+    env_pairs.sort_by_key(|(key, _)| *key);
+    let mut ssh_targets = inputs.required_ssh_targets.to_vec();
+    ssh_targets.sort();
+    ssh_targets.dedup();
+    let raw = serde_json::json!({
+        "harness": inputs.harness,
+        "command": inputs.command,
+        "args": inputs.args,
+        "env": env_pairs,
+        "network_required": inputs.network_required,
+        "required_ssh_targets": ssh_targets,
+        "writable_root_contract": inputs.writable_root_contract,
+    })
+    .to_string();
+    agent_doc_hash::content_hash(&raw)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreservedProofDecision {
+    Reuse,
+    Reprove,
+}
+
+/// A proof may cross a supervisor hot-reexec only when the exact launch
+/// contract matches and the already-proven child itself survived.
+pub fn preserved_proof_decision(
+    child_survived: bool,
+    preserved_contract: Option<&str>,
+    current_contract: &str,
+) -> PreservedProofDecision {
+    if child_survived && preserved_contract == Some(current_contract) {
+        PreservedProofDecision::Reuse
+    } else {
+        PreservedProofDecision::Reprove
+    }
 }
 
 /// Decide whether a failed managed-capability-proof attempt should be retried.
@@ -172,6 +228,48 @@ mod tests {
         let base = Duration::from_secs(2);
         assert_eq!(proof_retry_decision(3, 3, base), ProofRetryDecision::GiveUp);
         assert_eq!(proof_retry_decision(1, 1, base), ProofRetryDecision::GiveUp);
+    }
+
+    #[test]
+    fn managed_proof_contract_is_order_stable_and_fact_sensitive() {
+        let mut left_env = HashMap::new();
+        left_env.insert("B".to_string(), "2".to_string());
+        left_env.insert("A".to_string(), "1".to_string());
+        let mut right_env = HashMap::new();
+        right_env.insert("A".to_string(), "1".to_string());
+        right_env.insert("B".to_string(), "2".to_string());
+        let args = vec!["-s".to_string(), "danger-full-access".to_string()];
+        let contract = |env: &HashMap<String, String>, network_required| {
+            managed_proof_contract(ManagedProofContractInputs {
+                harness: "codex",
+                command: "codex",
+                args: &args,
+                env,
+                network_required,
+                required_ssh_targets: &["beta".to_string(), "alpha".to_string()],
+                writable_root_contract: Some("roots"),
+            })
+        };
+        assert_eq!(contract(&left_env, true), contract(&right_env, true));
+        assert_ne!(contract(&left_env, true), contract(&left_env, false));
+    }
+
+    #[test]
+    fn preserved_proof_requires_same_live_child_contract() {
+        assert_eq!(
+            preserved_proof_decision(true, Some("same"), "same"),
+            PreservedProofDecision::Reuse
+        );
+        for (child_survived, preserved) in [
+            (false, Some("same")),
+            (true, Some("different")),
+            (true, None),
+        ] {
+            assert_eq!(
+                preserved_proof_decision(child_survived, preserved, "same"),
+                PreservedProofDecision::Reprove
+            );
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@ use agent_doc_supervisor::{
     run_loop::{PostChildExitAction, child_launch_plan, post_child_exit_action},
 };
 use agent_doc_supervisor_process::{
-    REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
+    REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV, ReexecState,
     io_threads::{spawn_reader_thread, spawn_writer_thread},
     resize,
 };
@@ -55,11 +55,41 @@ fn configure_managed_capability_proof_for_spec(
     spec: &HarnessLaunchSpec,
     fm: &frontmatter::Frontmatter,
     global_config: &agent_doc_config::Config,
+    preserved_child_survived: bool,
+    preserved_proof_contract: Option<&str>,
     session_log: &mut Option<std::fs::File>,
 ) -> Option<std::thread::JoinHandle<()>> {
     let proof_epoch = shared.next_capability_proof_epoch();
     if !spec.capability_proof_required {
         shared.set_capability_proof_gate(CapabilityProofGate::NotRequired, None);
+        return None;
+    }
+
+    let proof_contract = agent_doc_agent_io::agent::codex::managed_capability_proof_contract(
+        &spec.harness.binary,
+        &spec.base_args,
+        &spec.resolved_env,
+        fm,
+        global_config,
+        &spec.harness.binary,
+    );
+    if agent_doc_turn_executor::capability_proof::preserved_proof_decision(
+        preserved_child_survived,
+        preserved_proof_contract,
+        &proof_contract,
+    ) == agent_doc_turn_executor::capability_proof::PreservedProofDecision::Reuse
+    {
+        shared.set_capability_proof_proven(proof_contract);
+        let event = agent_doc_agent_io::agent::codex::preserved_managed_capability_proof_event(
+            &spec.harness.binary,
+            &spec.base_args,
+            &spec.resolved_env,
+            fm,
+            global_config,
+            &spec.harness.binary,
+        );
+        log_event(session_log, &event);
+        surface_managed_capability_proof_status(shared, &spec.harness.binary, &event);
         return None;
     }
 
@@ -72,6 +102,7 @@ fn configure_managed_capability_proof_for_spec(
         shared.clone(),
         ManagedCapabilityProofTask {
             proof_epoch,
+            proof_contract,
             harness_binary: spec.harness.binary.clone(),
             args: spec.base_args.clone(),
             env: spec.resolved_env.clone(),
@@ -205,6 +236,23 @@ pub fn run_with_reap_policy(
         generation: actor_record.generation,
     };
 
+    // Consume hot-reexec handoff facts before configuring capability proof.
+    // A surviving child may retain an exact proof; a fresh child, missing
+    // contract, or changed launch contract must prove again.
+    let mut pending_adopt = ReexecState::from_env();
+    let preserved_proof_contract = std::env::var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV).ok();
+    let preserved_child_survived = pending_adopt
+        .as_ref()
+        .is_some_and(|state| state.child_survived());
+    if pending_adopt.is_some() {
+        unsafe {
+            std::env::remove_var(REEXEC_CHILD_PID_ENV);
+            std::env::remove_var(REEXEC_MASTER_FD_ENV);
+            std::env::remove_var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
+        }
+        log_event(&mut session_log, "supervisor_reexec_reentry detected");
+    }
+
     // Create shared state for IPC handler
     let launch_binary_identity =
         agent_doc_controller_io::project_controller::current_binary_identity().ok();
@@ -222,6 +270,8 @@ pub fn run_with_reap_policy(
         &initial_launch_spec,
         &capability_proof_frontmatter,
         &global_config,
+        preserved_child_survived,
+        preserved_proof_contract.as_deref(),
         &mut session_log,
     );
 
@@ -358,14 +408,6 @@ pub fn run_with_reap_policy(
     // self-`execve`, adopt the preserved harness child on the first iteration instead
     // of spawning a new one. Consume the handoff env immediately so a later in-process
     // (continue) restart never re-adopts a now-dead fd.
-    let mut pending_adopt = ReexecState::from_env();
-    if pending_adopt.is_some() {
-        unsafe {
-            std::env::remove_var(REEXEC_CHILD_PID_ENV);
-            std::env::remove_var(REEXEC_MASTER_FD_ENV);
-        }
-        log_event(&mut session_log, "supervisor_reexec_reentry detected");
-    }
     let mut first_run = true;
     let mut auto_trigger_next_launch = false;
 
@@ -562,6 +604,8 @@ pub fn run_with_reap_policy(
                                 &restart_spec,
                                 &capability_proof_frontmatter,
                                 &global_config,
+                                false,
+                                None,
                                 &mut session_log,
                             );
                         }

@@ -367,7 +367,19 @@ So yes: the earlier non-monotonic multi-head consume was evidence of a non-coher
 I did not reset or write EFS. Its foreign-owned live buffer and buffer-only `queue: stop` were left intact; the new reconstruction path is specifically designed to preserve that operator intent. The full Rust suite passed (7,771 tests) and the TLA+ checks passed. The target-scoped JetBrains regression also passed. Plugin 0.2.267 is installed, but the currently running IDE host still reports 0.2.266, so restart the IDE before live-testing Compact Exchange; `reload-lib` only reloads the native library.
 
 There are no new actionable engineering follow-ups from this incident; the remaining action is the already-tracked live IDE verification after restart.
-<!-- agent:boundary:172199ac -->
+### Re: #goal1d0k — gpt-5
+
+`#goal1d0k` was a stale tracking wrapper. Its underlying goal—graceful mid-turn operator steering plus anti-thrash closeout guidance—was already shipped in `61fa13d53be8f1fde4ca4ed035c07d2c69c054db` (`fix: gracefully handle mid-turn operator steering + fix JB patch-watcher read-access crash`).
+
+Verified today:
+
+- `61fa13d5` is an ancestor of the current v0.34.160 source head.
+- `RealtimeSteering` remains implemented in the document-realtime model and controller path.
+- `realtime_steering_closeout_guidance` remains wired into `session-check`.
+- The current v0.34.160 release passed the full `make check` suite (7,780 tests).
+
+No new implementation was needed in this drain cycle; this closes the stale wrapper without replaying or duplicating the shipped work.
+<!-- agent:boundary:08b32930 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -389,8 +401,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
   recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
 ```
 ~~~
----
-⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
+~~~done
+📌 haiven.md session had a JB `File Cache Conflict`.
 ```
 ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
   controller pid, retry the commit):
@@ -411,7 +423,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 ```
----
+~~~
 ~~~done
 📌 JB `Compact Exchange` on monsterrodholders.md
 ```
@@ -419,29 +431,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ~~~
 - ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
----
-⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
-```
-● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-  controller pid, retry the commit):
-
-  Ran 1 shell command
-
-● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-  Waiting, then retrying:
-
-  Ran 1 shell command
-
-● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-  tree? committed? is the editor replica alive?) before any further infra action.
-
-  Ran 1 shell command
-
-● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-```
----
 - ~~📌 haiven.md response was not committed.~~
 - ~~📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.~~
 - ~~📌 do [#zqv8]~~
@@ -455,9 +444,9 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
-- 🚧 📌 do [#clippy197cleanup]
+- ⏭️ 📌 do [#clippy197cleanup]
 - 📌 do [#jbtsiftnosub2verify]
-- 📌 do [#restartstderrbleed2]
+- 🚧 📌 do [#restartstderrbleed2]
 - 📌 do [#5bzd]
 - 📌 do [#sidecarstate]
 - 📌 do [#64we]
@@ -476,29 +465,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
 ```
 ~~~
----
-⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
-```
-● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-  controller pid, retry the commit):
-
-  Ran 1 shell command
-
-● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-  Waiting, then retrying:
-
-  Ran 1 shell command
-
-● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-  tree? committed? is the editor replica alive?) before any further infra action.
-
-  Ran 1 shell command
-
-● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-```
----
 ~~~done
 📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
 ```
@@ -507,60 +473,23 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ~~~
 - ~~In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
 - 📌 t
-- 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
----
-⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
-```
-● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-  controller pid, retry the commit):
-
-  Ran 1 shell command
-
-● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-  Waiting, then retrying:
-
-  Ran 1 shell command
-
-● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-  tree? committed? is the editor replica alive?) before any further infra action.
-
-  Ran 1 shell command
-
-● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-```
----
 - 📌 do [#5qjj]
-- ⏭️ 📌 do [#zqv8]
-- ⏭️ 📌 do [#crde]
-- ⏭️ 📌 do [#steeringobservableset]
 - ~~📌 do [#jbcompactexchange]~~
 - ⏭️ 📌 do [#goal1d0k]
 - ⏭️ 📌 do [#idlewatchturnactive]
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
-- ⏭️ 📌 do [#zqv8]
-- ⏭️ 📌 do [#crde]
-- ⏭️ 📌 do [#steeringobservableset]
 - ⏭️ 📌 do [#goal1d0k]
 - ⏭️ 📌 do [#idlewatchturnactive]
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
----
-🚧 📌 JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
-- 📌 do [#goal1d0k]
-- 📌 do [#idlewatchturnactive]
-- 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
-- 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
-- 📌 do [#clippy197cleanup]
-- haiven.md response was not committed.
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#capturebacklogatomic]
+- ⏭️ 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#clippy197cleanup]
 <!-- /agent:queue -->
 
 ## Notes

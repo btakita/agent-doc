@@ -76,7 +76,24 @@ When you're ready, here's the order they should ship in (all grounded in `fundin
 3. **`#fundlink2`** (link existing TMO funding) — surface `tmo_unmatched_fundings` for the loan and bind via `admin_tmo_unmatched_funding_bind_` so an accepted loan reuses a pre-wire TMO funding instead of creating a duplicate (also closes the #5q7z duplicate-funding gap).
 
 1 → 2 → 3 is the dependency order: the FK gives the binding, the card populates the per-vesting TMO mapping, and the link step reuses what TMO already tracks. Say "go" (all, or one at a time) and I'll start at the top.
-<!-- agent:boundary:18a5e81b -->
+
+### Re: Bi-directional lender/vesting ↔ TMO linking — opus-4-8
+
+Shipped the per-vesting card (EFS `0ac4402`, pushed). `make check` green: **1648 pass / 0 fail**.
+
+**`#lender-sync-tmo-ui` — done.** New `AdminLenderVestings` card on the lender-role user profile: lists `lender_vestings`, and each vesting gets its own `TmoLenderPicker` + "Sync with TMO" → `PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account` (empty clears the mapping). Plus a cache-refresh Sync and the LOS portal link, matching the lender-request page. Backend was already shipped (010a371), so this was the missing UI half. I also noted on the existing lender-level field that `users.lender_account` is only a *default* — it's single-valued and can't represent Mark Leonard = `MARKDBPP`/`MARKL`/`MARKPERSON`/`MARKROTHIR`, which is exactly why the account belongs on the vesting.
+
+**On your bi-directional requirements** — the two directions are in different states:
+
+1. **EFS-originated** (application received through EFS → create the funding by associating with a TMO lender or creating a new one): this is `#fundlink1`, already shipped. Per PRD D1 it's LOS-embed (`AddLoanFunding` carries the lender fields; no LSS lender-master call), and per D2 the funding materializes on lender-select, not at acceptance.
+2. **TMO-originated** (a TMO funding and an EFS deal both exist and must be linked): the *surface + bind* shipped last commit (`71327b0`). **The precedence rule you specified is the genuinely missing piece** — nothing in the codebase implements it today (I grepped; there's no conflict/override logic in `tmo-sync.ts`).
+
+So I recorded it as **PRD decision D4** and put the implementation on `#fundlink2`: on bind, the TMO funding is the source of truth and must **override** conflicting `funds` fields (amount, account, dates, status) from the pulled `loan_funding` cache row rather than preserving local values — and record what it overrode for audit.
+
+Worth flagging: **D4 governs the pull/bind direction only, so it is _not_ blocked by #dzmm/#7a4d.** Those gate the EFS→TMO *push* (`#fundlink3`). That means the TMO-wins bind is implementable now — it doesn't have to wait on the TMO write field map. Say go and I'll take `#fundlink2`.
+
+One caveat on scope: I verified via `make check` + the worker bundle, not against the live portal — driving the real card needs a seeded lender with vestings. If you want live confirmation before this counts as shipped, say so and I'll run the local portal recipe.
+<!-- agent:boundary:452b3844 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -86,7 +103,9 @@ When you're ready, here's the order they should ship in (all grounded in `fundin
 - ~~do [#h8rz]~~
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
-- ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~
+- ⏭️ do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
+- go...do options 1 -> 2 -> 3
 - do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
 <!-- /agent:queue -->
 

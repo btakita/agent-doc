@@ -34,85 +34,53 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260715-185133.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260716-002907.md`*
 
 Compacted content:
-- Archived 1 response topic(s): JetBrains Run Agent Doc on monsterrodholders.md
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): database lock and JetBrains delivery-ACK wedge
-❯ - JetBrains installation is deterministic in non-interactive environments through `--plugins-dir`; ambiguous targets now fail with a candidate list instead of selecting one silently. The signed 0.2.259 plugin was installed into the live IntelliJ IDEA 2026.1 plugin root; an IDE restart activates it.
-❯ - Timed-out agent backends now run in their own process group and receive TERM, a grace period, KILL, and synchronous reap. Descendants cannot remain behind as stuck preflight siblings, and cancellation diagnostics distinguish an intentional exit 144 from a product failure.
-❯ - Controller model backpressure now creates a shared, per-project cooldown with deterministic document jitter. Idle watchers honor it, preventing multiple sessions from hammering the controller; foreground finalize remains available. The skill/runbook now explicitly says to stop concurrent closeout attempts, keep a live editor authoritative, wait for cooldown/reconnect, and retry once—never kill the controller for queue-strike/backpressure and never force-disk while a live editor owns the document.
-❯ - Force-disk operations now hold an authority fence from authorization through the serialized mutation. If a relay appears or authority changes before the disk write, the operation aborts with a typed error before touching disk. Reconnect merges also semantically deduplicate exact response cells while retaining prompts and the newest boundary.
-❯ - Queue strikes no longer perform a controller/model lookup while holding the document lock. Commit-seam reconciliation uses the disk queue only, and implicit baselines no longer reload stale `.overlay.yrs` sidecars, preventing phantom queue-head resurrection.
-❯ - JetBrains now gates delivery pulls while an ACK is pending, so it cannot repeatedly decode the same large CRDT update. A lost controller transport refreshes the relay registration with bounded backoff and retires the old replica identity.
-❯ 5ar] 🚧 The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
-❯ - [ ] [#z
+- Archived 4 response topic(s): #z5ar; IPC proof diagnostic (interrupted-cycle recovery); IPC proof diagnostic (interrupted-cycle recovery); 1 more
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): JetBrains Run Agent Doc on monsterrodholders.md
 
-### Re: #z5ar — gpt-5
+### Re: editor save-flush authority and agent-doc churn — gpt-5
 
-> **Queue prompt:**
->
-> /goal Implement backlog item(s): #z5ar
+Yes. An editor save followed by an exact byte-for-byte flush to disk is now a first-class resolution event. That saved editor cut becomes authoritative and clears any older pending disk candidate. A disk watcher event by itself cannot clear the pending state, because it cannot prove whether the write came from the editor, agent-doc, Git, a formatter, or another process.
 
+#### Editor authority and pending disk state
 
-> **Queue prompt:** The edits I made in the exchange were not picked up as real-time steering by agent-doc. The realtime document should surface user edits as realtime steering. We need to figure out how to commit once the user is done editing and not submit incomplete work. Perhaps the user can simply run `agent-doc <file>` to do realtime steering?
+The implemented authority rules are:
 
-Implemented and released this as agent-doc 0.34.131. Every accepted CRDT replica update during an open turn is now compared with the saved turn baseline and recorded as an idempotent, cycle-scoped `RealtimeSteeringObserved` state fact. The closeout projection carries the aggregate primary kind, edit count, preview, and full verbatim steering text; commit, abandonment, or a new cycle clears it.
+- While any editor is open, the live editor/CRDT state is authoritative. Every external disk change is retained as an exact pending candidate in a separate Lazily slot; it is not merged into the editor and cannot replace a captured agent response.
+- Accepting/reloading a File Cache Conflict makes the resulting visible editor buffer the candidate truth. The plugin resets/reseeds its replica from that buffer, propagates it, and clears the pending disk candidate only after the exact cut is proven.
+- A later user edit makes that editor cut authoritative and clears the pending disk candidate without merging the disk version.
+- An editor save whose exact buffer bytes are observed on disk makes that save cut authoritative and clears the candidate. This is the rule in your latest clarification.
+- Closing one of several editors changes nothing. Closing the final editor clears the pending decision and falls back to the current disk bytes.
+- With multiple editors, causally compatible CRDT operations converge normally. If no exact cut or causal lineage proves which incompatible replacement is intended, agent-doc retains the alternatives and returns a typed `needs_operator` condition without mutation. Git is historical evidence only, after editor and disk.
 
-JetBrains and VS Code now decode that authoritative state-wire projection instead of losing steering on the state-mirror hot path. Their in-flight turn presentations show the aggregate edit count and preview, with the complete verbatim aggregate available in the tooltip/hover.
+This fixes the queue-item behavior you saw in `equityfundingsource.md`: unsaved editor content remains canonical during delivery, and saving the same content is an idempotent authority transition rather than a second insertion. The executable model covers both “unsaved item survives” and “saved item is not duplicated.”
 
-The settlement behavior is explicit: realtime edits surface immediately and aggregate throughout the active turn. Once the operator is done editing, invoking `agent-doc <file>` or the editor's Run Agent Doc action once is the handoff signal. The existing serialized project-controller route queues that request behind an active turn, so it does not submit an intermediate buffer; the running turn and `session-check` retain the aggregate steering evidence in the meantime.
+#### Finalize and recovery
 
-Architecture contract: the invariant is one primary kind/count/preview/verbatim projection for every consumer during an open cycle. `agent-doc-document-realtime` owns baseline comparison and `CloseoutProjection` owns lifecycle scope. Evidence is the active cycle, saved snapshot, canonical CRDT text, and content hash. Edits stayed within the turn projection, realtime comparison, state backbone/wire, controller ingestion, FFI, editor adapters, tests, specs, and the architecture plan. The larger SeqCrdt observable-set migration remains out of scope under `#steeringobservableset`.
+Finalize is now binary-owned after its first durable response capture. The capture is keyed by cycle, capture ID, and response identity. The supervisor—not the agent—owns reconciliation, deduplication, ACK proof, backoff, and exact-once commit retry. A stop hook is a status gate; it no longer tells the agent to alternate `finalize` and `write --commit`, recapture the answer, kill controllers, or elect force-disk.
 
-Verification passed: targeted Rust steering tests; 151 VS Code tests; the JetBrains Gradle suite; clippy, doctests, deterministic simulation, version/formal checks, and all 7,683 workspace tests. The latest completed CI run was green, including tmux. Release commit `a267c3a1` is on `main`, tag `v0.34.131` is pushed, the optimized binary/library and both local editor plugins are installed, and the portable manylinux 2.17 wheel uploaded successfully to PyPI. The tagged GitHub Release workflow is still in progress and is non-blocking per the release runbook.
+That is why the old behavior created more wedging: each new finalize attempt introduced another independently keyed response/cell operation while the previous operation was unresolved. CAS races, cell-merge conflicts, phantom queue strikes, and duplicate response copies were consequences of stacking recovery operations. Invalid states now fail closed and resume the original capture. Stale preflight ownership is repaired automatically, and recovery workers use bounded retry rather than leaving process descendants to contend indefinitely.
 
-OpenCode's managed agent-doc skill is also regenerated and installed at v0.34.131; the managed-surface audit passes.
-Implemented and released agent-doc 0.34.132. The OpenCode skill and its runbooks are now regenerated from the current canonical source at `.opencode/skills/agent-doc/` (version 0.34.132), alongside the Claude, Codex, and Cursor copies.
+Agent-doc can resolve ambiguity by rule when it has evidence: duplicate semantic operations dedupe; a causally newer editor/replica epoch supersedes its stale projection; and compatible CRDT histories merge. It does not guess between two incompatible user-authored replacements or missing causal lineage. Two unsaved occurrences can arise from separate editor buffers, offline replicas, or an IDE buffer racing an external writer. CRDT resolves operations with usable shared history, but convergence alone cannot decide semantic authority between independent replacement intents.
 
-❯ The churn paths are fixed at their sources:
+A manually interrupted Claude/Codex/OpenCode harness turn still needs a new user event to run the harness again; a minimal “continue” or another `agent-doc <file>` invocation is sufficient, and the work need not be restated. If the response had already reached durable capture before interruption, the binary closeout worker continues without another agent prompt or another finalize call.
 
-- JetBrains now gates delivery pulls while an ACK is pending, so it cannot repeatedly decode the same large CRDT update. A lost controller transport refreshes the relay registration with bounded backoff and retires the old replica identity.
-- Queue strikes no longer perform a controller/model lookup while holding the document lock. Commit-seam reconciliation uses the disk queue only, and implicit baselines no longer reload stale `.overlay.yrs` sidecars, preventing phantom queue-head resurrection.
-- Force-disk operations now hold an authority fence from authorization through the serialized mutation. If a relay appears or authority changes before the disk write, the operation aborts with a typed error before touching disk. Reconnect merges also semantically deduplicate exact response cells while retaining prompts and the newest boundary.
-- Controller model backpressure now creates a shared, per-project cooldown with deterministic document jitter. Idle watchers honor it, preventing multiple sessions from hammering the controller; foreground finalize remains available. The skill/runbook now explicitly says to stop concurrent closeout attempts, keep a live editor authoritative, wait for cooldown/reconnect, and retry once—never kill the controller for queue-strike/backpressure and never force-disk while a live editor owns the document.
-- Timed-out agent backends now run in their own process group and receive TERM, a grace period, KILL, and synchronous reap. Descendants cannot remain behind as stuck preflight siblings, and cancellation diagnostics distinguish an intentional exit 144 from a product failure.
-- JetBrains installation is deterministic in non-interactive environments through `--plugins-dir`; ambiguous targets now fail with a candidate list instead of selecting one silently. The signed 0.2.259 plugin was installed into the live IntelliJ IDEA 2026.1 plugin root; an IDE restart activates it.
+#### Realtime model and Lazily transition
 
-Verification is green: `make check` passed all 7,693 tests, the full JetBrains `test buildPlugin signPlugin` build passed, focused authority-fence/process-group/backpressure/ACK tests passed, all 82 skill tests passed, documentation audit passed, and the optimized 0.34.132 install succeeded. PyPI publication completed successfully. The agent-doc release is commit `7a985c5d0`, tag `v0.34.132`; the superproject skill/gitlink update is `b62c07ba9`. Both are pushed. GitHub CI and Release workflows were running normally at closeout, with the previous runs green.
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+The test architecture now combines an executable state-machine model with Lean proofs. The model drives editor attach/detach, offline reconnect, IPC delivery and ACK/backpressure, cycle capture/finalize, external disk writes, File Cache Conflict accept/keep, editor edits, exact save-flushes, force-disk candidates, and last-editor close. Lean proves the pending-state transition invariants. JetBrains, VS Code, and the binary share the same transition contract and adapter conformance tests; separate hand-written formal models for each plugin would create drift rather than parity.
 
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
+These tests are suitable for driving the full Lazily migration. They define observable behavior independently of the current backend, so the existing implementation and progressively fuller Lazily implementations can run against the same traces. They also identify missing Lazily features. This work exposed and records `PendingExternalDiskDecision` as a distinct required primitive: durable exact candidate bytes, causal/epoch evidence, explicit resolution actions, and atomic separation from pending response lineage.
 
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_already_applied patch_id=a40dd92d-4dc8-44be-b7a5-d4ae093c9b67 invariant=visible_write_receipt_missing_response recovery=retry_response_cell_via_cpc_without_disk_write response_sha256=7c6a0a1374cd3c529cd16f522f449c41a5f3eefb7619cd3accd1f4b3aab9294f visible_len=51951 visible_hash=fdc8af91aaa9fd9fb85f6b8e5ddef5f74b0542d316da6d27637ce653e59d73fd content_ours_len=52730 content_ours_hash=2dca1252c61f931d835007917625bb1c036625c733add08fbf0c615cb8a71687 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784148773334
-```
-Correction: you were running the exact 0.2.259 artifact. The signed archive was built at 16:23 and IDEA started at 16:26. My 16:52 operation merely reinstalled that archive; it did not rebuild a second 0.2.259. The jar inside the archive and the installed jar were byte-identical (`sha256 3bb41c4e…`). My earlier “old in-memory plugin” diagnosis was wrong.
+#### Shipped versions, parity, and verification
 
-The live logs exposed an uncovered bug in 0.2.259: `RemoteEditorApplyOutcome.applied` actually represented whether disk persistence succeeded. When the editor visibly contained the exact canonical target but disk saving was deliberately deferred, the plugin treated the projection as unapplied, withheld the ACK, and immediately pulled/decoded the same 13.4 MB delivery again. The retained-ACK gate therefore never engaged.
+The release is agent-doc `0.34.136` at submodule commit `a979baafa`. I did not rebuild a different implementation under the old `0.2.259` or `0.2.261` JetBrains version. The current JetBrains plugin is `0.2.262`; VS Code is `0.2.52`. OpenCode, Codex, Claude, and Cursor installed skills all report `0.34.136` and now contain the binary-owned closeout and exact save-flush rules. I also fixed the packaging source that had caused the installer to overwrite current development guidance with an older bundled skill.
 
-This is fixed and released with distinct identities: agent-doc 0.34.133 and JetBrains plugin 0.2.260. ACK eligibility now comes from exact visible editor content independently of disk persistence. Genuine editor races use exponential backoff instead of treating repeated downloads as progress. After IDEA restarted onto 0.2.260, live preflight recovered the retained response, waited on `delivery_ack_pending`, settled it, and continued through repair/commit without the replay loop.
+JetBrains and VS Code are at behavior parity for deferred reconnect, visible-buffer rebootstrap, exact candidate proof, save-flush resolution, and no component merge of disk candidates. The JetBrains 0.2.262 artifact is installed, but this preflight reports the currently running IDEA process still has 0.2.261 loaded. Because 0.2.262 was installed after your last restart, one additional IDEA restart is required to activate the Kotlin plugin update. The native library reload/recycle was already broadcast; no waiting or controller-kill loop is needed.
 
-The broader 0.34.132 fixes remain in place: queue strikes use disk-only authority under the document lock; implicit baselines ignore stale overlay sidecars; force-disk holds an authority fence through mutation; reconnect merges deduplicate response cells; project-wide controller backpressure establishes a shared cooldown; timed-out backends terminate and reap their process groups; controller loss triggers bounded JetBrains replica re-registration; and non-interactive JetBrains installation requires deterministic target evidence. The OpenCode, Codex, Claude, and Cursor agent-doc surfaces are regenerated at 0.34.133.
-
-Verification is green: repository-wide `make check`, the full JetBrains `test buildPlugin signPlugin` pipeline, the focused ACK regression, documentation audit, optimized install, and PyPI publication all passed. The corrected agent-doc commit is `b7f2d9d42`, tag `v0.34.133`; the superproject gitlink/skill commit is `3c7eaae34`. Both are pushed. GitHub CI and Release are running for 0.34.133; the complete 0.34.132 runs are green.
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=file_ipc patch_id=637c877e-89b6-4ef0-8b60-95432cbba380 invariant=no_lazily_visible_write_receipt recovery=retry_without_disk_write lazily_receipt_timeout=true typing_status=idle operator_activity_inferred=false doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784151187530
-```
-<!-- agent:boundary:a48d8c83 -->
+Verification is green locally: the full suite passed 7,713 tests with 240 skipped, VS Code passed 158 tests, JetBrains `test buildPlugin` passed, Lean `lake build` passed, and skill generation/install passed 82 tests. The single requested CI inspection showed the new 0.34.136 CI run in progress, not red; per policy I did not poll it. The repository policy now explicitly says to inspect CI once and fix it only when that inspection is red.
+<!-- agent:boundary:1008c904 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -203,7 +171,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ---
 - 📌 haiven.md response was not committed.
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
-- 📌 do [#zqv8]
+- ⏭️ 📌 do [#zqv8]
 - 📌 do [#crde]
 - 📌 do [#steeringobservableset]
 - 📌 do [#jbcompactexchange]
@@ -229,8 +197,55 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#staleplugindeploy]
+---
+📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+```
+---
+---
+📍 haiven.md thrash issue:
+```
+● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
+  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
+  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
+```
+---
+---
+⏭️ 📍 haiven.md session had a JB `File Cache Conflict`.
+```
+● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+  controller pid, retry the commit):
+
+  Ran 1 shell command
+
+● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+  Waiting, then retrying:
+
+  Ran 1 shell command
+
+● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+  tree? committed? is the editor replica alive?) before any further infra action.
+
+  Ran 1 shell command
+
+● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+```
+---
+---
+📍 JB `Compact Exchange` on monsterrodholders.md
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+```
+---
 - do [#5qjj]
-- Editor document selection auto-sync with tmux pane is inconsistent.
+- In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.
+- haiven.md response was not committed.
+- t
+- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
+- 📌 do [#zqv8]
 ---
 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
 ```
@@ -274,10 +289,6 @@ JB `Compact Exchange` on monsterrodholders.md
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ---
-- In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.
-- haiven.md response was not committed.
-- t
-- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - do [#zqv8]
 - do [#crde]
 - do [#steeringobservableset]

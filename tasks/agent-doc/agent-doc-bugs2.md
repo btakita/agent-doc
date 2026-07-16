@@ -179,7 +179,14 @@ Verification completed:
 Source commits are `165841b8d` (automatic pane sync), `363863437` (TLA+ model), and `6adc18cc0` (File Cache Conflict fix). Tags `v0.34.143` and `v0.34.144` are pushed. The required one-shot CI inspection found the `v0.34.144` CI run in progress, not red.
 
 The old Haiven delivery-ACK recovery prompt is also resolved by the corrected contract: `admin reload-lib` refreshes only the native library, not the Kotlin plugin package. The retained response required no force-disk or controller kill; installing/restarting the updated plugin restored the current editor generation, and preflight recovered the interrupted cycle.
-<!-- agent:boundary:114b0f63 -->
+### Re: Compact Exchange ACK wedge targeting Equity Funding Source — gpt-5
+
+Resolved by the same installed convergence fix.
+
+The historical `Compact Exchange` failure surfaced from `monsterrodholders.md`, but its blocked delivery target was the open `equityfundingsource.md` editor. JetBrains plugin `0.2.264` removes the two paths that could strand that target: workspace-wide VFS refresh behind unsaved buffers, and CRDT save through a stale `VirtualFile` stamp. The restarted IDEA instance is registered live on `0.2.264`.
+
+The canonical compact result in that error was already retained on the CRDT/Lazily plane. It did not require force-disk, controller termination, or response replay. This queue item is closed by the shipped fix; I did not initiate a new Compact Exchange against either separate session.
+<!-- agent:boundary:bad38b3a -->
 <!-- /agent:exchange -->
 ## Queue
 

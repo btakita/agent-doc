@@ -224,7 +224,45 @@ Live dog-food succeeded: the retained Haiven capture resumed and committed as `7
 Verification is green: focused Rust recovery tests, full `make check`, documentation/managed-skill audit, plugin-version check, and all four PlusCal/TLA+ models. `CloseoutChurn.tla` now proves replacement bootstrap eventually settles and commits the same capture without duplication. Alloy is not warranted for this bug class: it is an ordering/liveness/exact-once problem, where TLA+ is the stronger fit. Add Alloy when we need arbitrary-N relational/topology or schema invariants rather than temporal convergence.
 
 Released and pushed: agent-doc `c2acade43`, tag `v0.34.148`; workspace integration `26657f067`. The latest agent-doc CI run was in progress at the single required observation.
-<!-- agent:boundary:4e7c4954 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=tasks/agent-doc/agent-doc-bugs2.md source=socket_already_applied patch_id=07ab4a4a-b491-49b9-81b9-8be1d2258275 invariant=visible_write_receipt_superseded_by_live_editor recovery=refresh_editor_cut_without_file_ipc_or_disk_write receipt_len=71255 receipt_hash=34777116065f15e8c768abfb05609c2f86e9670cb5a26fbcb6272768606f4cd8 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784175030367
+```
+### Re: stale Compact Exchange ACK timeout — gpt-5.6
+
+> 📌 JB `Compact Exchange` on monsterrodholders.md
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for `/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md` did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously.
+
+This queue item duplicates the already-answered ACK-wedge report and is now stale. The recorded controller transaction targeted `tasks/professional/equityfundingsource.md`, not `tasks/research/monsterrodholders.md`; there is no matching `controller_compact_document` event for Monster Rod Holders.
+
+The retained EFS compact later recovered without force-disk or controller intervention. At 07:29:59Z its CRDT delivery converged after 4,775 ms (`delivery_converged=true`), and commit `ec12db99c` landed at 03:30 EDT. The original eight-second timeout therefore did not lose the canonical compact result.
+
+EFS currently has a newer, unrelated captured finalize in `retain_without_mutation`, owned by pane `%26`. I did not run recovery or mutate that foreign-owned document. If Compact Exchange is still desired for Monster Rod Holders, select `tasks/research/monsterrodholders.md` and invoke it once; this historical EFS failure is not evidence that Monster Rod Holders was compacted.
+
+No source change or new backlog item is needed for this duplicate. Session accretion is at warning level (205 exchange lines), but the auto queue is active, so this cycle continues without clearing context.
+### Re: 🚧 📌 JB `Compact Exchange` on monsterrodholders.md — gpt-5
+
+> **Queue prompt:**
+>
+> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+> ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+> ```
+
+The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
+
+In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
+
+Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
+<!-- agent:boundary:8314ed58 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -309,10 +347,10 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
-- ⏭️ 📌 do [#steeringobservableset]
+- 📌 do [#steeringobservableset]
 - ~~📌 do [#jbcompactexchange]~~
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
+- 📌 do [#goal1d0k]
+- 📌 do [#idlewatchturnactive]
 - 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
@@ -409,12 +447,20 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#5qjj]
 - ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
-- ⏭️ 📌 do [#steeringobservableset]
+- 📌 do [#steeringobservableset]
 - ~~📌 do [#jbcompactexchange]~~
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
+- 📌 do [#goal1d0k]
+- 📌 do [#idlewatchturnactive]
 - 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
+- 📌 do [#zqv8]
+- ⏭️ 📌 do [#crde]
+- ⏭️ 📌 do [#steeringobservableset]
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
+- haiven.md response was not committed.
 <!-- /agent:queue -->
 
 ## Notes

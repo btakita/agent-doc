@@ -29463,18 +29463,15 @@ fn test_agent_doc_template_owns_response_materialization_policy() {
         "write IPC must not re-own or facade response heading extraction"
     );
     assert!(
-        write_ipc_io.contains("extract_response_headings_from_patches")
-            && write_ipc_io.contains("pub fn patch_response_headings_already_in_head(")
-            && write_ipc_io.contains("pub fn build_ipc_patches_json(")
-            && write_ipc_io.contains("agent_doc_template::response_materialization::"),
-        "agent-doc-write-ipc-io should own the response heading HEAD gate and IPC payload builder while calling focused template APIs directly"
+        write_ipc_io.contains("pub fn patch_response_bodies_already_in_head(")
+            && write_ipc_io.contains("pub fn build_ipc_patches_json("),
+        "agent-doc-write-ipc-io should own the full-response-body HEAD gate and IPC payload builder"
     );
 
     let focused_callers = [
         "agent-doc-run-io/src/lib.rs",
         "agent-doc-write-runtime-io/src/run_entry.rs",
         "agent-doc-write-ipc-io/src/transport.rs",
-        "agent-doc-write-ipc-io/src/lib.rs",
         "agent-doc-template-io/src/response_materialization_io.rs",
         "agent-doc-template-io/src/write_normalize.rs",
     ];

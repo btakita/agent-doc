@@ -20,7 +20,11 @@ use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use std::collections::BTreeSet;
 
 const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(1);
-const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_millis(750);
+// Foreground closeout reads may briefly queue behind a replica bootstrap or
+// durable outbox fold. Give that observation enough time to see the ACK that
+// already landed; idle revision probes retain the sub-second budget below.
+const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTROLLER_CRDT_REVISION_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 /// A CPC-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -119,11 +123,22 @@ fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &st
         );
         return;
     }
-    let deadline = controller_model_pressure_now_secs()
-        .saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs());
-    let retained_deadline = read_controller_model_pressure_deadline(project_root)
-        .unwrap_or(0)
-        .max(deadline);
+    let now = controller_model_pressure_now_secs();
+    let deadline = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs());
+    let existing_deadline = read_controller_model_pressure_deadline(project_root).unwrap_or(0);
+    // Do not rewrite/log the same project-wide marker on every foreground
+    // retry. Refresh only after half its cooldown has elapsed.
+    let refresh_after = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs() / 2);
+    if existing_deadline > refresh_after {
+        if let Err(err) = fs2::FileExt::unlock(&lock) {
+            eprintln!(
+                "[agent-doc] failed to unlock controller model pressure marker {}: {err}",
+                lock_path.display()
+            );
+        }
+        return;
+    }
+    let retained_deadline = existing_deadline.max(deadline);
     if let Err(err) = std::fs::write(&state, format!("{retained_deadline}\n")) {
         eprintln!(
             "[agent-doc] failed to write controller model pressure marker {}: {err}",
@@ -3998,7 +4013,7 @@ fn request_existing_controller_crdt_revision_read(
             command_kind: None,
             diagnostic_payload: Some(serde_json::json!({ "source": source }).to_string()),
         },
-        CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT,
+        CONTROLLER_CRDT_REVISION_READ_TIMEOUT,
     )?;
     serde_json::from_value(data).context("failed to parse controller CRDT revision response")
 }
@@ -8421,9 +8436,10 @@ fn handle_reliable_sync(
         let ops = decoded.with_context(|| {
             format!("reliable_sync_full_state_adopt_malformed hash={document_hash}")
         })?;
-        let full_state = serde_json::to_vec(&ops).with_context(|| {
-            format!("reliable_sync_full_state_adopt_reencode_failed hash={document_hash}")
-        })?;
+        let full_state =
+            agent_doc_merge::crdt_sync::encode_update_ops(&ops).with_context(|| {
+                format!("reliable_sync_full_state_adopt_reencode_failed hash={document_hash}")
+            })?;
         agent_doc_crdt_relay_io::adopt_editor_full_state_for_file(file, &full_state).with_context(
             || format!("reliable_sync_full_state_adopt_failed hash={document_hash}"),
         )?;
@@ -8436,7 +8452,7 @@ fn handle_reliable_sync(
         let ops = decoded.with_context(|| {
             format!("reliable_sync_document_op_frame_malformed hash={document_hash}")
         })?;
-        let delta = serde_json::to_vec(&ops).with_context(|| {
+        let delta = agent_doc_merge::crdt_sync::encode_update_ops(&ops).with_context(|| {
             format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
         })?;
         agent_doc_crdt_relay_io::apply_document_op_delta_for_file(file, &delta).with_context(
@@ -12460,6 +12476,29 @@ mod tests {
         assert!(controller_model_pressure_cooldown_active_for_doc(&second));
         let deadline = read_controller_model_pressure_deadline(dir.path()).unwrap();
         assert!(deadline >= controller_model_pressure_now_secs());
+    }
+
+    #[test]
+    fn controller_model_pressure_marker_is_not_extended_on_every_retry() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = dir.path().join(".agent-doc/runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let retained = controller_model_pressure_now_secs() + 25;
+        std::fs::write(
+            runtime.join("controller-model-pressure-until"),
+            format!("{retained}\n"),
+        )
+        .unwrap();
+
+        record_controller_model_pressure(dir.path(), &doc, "retry", "still busy");
+
+        assert_eq!(
+            read_controller_model_pressure_deadline(dir.path()),
+            Some(retained),
+            "an active marker must not churn disk and ops.log on every retry"
+        );
     }
 
     #[test]

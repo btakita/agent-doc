@@ -1,8 +1,8 @@
 //! Write IPC transport: socket-first delivery with durable file-IPC fallback.
 
 use crate::{
-    IpcResult, build_ipc_patches_json, ipc_document_content,
-    patch_response_headings_already_in_head, projected_or_sidecar_cycle_id,
+    IpcResult, build_ipc_patches_json, ipc_document_content, patch_response_bodies_already_in_head,
+    projected_or_sidecar_cycle_id,
 };
 use agent_doc_document_realtime::write_policy::{
     EditorDeliveryAdmission, EditorDeliveryAdmissionFacts, decide_editor_delivery_admission,
@@ -276,11 +276,11 @@ fn try_ipc_inner(
     // If they are not, the "committed" cycle is unrelated to this response:
     // rotate the cycle state to start fresh and let the patch flow continue.
     if let Some(ref cycle_id) = cycle_already_committed(file) {
-        let response_in_head = patch_response_headings_already_in_head(file, patches);
+        let response_in_head = patch_response_bodies_already_in_head(file, patches);
         if !response_in_head {
             eprintln!(
                 "[write] mid-turn cycle rotation detected for {}: cycle {} marked committed \
-                 but the incoming response heading(s) are absent from HEAD — starting a fresh \
+                 but the incoming response body is absent from HEAD — starting a fresh \
                  cycle instead of rejecting (see #adoc-compact-during-turn-response-loss)",
                 file.display(),
                 cycle_id

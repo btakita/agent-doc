@@ -778,7 +778,6 @@ pub fn mark_completed_queue_prompts_for_done_ids(
                         marked_texts.len()
                     ),
                 );
-                return Ok(None);
             }
             let snapshot_body = agent_doc_queue::document_queue::render(&snapshot_marked_entries);
             Ok(Some(
@@ -1625,6 +1624,41 @@ mod core_tests {
         assert!(
             snapshot.contains("- ~~do [#opportunistic]~~\n"),
             "{snapshot}"
+        );
+    }
+
+    #[test]
+    fn done_id_syncs_snapshot_overlap_when_document_has_newer_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do first copy [#duplicate]\n",
+            "- do newer copy [#duplicate]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let snapshot = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- do [#head]\n",
+            "- do first copy [#duplicate]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+
+        let marked =
+            mark_completed_queue_prompts_for_done_ids(&doc, &["duplicate".to_string()], true)
+                .unwrap();
+        assert_eq!(marked, 2);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(updated.matches("~~").count(), 4, "{updated}");
+        let updated_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert!(
+            updated_snapshot.contains("- ~~do first copy [#duplicate]~~\n"),
+            "the independently matching snapshot item must still be synchronized: {updated_snapshot}"
         );
     }
     #[test]

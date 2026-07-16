@@ -57,6 +57,28 @@ pub fn ensure_strict_template_response_heading(
     );
 }
 
+/// Strict template closeout is an exact protocol boundary: a free-form capture
+/// is too ambiguous to distinguish response materialization from a malformed
+/// transcript. Require a parsed patch block so both opening and closing markers
+/// were present before any pending state or document mutation is recorded.
+pub fn ensure_strict_template_patch_markers(
+    template_mode: bool,
+    parsed_marker_count: usize,
+    patches: &[PatchBlock],
+    unmatched: &str,
+) -> Result<()> {
+    if !template_mode
+        || parsed_marker_count > 0
+        || !patches.is_empty()
+        || unmatched.trim().is_empty()
+    {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "strict template closeout response must wrap its response in matching `<!-- patch:exchange -->` and `<!-- /patch:exchange -->` markers"
+    );
+}
+
 pub fn ensure_strict_template_response_heading_for_current_doc(
     current_content: &str,
     patches: &[PatchBlock],
@@ -400,6 +422,32 @@ mod tests {
     fn strict_template_response_heading_accepts_unmatched_heading() {
         ensure_strict_template_response_heading(&[], "### Re: queue head - gpt-5\n\nAnswered.\n")
             .unwrap();
+    }
+
+    #[test]
+    fn strict_template_closeout_rejects_unmarked_response_before_mutation() {
+        let err = ensure_strict_template_patch_markers(
+            true,
+            0,
+            &[],
+            "### Re: queue head - gpt-5\n\nAnswered.\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("matching `<!-- patch:exchange -->`")
+        );
+    }
+
+    #[test]
+    fn append_mode_keeps_legacy_unmatched_response_compatibility() {
+        ensure_strict_template_patch_markers(
+            false,
+            0,
+            &[],
+            "### Re: queue head - gpt-5\n\nAnswered.\n",
+        )
+        .unwrap();
     }
 
     #[test]

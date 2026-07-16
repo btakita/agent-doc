@@ -207,6 +207,19 @@ race class instead of papering over each symptom.
   disk-write authority and a genuinely degraded session routes through the
   file-IPC patch queue (plugin still applies via Document API) rather than a raw
   disk write that would manufacture a File Cache Conflict.
+- **Compact CRDT wire with rolling compatibility.** Replica bootstrap, deltas,
+  relay frames, and the existing string FFI seam carry a UTF-8-safe compact
+  envelope (`ADCR1:` + base64 of zstd-compressed MessagePack operations). Readers
+  continue to accept legacy JSON so an update retained before a binary/plugin
+  upgrade can land afterwards. The compact form is required because per-character
+  insert/tombstone operations can otherwise expand a modest Markdown document
+  into tens of megabytes of controller JSON and starve the ACK read that proves
+  delivery.
+- **Foreground proof reads outrank idle observations.** A current-text read used
+  to prove response delivery has a five-second controller budget; the idle
+  revision probe keeps the 750 ms budget. Controller pressure markers are
+  cooldown-coalesced: while more than half of the existing cooldown remains, a
+  retry neither rewrites the marker nor emits another pressure log entry.
 
 Migration follows the same gate ladder as the rest of this contract (shadow →
 dual-write → read-switch → authority → removal); each gate carries a rollback

@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.146
+
+- **Retained JetBrains closeouts no longer overload their own ACK path.** CRDT bootstrap/delta operations now use a compact, UTF-8-safe zstd/MessagePack envelope over the existing plugin string FFI seam while retaining legacy-JSON decode compatibility. Foreground canonical-text proof gets a five-second controller budget, idle revision polling remains at 750 ms, and repeated pressure signals are cooldown-coalesced. This is a native-library/control-plane update and does not change the JetBrains Kotlin ABI.
+- **Closeout recovery is exact-once across the churn edges.** Strict template responses without exchange patch markers fail before capture or mutation; stale-cycle dedupe requires the full response body rather than a reused heading; retained pending writes suppress the false direct-patchback/recapture diagnosis; and duplicate live queue occurrences no longer prevent independently matching snapshot done-id updates.
+- **PlusCal/TLA+ exhaustively covers the combined failure sequence.** `CloseoutChurn.tla` checks compact-payload service, eventual ACK observation, full-body response identity, one capture/copy, partial queue-snapshot progress, strict unmarked rejection, and bounded pressure-marker writes. Alloy is intentionally not added because these regressions are temporal ordering/liveness properties rather than arbitrary-size relational topology constraints.
+
 ## 0.34.145
 
 - **JetBrains no longer recursively refreshes project content after an external agent-doc commit (JetBrains plugin 0.2.264).** VCS signals now dirty only the VCS scope, so an unrelated unsaved agent-document buffer is never pushed into IntelliJ's memory-vs-disk resolver. Remote CRDT delivery refreshes only its clean target file before mutation, revalidates that the document stayed clean, and fails closed to exact-editor-baseline retry when operator memory is unsaved. This also updates the target `VirtualFile` modification stamp before `saveDocument`, eliminating byte-equal-but-stamp-stale conflict dialogs.

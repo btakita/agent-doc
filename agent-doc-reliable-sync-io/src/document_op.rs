@@ -52,7 +52,7 @@ const DOCUMENT_OP_ADOPT_NODE: NodeId = NodeId(u64::MAX - 2);
 /// Encode a `TextCrdt` delta (a [`TextCrdt::delta_since`] op list) as a reliable-sync
 /// frame. A whole-state snapshot is `delta_since(&TextVersionVector::new())`.
 pub fn encode_document_op_frame(ops: &[TextOp]) -> Result<IpcMessage> {
-    let bytes = serde_json::to_vec(ops)?;
+    let bytes = agent_doc_merge::crdt_sync::encode_update_ops(ops)?;
     let op = CrdtOp {
         node: DOCUMENT_OP_NODE,
         key: None,
@@ -71,11 +71,12 @@ pub fn encode_document_op_frame(ops: &[TextOp]) -> Result<IpcMessage> {
     }))
 }
 
-/// Parse an editor-side `agent_doc_replica_diff` JSON buffer and encode it as a
-/// document-op frame. `None` is the canonical empty-delta no-op.
+/// Parse an editor-side `agent_doc_replica_diff` compact envelope (or legacy
+/// JSON buffer) and encode it as a document-op frame. `None` is the canonical
+/// empty-delta no-op.
 pub fn encode_document_op_json_frame(delta_json: &str) -> Result<Option<IpcMessage>> {
-    let ops: Vec<TextOp> =
-        serde_json::from_str(delta_json).map_err(|error| anyhow!("parse delta_json: {error}"))?;
+    let ops = agent_doc_merge::crdt_sync::decode_update_ops(delta_json.as_bytes())
+        .map_err(|error| anyhow!("parse delta update: {error}"))?;
     if ops.is_empty() {
         Ok(None)
     } else {
@@ -113,7 +114,7 @@ fn decode_document_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
                 "document-op frame carried a non-inline (SharedBlob) op state"
             ));
         };
-        let batch: Vec<TextOp> = serde_json::from_slice(bytes)
+        let batch = agent_doc_merge::crdt_sync::decode_update_ops(bytes)
             .map_err(|e| anyhow!("document-op frame inline decode failed: {e}"))?;
         out.extend(batch);
     }
@@ -125,7 +126,7 @@ fn decode_document_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
 /// [`encode_document_op_frame`] but on [`DOCUMENT_OP_ADOPT_NODE`], so the receiver
 /// adopts (replaces the canonical) instead of folding (union-merge).
 pub fn encode_full_state_adopt_frame(ops: &[TextOp]) -> Result<IpcMessage> {
-    let bytes = serde_json::to_vec(ops)?;
+    let bytes = agent_doc_merge::crdt_sync::encode_update_ops(ops)?;
     let op = CrdtOp {
         node: DOCUMENT_OP_ADOPT_NODE,
         key: None,
@@ -143,14 +144,15 @@ pub fn encode_full_state_adopt_frame(ops: &[TextOp]) -> Result<IpcMessage> {
 }
 
 /// Build a ready-to-push reliable-sync **envelope** for a full-state adopt directly
-/// from the editor's `agent_doc_replica_encode_state` JSON (a `serde_json`
-/// `Vec<TextOp>`) — one call so the FFI push path needs no `lazily::TextOp` knowledge.
+/// from the editor's compact `agent_doc_replica_encode_state` envelope (legacy
+/// JSON remains readable) — one call so the FFI push path needs no
+/// `lazily::TextOp` knowledge.
 pub fn encode_full_state_adopt_envelope(
     document_hash: &str,
     full_state_json: &str,
 ) -> Result<serde_json::Value> {
-    let ops: Vec<TextOp> =
-        serde_json::from_str(full_state_json).map_err(|e| anyhow!("parse full_state_json: {e}"))?;
+    let ops = agent_doc_merge::crdt_sync::decode_update_ops(full_state_json.as_bytes())
+        .map_err(|e| anyhow!("parse full state update: {e}"))?;
     let frame = encode_full_state_adopt_frame(&ops)?;
     super::encode_envelope(document_hash, &frame)
 }
@@ -180,7 +182,7 @@ fn decode_adopt_ops(ops: &[&CrdtOp]) -> Result<Vec<TextOp>> {
                 "full-state adopt frame carried a non-inline (SharedBlob) op state"
             ));
         };
-        let batch: Vec<TextOp> = serde_json::from_slice(bytes)
+        let batch = agent_doc_merge::crdt_sync::decode_update_ops(bytes)
             .map_err(|e| anyhow!("full-state adopt frame inline decode failed: {e}"))?;
         out.extend(batch);
     }
@@ -314,6 +316,30 @@ mod tests {
             .expect("is a document-op frame")
             .expect("decodes");
         assert_eq!(decoded, ops, "round-trip preserves the op list verbatim");
+    }
+
+    #[test]
+    fn existing_string_ffi_seam_accepts_compact_and_legacy_updates() {
+        let src = TextCrdt::from_str(CANON_PEER, "large response lineage\n");
+        let ops = src.delta_since(&lazily::TextVersionVector::new());
+        let compact = agent_doc_merge::crdt_sync::encode_update_ops(&ops).unwrap();
+        let compact = std::str::from_utf8(&compact).expect("compact envelope stays FFI-safe UTF-8");
+        let compact_frame = encode_document_op_json_frame(compact)
+            .unwrap()
+            .expect("non-empty compact frame");
+        assert_eq!(
+            decode_document_op_frame(&compact_frame).unwrap().unwrap(),
+            ops
+        );
+
+        let legacy = serde_json::to_string(&ops).unwrap();
+        let legacy_frame = encode_document_op_json_frame(&legacy)
+            .unwrap()
+            .expect("non-empty legacy frame");
+        assert_eq!(
+            decode_document_op_frame(&legacy_frame).unwrap().unwrap(),
+            ops
+        );
     }
 
     #[test]

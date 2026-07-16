@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-frontmatter"
-version = "0.34.145"
+version = "0.34.146"
 edition = "2024"
 description = "Pure frontmatter and project configuration parsing for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_frontmatter"
 
 [dependencies]
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.145" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.34.146" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }

@@ -24,6 +24,7 @@
 //! since the authority layer lives there.
 
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{TextCrdt, TextOp, TextVersionVector};
 use std::cell::RefCell;
 
@@ -35,9 +36,45 @@ use std::cell::RefCell;
 /// is **kept across cycles**: it accumulates ops and exchanges only deltas with its
 /// peers via [`ReplicaState::state_vector`] (a `version_vector` frontier) /
 /// [`ReplicaState::diff`] (`delta_since`) / [`ReplicaState::apply_update`]
-/// (`apply_delta`). The wire form is JSON `TextOp` lists / version vectors.
+/// (`apply_delta`). Version vectors remain compact JSON. Text-op updates use a
+/// versioned zstd-compressed MessagePack envelope, with legacy JSON decoding so
+/// durable pending/outbox data written by older binaries remains replayable.
 pub struct ReplicaState {
     text: RefCell<TextCrdt>,
+}
+
+const COMPACT_TEXT_OPS_MAGIC: &[u8] = b"ADCR1:";
+
+/// Encode a text-op batch for controller, FFI, and reliable-sync transport.
+///
+/// Character CRDTs carry an op per codepoint plus tombstones. JSON made a
+/// modest markdown buffer expand into tens of megabytes and starved foreground
+/// controller reads. MessagePack removes field-name repetition and zstd makes
+/// the retained frame proportional enough for interactive closeout.
+pub fn encode_update_ops(ops: &[TextOp]) -> Result<Vec<u8>> {
+    let packed = rmp_serde::to_vec(ops).context("encode text ops as MessagePack")?;
+    let compressed =
+        zstd::stream::encode_all(packed.as_slice(), 3).context("compress MessagePack text ops")?;
+    // Keep the envelope UTF-8 so the existing NUL-terminated editor/JNA seam
+    // carries compact updates safely during rolling upgrades.
+    let compressed = BASE64_STANDARD.encode(compressed);
+    let mut encoded = Vec::with_capacity(COMPACT_TEXT_OPS_MAGIC.len() + compressed.len());
+    encoded.extend_from_slice(COMPACT_TEXT_OPS_MAGIC);
+    encoded.extend_from_slice(compressed.as_bytes());
+    Ok(encoded)
+}
+
+/// Decode the compact envelope or a pre-upgrade JSON `Vec<TextOp>`.
+pub fn decode_update_ops(update: &[u8]) -> Result<Vec<TextOp>> {
+    if let Some(compressed) = update.strip_prefix(COMPACT_TEXT_OPS_MAGIC) {
+        let compressed = BASE64_STANDARD
+            .decode(compressed)
+            .context("decode compact text-op base64")?;
+        let packed = zstd::stream::decode_all(compressed.as_slice())
+            .context("decompress MessagePack text ops")?;
+        return rmp_serde::from_slice(&packed).context("decode MessagePack text ops");
+    }
+    serde_json::from_slice(update).context("decode legacy JSON text ops")
 }
 
 impl ReplicaState {
@@ -118,14 +155,14 @@ impl ReplicaState {
         let their_vv: TextVersionVector =
             serde_json::from_slice(their_sv).context("decode version vector")?;
         let delta = self.text.borrow().delta_since(&their_vv);
-        serde_json::to_vec(&delta).context("encode delta")
+        encode_update_ops(&delta).context("encode delta")
     }
 
     /// Apply a remote update (a `TextOp` delta). **Idempotent** (re-applying a known
     /// delta is a no-op) and order-independent (commutative/associative merge), so
     /// duplicate or out-of-order delivery converges rather than corrupting.
     pub fn apply_update(&self, update: &[u8]) -> Result<()> {
-        let ops: Vec<TextOp> = serde_json::from_slice(update).context("decode delta")?;
+        let ops = decode_update_ops(update).context("decode delta")?;
         self.text.borrow_mut().apply_delta(&ops);
         Ok(())
     }
@@ -135,7 +172,7 @@ impl ReplicaState {
     /// replica holds, as a `TextOp` list.
     pub fn encode_state(&self) -> Vec<u8> {
         let snapshot = self.text.borrow().delta_since(&TextVersionVector::new());
-        serde_json::to_vec(&snapshot).unwrap_or_default()
+        encode_update_ops(&snapshot).unwrap_or_default()
     }
 }
 
@@ -332,6 +369,48 @@ mod tests {
         a.apply_local_edit(0, 0, "roundtrip me");
         let restored = ReplicaState::from_encoded(7, &a.encode_state()).unwrap();
         assert_eq!(restored.text(), "roundtrip me");
+    }
+
+    #[test]
+    fn legacy_json_update_remains_decodable() {
+        let source = ReplicaState::from_text(7, "legacy pending response\n");
+        let ops = source.text.borrow().delta_since(&TextVersionVector::new());
+        let legacy = serde_json::to_vec(&ops).unwrap();
+        let restored = ReplicaState::from_encoded(8, &legacy).unwrap();
+        assert_eq!(restored.text(), source.text());
+    }
+
+    #[test]
+    fn compact_update_has_versioned_header_and_roundtrips() {
+        let source = ReplicaState::from_text(7, "compact response\n");
+        let encoded = source.encode_state();
+        assert!(encoded.starts_with(COMPACT_TEXT_OPS_MAGIC));
+        let restored = ReplicaState::from_encoded(8, &encoded).unwrap();
+        assert_eq!(restored.text(), source.text());
+    }
+
+    #[test]
+    fn compact_state_bounds_large_document_and_tombstone_churn() {
+        let initial = (0..1_500)
+            .map(|index| format!("queue item {index:04}: durable closeout content\n"))
+            .collect::<String>();
+        assert!(initial.len() > 60_000);
+        let source = ReplicaState::from_text(7, &initial);
+        let replacement = initial.replace("queue item", "response  ");
+        source.apply_local_edit(0, u32::MAX, &replacement);
+
+        let ops = source.text.borrow().delta_since(&TextVersionVector::new());
+        let legacy = serde_json::to_vec(&ops).unwrap();
+        let compact = source.encode_state();
+        assert!(compact.len() < 2_000_000, "compact bytes={}", compact.len());
+        assert!(
+            compact.len() * 4 < legacy.len(),
+            "compact={} legacy={}",
+            compact.len(),
+            legacy.len()
+        );
+        let restored = ReplicaState::from_encoded(8, &compact).unwrap();
+        assert_eq!(restored.text(), replacement);
     }
 
     #[test]

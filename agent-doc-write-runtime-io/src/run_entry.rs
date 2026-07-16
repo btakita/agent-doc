@@ -473,6 +473,7 @@ pub(crate) fn run_template(
         "run_template",
         agent_doc_ops_log_io::log_op,
     )?;
+    let parsed_marker_count = parsed.marker_count;
     let mut patches = parsed.patches;
     let mut unmatched = parsed.unmatched;
 
@@ -513,6 +514,15 @@ pub(crate) fn run_template(
         )?;
     }
     if flags.strict_closeout {
+        let template_mode = frontmatter::parse(&current_content)
+            .map(|(fm, _)| fm.resolve_mode().is_template())
+            .unwrap_or(false);
+        agent_doc_template::response_materialization::ensure_strict_template_patch_markers(
+            template_mode,
+            parsed_marker_count,
+            &patches,
+            &unmatched,
+        )?;
         agent_doc_template::response_materialization::ensure_strict_template_response_heading_for_current_doc(
             &current_content,
             &patches,

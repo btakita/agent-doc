@@ -875,6 +875,23 @@ pub fn detect_uncommitted_closeout_drift_with_context(
     rc: &agent_doc_run_context_io::CycleContext,
     effects: &impl SessionCheckEffects,
 ) -> Result<Option<String>> {
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file) {
+        let closeout_committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            .is_some_and(|state| state.phase == CyclePhase::Committed);
+        if !closeout_committed {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_check_drift_deferred_to_pending_write file={} intent_id={} target_hash={} reason={}",
+                    file.display(),
+                    pending.intent_id,
+                    pending.target_hash,
+                    pending.reason.token(),
+                ),
+            );
+            return Ok(None);
+        }
+    }
     if effects
         .repair_committed_historical_snapshot_drift(file)?
         .is_some()
@@ -963,6 +980,25 @@ fn projected_open_closeout_message(
     )
 }
 
+fn retained_pending_write_message(
+    file: &Path,
+    intent_id: &str,
+    reason: &str,
+    source: &str,
+    target_hash: &str,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume after the editor/controller ACK. Do not recapture it with `agent-doc write --commit` and do not force disk; retry `agent-doc session-check {}` or `agent-doc finalize {}` after delivery converges.",
+        intent_id,
+        file.display(),
+        reason,
+        source,
+        target_hash,
+        file.display(),
+        file.display(),
+    )
+}
+
 fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
     let initial_last_ops_event = agent_doc_ops_log_io::last_ops_event(file)?;
 
@@ -1003,8 +1039,26 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
     }
 
     let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
+    let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let closeout_committed = cycle_state
+        .as_ref()
+        .is_some_and(|state| state.phase == CyclePhase::Committed);
 
-    if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
+        && !closeout_committed
+    {
+        return Ok(SessionCheckStatus::Interrupted(
+            retained_pending_write_message(
+                file,
+                &pending.intent_id,
+                pending.reason.token(),
+                &pending.source,
+                &pending.target_hash,
+            ),
+        ));
+    }
+
+    if let Some(state) = cycle_state {
         if state.is_open() {
             if let Some(blocked) = state.blocked_closeout.as_ref() {
                 return Ok(SessionCheckStatus::Interrupted(blocked_closeout_message(
@@ -1623,5 +1677,20 @@ mod terminal_convergence_tests {
 
         assert!(!healed);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), authority);
+    }
+
+    #[test]
+    fn retained_pending_write_guidance_preserves_same_capture() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message(
+            file,
+            "intent-1",
+            "crdt_delivery_ack_pending",
+            "write_stream",
+            "new",
+        );
+        assert!(message.contains("same capture will resume"));
+        assert!(message.contains("Do not recapture"));
+        assert!(message.contains("do not force disk"));
     }
 }

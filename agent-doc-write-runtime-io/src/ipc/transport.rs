@@ -2614,8 +2614,10 @@ mod late_fallback_patch_guard_tests {
     #[test]
     fn try_ipc_marks_committed_cycle_skip_as_not_consumed() {
         let tmp = TempDir::new().unwrap();
-        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
+        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\nlate response\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
+        init_git_repo(tmp.path());
+        git_commit_file(tmp.path(), "doc.md", content, "commit response");
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(

@@ -11,7 +11,6 @@ use agent_doc_element_exchange::{
 use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
 use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_receipt_timeout_error};
 use agent_doc_run_context_io::AgentDocContextExt;
-use agent_doc_template::response_materialization::extract_response_headings_from_patches;
 use agent_doc_template::stale_baseline::is_append_mode_component;
 use agent_doc_write_converge_io::{
     cleanup_legacy_ipc_degraded, clear_ipc_socket_ack_timeouts, ipc_direct_disk_degraded,
@@ -74,24 +73,30 @@ pub enum FileIpcRepositionResult {
     Unavailable,
 }
 
-/// Return `true` when every response heading carried in the incoming patches is
-/// already present in the document's `HEAD` content.
+/// Return `true` when every non-empty incoming response patch body is already
+/// present in the document's `HEAD` content.
 ///
 /// This distinguishes "cycle already committed because this response landed"
 /// from "cycle committed by an unrelated mid-turn operation; rotate and apply".
-pub fn patch_response_headings_already_in_head(
+/// A heading alone is not response identity: headings are intentionally reused
+/// across retries and queue IDs.
+pub fn patch_response_bodies_already_in_head(
     file: &Path,
     patches: &[agent_doc_template::PatchBlock],
 ) -> bool {
-    let headings = extract_response_headings_from_patches(patches);
-    if headings.is_empty() {
+    let response_bodies = patches
+        .iter()
+        .map(|patch| patch.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>();
+    if response_bodies.is_empty() {
         return true;
     }
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let Some(head) = rc.head_content() else {
         return false;
     };
-    headings.iter().all(|h| head.contains(h.as_str()))
+    response_bodies.iter().all(|body| head.contains(body))
 }
 
 /// Build the IPC patches JSON array shared by socket and file IPC paths.
@@ -740,27 +745,45 @@ mod tests {
     }
 
     #[test]
-    fn patch_response_headings_already_in_head_true_when_no_patches() {
+    fn patch_response_bodies_already_in_head_true_when_no_patches() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         fs::write(&doc, "doc body\n").unwrap();
-        assert!(patch_response_headings_already_in_head(&doc, &[]));
+        assert!(patch_response_bodies_already_in_head(&doc, &[]));
     }
 
     #[test]
-    fn patch_response_headings_already_in_head_true_when_heading_in_head() {
+    fn patch_response_bodies_already_in_head_true_when_heading_in_head() {
         let dir = TempDir::new().unwrap();
         let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
             "session.md",
-            "## Exchange\n\n### Re: shipped - opus-4-7\n\nbody\n",
+            "## Exchange\n\n### Re: shipped - opus-4-7\n\nbody line one\n",
         );
         let patch = agent_doc_test_support::patch_with_heading("### Re: shipped - opus-4-7");
-        assert!(patch_response_headings_already_in_head(&doc, &[patch]));
+        assert!(patch_response_bodies_already_in_head(&doc, &[patch]));
     }
 
     #[test]
-    fn patch_response_headings_already_in_head_false_when_heading_missing_from_head() {
+    fn patch_response_heading_match_is_not_response_identity() {
+        let dir = TempDir::new().unwrap();
+        let doc = agent_doc_test_support::init_repo_with_doc(
+            dir.path(),
+            "session.md",
+            "## Exchange\n\n### Re: repeated - opus-4-7\n\nold response body\n",
+        );
+        let patch = agent_doc_template::PatchBlock::new(
+            "exchange",
+            "### Re: repeated - opus-4-7\n\nnew retained response body\n",
+        );
+        assert!(
+            !patch_response_bodies_already_in_head(&doc, &[patch]),
+            "a committed cycle must rotate when only the heading, not the full response, is in HEAD"
+        );
+    }
+
+    #[test]
+    fn patch_response_bodies_already_in_head_false_when_heading_missing_from_head() {
         let dir = TempDir::new().unwrap();
         let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
@@ -769,13 +792,13 @@ mod tests {
         );
         let patch = agent_doc_test_support::patch_with_heading("### Re: new response - opus-4-7");
         assert!(
-            !patch_response_headings_already_in_head(&doc, &[patch]),
+            !patch_response_bodies_already_in_head(&doc, &[patch]),
             "mid-turn rotation must allow the patch when response is not in HEAD"
         );
     }
 
     #[test]
-    fn patch_response_headings_already_in_head_false_when_any_heading_missing() {
+    fn patch_response_bodies_already_in_head_false_when_any_heading_missing() {
         let dir = TempDir::new().unwrap();
         let doc = agent_doc_test_support::init_repo_with_doc(
             dir.path(),
@@ -787,18 +810,18 @@ mod tests {
             agent_doc_test_support::patch_with_heading("### Re: second - opus-4-7"),
         ];
         assert!(
-            !patch_response_headings_already_in_head(&doc, &patches),
+            !patch_response_bodies_already_in_head(&doc, &patches),
             "all headings must be in HEAD for the gate to skip"
         );
     }
 
     #[test]
-    fn patch_response_headings_already_in_head_false_when_file_not_in_git() {
+    fn patch_response_bodies_already_in_head_false_when_file_not_in_git() {
         let dir = TempDir::new().unwrap();
         let doc = dir.path().join("session.md");
         fs::write(&doc, "no git\n").unwrap();
         let patch = agent_doc_test_support::patch_with_heading("### Re: something - opus-4-7");
-        assert!(!patch_response_headings_already_in_head(&doc, &[patch]));
+        assert!(!patch_response_bodies_already_in_head(&doc, &[patch]));
     }
 
     #[test]

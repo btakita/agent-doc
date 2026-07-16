@@ -2611,8 +2611,8 @@ pub fn adopt_authoritative_text_for_file(file: &Path, text: &str) -> Result<Opti
 /// Adopt an editor's authoritative **full lazily state** as the relay canonical for
 /// `file`, lineage-intact — the reattach acute-wedge fix (`#reattach-adopt`).
 ///
-/// `full_state` is the editor's whole `ReplicaState::encode_state()` (`serde_json`
-/// `Vec<TextOp>`). Use this (NOT [`apply_document_op_delta_for_file`], which
+/// `full_state` is the editor's whole compact `ReplicaState::encode_state()`
+/// envelope. Use this (NOT [`apply_document_op_delta_for_file`], which
 /// union-merges) when the editor re-announces after its registration lapsed: the
 /// recovered canonical may carry drift the operator already deleted (`#sy71`) with no
 /// counterpart delete op, so a fold would keep it — adoption replaces the drifted

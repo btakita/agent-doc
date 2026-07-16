@@ -7,7 +7,10 @@ use agent_doc_supervisor_io::detection::{
     normalize_stdin_for_harness_permission_prompt, prompt_visible_requires_ready_transition,
     record_recent_output, record_terminal_screen,
 };
-use agent_doc_supervisor_process::io_threads::{PtyReaderObserver, StdinForwardObserver};
+use agent_doc_supervisor_process::{
+    REEXEC_CAPABILITY_PROOF_CONTRACT_ENV, REEXEC_CHILD_PID_ENV, REEXEC_MASTER_FD_ENV,
+    io_threads::{PtyReaderObserver, StdinForwardObserver},
+};
 use agent_doc_turn_executor::codex_launch::{
     CODEX_SANDBOX_NETWORK_DISABLED_ENV, apply_codex_network_access_env_map,
     codex_network_status_from_env_map, resolve_codex_network_access,
@@ -179,6 +182,7 @@ pub fn build_harness_launch_spec(
 
     let env_spec = agent_doc_supervisor_io::env::EnvSpec::from_frontmatter(fm);
     let mut resolved_env = env_spec.resolve()?;
+    strip_reexec_handoff_env(&mut resolved_env);
     if harness.supports_enable_tool_search && fm.enable_tool_search.unwrap_or(false) {
         resolved_env.insert("ENABLE_TOOL_SEARCH".into(), "true".into());
     }
@@ -246,6 +250,18 @@ pub fn build_harness_launch_spec(
         resolved_env,
         capability_proof_required,
     })
+}
+
+/// Supervisor hot-reexec handoff facts belong to the replacement process, not
+/// to the managed harness child or its exact capability-proof contract.
+fn strip_reexec_handoff_env(env: &mut HashMap<String, String>) {
+    for key in [
+        REEXEC_CHILD_PID_ENV,
+        REEXEC_MASTER_FD_ENV,
+        REEXEC_CAPABILITY_PROOF_CONTRACT_ENV,
+    ] {
+        env.remove(key);
+    }
 }
 
 pub fn parent_codex_network_disabled() -> bool {
@@ -351,5 +367,31 @@ where
             state.transition_actor_ready_for_prompt();
         }
         state.clear_suppress_stale_ctrl_d_until_prompt();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reexec_handoff_env_is_not_part_of_the_child_launch_contract() {
+        let mut env = HashMap::from([
+            (REEXEC_CHILD_PID_ENV.to_string(), "101".to_string()),
+            (REEXEC_MASTER_FD_ENV.to_string(), "42".to_string()),
+            (
+                REEXEC_CAPABILITY_PROOF_CONTRACT_ENV.to_string(),
+                "preserved".to_string(),
+            ),
+            ("STABLE_CHILD_ENV".to_string(), "kept".to_string()),
+        ]);
+
+        strip_reexec_handoff_env(&mut env);
+
+        assert_eq!(env.len(), 1);
+        assert_eq!(
+            env.get("STABLE_CHILD_ENV").map(String::as_str),
+            Some("kept")
+        );
     }
 }

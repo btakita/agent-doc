@@ -32,7 +32,7 @@
 
 | Surface | Current state | Evidence/event | Next state | Required effect |
 | --- | --- | --- | --- | --- |
-| managed capability proof | proven child, supervisor binary stale | same child survives `execve` and exact proof contract matches | proven | hand the fingerprint through the reexec environment, emit a new current-generation proven event, and launch no probe child |
+| managed capability proof | proven child, supervisor binary stale | same child survives `execve` and exact proof contract matches | proven | hand the fingerprint through the reexec environment, consume and strip all supervisor-only handoff variables before resolving child env, emit a new current-generation proven event, and launch no probe child |
 | managed capability proof | missing/pending/failed proof, dead/fresh child, or contract mismatch | supervisor start/reexec | pending then proven/failed | launch the bounded probe; never promote historical proof for a different child or contract |
 | managed network proof | fresh Codex child with `danger-full-access` | exact direct DNS/HTTPS shell command succeeds under resolved child environment | proven | record `network_probe=unrestricted_shell_dns_https`; do not launch a second inference-backed Codex child |
 | managed network proof | sandboxed Codex or OpenCode | network proof required | pending then proven/failed | run the bounded harness-child probe so the effective sandbox is measured |

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.152
+
+- **Supervisor hot-reexec transport state no longer poisons the preserved capability-proof fingerprint.** The replacement now consumes the child-pid, PTY-fd, and preserved-contract handoff before resolving the managed child environment, and launch-spec assembly defensively strips those supervisor-only variables as well. Repeated reexecs therefore compute the same exact child contract and reuse the proven gate instead of running another network probe merely because a file descriptor or prior fingerprint changed.
+
 ## 0.34.151
 
 - **Unrestricted Codex network proof no longer spends a second model turn to execute a fixed shell command.** When the exact launch args select `danger-full-access`, agent-doc runs the existing DNS/HTTPS probe command directly with the resolved child environment and bounded process-group cleanup, recording `network_probe=unrestricted_shell_dns_https`. There is no Codex sandbox in that mode for a nested `codex exec` process to prove, and the old inference-backed probe repeatedly hit its 45-second cancellation deadline even while the live Codex child and the identical direct check had working network. Sandboxed Codex and OpenCode launches retain their managed-child proofs.

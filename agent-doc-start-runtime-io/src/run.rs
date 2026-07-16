@@ -181,6 +181,23 @@ pub fn run_with_reap_policy(
         ),
     );
 
+    // Consume hot-reexec handoff facts before resolving the child environment.
+    // These supervisor-only transport values must never reach the harness child or
+    // perturb the exact capability-proof contract.
+    let mut pending_adopt = ReexecState::from_env();
+    let preserved_proof_contract = std::env::var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV).ok();
+    let preserved_child_survived = pending_adopt
+        .as_ref()
+        .is_some_and(|state| state.child_survived());
+    if pending_adopt.is_some() {
+        unsafe {
+            std::env::remove_var(REEXEC_CHILD_PID_ENV);
+            std::env::remove_var(REEXEC_MASTER_FD_ENV);
+            std::env::remove_var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
+        }
+        log_event(&mut session_log, "supervisor_reexec_reentry detected");
+    }
+
     // `#agentreloadrestart` Phase 1b — assemble the harness launch spec from
     // current frontmatter. Built once here; re-built at the top of a restart
     // iteration to bring up a freshly-resolved harness on an `agent:` change.
@@ -235,23 +252,6 @@ pub fn run_with_reap_policy(
         pane_id: pane_id.clone(),
         generation: actor_record.generation,
     };
-
-    // Consume hot-reexec handoff facts before configuring capability proof.
-    // A surviving child may retain an exact proof; a fresh child, missing
-    // contract, or changed launch contract must prove again.
-    let mut pending_adopt = ReexecState::from_env();
-    let preserved_proof_contract = std::env::var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV).ok();
-    let preserved_child_survived = pending_adopt
-        .as_ref()
-        .is_some_and(|state| state.child_survived());
-    if pending_adopt.is_some() {
-        unsafe {
-            std::env::remove_var(REEXEC_CHILD_PID_ENV);
-            std::env::remove_var(REEXEC_MASTER_FD_ENV);
-            std::env::remove_var(REEXEC_CAPABILITY_PROOF_CONTRACT_ENV);
-        }
-        log_event(&mut session_log, "supervisor_reexec_reentry detected");
-    }
 
     // Create shared state for IPC handler
     let launch_binary_identity =

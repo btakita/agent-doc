@@ -8,7 +8,7 @@ use agent_doc_element_boundary::boundary::find_boundary_id;
 use agent_doc_element_exchange::{
     extract_post_commit_normalization_targets, normalize_exchange_prefixes_for_targets,
 };
-use agent_doc_ipc_io::editor_target::target_payload_to_live_editor;
+use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{existing_patch_is_reposition_only, is_socket_receipt_timeout_error};
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template::stale_baseline::is_append_mode_component;
@@ -18,6 +18,19 @@ use agent_doc_write_converge_io::{
 };
 use anyhow::Result;
 use std::path::Path;
+
+fn target_payload_to_registered_editor(
+    file: &Path,
+    payload: &mut serde_json::Value,
+    transport: &str,
+) -> Option<String> {
+    let registration =
+        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+            .ok()
+            .flatten()?;
+    target_payload_to_editor(file, payload, transport, &registration.editor_id);
+    Some(registration.editor_id)
+}
 
 pub(crate) fn current_document_content(file: &Path, source: &str) -> Result<String> {
     agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
@@ -312,7 +325,7 @@ pub fn queue_file_ipc_reposition_boundary(
     ) {
         payload["baseline_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(&live));
     }
-    target_payload_to_live_editor(file, &mut payload, "file_reposition");
+    target_payload_to_registered_editor(file, &mut payload, "file_reposition");
 
     atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
     agent_doc_ops_log_io::log_op(
@@ -497,7 +510,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         if let Some(boundary_id) = boundary_id.as_deref() {
             message["boundary_id"] = serde_json::Value::String(boundary_id.to_string());
         }
-        target_payload_to_live_editor(file, &mut message, "socket_reposition");
+        target_payload_to_registered_editor(file, &mut message, "socket_reposition");
         agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
     } else {
         let mut message = serde_json::json!({
@@ -512,7 +525,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
         if let Some(boundary_id) = boundary_id.as_deref() {
             message["reposition_boundary_id"] = serde_json::Value::String(boundary_id.to_string());
         }
-        target_payload_to_live_editor(file, &mut message, "socket_reposition_patch");
+        target_payload_to_registered_editor(file, &mut message, "socket_reposition_patch");
         agent_doc_ipc_io::send_message(&project_root, &message).map(|_| true)
     };
 

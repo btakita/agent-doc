@@ -156,7 +156,11 @@ pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Opti
 pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     mark_test_local_crdt_relay(&canonical);
-    seed_reliable_sync_open(&canonical, editor_id);
+    seed_reliable_sync_editor_registration(
+        &canonical,
+        editor_id,
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
     let canonical_key = canonical.to_string_lossy().to_string();
     assert!(
         agent_doc_plugin_owner::try_acquire_plugin_owner(
@@ -533,7 +537,11 @@ pub fn seed_live_plugin_owner_lease(file: &str) {
 
 pub fn seed_live_plugin_owner_lease_for_editor(file: &str, editor_id: &str) {
     seed_live_plugin_owner_lease_without_reliable_sync(file, editor_id);
-    seed_reliable_sync_open(Path::new(file), editor_id);
+    seed_reliable_sync_editor_registration(
+        Path::new(file),
+        editor_id,
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
 }
 
 pub fn seed_live_plugin_owner_lease_without_reliable_sync(file: &str, editor_id: &str) {
@@ -559,7 +567,11 @@ pub fn seed_live_plugin_owner_lease_without_reliable_sync(file: &str, editor_id:
 pub fn seed_durable_open_zero_live_replica(file: &Path, editor_id: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     mark_test_local_crdt_relay(&canonical);
-    seed_reliable_sync_open(&canonical, editor_id);
+    seed_reliable_sync_editor_registration(
+        &canonical,
+        editor_id,
+        &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+    );
     let canonical_key = canonical.to_string_lossy().to_string();
     let identity = format!("{editor_id}:{canonical_key}");
     agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
@@ -573,16 +585,63 @@ pub fn seed_durable_open_zero_live_replica(file: &Path, editor_id: &str) {
     );
 }
 
-fn seed_reliable_sync_open(file: &Path, tag: &str) {
-    let document_hash = agent_doc_hash::document_id_for_path(file);
+/// Publish one test editor's Open + Register batch through Lazily reliable sync.
+///
+/// Tests may pass an empty capability list to exercise fail-closed generation
+/// gates without fabricating a filesystem live-buffer projection.
+pub fn seed_reliable_sync_editor_registration(file: &Path, tag: &str, capabilities: &[&str]) {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let ops = vec![
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: std::process::id().into(),
+            tag: tag.to_string(),
+        },
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: document_hash.clone(),
+                pid: std::process::id().into(),
+                path: canonical.to_string_lossy().into_owned(),
+                editor_id: tag.to_string(),
+                editor_kind: "test".to_string(),
+                editor_version: "test".to_string(),
+                capabilities: capabilities
+                    .iter()
+                    .map(|capability| (*capability).to_string())
+                    .collect(),
+                timestamp_ms,
+            },
+        ),
+    ];
     agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
         .unwrap()
-        .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-            document_hash,
-            pid: std::process::id().into(),
-            tag: tag.to_string(),
-        }]);
+        .restore_liveness(&ops);
+    let project_root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
+    let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+        &project_root.join(".agent-doc/reliable_sync_outbox.db"),
+        document_hash.clone(),
+    )
+    .unwrap();
+    let acked_through = outbox.acked_through();
+    let mut endpoint = agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
+        document_hash,
+        outbox,
+        acked_through,
+    );
+    endpoint.enqueue(&ops).unwrap();
+    let transport =
+        agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(&project_root);
+    let progress = endpoint.flush(&transport).unwrap();
+    assert!(
+        !progress.stalled && progress.retained == 0,
+        "test reliable-sync editor registration did not reach controller"
+    );
 }
 
 pub fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {

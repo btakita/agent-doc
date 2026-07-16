@@ -47,12 +47,19 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
             // Scope liveness to agent-doc session documents only: a plain source file
             // opened as a tab must not enter the plane (it would over-count the
-            // open-set vs the sidecar `open_agent_docs` ground truth). This disk read
+            // session-document scope). This disk read
             // is appropriate at open time — it is the moment we decide whether to
             // start tracking a possibly-random `.md` tab at all.
             if (lib.agent_doc_is_session_document(filePath) != 1) return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
-            val opsJson = graph.open(documentHash) ?: return@executeOnPooledThread
+        val opsJson = graph.open(
+            documentHash,
+            filePath,
+            EditorIdentity.id,
+            "jetbrains",
+            pluginVersion(),
+            EDITOR_CAPABILITIES,
+        ) ?: return@executeOnPooledThread
             push(lib, root, documentHash, opsJson)
         }
     }
@@ -69,8 +76,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
             // project tearing down) even though this editor genuinely opened it as a
             // tracked session document earlier. Re-gating on a disk read would
             // silently drop the compensating `Close` op, leaving the plane's OrSet
-            // permanently "present" with no reaper (unlike the sidecar's `#lbreap`
-            // scan). [ReliableSyncLivenessGraph.close] is itself the correct gate: it
+            // permanently "present". [ReliableSyncLivenessGraph.close] is itself the correct gate: it
             // returns null when this editor never opened the doc, which is exactly
             // the case a disk-read gate was trying to approximate.
             val opsJson = graph.close(documentHash) ?: return@executeOnPooledThread

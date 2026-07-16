@@ -73,7 +73,7 @@ class TypingTrackerEdtBudgetTest {
             source.contains("pendingEditorOps"),
         )
         assertTrue(
-            "JetBrains live-buffer reports should advertise operator-text and lazily receipt capabilities",
+            "JetBrains current-document reports should advertise operator-text and lazily receipt capabilities",
             source.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
                 source.contains("operator_text_authority_v1") &&
                 source.contains("lazily_transport_receipts_v1"),
@@ -100,7 +100,7 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
-    fun `open markdown buffers publish capability-bearing live-buffer reports before typing`() {
+    fun `open markdown buffers publish capability-bearing Lazily registrations before typing`() {
         val trackerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
@@ -113,21 +113,21 @@ class TypingTrackerEdtBudgetTest {
         val lifecycle = Files.readString(lifecyclePath)
 
         assertTrue(
-            "project startup must seed already-open markdown buffers with a live-buffer authority report",
+            "project startup must seed already-open markdown buffers with a Lazily registration",
             lifecycle.contains("TypingTracker.reportOpenMarkdownDocuments(project)"),
         )
         assertTrue(
-            "file-open events must seed newly opened markdown buffers with a live-buffer authority report",
+            "file-open events must seed newly opened markdown buffers with a Lazily registration",
             lifecycle.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)") &&
                 lifecycle.contains("TypingTracker.scheduleOpenDocumentReport(file)"),
         )
         assertTrue(
-            "file-close events must clear this editor's live-buffer sidecar",
+            "file-close events must publish this editor's reliable-sync close",
             lifecycle.contains("override fun fileClosed(source: FileEditorManager, file: VirtualFile)") &&
                 lifecycle.contains("TypingTracker.clearOpenDocumentReport(file)"),
         )
         val clearBody = tracker.substringAfter("fun clearOpenDocumentReport")
-            .substringBefore("fun publishLiveBufferNow")
+            .substringBefore("fun publishCurrentDocumentNow")
         assertTrue(
             "file-close cleanup must queue native release/close work off the file listener path",
             clearBody.contains("contentReportExecutor.execute"),
@@ -147,7 +147,7 @@ class TypingTrackerEdtBudgetTest {
     }
 
     @Test
-    fun `socket live-buffer publication is read-only and authority-bearing`() {
+    fun `socket current-document publication refreshes Lazily authority`() {
         val trackerPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
@@ -160,9 +160,9 @@ class TypingTrackerEdtBudgetTest {
         val watcher = Files.readString(watcherPath)
 
         assertTrue(
-            "socket IPC should expose a read-only live-buffer publication command",
+            "the compatibility socket command should refresh the Lazily current document",
             watcher.contains("\"publish_live_buffer\" -> {") &&
-                watcher.contains("TypingTracker.publishLiveBufferNow(file)"),
+                watcher.contains("TypingTracker.publishCurrentDocumentNow(file)"),
         )
         val broadcastReloadBody = watcher
             .substringAfter("private fun handleLibReloadBroadcastChanged()")
@@ -173,7 +173,7 @@ class TypingTrackerEdtBudgetTest {
                 broadcastReloadBody.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
         )
 
-        val publishBody = tracker.substringAfter("fun publishLiveBufferNow")
+        val publishBody = tracker.substringAfter("fun publishCurrentDocumentNow")
             .substringBefore("private fun scheduleFullContentReport")
         assertTrue(
             "socket-triggered publication should resolve the live editor document and publish without queued-op side effects",
@@ -185,7 +185,7 @@ class TypingTrackerEdtBudgetTest {
         )
 
         val reporterBody = tracker.substringAfter("private fun reportFullContentNow")
-            .substringBefore("private fun reportLiveBufferContentV1")
+            .substringBefore("private fun reportCompatibilityContentV1")
         assertTrue(
             "authority refresh must require the v2 capability-bearing ABI and keep legacy fallback only for non-authority reports",
             reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
@@ -315,6 +315,11 @@ class TypingTrackerEdtBudgetTest {
                 reconnectInstallBody.contains("applyMinimalDocumentEditUtil(document, before, canonical)") &&
                 reconnectInstallBody.contains("shadows[filePath] = canonical") &&
                 reconnectInstallBody.contains("applyingRemote.remove(filePath)"),
+        )
+        assertTrue(
+            "every non-operator editor projection must close the prior native op-capture epoch",
+            source.contains("AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)") &&
+                source.contains("advanceNonOperatorMutationEpoch(filePath)"),
         )
         assertFalse(
             "an existing CRDT replica must never be overwritten from an unproven full editor snapshot",

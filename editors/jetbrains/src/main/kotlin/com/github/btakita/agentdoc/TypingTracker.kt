@@ -40,7 +40,7 @@ private const val LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = "lazily_transport_recei
 // (it binds agent_doc_lossless_tree_render/project via LosslessTreeFrames). Kept in
 // sync with agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY on the binary side.
 private const val LOSSLESS_TREE_CRDT_CAPABILITY = "lossless_tree_crdt_v1"
-private val EDITOR_CAPABILITIES = listOf(
+internal val EDITOR_CAPABILITIES = listOf(
     OPERATOR_TEXT_AUTHORITY_CAPABILITY,
     LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
     LOSSLESS_TREE_CRDT_CAPABILITY,
@@ -50,7 +50,7 @@ private val EDITOR_CAPABILITIES = listOf(
 // stale-plugin detection is not blind. The IntelliJ plugin descriptor (patched
 // plugin.xml <version>) is the reliable source; the jar-manifest read is a
 // fallback for contexts where the descriptor is unavailable.
-private fun pluginVersion(): String =
+internal fun pluginVersion(): String =
     com.intellij.ide.plugins.PluginManager.getPluginByClass(TypingTracker::class.java)?.version
         ?: TypingTracker::class.java.`package`?.implementationVersion
         ?: "unknown"
@@ -123,7 +123,7 @@ private fun reverseApplyEditorOps(finalText: String, ops: List<PendingEditorOp>)
  * Tracks document changes and reports editor-buffer projections.
  *
  * On every .md document change, queues the lightweight
- * `agent_doc_document_changed()` marker and the coalesced live-buffer report off
+ * `agent_doc_document_changed()` marker and the coalesced current-document report off
  * the document listener path.
  *
  * Registered as a bulk DocumentListener in PluginLifecycleListener.
@@ -133,7 +133,7 @@ object TypingTracker : DocumentListener {
     private const val CONTENT_REPORT_DELAY_MS = 75L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
     private val contentReportExecutor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-live-buffer-report").apply { isDaemon = true }
+        Thread(r, "agent-doc-current-document-report").apply { isDaemon = true }
     }
     /**
      * Per-document lazily rate-shape state. The compute core owns latest-value
@@ -297,16 +297,14 @@ object TypingTracker : DocumentListener {
             try {
                 lib.agent_doc_document_closed_for_editor(filePath, EditorIdentity.id)
             } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without per-editor close support; stale sidecar cleanup
-                // falls back to PID liveness checks in the binary.
+            // Older cdylib without per-editor reliable-sync close support.
             } catch (_: NoSuchMethodError) {
-                // older cdylib without per-editor close support; stale sidecar cleanup
-                // falls back to PID liveness checks in the binary.
+            // Older cdylib without per-editor reliable-sync close support.
             }
         }
     }
 
-    fun publishLiveBufferNow(filePath: String): Boolean {
+    fun publishCurrentDocumentNow(filePath: String): Boolean {
         val lib = AgentDocLib.get() ?: return false
         val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
         if (!file.name.endsWith(".md")) return false
@@ -434,9 +432,9 @@ object TypingTracker : DocumentListener {
                 )
                 true
             } catch (_: UnsatisfiedLinkError) {
-                reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
+                reportCompatibilityContentV2OrV1(lib, filePath, text, requireAuthority)
             } catch (_: NoSuchMethodError) {
-                reportLiveBufferContentV2OrV1(lib, filePath, text, requireAuthority)
+                reportCompatibilityContentV2OrV1(lib, filePath, text, requireAuthority)
             }
             if (!reported) return false
             if (!requireAuthority) {
@@ -473,7 +471,7 @@ object TypingTracker : DocumentListener {
      * simply omit the provenance flag (conservative fail-closed default), so this
      * degrades safely.
      */
-    private fun reportLiveBufferContentV2OrV1(
+    private fun reportCompatibilityContentV2OrV1(
         lib: AgentDocLib,
         filePath: String,
         text: String,
@@ -491,18 +489,18 @@ object TypingTracker : DocumentListener {
             true
         } catch (_: UnsatisfiedLinkError) {
             if (requireAuthority) false else {
-                reportLiveBufferContentV1(lib, filePath, text)
+                reportCompatibilityContentV1(lib, filePath, text)
                 true
             }
         } catch (_: NoSuchMethodError) {
             if (requireAuthority) false else {
-                reportLiveBufferContentV1(lib, filePath, text)
+                reportCompatibilityContentV1(lib, filePath, text)
                 true
             }
         }
     }
 
-    private fun reportLiveBufferContentV1(lib: AgentDocLib, filePath: String, text: String) {
+    private fun reportCompatibilityContentV1(lib: AgentDocLib, filePath: String, text: String) {
         try {
             lib.agent_doc_document_changed_digest_content_for_editor(
                 filePath,

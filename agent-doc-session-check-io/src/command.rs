@@ -1662,19 +1662,25 @@ fn blocked_closeout_editor_authority_note(
     if blocked.kind != "editor_convergence_required" {
         return String::new();
     }
-    let Ok(canonical) = file.canonicalize() else {
+    if !agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file) {
         return String::new();
-    };
-    let Ok(content) = std::fs::read_to_string(&canonical) else {
+    }
+    let registration =
+        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+            .ok()
+            .flatten();
+    if registration.as_ref().is_some_and(|registration| {
+        registration
+            .capabilities
+            .iter()
+            .any(|capability| capability == agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+    }) {
         return String::new();
-    };
-    let Some(snapshot) = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
-        &canonical.to_string_lossy(),
-        &content,
-    ) else {
-        return String::new();
-    };
-    let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
+    }
+    let editor_id = registration
+        .as_ref()
+        .map(|registration| registration.editor_id.as_str())
+        .unwrap_or("unknown");
     format!(
         " Live editor `{editor_id}` lacks required capability `{}`; reload or restart the editor plugin before retrying so delivery can preserve operator text.",
         agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY

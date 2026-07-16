@@ -138,14 +138,14 @@ describe('editor UI thread budget', () => {
         const handlerEnd = source.indexOf('private writeEditorContentProjection', handlerStart);
         assert.ok(handlerEnd > handlerStart, 'handler should precede content projection helper');
         const handler = source.slice(handlerStart, handlerEnd);
-        assert.ok(handler.includes('this.publishLiveBufferNow(document, projectRoot);'));
+        assert.ok(handler.includes('this.publishCurrentDocumentNow(document, projectRoot);'));
         assert.ok(handler.includes('PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS'));
         assert.ok(handler.includes('signalMtimeMs'));
         assert.ok(handler.includes('stale signal ignored'));
         assert.strictEqual(handler.includes('workspace.applyEdit'), false);
         assert.strictEqual(handler.includes('.save('), false);
 
-        const publishStart = source.indexOf('private publishLiveBufferNow');
+        const publishStart = source.indexOf('private publishCurrentDocumentNow');
         assert.ok(publishStart >= 0, 'immediate live-buffer publisher should exist');
         const publishEnd = source.indexOf('private scheduleEditorOpReport', publishStart);
         assert.ok(publishEnd > publishStart, 'publisher should precede editor-op scheduler');
@@ -160,7 +160,9 @@ describe('editor UI thread budget', () => {
     it('VS Code reliable-sync liveness seeds restored tabs exactly once', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'reliableSyncLiveness.ts'), 'utf-8');
         assert.ok(source.includes('for (const document of vscode.workspace.textDocuments) reportOpen(document);'));
-        assert.ok(source.includes('if (this.docs.get(documentHash)?.orSet.present() === true) return null;'));
-        assert.ok(source.includes('if (!opsJson) return;'));
-    });
+assert.ok(source.includes('if (this.docs.get(documentHash)?.orSet.present() === true) return null;'));
+assert.ok(source.includes('if (!opsJson) return;'));
+assert.ok(source.includes('Register: {'));
+assert.ok(source.includes('editor_id: editorId'));
+});
 });

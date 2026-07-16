@@ -19,6 +19,7 @@ VARIABLES
     canonical,
     operatorDelete,
     queueVisible,
+    durableQueueVisible,
     pendingAgentIntent,
     staleFramePending,
     currentFramePending,
@@ -27,7 +28,7 @@ VARIABLES
     ackCursor,
     committed
 
-vars == <<lineage, canonical, operatorDelete, queueVisible,
+vars == <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
           pendingAgentIntent, staleFramePending, currentFramePending,
           disk, editorSaveRequested, ackCursor, committed>>
 
@@ -36,6 +37,7 @@ Init ==
     /\ canonical = "base"
     /\ operatorDelete = FALSE
     /\ queueVisible = TRUE
+    /\ durableQueueVisible = TRUE
     /\ pendingAgentIntent = FALSE
     /\ staleFramePending = FALSE
     /\ currentFramePending = FALSE
@@ -48,6 +50,7 @@ OperatorDeletesQueue ==
     /\ queueVisible
     /\ operatorDelete' = TRUE
     /\ queueVisible' = FALSE
+    /\ durableQueueVisible' = FALSE
     /\ canonical' = "operator"
     /\ staleFramePending' = TRUE
     /\ UNCHANGED <<lineage, pendingAgentIntent, currentFramePending,
@@ -58,7 +61,7 @@ CaptureAgentIntent ==
     /\ ~committed
     /\ pendingAgentIntent' = TRUE
     /\ currentFramePending' = IF lineage = "current" THEN TRUE ELSE currentFramePending
-    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
                     staleFramePending, disk, editorSaveRequested,
                     ackCursor, committed>>
 
@@ -68,7 +71,7 @@ ReplaceAndRebase ==
     /\ lineage' = "current"
     /\ canonical' = IF pendingAgentIntent THEN "agent-applied" ELSE "rebased"
     /\ currentFramePending' = pendingAgentIntent
-    /\ UNCHANGED <<operatorDelete, queueVisible, pendingAgentIntent,
+    /\ UNCHANGED <<operatorDelete, queueVisible, durableQueueVisible, pendingAgentIntent,
                     staleFramePending, disk, editorSaveRequested,
                     ackCursor, committed>>
 
@@ -77,7 +80,7 @@ DeliverStaleFrame ==
     /\ lineage = "current"
     /\ staleFramePending' = FALSE
     /\ ackCursor' = IF ackCursor < 2 THEN ackCursor + 1 ELSE ackCursor
-    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
                     pendingAgentIntent, currentFramePending, disk,
                     editorSaveRequested, committed>>
 
@@ -87,7 +90,7 @@ DeliverCurrentFrame ==
     /\ currentFramePending' = FALSE
     /\ canonical' = "agent-applied"
     /\ ackCursor' = IF ackCursor < 2 THEN ackCursor + 1 ELSE ackCursor
-    /\ UNCHANGED <<lineage, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, operatorDelete, queueVisible, durableQueueVisible,
                     pendingAgentIntent, staleFramePending, disk,
                     editorSaveRequested, committed>>
 
@@ -97,7 +100,7 @@ RequestEditorSave ==
     /\ ~currentFramePending
     /\ disk # canonical
     /\ editorSaveRequested' = TRUE
-    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
                     pendingAgentIntent, staleFramePending,
                     currentFramePending, disk, ackCursor, committed>>
 
@@ -107,7 +110,7 @@ EditorNativeSave ==
     /\ ~currentFramePending
     /\ disk' = canonical
     /\ editorSaveRequested' = FALSE
-    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
                     pendingAgentIntent, staleFramePending,
                     currentFramePending, ackCursor, committed>>
 
@@ -117,9 +120,26 @@ OperatorAdvancesAfterSaveRequest ==
     /\ canonical' = "operator"
     /\ currentFramePending' = TRUE
     /\ editorSaveRequested' = FALSE
-    /\ UNCHANGED <<lineage, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, operatorDelete, queueVisible, durableQueueVisible,
                     pendingAgentIntent, staleFramePending, disk,
                     ackCursor, committed>>
+
+CrashDropsCleanQueue ==
+    /\ queueVisible
+    /\ ~operatorDelete
+    /\ queueVisible' = FALSE
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, durableQueueVisible,
+                    pendingAgentIntent, staleFramePending, currentFramePending,
+                    disk, editorSaveRequested, ackCursor, committed>>
+
+RecoverDurableQueue ==
+    /\ durableQueueVisible
+    /\ ~operatorDelete
+    /\ ~queueVisible
+    /\ queueVisible' = TRUE
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, durableQueueVisible,
+                    pendingAgentIntent, staleFramePending, currentFramePending,
+                    disk, editorSaveRequested, ackCursor, committed>>
 
 Commit ==
     /\ pendingAgentIntent
@@ -128,7 +148,7 @@ Commit ==
     /\ disk = canonical
     /\ committed' = TRUE
     /\ pendingAgentIntent' = FALSE
-    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible,
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
                     staleFramePending, currentFramePending, disk,
                     editorSaveRequested, ackCursor>>
 
@@ -145,16 +165,22 @@ Next ==
     \/ RequestEditorSave
     \/ EditorNativeSave
     \/ OperatorAdvancesAfterSaveRequest
+    \/ CrashDropsCleanQueue
+    \/ RecoverDurableQueue
     \/ Commit
     \/ TerminalStutter
 
-Spec == Init /\ [][Next]_vars /\ WF_vars(DeliverStaleFrame) /\ WF_vars(DeliverCurrentFrame)
+Spec == Init /\ [][Next]_vars
+        /\ WF_vars(DeliverStaleFrame)
+        /\ WF_vars(DeliverCurrentFrame)
+        /\ WF_vars(RecoverDurableQueue)
 
 TypeOK ==
     /\ lineage \in Lineages
     /\ canonical \in CanonicalStates
     /\ operatorDelete \in BOOLEAN
     /\ queueVisible \in BOOLEAN
+    /\ durableQueueVisible \in BOOLEAN
     /\ pendingAgentIntent \in BOOLEAN
     /\ staleFramePending \in BOOLEAN
     /\ currentFramePending \in BOOLEAN
@@ -164,6 +190,7 @@ TypeOK ==
     /\ committed \in BOOLEAN
 
 DeletedQueueNeverResurrects == operatorDelete => ~queueVisible
+DeletedQueueIsNotDurable == operatorDelete => ~durableQueueVisible
 StaleFrameCannotCorrupt == canonical # "corrupt"
 CommitRequiresAppliedIntent == committed => canonical = "agent-applied"
 CommitRequiresExactNativeSave == committed => disk = "agent-applied"
@@ -174,5 +201,7 @@ PendingIntentIsDurable ==
         canonical = "agent-applied" \/ currentFramePending
 StaleFrameEventuallyAcked ==
     (lineage = "current" /\ staleFramePending) ~> ~staleFramePending
+CleanCrashEventuallyRecovers ==
+    (~operatorDelete /\ durableQueueVisible /\ ~queueVisible) ~> queueVisible
 
 =============================================================================

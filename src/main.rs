@@ -584,7 +584,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         Ok(facts)
     }
 
-    fn live_buffer_diverges(
+    fn lazily_current_diverges(
         &mut self,
         file: &Path,
         disk_content: &str,
@@ -1123,22 +1123,8 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         }
         // A filesystem change cannot outrank an open editor. Retain its exact
         // disk bytes as a Lazily user-decision candidate, or settle an older
-        // candidate when every live full-content buffer proves the same bytes
-        // were saved. Only editorless (or already matching) changes enter the
-        // ordinary disk-reconcile route.
-        let live_snapshots: Vec<_> = agent_doc_debounce::live_buffer_snapshots(file)
-            .into_iter()
-            .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
-            .collect();
-        let full_live: Vec<_> = live_snapshots
-            .iter()
-            .filter_map(|snapshot| {
-                snapshot
-                    .content
-                    .as_deref()
-                    .map(|content| (snapshot, content))
-            })
-            .collect();
+        // candidate when the CPC current document proves the same bytes were
+        // saved. Filesystem live-buffer projections are not an authority input.
         let (relay_has_live_editor, relay_editor_content) =
             match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(Path::new(file)) {
                 Ok(agent_doc_crdt_relay_io::CurrentText::Current {
@@ -1148,14 +1134,8 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
                 | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => (true, None),
                 Ok(agent_doc_crdt_relay_io::CurrentText::Detached) | Err(_) => (false, None),
             };
-        let snapshot_editor_content = full_live.first().and_then(|(_, first)| {
-            full_live
-                .iter()
-                .all(|(_, content)| *content == *first)
-                .then(|| (*first).to_string())
-        });
-        let editor_content = relay_editor_content.or(snapshot_editor_content);
-        let has_live_editor = relay_has_live_editor || !live_snapshots.is_empty();
+        let editor_content = relay_editor_content;
+        let has_live_editor = relay_has_live_editor;
         let all_live_match_disk = has_live_editor
             && editor_content
                 .as_deref()
@@ -2674,11 +2654,10 @@ enum Commands {
         #[arg(long)]
         target_dir: Option<PathBuf>,
     },
-    /// Show the reliable-sync shadow liveness plane vs the sidecar open-set (dual-run
-    /// `[operator-verify]` parity read — sidecar-retirement Phase 3C)
+    /// Show the controller-owned reliable-sync liveness/registration plane
     #[command(name = "reliable-sync-status")]
     ReliableSyncStatus {
-        /// Emit the raw JSON response instead of the human parity table
+        /// Emit the raw JSON response instead of the human status table
         #[arg(long)]
         json: bool,
         /// Project root (default: discovered from the current directory)
@@ -4737,10 +4716,7 @@ fn try_main() -> anyhow::Result<()> {
                     " (plane dark — AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0)"
                 };
                 println!("reliable-sync dual-run: {}{}", status.dual_run, dark);
-                println!(
-                    "parity (plane open-set == sidecar open-set): {}",
-                    if status.parity { "MATCH" } else { "MISMATCH" }
-                );
+                println!("authority: reliable-sync Lazily plane");
                 println!("plane open docs ({}):", status.plane_open_docs.len());
                 for doc in &status.plane_open_docs {
                     let pids = status
@@ -4759,15 +4735,22 @@ fn try_main() -> anyhow::Result<()> {
                         .iter()
                         .find(|(h, _)| h == doc)
                         .and_then(|(_, p)| p.clone())
-                        .unwrap_or_else(|| "<no sidecar to resolve path>".to_string());
+                        .unwrap_or_else(|| "<registration pending>".to_string());
                     println!("  {live:8}  pids={pids:?}  {path}");
                 }
                 println!(
-                    "sidecar open docs — durable live-buffer scan, strictly-live editors only ({}):",
-                    status.sidecar_open_docs.len()
+                    "live editor registrations ({}):",
+                    status.registrations.len()
                 );
-                for doc in &status.sidecar_open_docs {
-                    println!("  {doc}");
+                for registration in &status.registrations {
+                    println!(
+                        "  {} pid={} {} {} {}",
+                        registration.editor_id,
+                        registration.pid,
+                        registration.editor_kind,
+                        registration.editor_version,
+                        registration.path
+                    );
                 }
                 println!(
                     "in-memory registry open docs — secondary, empty right after a recycle ({}):",

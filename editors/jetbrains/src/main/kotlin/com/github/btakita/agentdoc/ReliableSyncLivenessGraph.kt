@@ -15,7 +15,10 @@ import java.util.concurrent.ConcurrentHashMap
  * — one per open document, keyed by the canonical `document_hash`. Because it is
  * a real lazily graph (not opaque FFI state), the plugin UI can react to its own
  * liveness ([isOpen]); and [open] / [close] derive the exact externally-tagged
- * `LivenessOp` batch JSON the plugin pushes through the FFI. The Rust FFI keeps
+* `LivenessOp` batch JSON the plugin pushes through the FFI. Each `Open` batch
+* includes the editor's identity/version/capabilities registration, so metadata
+* advances on the same durable epoch rather than on content-report heartbeats.
+* The Rust FFI keeps
  * the durable outbox + the controller socket; this graph is the reactive source
  * of truth for what the plugin reports (mirrors S5's `StateGraphMirror` for the
  * reverse, controller→plugin, direction).
@@ -36,13 +39,23 @@ class ReliableSyncLivenessGraph(private val pid: Long) {
      * `Open` `LivenessOp` batch JSON to push.
      */
     @Synchronized
-    fun open(documentHash: String): String? {
+fun open(
+documentHash: String,
+path: String,
+editorId: String,
+editorKind: String,
+editorVersion: String,
+capabilitiesCsv: String,
+): String? {
         if (docs[documentHash]?.orSet?.present() == true) return null
         val tag = UUID.randomUUID().toString()
         val state = docs.getOrPut(documentHash) { DocState() }
         state.orSet.add(tag)
         state.tags.add(tag)
-        return opsJson(openOp(documentHash, tag))
+return opsJson(
+openOp(documentHash, tag),
+registrationOp(documentHash, path, editorId, editorKind, editorVersion, capabilitiesCsv),
+)
     }
 
     /**
@@ -71,7 +84,7 @@ class ReliableSyncLivenessGraph(private val pid: Long) {
         return JsonObject().apply { add("Open", inner) }
     }
 
-    private fun closeOp(documentHash: String, observed: List<String>): JsonObject {
+private fun closeOp(documentHash: String, observed: List<String>): JsonObject {
         val tags = JsonArray().apply { observed.forEach { add(it) } }
         val inner = JsonObject().apply {
             addProperty("document_hash", documentHash)
@@ -79,7 +92,38 @@ class ReliableSyncLivenessGraph(private val pid: Long) {
             add("observed_tags", tags)
         }
         return JsonObject().apply { add("Close", inner) }
-    }
+}
 
-    private fun opsJson(op: JsonObject): String = JsonArray().apply { add(op) }.toString()
+private fun registrationOp(
+documentHash: String,
+path: String,
+editorId: String,
+editorKind: String,
+editorVersion: String,
+capabilitiesCsv: String,
+): JsonObject {
+val capabilities = JsonArray().apply {
+capabilitiesCsv.split(',')
+.map { it.trim() }
+.filter { it.isNotEmpty() }
+.distinct()
+.sorted()
+.forEach { add(it) }
+}
+val inner = JsonObject().apply {
+addProperty("document_hash", documentHash)
+addProperty("pid", pid)
+addProperty("path", path)
+addProperty("editor_id", editorId)
+addProperty("editor_kind", editorKind)
+addProperty("editor_version", editorVersion)
+add("capabilities", capabilities)
+addProperty("timestamp_ms", System.currentTimeMillis())
+}
+return JsonObject().apply { add("Register", inner) }
+}
+
+private fun opsJson(vararg ops: JsonObject): String = JsonArray().apply {
+ops.forEach { add(it) }
+}.toString()
 }

@@ -210,10 +210,12 @@ mod crdt_lineage_fence_model {
         RequestEditorSave,
         EditorNativeSave,
         OperatorAdvanceAfterSaveRequest,
+        CrashDropsCleanQueue,
+        RecoverDurableQueue,
         Commit,
     }
 
-    const ACTIONS: [Action; 11] = [
+    const ACTIONS: [Action; 13] = [
         Action::OperatorDelete,
         Action::CaptureAgentIntent,
         Action::ReplaceAndRebase,
@@ -224,6 +226,8 @@ mod crdt_lineage_fence_model {
         Action::RequestEditorSave,
         Action::EditorNativeSave,
         Action::OperatorAdvanceAfterSaveRequest,
+        Action::CrashDropsCleanQueue,
+        Action::RecoverDurableQueue,
         Action::Commit,
     ];
 
@@ -231,7 +235,9 @@ mod crdt_lineage_fence_model {
     struct World {
         lineage: u8,
         queue_visible: bool,
+        durable_queue_visible: bool,
         queue_tombstone: bool,
+        clean_queue_replayed: bool,
         pending_agent_intent: bool,
         agent_intent_applied: bool,
         stale_frame_pending: bool,
@@ -247,6 +253,7 @@ mod crdt_lineage_fence_model {
         fn initial() -> Self {
             Self {
                 queue_visible: true,
+                durable_queue_visible: true,
                 ..Self::default()
             }
         }
@@ -255,6 +262,7 @@ mod crdt_lineage_fence_model {
             match action {
                 Action::OperatorDelete if self.queue_visible => {
                     self.queue_visible = false;
+                    self.durable_queue_visible = false;
                     self.queue_tombstone = true;
                     self.stale_frame_pending = true;
                 }
@@ -316,6 +324,17 @@ mod crdt_lineage_fence_model {
                     self.current_frame_pending = true;
                     self.editor_save_requested = false;
                 }
+                Action::CrashDropsCleanQueue if self.queue_visible && !self.queue_tombstone => {
+                    self.queue_visible = false;
+                }
+                Action::RecoverDurableQueue
+                    if self.durable_queue_visible
+                        && !self.queue_tombstone
+                        && !self.queue_visible =>
+                {
+                    self.queue_visible = true;
+                    self.clean_queue_replayed = true;
+                }
                 Action::Commit
                     if self.pending_agent_intent
                         && self.agent_intent_applied
@@ -337,6 +356,10 @@ mod crdt_lineage_fence_model {
             assert!(
                 !self.queue_tombstone || !self.queue_visible,
                 "deleted queue item resurrected: {self:?}"
+            );
+            assert!(
+                !self.queue_tombstone || !self.durable_queue_visible,
+                "operator deletion remained replayable in the journal: {self:?}"
             );
             assert!(
                 !self.committed || (self.agent_intent_applied && self.disk_has_agent_intent),
@@ -371,6 +394,7 @@ mod crdt_lineage_fence_model {
         assert!(visited.iter().any(|world| world.ack_cursor >= 2));
         assert!(visited.iter().any(|world| world.lineage >= 2));
         assert!(visited.iter().any(|world| world.editor_save_requested));
+        assert!(visited.iter().any(|world| world.clean_queue_replayed));
     }
 }
 
@@ -8628,10 +8652,8 @@ fn jb_cache_conflict_accept_late_replay_manual_repair_recovers_today() {
 // #swint — SimWorld editor + tmux integration harness
 //
 // `SimEditor` is a deterministic in-harness actor that speaks the same durable
-// live-buffer protocol the JetBrains / VS Code plugins speak over socket IPC /
-// FFI: it records the editor-visible buffer via
-// `debounce::record_live_buffer_digest_content` (the `#pcp6` full-content
-// digest the plugin writes on every change) and reads "current document" back
+// Lazily/CRDT protocol as the JetBrains / VS Code plugins: it publishes the
+// editor-visible buffer through the canonical replica relay and reads "current document" back
 // through the *production* `realtime_model::resolve_current_doc` seam (rung 3b,
 // `#rtwatch`). This lets a SimWorld scenario exercise the editor-buffer-vs-disk
 // read-authority reconcile, multi-editor CRDT relay, and the
@@ -8694,8 +8716,7 @@ struct SimEditor {
     kind: EditorKind,
     editor_id: String,
     path: PathBuf,
-    /// Canonical path string used by compatibility projections and plugin-owner
-    /// lease keys.
+    /// Canonical path string used by plugin-owner lease keys.
     key: String,
     liveness_tag: String,
     replica_identity: String,
@@ -8768,22 +8789,21 @@ impl SimEditor {
         self.publish_buffer_replace(content)?;
         self.dirty = true;
         self.generation += 1;
-        self.record_buffer()
+        Ok(())
     }
 
-    /// Flush the buffer to disk (Ctrl-S): buffer == disk, clean. Re-records the
-    /// sidecar so the realtime feed classifies the editor as in sync with disk.
+    /// Flush the buffer to disk (Ctrl-S): buffer == disk, clean. The relay
+    /// remains the current-document authority; disk becomes its saved projection.
     fn save(&mut self) -> Result<()> {
         std::fs::write(&self.path, &self.buffer)
             .map_err(|err| anyhow!("SimEditor save write {}: {err}", self.path.display()))?;
         self.dirty = false;
         self.generation += 1;
-        self.record_buffer()
+        Ok(())
     }
 
-    /// Close the document in the editor: clear the live-buffer sidecar so the
-    /// cycle falls back to disk (`editor_absent`). Uses the production
-    /// `debounce::clear_live_buffer` editor-close primitive.
+    /// Close the document in the editor through replica deregistration plus the
+    /// reliable-sync Lazily OR-set close event.
     fn close(self) -> Result<()> {
         let _ = agent_doc_crdt_relay_io::deregister_replica_for_file(
             &self.path,
@@ -8799,8 +8819,7 @@ impl SimEditor {
                 observed_tags: vec![self.liveness_tag.clone()],
             }]);
         agent_doc_plugin_owner::release_plugin_owner(&self.key, &self.editor_id);
-        agent_doc_debounce::clear_live_buffer_for_editor(&self.key, Some(&self.editor_id))
-            .map_err(|err| anyhow!("SimEditor close clear sidecar: {err}"))
+        Ok(())
     }
 
     /// Reload from disk after the controller wrote+committed the document model
@@ -8811,7 +8830,7 @@ impl SimEditor {
         self.publish_buffer_replace(&disk)?;
         self.dirty = false;
         self.generation += 1;
-        self.record_buffer()
+        Ok(())
     }
 
     /// Model an external disk write (agent-doc patchback) landing while the editor
@@ -8829,14 +8848,11 @@ impl SimEditor {
         if !self.dirty {
             self.publish_buffer_replace(content)?;
             self.generation += 1;
-            self.record_buffer()?;
             return Ok(CacheConflict::NoneAdopted);
         }
-        // The plugin re-reports the still-dirty buffer when its VFS watch fires on
-        // the external change, refreshing the sidecar timestamp so the buffer
-        // stays provably ahead of the disk write.
+        // The canonical relay still contains the dirty editor cut, so the
+        // external disk projection cannot outrank it.
         self.generation += 1;
-        self.record_buffer()?;
         Ok(match self.kind {
             EditorKind::JetBrains => CacheConflict::JetBrainsDialog,
             // VS Code and the generic seam both keep the dirty buffer non-modally.
@@ -8849,15 +8865,6 @@ impl SimEditor {
     /// `session-check` source the current doc through.
     fn resolve(&self) -> Result<Reconciliation> {
         agent_doc_document_realtime_io::try_resolve_current_doc_from_file(&self.path)
-    }
-
-    fn record_buffer(&self) -> Result<()> {
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &self.key,
-            &self.buffer,
-            Some(&self.editor_id),
-        )
-        .map_err(|err| anyhow!("SimEditor record live buffer: {err}"))
     }
 
     fn publish_buffer_replace(&mut self, content: &str) -> Result<()> {

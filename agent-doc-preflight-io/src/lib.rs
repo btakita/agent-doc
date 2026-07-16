@@ -2092,81 +2092,6 @@ fn record_queue_worklist_state(
 /// stripping cosmetic progress/pin markers. That covers deleting one duplicate
 /// row or all copies of a row without treating same-cycle queue additions as an
 /// implicit merge. Plugin sidecars are not consulted.
-fn adopt_cpc_queue_deletions(file: &Path, disk_content: &mut String) -> Result<bool> {
-    let live_content = match current_text_via_preflight_authority(
-        file,
-        "preflight_queue_delete_adopt",
-    ) {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => text,
-        Ok(Some(_)) | Ok(None) => return Ok(false),
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_cpc_delete_adopt_skipped file={} reason=current_text_unavailable error={}",
-                    file.display(),
-                    err
-                ),
-            );
-            return Ok(false);
-        }
-    };
-    if &live_content == disk_content {
-        return Ok(false);
-    }
-    let disk_components = agent_doc_element::element::parse(disk_content)?;
-    let live_components = agent_doc_element::element::parse(&live_content)?;
-    let Some(disk_queue) = disk_components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(false);
-    };
-    let Some(live_queue) = live_components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(false);
-    };
-    let disk_body = disk_queue.content(disk_content);
-    let live_body = live_queue.content(&live_content);
-    if disk_body == live_body {
-        return Ok(false);
-    }
-    let Some(disk_counts) = agent_doc_queue::document_queue::queue_delete_counts(disk_body) else {
-        return Ok(false);
-    };
-    let Some(live_counts) = agent_doc_queue::document_queue::queue_delete_counts(live_body) else {
-        return Ok(false);
-    };
-    if !agent_doc_queue::document_queue::queue_counts_have_deletion(&disk_counts, &live_counts)
-        || !agent_doc_queue::document_queue::queue_counts_are_subset(&live_counts, &disk_counts)
-    {
-        return Ok(false);
-    }
-
-    let deleted_count: usize = disk_counts
-        .iter()
-        .map(|(key, disk_count)| {
-            disk_count.saturating_sub(live_counts.get(key).copied().unwrap_or(0))
-        })
-        .sum();
-    *disk_content = disk_queue.replace_content(disk_content, live_body);
-    eprintln!(
-        "[preflight] queue: adopted {deleted_count} live editor queue deletion(s) before maintenance (#qeditdelete)"
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "queue_cpc_delete_adopted file={} deleted_count={} current_hash={} (#qeditdelete)",
-            file.display(),
-            deleted_count,
-            agent_doc_hash::content_hash(&live_content)
-        ),
-    );
-    Ok(true)
-}
-
 /// Read-only queue inspection for `preflight --probe`.
 ///
 /// This intentionally does not run queue convergence, backlog mirroring,
@@ -2414,9 +2339,12 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             return Ok(QueueState::default());
         }
     };
-    let adopted_live_queue_delete = adopt_cpc_queue_deletions(file, &mut content).unwrap_or(false);
+    // `content` already came from the CPC/editor authority above. Do not reread
+    // disk or run a second queue-only merge here: that used to compare the live
+    // frontier with itself, making the supposed deletion-adoption branch dead
+    // while obscuring which authority maintenance actually mutated.
     let mut current_content = content.clone();
-    let mut mutated = adopted_live_queue_delete;
+    let mut mutated = false;
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
@@ -2459,26 +2387,6 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let mut synced_queue_ids = Vec::new();
     let mut source_queue_priority = false;
     let mut queue_tag_attrs_normalized = false;
-
-    // #qprtloss: journal the live queue as soon as it is parsed, before any
-    // convergence/normalization branch can return early and erase an
-    // uncommitted operator prompt from the visible queue.
-    if let Err(err) = agent_doc_queue_io::queue_journal::record(file, &current_content) {
-        eprintln!(
-            "[agent-doc] queue_journal: early record failed for {} ({err:#})",
-            file.display()
-        );
-    }
-    // `#qftloss` mode-6: also journal any operator queue prompt that lives only in
-    // the live editor buffer (reported to `.agent-doc/live-buffer/<hash>` but not
-    // yet on disk), so a pre-observation operator add is crash-durable from this
-    // cycle on — before any convergence/normalization branch below can erase it.
-    if let Err(err) = agent_doc_queue_io::queue_journal::record_live_buffer(file) {
-        eprintln!(
-            "[agent-doc] queue_journal: early live-buffer record failed for {} ({err:#})",
-            file.display()
-        );
-    }
 
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
     let normalized_queue_tag =
@@ -4104,17 +4012,6 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // / inert noise — a no-op churn cycle. Surfacing it lets the agent and the
     // Claude Code auto-loop stop without re-deriving drainability from prose, even
     // when the route-owned supervisor predates the idle-watch filter (#qchurn).
-    // `#qdurcrash`: durably journal the operator queue prompts the binary
-    // observes this cycle so an add survives a supervisor/pane crash+restart
-    // (replayed at startup by `queue_journal::replay_missing`). Best-effort;
-    // never wedges the cycle on a journal hiccup.
-    if let Err(err) = agent_doc_queue_io::queue_journal::record(file, &content) {
-        eprintln!(
-            "[agent-doc] queue_journal: record failed for {} ({err:#})",
-            file.display()
-        );
-    }
-
     // `#qpausego`: an accepted controller `admin queue pause` suppresses the
     // *unattended* supervisor idle-watch auto-injection (the flood this fixes —
     // see `start/idle_watch.rs`) and is surfaced here as `queue_paused` for
@@ -7610,9 +7507,14 @@ mod tests {
         let missing =
             agent_doc_queue_io::queue_journal::replay_missing(&doc, snapshot_content, None);
         assert!(
-            missing.iter().any(|entry| entry.text == "do [#newhead]"),
-            "early-return queue maintenance must journal the live edited head before convergence: {:?}",
+            missing.is_empty(),
+            "early-return queue maintenance must not create replay authority beside CPC: {:?}",
             missing
+        );
+        assert!(
+            agent_doc_queue_io::queue_journal::queue_journal_path(&doc)
+                .is_none_or(|path| !path.exists()),
+            "legacy queue journal must remain retired"
         );
     }
     #[test]

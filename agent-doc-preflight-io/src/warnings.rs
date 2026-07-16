@@ -297,12 +297,21 @@ pub fn live_plugin_generation_statuses_from_snapshots(
 }
 
 pub fn live_plugin_generation_statuses(file: &Path) -> Vec<LivePluginGenerationStatus> {
-    let file_str = file.display().to_string();
-    let live = agent_doc_debounce::live_buffer_snapshots(&file_str)
+    agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)
+        .unwrap_or_default()
         .into_iter()
-        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
-        .collect::<Vec<_>>();
-    live_plugin_generation_statuses_from_snapshots(&live, expected_plugin_version)
+        .filter_map(|registration| {
+            let expected = expected_plugin_version(&registration.editor_kind)?;
+            Some(LivePluginGenerationStatus {
+                editor_id: Some(registration.editor_id),
+                kind: registration.editor_kind,
+                stale: plugin_version_is_older(&registration.editor_version, expected),
+                running: registration.editor_version,
+                expected: expected.to_string(),
+                timestamp_ms: u128::from(registration.timestamp_ms),
+            })
+        })
+        .collect()
 }
 
 /// Emit replay-time generation evidence. This deliberately runs after preflight
@@ -339,13 +348,24 @@ pub fn report_live_plugin_generation_refresh(file: &Path) {
 /// older than the plugin build this binary ships with, and warn so the operator
 /// reinstalls it.
 pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
-    let file_str = file.display().to_string();
-    let live: Vec<agent_doc_debounce::LiveBufferSnapshot> =
-        agent_doc_debounce::live_buffer_snapshots(&file_str)
-            .into_iter()
-            .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
-            .collect();
-    stale_plugin_warnings_from_snapshots(&live, expected_plugin_version)
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    live_plugin_generation_statuses(file)
+        .into_iter()
+        .filter_map(|status| {
+            if !status.stale || !seen.insert((status.kind.clone(), status.running.clone())) {
+                return None;
+            }
+            Some(PreflightWarning {
+                code: "stale_plugin".to_string(),
+                message: format!(
+                    "live {} editor plugin {} is older than the {} build shipped with this agent-doc binary; install/update the editor plugin and restart/reload the IDE host before relying on editor delivery ACKs.",
+                    status.kind, status.running, status.expected
+                ),
+                document_agent: None,
+                active_harness: None,
+            })
+        })
+        .collect()
 }
 
 /// Pure core of [`stale_plugin_warnings`]: given the live per-editor snapshots
@@ -523,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_plugin_warning_end_to_end_from_live_sidecar() {
+    fn stale_plugin_warning_end_to_end_from_reliable_registration() {
         let Some(_expected) = expected_plugin_version("jetbrains") else {
             return;
         };
@@ -531,15 +551,33 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("plan.md");
         std::fs::write(&doc, "# plan\n").unwrap();
-        let doc_str = doc.display().to_string();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let editor_id = format!("jetbrains-{}-e2e", std::process::id());
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            "# plan\n",
-            &editor_id,
-            "jetbrains",
-            "0.2.100",
-            &[],
+        let ops = vec![
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid: std::process::id().into(),
+                tag: editor_id.clone(),
+            },
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                    document_hash: document_hash.clone(),
+                    pid: std::process::id().into(),
+                    path: canonical.to_string_lossy().into_owned(),
+                    editor_id,
+                    editor_kind: "jetbrains".to_string(),
+                    editor_version: "0.2.100".to_string(),
+                    capabilities: Vec::new(),
+                    timestamp_ms: 1,
+                },
+            ),
+        ];
+        agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+            &dir.path().join(".agent-doc/reliable_sync_outbox.db"),
+            &document_hash,
+            1,
+            Some(&serde_json::to_string(&ops).unwrap()),
         )
         .unwrap();
 

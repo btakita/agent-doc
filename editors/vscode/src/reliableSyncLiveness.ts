@@ -18,8 +18,11 @@ import { randomUUID } from 'crypto';
 // the monorepo (same resolution the state-graph-mirror import uses).
 import { OrSet } from '../../../../lazily-js/src/index.js';
 import {
-    documentIdForPath,
-    isSessionDocument,
+documentIdForPath,
+EDITOR_CAPABILITY_LIST,
+EDITOR_PLUGIN_KIND,
+EDITOR_PLUGIN_VERSION,
+isSessionDocument,
     reliableSyncLivenessEnqueue,
     reliableSyncLivenessFlush,
 } from './native';
@@ -31,7 +34,7 @@ class LivenessGraph {
     constructor(private readonly pid: number) {}
 
     /** Mark `documentHash` opened once; returns null for a duplicate IDE event. */
-    open(documentHash: string): string | null {
+open(documentHash: string, path: string, editorId: string): string | null {
         if (this.docs.get(documentHash)?.orSet.present() === true) return null;
         const tag = randomUUID();
         let state = this.docs.get(documentHash);
@@ -41,9 +44,21 @@ class LivenessGraph {
         }
         state.orSet.add(tag);
         state.tags.push(tag);
-        return JSON.stringify([
-            { Open: { document_hash: documentHash, pid: this.pid, tag } },
-        ]);
+return JSON.stringify([
+{ Open: { document_hash: documentHash, pid: this.pid, tag } },
+{
+Register: {
+document_hash: documentHash,
+pid: this.pid,
+path,
+editor_id: editorId,
+editor_kind: EDITOR_PLUGIN_KIND,
+editor_version: EDITOR_PLUGIN_VERSION,
+capabilities: [...EDITOR_CAPABILITY_LIST].sort(),
+timestamp_ms: Date.now(),
+},
+},
+]);
     }
 
     /** Mark `documentHash` closed; returns the `Close` op batch JSON, or null. */
@@ -68,7 +83,10 @@ class LivenessGraph {
  * Wire VS Code open/close events to the liveness graph + FFI push. Returns a
  * disposable that unregisters the listeners.
  */
-export function registerReliableSyncLiveness(context: vscode.ExtensionContext): void {
+export function registerReliableSyncLiveness(
+context: vscode.ExtensionContext,
+editorId: string,
+): void {
     const graph = new LivenessGraph(process.pid);
 
     const workspaceRootFor = (document: vscode.TextDocument): string | undefined =>
@@ -89,13 +107,13 @@ export function registerReliableSyncLiveness(context: vscode.ExtensionContext): 
         setImmediate(() => {
             // Scope liveness to agent-doc session documents only: a plain source
             // file opened as a tab must not enter the plane (it would over-count the
-            // open-set vs the sidecar `open_agent_docs` ground truth). This disk read
+            // session-document scope). This disk read
             // is appropriate at open time — it is the moment we decide whether to
             // start tracking a possibly-random `.md` tab at all.
             if (!isSessionDocument(filePath, root)) return;
             const documentHash = documentIdForPath(filePath, root);
             if (!documentHash) return;
-            const opsJson = graph.open(documentHash);
+const opsJson = graph.open(documentHash, filePath, editorId);
             if (!opsJson) return;
             push(root, documentHash, opsJson);
         });

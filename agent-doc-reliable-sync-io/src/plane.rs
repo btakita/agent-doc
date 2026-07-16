@@ -1,18 +1,15 @@
-//! Controller-side reliable-sync liveness plane + the dual-run parity oracle
-//! (sidecar-retirement Phase 3C — the controller *receive* half).
+//! Controller-side reliable-sync liveness plane and reference-model tests.
 //!
 //! [`ControllerLivenessPlane`] is what the controller RPC handler folds inbound
 //! reliable-sync liveness frames into: it owns the [`LivenessProjection`] the
-//! cutover will read *instead of* scanning `.agent-doc/live-buffer/*` +
-//! `plugin-owner/*.json`, plus a per-`document_hash` ack cursor returned to the
+//! authority reads instead of scanning filesystem projections, plus a
+//! per-`document_hash` ack cursor returned to the
 //! pushing plugin (over the request receipt) so the plugin's [`crate::ReliableSyncSink`]
 //! + `DurableOutbox` can prune / resume from the frontier.
 //!
-//! [`SidecarOpenSetModel`] is the **parity oracle**: a straightforward model of
-//! what today's sidecar scan derives for the same open / close / crash sequence.
-//! The migration invariant (plan § Migration & cutover) is that the synced plane
-//! and the sidecar model agree across every open/close/crash/recycle sequence
-//! *before* the hot path is switched — the `parity` tests below are that SimWorld.
+//! [`ReferenceOpenSetModel`] is a deliberately simple open/close/crash oracle.
+//! The `parity` tests prove the reliable plane agrees with that model across
+//! retry and recycle sequences without introducing another production authority.
 
 use anyhow::Result;
 use lazily::IpcMessage;
@@ -100,30 +97,28 @@ impl ControllerLivenessPlane {
     }
 }
 
-/// Reference model of the open-set the **sidecars** derive today — the dual-run
-/// parity oracle. `open` mirrors a present `.agent-doc/live-buffer/<doc>` for an
-/// editor `pid`; `dead` mirrors a pid the OS-exit watcher marked gone.
+/// Reference open-set model used only by deterministic verification.
 ///
 /// This is a test/verification oracle, not a hot-path type; it deliberately uses
 /// the *same* derivation rules as [`LivenessProjection`] so any divergence is a
 /// real semantic gap, not an apples-to-oranges artifact.
 #[derive(Debug, Default)]
-pub struct SidecarOpenSetModel {
+pub struct ReferenceOpenSetModel {
     open: BTreeSet<(String, Pid)>,
     dead: BTreeSet<Pid>,
 }
 
-impl SidecarOpenSetModel {
+impl ReferenceOpenSetModel {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Editor `pid` wrote a live-buffer sidecar for `doc` (opened it).
+    /// Editor `pid` opened `doc`.
     pub fn open(&mut self, doc: &str, pid: Pid) {
         self.open.insert((doc.to_string(), pid));
     }
 
-    /// Editor `pid`'s live-buffer sidecar for `doc` was reaped (closed).
+    /// Editor `pid` closed `doc`.
     pub fn close(&mut self, doc: &str, pid: Pid) {
         self.open.remove(&(doc.to_string(), pid));
     }
@@ -133,12 +128,12 @@ impl SidecarOpenSetModel {
         self.dead.insert(pid);
     }
 
-    /// Docs with a present sidecar (open-set ground truth), independent of alive.
+    /// Open documents, independent of process liveness.
     pub fn open_docs(&self) -> BTreeSet<String> {
         self.open.iter().map(|(doc, _)| doc.clone()).collect()
     }
 
-    /// Docs with a present sidecar held by a still-alive pid (live aggregate).
+    /// Open documents held by a still-alive pid.
     pub fn live_docs(&self) -> BTreeSet<String> {
         self.open
             .iter()
@@ -154,8 +149,7 @@ mod parity {
     use crate::liveness::{LivenessOp, encode_liveness_frame};
     use lazily::WireStamp;
 
-    /// One migration event applied to *both* the synced plane and the sidecar
-    /// oracle, so a divergence is caught immediately.
+    /// One event applied to both the synced plane and the reference oracle.
     #[derive(Clone)]
     enum Event {
         Open {
@@ -198,7 +192,7 @@ mod parity {
         }
     }
 
-    fn apply_to_sidecar(model: &mut SidecarOpenSetModel, ev: &Event) {
+    fn apply_to_reference(model: &mut ReferenceOpenSetModel, ev: &Event) {
         match ev {
             Event::Open { doc, pid, .. } => model.open(doc, *pid),
             Event::Close { doc, pid, .. } => model.close(doc, *pid),
@@ -210,7 +204,7 @@ mod parity {
     /// increasing epoch, retaining each frame so a recycle can replay it.
     fn drive(
         plane: &mut ControllerLivenessPlane,
-        model: &mut SidecarOpenSetModel,
+        model: &mut ReferenceOpenSetModel,
         events: &[Event],
         retained: &mut Vec<(u64, IpcMessage)>,
     ) {
@@ -219,7 +213,7 @@ mod parity {
             let frame = encode_liveness_frame(&liveness_ops(ev)).expect("encode");
             plane.ingest("docwire", epoch, &frame).expect("ingest");
             retained.push((epoch, frame));
-            apply_to_sidecar(model, ev);
+            apply_to_reference(model, ev);
             // Parity holds after every single event, not just at the end.
             assert_eq!(
                 plane.projection().open_docs(),
@@ -235,7 +229,7 @@ mod parity {
     }
 
     #[test]
-    fn synced_plane_matches_sidecar_across_open_close_crash() {
+    fn synced_plane_matches_reference_across_open_close_crash() {
         let events = vec![
             Event::Open {
                 doc: "docA",
@@ -260,7 +254,7 @@ mod parity {
             Event::Crash { pid: 100, wall: 50 },
         ];
         let mut plane = ControllerLivenessPlane::new();
-        let mut model = SidecarOpenSetModel::new();
+        let mut model = ReferenceOpenSetModel::new();
         let mut retained = Vec::new();
         drive(&mut plane, &mut model, &events, &mut retained);
         // Final: docA held by dead pid100 → not live; docB closed; docC live.
@@ -286,7 +280,7 @@ mod parity {
             Event::Crash { pid: 100, wall: 50 },
         ];
         let mut plane = ControllerLivenessPlane::new();
-        let mut model = SidecarOpenSetModel::new();
+        let mut model = ReferenceOpenSetModel::new();
         let mut retained = Vec::new();
         drive(&mut plane, &mut model, &events, &mut retained);
         let before = plane.projection().live_docs();

@@ -7979,8 +7979,8 @@ pub struct ControllerReliableSyncResponse {
     pub document_hash: String,
     /// Ack cursor the pushing plugin uses to prune / resume its outbox.
     pub ack_through: u64,
-    /// Whether the shadow liveness plane actually consumed the frame
-    /// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`); OFF ⇒ sidecars stay authoritative.
+    /// Whether the Lazily liveness plane consumed the frame
+    /// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`).
     pub dual_run: bool,
 }
 
@@ -8095,7 +8095,7 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcDocumentPush
 /// Phase 3C + step 3). The global lives in `agent-doc-reliable-sync-io`
 /// ([`agent_doc_reliable_sync_io::global_liveness_plane`]) so the same instance the
 /// controller feeds is the one [`crdt_authority_for_file`] reads — the plane is the
-/// hot-path authority, the sidecars are background durability.
+/// sole live-editor metadata authority.
 fn controller_liveness_plane()
 -> &'static std::sync::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane> {
     agent_doc_reliable_sync_io::global_liveness_plane()
@@ -8166,8 +8166,7 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
 /// Default-on liveness authority with a durable cold path. The hot path is one
 /// in-memory CRDT projection read. A cold process replays the receiver journal
 /// plus the sender's retained suffix; it never reconciles live-buffer sidecars or
-/// consults a plugin-owner lease. The explicit authority-off rollback retains the
-/// legacy lease behavior by operator request.
+/// consults a plugin-owner lease or live-buffer filesystem model.
 pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
     agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
 }
@@ -8175,8 +8174,7 @@ pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
 /// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4). The
 /// reliable-sync plane is **primary**: its `live_docs` decides `MultiReplica` /
 /// `GitAuthoritative`, and a cold process first hydrates the receiver journal plus
-/// retained sender suffix. Filesystem leases and live-buffer sidecars are not read
-/// unless the operator explicitly disables reliable-sync authority for rollback.
+/// retained sender suffix. Filesystem leases and live-buffer sidecars are not read.
 /// This is the single authority entry shared by controller and write paths.
 pub fn crdt_authority_for_file(
     file: &str,
@@ -8189,59 +8187,32 @@ pub fn crdt_authority_for_file(
     }
 }
 
-/// Status response for the `reliable_sync_status` diagnostic RPC (sidecar-retirement
-/// Phase 3C `[operator-verify]` parity oracle). Surfaces the shadow plane's derived
-/// open-/live-set next to the sidecar-derived open-set so an operator can eyeball
-/// dual-run parity on real editor events (handoff step 2) without a debugger.
+/// Status response for the `reliable_sync_status` diagnostic RPC. The Lazily
+/// reliable-sync projection is the sole live-editor authority; no filesystem
+/// live-buffer model participates in this response.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerReliableSyncStatusResponse {
-    /// Whether the shadow plane is active (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN` not disabled).
+    /// Whether the reliable-sync plane is active.
     pub dual_run: bool,
     /// Document hashes the plane derives as open (from pushed liveness frames).
     pub plane_open_docs: Vec<String>,
-    /// Each plane-open hash resolved to a readable file path via the live-buffer
-    /// path index (`None` if no sidecar records that hash's path) — so an operator
-    /// can eyeball exactly which documents the plane believes are open.
+    /// Each plane-open hash resolved through a live editor registration.
     pub plane_open_paths: Vec<(String, Option<String>)>,
     /// Document hashes the plane derives as live (open minus the whole-editor-death cascade).
     pub plane_live_docs: Vec<String>,
-    /// Document hashes the **durable** sidecar ground truth derives as open — the
-    /// `.agent-doc/live-buffer/` scan (`#lbreap`) restricted to **strictly-live,
-    /// identified** editors, converted path→hash. Durable like the plane and scoped to
-    /// live editors, so this is the apples-to-apples parity comparison; dead-pid and
-    /// legacy `editor_id: null` sidecars (which accumulate un-reaped) are excluded.
-    pub sidecar_open_docs: Vec<String>,
-    /// Document hashes the **volatile** in-memory `editor_open_docs` registry derives
-    /// as open. Secondary diagnostic only: it is empty right after a controller recycle
-    /// until editors re-report, so it is NOT the parity basis (the durable live-buffer
-    /// scan is). Surfaced to make a recycle-timing divergence legible.
+    /// Live editor identity/version/capability registrations carried on the same
+    /// monotone reliable-sync channel as open/close state.
+    pub registrations: Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
+    /// Volatile in-process registry, retained as a diagnostic only.
     pub registry_open_docs: Vec<String>,
     /// Per open document: the live editor pids the plane sees.
     pub per_doc_pids: Vec<(String, Vec<u64>)>,
-    /// True when the plane's open-set equals the durable sidecar open-set
-    /// (`sidecar_open_docs`) — the dual-run parity assertion. Trivially true (both
-    /// empty) before any editor event.
-    pub parity: bool,
 }
 
-/// Whether `path` is an agent-doc session document — the same frontmatter/opt-in
-/// classification the plugin liveness gate (`agent_doc_is_session_document`) uses, so
-/// the oracle's sidecar open-set is scoped identically to the plane. A path that no
-/// longer reads is not a session document.
-fn path_is_session_document(path: &str) -> bool {
-    match std::fs::read_to_string(path) {
-        Ok(content) => agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(
-            &content,
-            std::path::Path::new(path),
-        ),
-        Err(_) => false,
-    }
-}
-
-/// Handle the `reliable_sync_status` diagnostic RPC: project the shadow liveness plane
-/// and the sidecar-derived open-set into a single parity view for `[operator-verify]`.
+/// Handle the `reliable_sync_status` diagnostic RPC from the controller-owned
+/// reliable liveness projection.
 fn handle_reliable_sync_status(
-    bootstrap: &ControllerBootstrap,
+    _bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
     let dual_run = agent_doc_reliable_sync_io::dual_run_enabled();
     let plane = controller_liveness_plane()
@@ -8254,54 +8225,43 @@ fn handle_reliable_sync_status(
         .iter()
         .map(|doc| (doc.clone(), projection.open_pids(doc).into_iter().collect()))
         .collect();
-    // Durable sidecar ground truth: the `.agent-doc/live-buffer/` scan. Every path
-    // yields a hash→path index (to resolve the plane's hashes to readable paths);
-    // only paths with a strictly-live editor form the durable open-set the plane is
-    // compared against (dead-pid / legacy sidecars accumulate and must not count).
-    let mut hash_to_path: std::collections::BTreeMap<String, String> =
-        std::collections::BTreeMap::new();
-    let mut sidecar_open: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for (path, strictly_live) in
-        agent_doc_debounce::live_buffer_document_paths_with_liveness(&bootstrap.project_root)
-    {
-        let hash = agent_doc_hash::document_id_for_path(std::path::Path::new(&path));
-        // The durable open-set is a strictly-live sidecar for an agent-doc **session
-        // document** — the plane is session-scoped (its plugins gate on
-        // `agent_doc_is_session_document`), so the parity basis must match: the
-        // live-buffer path also tracks non-session files (plain specs/plans opened as
-        // tabs) which the plane correctly excludes.
-        if strictly_live && path_is_session_document(&path) {
-            sidecar_open.insert(hash.clone());
-        }
-        hash_to_path.insert(hash, path);
-    }
+    let registrations = projection.all_live_registrations();
     let plane_open_paths: Vec<(String, Option<String>)> = plane_open
         .iter()
-        .map(|hash| (hash.clone(), hash_to_path.get(hash).cloned()))
+        .map(|hash| {
+            let path = registrations
+                .iter()
+                .filter(|registration| &registration.document_hash == hash)
+                .max_by_key(|registration| {
+                    (
+                        registration.timestamp_ms,
+                        registration.pid,
+                        registration.editor_id.as_str(),
+                    )
+                })
+                .map(|registration| registration.path.clone());
+            (hash.clone(), path)
+        })
         .collect();
-    // Volatile in-memory registry — secondary diagnostic only (empty after a recycle
-    // until editors re-report), not the parity basis.
+    // Volatile in-memory registry — secondary diagnostic only.
     let registry_open: std::collections::BTreeSet<String> =
         agent_doc_document_realtime::editor_open_docs::editor_open_docs()
             .open_agent_docs()
             .into_iter()
             .map(|path| agent_doc_hash::document_id_for_path(std::path::Path::new(&path)))
             .collect();
-    let parity = plane_open == sidecar_open;
     Ok(ControllerReliableSyncStatusResponse {
         dual_run,
         plane_open_docs: plane_open.into_iter().collect(),
         plane_open_paths,
         plane_live_docs: plane_live.into_iter().collect(),
-        sidecar_open_docs: sidecar_open.into_iter().collect(),
+        registrations,
         registry_open_docs: registry_open.into_iter().collect(),
         per_doc_pids,
-        parity,
     })
 }
 
-/// Client side of the `reliable_sync_status` diagnostic RPC — the `[operator-verify]`
-/// parity read (`agent-doc reliable-sync-status`).
+/// Client side of the `reliable_sync_status` diagnostic RPC.
 pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyncStatusResponse> {
     let request = ControllerRequest {
         command: "reliable_sync_status".to_string(),
@@ -8321,12 +8281,42 @@ pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyn
     request_controller::<ControllerReliableSyncStatusResponse>(project_root, request)
 }
 
+/// Resolve live editor registrations for one document from the controller-owned
+/// Lazily liveness projection. The result is ordered deterministically for
+/// diagnostics; single-target selection explicitly orders by registration time.
+pub fn live_editor_registrations_for_file(
+    file: &Path,
+) -> Result<Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .ok_or_else(|| anyhow::anyhow!("no agent-doc project root for {}", file.display()))?;
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    let mut registrations = reliable_sync_status(&project_root)?
+        .registrations
+        .into_iter()
+        .filter(|registration| registration.document_hash == document_hash)
+        .collect::<Vec<_>>();
+    registrations.sort();
+    Ok(registrations)
+}
+
+pub fn live_editor_registration_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    Ok(live_editor_registrations_for_file(file)?
+        .into_iter()
+        .max_by(|left, right| {
+            (left.timestamp_ms, left.pid, left.editor_id.as_str()).cmp(&(
+                right.timestamp_ms,
+                right.pid,
+                right.editor_id.as_str(),
+            ))
+        }))
+}
+
 /// Feed the shadow liveness plane the controller's own OS-exit-watcher death
 /// signal (`#s4b`, Phase 3C): a dead editor `pid` writes `Alive{value:false}` at a
 /// fresh stamp, so the derived live-doc aggregate cascades every doc that pid held
-/// to not-live — the reliable-sync equivalent of the sidecar path's crash demote.
-/// No-op only when dual-run is explicitly disabled; the shadow plane is ON by
-/// default (sidecars remain the hot-path authority until the separate flip).
+/// to not-live. No-op only when reliable sync is explicitly disabled.
 pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
     if !agent_doc_reliable_sync_io::dual_run_enabled() {
         return;
@@ -8377,9 +8367,10 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
 ///
 /// The plugin sends the 3A `reliable_sync` envelope (from
 /// `agent_doc_reliable_sync_io::encode_envelope`) as the `diagnostic_payload` and
-/// the outbox epoch as `generation`. When dual-run is **off** (default) the frame
-/// is not consumed and the ack is `0` — sidecars stay authoritative. When on, the
-/// frame folds into the shadow `ControllerLivenessPlane` and the returned
+/// the outbox epoch as `generation`. When reliable sync is explicitly disabled,
+/// the frame is not consumed and the ack is `0`, leaving the document without a
+/// live-editor authority claim. Otherwise the frame folds into the
+/// `ControllerLivenessPlane` and the returned
 /// `ack_through` lets the plugin outbox prune / resume from the frontier.
 fn handle_reliable_sync(
     project_root: &Path,
@@ -16338,7 +16329,7 @@ mod tests {
     #[test]
     fn reliable_sync_handler_explicit_off_is_noop_ack_zero() {
         let _env = reliable_sync_env_lock();
-        // Explicitly disabled ⇒ dual-run OFF: sidecars authoritative, frame not consumed.
+        // Explicitly disabled: frame not consumed and no live-editor claim is made.
         unsafe {
             std::env::set_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV, "0");
         }
@@ -16355,9 +16346,8 @@ mod tests {
     #[test]
     fn reliable_sync_handler_default_on_folds_frame() {
         let _env = reliable_sync_env_lock();
-        // Env unset ⇒ dual-run ON by default: the plane runs in shadow and folds
-        // the inbound liveness frame (authority is still the sidecars until the
-        // separate flip). The handler reports dual_run and advances the ack cursor.
+        // Env unset: the authoritative plane folds the inbound liveness frame and
+        // advances the durable ACK cursor.
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
         }
@@ -16476,11 +16466,11 @@ mod tests {
     }
 
     #[test]
-    fn crdt_authority_for_file_disabled_falls_back_to_sidecar() {
+    fn crdt_authority_for_file_disabled_has_no_live_editor_claim() {
         let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-        // Explicitly disabled ⇒ the plane is never consulted; a never-tracked path
-        // resolves through the sidecar-backed path as GitAuthoritative.
+        // Explicitly disabled: the plane makes no live-editor claim, so the
+        // document resolves as GitAuthoritative without consulting a sidecar.
         unsafe {
             std::env::set_var(agent_doc_reliable_sync_io::AUTHORITY_ENV, "0");
         }
@@ -16588,7 +16578,7 @@ mod tests {
     }
 
     #[test]
-    fn reliable_sync_status_projects_plane_open_set_and_parity() {
+    fn reliable_sync_status_projects_plane_open_set_without_sidecar_oracle() {
         let _env = reliable_sync_env_lock();
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
@@ -16633,9 +16623,6 @@ mod tests {
             .map(|(_, p)| p.clone())
             .unwrap_or_default();
         assert!(pids.contains(&100));
-        // No live-buffer sidecars in this fresh project, so the durable sidecar
-        // open-set is empty while the plane holds a doc ⇒ parity computed and false.
-        assert!(status.sidecar_open_docs.is_empty());
-        assert!(!status.parity);
+        assert!(status.registrations.is_empty());
     }
 }

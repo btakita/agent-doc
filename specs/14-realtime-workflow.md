@@ -39,12 +39,11 @@ document. When such a projection differs, the CPC canonical is re-applied to the
 editor and acknowledged only after the visible text hash converges.
 If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
-write as an automatic recovery behind the editor. The legacy live-buffer sidecar
-is compatibility/diagnostic state only; it must not decide document authority.
-Sidecars renamed to `{stem}.stale-*` are quarantined diagnostics and must not
-re-enter current live-buffer enumeration or editor-capability gating.
-Reliable-sync liveness remains the authority proof for deciding whether disk
-convergence must fail closed behind an editor.
+write as an automatic recovery behind the editor. There is no full live-buffer
+sidecar: current text lives in the Lazily/CPC CRDT model, while open/close,
+sync epochs, editor identity, plugin version, and capabilities travel on the
+reliable-sync Lazily plane. Legacy `.agent-doc/live-buffer` files may only be
+deleted during migration; they must never be read as authority or recreated.
 When a controller recycle removes server-side membership but the editor still
 holds a cached client, refresh must retire that cached client and issue a new
 registration. Every stale supervisor/controller recycle request emits that
@@ -228,6 +227,13 @@ long-term owner of `🚧` semantics.
 | Edit backlog/icebox/pending dependency metadata used by auto-DAG | Recompute dependency order from the latest source. | Affects the active turn when the selected head changes; otherwise it updates future queue state only. |
 | Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
 | Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |
+
+Queue crash recovery is part of the Lazily/CPC current-document lineage. The
+former append-only `.agent-doc/queue-journal` is retired and cleared at start; it
+must never replay text over the controller-resolved document because absence
+there may be an operator deletion. A genuinely unsaved queue add survives through
+the editor's durable CRDT/reliable-sync stream, using the same ordered causality
+as every other editor operation rather than a second queue-specific head set.
 
 The combined realtime diff state is therefore not simply "file changed" or
 "queue changed". It must classify at least these cases:
@@ -445,6 +451,13 @@ When an unacknowledged response is already visible with later operator text, tha
 response intent counts as applied before later entries are replayed, so an
 ours-wins exchange conflict cannot erase the operator text.
 
+Exact target bytes are not sufficient settlement proof for a semantic rebase
+intent. The non-capture byte-equality fast path is limited to delivery-only
+reasons (missing replica, stale delivery worker, or pending delivery ACK). An
+intent that merged an unsaved editor cut, extended reconnect lineage, or awaits
+an external-source decision remains retained until its operator-cut causality is
+proved; reaching canonical authority and disk cannot bless a stale resurrection.
+
 All generic realtime merges on this path—settled-operator rebase, deferred-target
 composition, and reconnect—canonicalize boundary control state from the newest
 target branch after the CRDT merge. A valid target boundary is the singleton
@@ -463,6 +476,12 @@ replaying captured editor ops over the intent's expected base, validates that
 cut, and then replays the deferred agent-intent journal. Thus an operator-only
 `queue: stop` survives while duplicated agent content is discarded. This repair
 is automatic and does not require or authorize a force-disk reset.
+
+Editor-op capture is epoch-scoped. Immediately before JetBrains applies any
+remote or agent-authored text mutation, it closes the native op-capture epoch.
+Later operator operations therefore cannot be concatenated onto an old snapshot
+base across an intervening agent projection. The newest CPC/CRDT current text
+remains the authority/fallback when an op epoch is unavailable.
 
 Document-scoped editor actions must not create cross-document authority edges.
 In particular, JetBrains Compact Exchange saves only its selected document
@@ -561,22 +580,16 @@ realtime authority rules.
 | `AppliedVerified` | Post-apply source-of-truth | The owner-visible document contains the agent operation and preserves observed operator text. | Save backup state and commit. |
 | `ConflictBlocked` | Current source-of-truth | Merge or delivery could not prove preservation of operator text. | Leave the document untouched and report/retry later. |
 
-Editor-sidecars that prove a live editor buffer must also carry a stable
+Each live editor registration on the reliable-sync plane must carry a stable
 frontend capability proof before the controller treats that editor as safe for
-operator-preserving mutation. The canonical capability for this invariant is
-`operator_text_authority_v1`: the editor reports full visible buffer content,
-per-editor identity, and enough local operation/epoch evidence for the harness
-to avoid discarding operator text. A live-buffer sidecar from an older or
-capability-unknown frontend is still authoritative operator input, but it is not
-safe delivery proof. This is true even when the reported buffer currently equals
-disk: the unsafe race is between delivery and the operator's next keystroke. The
-controller must enter `ConflictBlocked` (or an equivalent fail-closed closeout)
-before sending a patch that could overwrite that buffer. This applies to every
-editor mutation transport, including normal writeback, compact exchange,
-normalization repair, IPC dedupe repair, full-content repair redelivery, socket
-delivery, and file-IPC fallback. Reloading/updating the editor frontend can
-replace the sidecar with a capability-bearing report; direct disk overwrite
-remains an explicit operator escape hatch only.
+operator-preserving mutation. The canonical capability is
+`operator_text_authority_v1`; current visible text itself remains in the CRDT,
+not in registration metadata. A live but capability-unknown frontend remains an
+operator-authority fence, but it is not safe delivery proof. The controller must
+enter `ConflictBlocked` before sending a mutation through such a frontend. This
+applies to normal writeback, compact exchange, repair redelivery, socket delivery,
+and file-IPC fallback. Reloading/updating the frontend publishes a newer monotone
+registration; direct disk overwrite remains an explicit operator escape hatch.
 
 Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
@@ -837,17 +850,16 @@ Every document mutation that can affect a session document follows this order:
 5. If the operator changed the same node, preserve the operator change and
    either merge the agent response around it with explicit proof or fail closed.
 6. If the operator changed a disjoint node, keep both changes.
-7. Apply through the editor/CRDT transport when an editor listener or live
-   editor sidecar owns the document. Use the guarded `DetachedDisk` path only
-   when no listener can deliver and no live editor sidecar is present, or when
+7. Apply through the editor/CRDT transport when reliable-sync liveness reports
+an editor owner. Use the guarded `DetachedDisk` path only when the Lazily plane
+proves no live editor owns the document, or when
    the operator explicitly chose a disk-authoritative recovery. `DetachedDisk`
    is the current-file realtime replica, not a snapshot fallback. CRDT remote
    delivery must compare the live editor text with the expected editor text
    captured before convergence; if the editor text advanced, the delivery is
    stale and must not ACK or mutate. Socket IPC, file-IPC fallback, and
-   reposition payloads must target the live plugin-owner `editor_id` when that
-   owner lease exists; if no owner lease exists, they may target the newest live
-   editor sidecar with `operator_text_authority_v1`. Untargeted file-IPC
+reposition payloads target the newest live reliable-sync editor registration
+carrying `operator_text_authority_v1`. Untargeted file-IPC
    fallback is not delivery proof for an editor-owned document.
 8. Verify the post-apply source-of-truth document equals the intended target,
    contains the agent response, and still contains every operator-authored line
@@ -909,7 +921,7 @@ response append from explicit exchange replacement.
 
 `agent-doc-document-realtime` is the document-specific realtime boundary:
 editor ownership, disk visibility epochs, debounce, CRDT transport,
-live-buffer publication, parse diagnostics, retry timing, and owner leases.
+reliable-sync registrations, parse diagnostics, and retry timing.
 Other realtime loops, such as tmux, supervisor, editor-plugin, and controller
 loops, use their own crate names. Document realtime orchestration may decide
 when to call the merge core and how to deliver its patch plan, but it must not
@@ -1028,8 +1040,8 @@ Implementations must keep tests for these cases:
   live editor buffer or fail closed before any agent response lands;
 - lazily visible-write drift cannot reset operator-visible file content;
 - an editor ACK persists its full visible content in Lazily, and a legacy
-  hash-only `already_applied` receipt is upgraded by one bounded live-buffer
-  publication without file-IPC fallback;
+hash-only `already_applied` receipt is upgraded by one bounded CRDT current-text
+publication without file-IPC fallback;
 - an editor-owned write with zero registered replicas in either pre-delivery
   timing window retains its full target
 as a Lazily deferred-write intent, returns promptly, and does not project to

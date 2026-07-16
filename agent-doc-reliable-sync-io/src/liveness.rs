@@ -37,6 +37,22 @@ use std::collections::{BTreeMap, BTreeSet};
 /// OS process id of an editor.
 pub type Pid = u64;
 
+/// Metadata for one editor replica. This travels on the same reliable Lazily
+/// channel as open/close state; it is not a filesystem projection of the live
+/// buffer. Registrations are scoped by document and pid, and only registrations
+/// whose pid is currently live/open are exposed as authority.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct EditorRegistration {
+    pub document_hash: String,
+    pub pid: Pid,
+    pub path: String,
+    pub editor_id: String,
+    pub editor_kind: String,
+    pub editor_version: String,
+    pub capabilities: Vec<String>,
+    pub timestamp_ms: u64,
+}
+
 /// One liveness event pushed editor-plugin → controller on the reliable-sync plane.
 ///
 /// The open/close pair carries the OR-set observation `tag`s (not stamps — OR-set
@@ -79,6 +95,10 @@ pub enum LivenessOp {
         synced_epoch: u64,
         stamp: WireStamp,
     },
+    /// Editor identity/generation/capabilities for one document replica. The
+    /// value is folded monotonically by `(timestamp_ms, value)` so retry and
+    /// reordering converge without a separate live-buffer metadata sidecar.
+    Register(EditorRegistration),
 }
 
 /// The controller's convergent liveness projection over one or more documents.
@@ -96,6 +116,8 @@ pub struct LivenessProjection {
     /// plane's sync-in-flight signal (`edit_epoch > synced_epoch` ⇒ unsynced edits),
     /// replacing the live-buffer sidecar's epoch fields (#sidecar-retirement).
     sync_state: BTreeMap<(String, Pid), WireLwwRegister<(u64, u64)>>,
+    /// `(document_hash, pid)` -> newest deterministic editor registration.
+    registrations: BTreeMap<(String, Pid), EditorRegistration>,
 }
 
 impl LivenessProjection {
@@ -152,6 +174,17 @@ impl LivenessProjection {
                         self.sync_state
                             .insert(key, WireLwwRegister::new(*stamp, value));
                     }
+                }
+            }
+            LivenessOp::Register(registration) => {
+                let key = (registration.document_hash.clone(), registration.pid);
+                let replace = self.registrations.get(&key).is_none_or(|current| {
+                    registration.timestamp_ms > current.timestamp_ms
+                        || (registration.timestamp_ms == current.timestamp_ms
+                            && registration > current)
+                });
+                if replace {
+                    self.registrations.insert(key, registration.clone());
                 }
             }
         }
@@ -214,6 +247,26 @@ impl LivenessProjection {
             .iter()
             .filter(|((_, pid), set)| set.present() && self.pid_alive(*pid))
             .map(|((doc, _), _)| doc.clone())
+            .collect()
+    }
+
+    /// Live/open editor registrations for `document_hash`, ordered
+    /// deterministically by pid and registration value.
+    pub fn live_registrations(&self, document_hash: &str) -> Vec<EditorRegistration> {
+        self.registrations
+            .iter()
+            .filter(|((doc, pid), _)| {
+                doc == document_hash && self.is_open(doc, *pid) && self.pid_alive(*pid)
+            })
+            .map(|(_, registration)| registration.clone())
+            .collect()
+    }
+
+    /// Live/open registrations across the whole projection.
+    pub fn all_live_registrations(&self) -> Vec<EditorRegistration> {
+        self.open_docs()
+            .into_iter()
+            .flat_map(|document_hash| self.live_registrations(&document_hash))
             .collect()
     }
 
@@ -322,6 +375,76 @@ mod tests {
             logical: 0,
             peer,
         }
+    }
+
+    #[test]
+    fn editor_registration_is_visible_only_while_replica_is_live_and_open() {
+        let mut projection = LivenessProjection::new();
+        let registration = EditorRegistration {
+            document_hash: "docA".into(),
+            pid: 100,
+            path: "/tmp/doc.md".into(),
+            editor_id: "jetbrains-100-test".into(),
+            editor_kind: "jetbrains".into(),
+            editor_version: "0.2.270".into(),
+            capabilities: vec!["operator_text_authority_v1".into()],
+            timestamp_ms: 10,
+        };
+        projection.apply(&LivenessOp::Register(registration.clone()));
+        assert!(projection.live_registrations("docA").is_empty());
+
+        projection.apply(&LivenessOp::Open {
+            document_hash: "docA".into(),
+            pid: 100,
+            tag: "open-1".into(),
+        });
+        assert_eq!(projection.live_registrations("docA"), vec![registration]);
+
+        projection.apply(&LivenessOp::Alive {
+            pid: 100,
+            value: false,
+            stamp: stamp(20, 1),
+        });
+        assert!(projection.live_registrations("docA").is_empty());
+    }
+
+    #[test]
+    fn editor_registration_advances_by_timestamp_before_metadata_order() {
+        let mut projection = LivenessProjection::new();
+        projection.apply(&LivenessOp::Open {
+            document_hash: "docA".into(),
+            pid: 100,
+            tag: "open-1".into(),
+        });
+        let older = EditorRegistration {
+            document_hash: "docA".into(),
+            pid: 100,
+            path: "/tmp/z-old.md".into(),
+            editor_id: "z-old".into(),
+            editor_kind: "jetbrains".into(),
+            editor_version: "9.9.9".into(),
+            capabilities: vec!["z-old".into()],
+            timestamp_ms: 10,
+        };
+        let newer = EditorRegistration {
+            path: "/tmp/a-new.md".into(),
+            editor_id: "a-new".into(),
+            editor_version: "0.2.270".into(),
+            capabilities: vec!["a-new".into()],
+            timestamp_ms: 20,
+            ..older.clone()
+        };
+
+        projection.apply(&LivenessOp::Register(older));
+        projection.apply(&LivenessOp::Register(newer.clone()));
+        assert_eq!(projection.live_registrations("docA"), vec![newer.clone()]);
+
+        projection.apply(&LivenessOp::Register(EditorRegistration {
+            timestamp_ms: 5,
+            path: "/tmp/zz-stale.md".into(),
+            ..newer.clone()
+        }));
+        assert_eq!(projection.live_registrations("docA"), vec![newer]);
     }
 
     // Conformance scenario `open_set_add_wins_over_stale_remove`

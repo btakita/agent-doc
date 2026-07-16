@@ -166,6 +166,11 @@ Closeout invariants currently exercised by the simulator:
   adopted.
 - Each named closeout fault point has an explicit fail-closed, recovery, or
   no-op outcome.
+- The exhaustive CRDT-lineage world distinguishes a clean crash-lost queue add
+  from an operator deletion: durable Lazily/CRDT lineage restores the former, while the
+  operator frontier retracts the latter and every later replay ordering preserves
+  the deletion. `formal/tla/CrdtLineageFence.tla` checks the same safety and
+  liveness properties independently with TLC.
 
 The simulator also covers route/controller schedules with a deliberately small
 actor model:
@@ -245,18 +250,17 @@ all.
 ## Editor integration harness (`#swint`)
 
 The simulator also owns a deterministic editor-buffer actor, `SimEditor`, that
-speaks the same durable live-buffer protocol the JetBrains / VS Code plugins
-speak over socket IPC / FFI. It records the editor-visible buffer through the
-production `debounce::record_live_buffer_digest_content` digest path (`#pcp6`)
-and reads "current document" back through the production
+speaks the same Lazily reliable-sync + CRDT replica protocol as the JetBrains /
+VS Code plugins. It publishes editor-visible text through the controller-owned
+replica relay and reads "current document" back through the production
 `realtime_model::resolve_current_doc` seam (rung 3b, `#rtwatch`) — the same seam
 `preflight` / `write` / `session-check` source the current document through.
 This turns the File-Cache-Conflict / IPC-drift / queue-flood classes — which
 previously only reproduced in a live IDE — into deterministic regressions.
 
 A `SimEditor` attaches to a real on-disk document and can type an unsaved edit,
-save (flush to disk), close (clear the sidecar via the production
-`debounce::clear_live_buffer` editor-close primitive), adopt a CRDT-merged
+save (flush to disk), close (deregister the replica and publish a reliable-sync
+OR-set close), adopt a CRDT-merged
 broadcast from a peer editor, reload from disk, and absorb an external disk
 write (agent-doc patchback) while open. Each editor is one of `EditorKind`
 (`Generic`, `JetBrains`, `VsCode`); the read-authority contract is identical
@@ -272,7 +276,7 @@ that lands while the buffer is dirty.
   `simeditor_save_then_close_falls_back_to_disk_authority` pins the "fall back to
   disk" half: a present in-sync buffer is `in_sync` (disk canonical) at the pure
   `reconcile_current_doc` seam, while the durable feed suppresses it to no-feed,
-  and closing the document clears the sidecar so resolve reports `editor_absent`.
+  and closing the document removes Lazily liveness so resolve reports `editor_absent`.
 - Slice 2 (JB + VS Code parity): `simeditor_jb_and_vscode_buffer_authority_parity_with_kind_specific_conflict`
   proves both editor kinds agree on read authority (a dirty buffer always wins,
   a clean buffer defers to disk) while differing only on the surfaced

@@ -2489,7 +2489,7 @@ class PatchWatcher implements vscode.Disposable {
         if (!this.writeEditorContentProjection(signal.patchId, signal.file, content, patchesDir)) {
             return;
         }
-        this.publishLiveBufferNow(document, projectRoot);
+        this.publishCurrentDocumentNow(document, projectRoot);
         this.outputChannel.appendLine(`save_document: flushed ${content.length} chars for ${signal.file}`);
     }
 
@@ -2543,7 +2543,7 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine(`publish_live_buffer: no open markdown document for ${file}`);
             return;
         }
-        this.publishLiveBufferNow(document, projectRoot);
+        this.publishCurrentDocumentNow(document, projectRoot);
     }
 
     /**
@@ -2997,10 +2997,10 @@ class PatchWatcher implements vscode.Disposable {
         this.liveBufferReports.delete(fsPath);
         const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === emittedPath);
         if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
-        this.publishLiveBufferNow(latest, projectRoot);
+        this.publishCurrentDocumentNow(latest, projectRoot);
     }
 
-    private publishLiveBufferNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
+    private publishCurrentDocumentNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
         const state = this.liveBufferReports.get(fsPath);
         if (state) {
@@ -3515,7 +3515,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Sidecar-retirement Phase 3C (design B): report this editor's open-set to the
     // reliable-sync liveness plane via a lazily-js OrSet graph → FFI push. No-op
     // unless the controller dual-run flag is on.
-    registerReliableSyncLiveness(context);
+    registerReliableSyncLiveness(context, EDITOR_ID);
 
     // Coordinate Project Controller turn state into the status bar. Refresh on
     // active editor changes and editor/plugin events; state itself comes from

@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.160
+
+- **Live editor text now has one authority: the Lazily/CPC CRDT.** Full `.agent-doc/live-buffer` snapshots are no longer written or read for content, liveness, targeting, stale-plugin detection, or capability proof. Open/close state, sync epochs, editor identity/version, and capabilities travel as monotone reliable-sync registrations; legacy live-buffer files are delete-only. JetBrains 0.2.270 also closes the native editor-op epoch before applying an agent or remote projection.
+- **Deleted queue heads cannot be replayed by an append-only journal.** Startup retires and clears `.agent-doc/queue-journal`; queue additions and deletions survive only through the same CRDT lineage, and preflight consumes CPC current directly.
+- **Retained semantic rebases require causal proof.** Exact byte equality settles delivery-only intents, while editor-cut, reconnect, external, and legacy semantic intents remain retained until lineage proof. The TLC model and exhaustive SimWorld cover deletion/crash/replay and editor-op epoch fences.
+
 ## 0.34.159
 
 - **Exact non-capture editor-reconnect projections now settle monotonically.** A queue-normalization or other deterministic preflight projection is no longer misclassified as a captured assistant response. Once the retained target hash, canonical editor/CRDT authority, and native-saved disk bytes are identical, `session-check` clears that intent without requiring inapplicable response-materialization proof; unresolved instances retain the same intent and use non-capture diagnostics. The CRDT relay regression fixture covers ACK-before-save retention followed by exact-save settlement.

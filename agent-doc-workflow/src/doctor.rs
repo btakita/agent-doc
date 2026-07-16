@@ -11,7 +11,7 @@ use crate::invariants::{
     RemediationAction, WorkflowInvariant, WorkflowInvariantCatalog, WorkflowInvariantId,
 };
 
-pub const WORKFLOW_DOCTOR_SCHEMA_VERSION: u8 = 1;
+pub const WORKFLOW_DOCTOR_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -136,8 +136,8 @@ pub struct GitDoctorFacts {
 pub struct EditorDoctorFacts {
     pub patches_dir_present: bool,
     pub legacy_ack_content_dir_present: bool,
-    pub live_buffer_dir_present: bool,
-    pub live_buffer_diverges: Option<bool>,
+    pub legacy_live_buffer_dir_present: bool,
+    pub lazily_current_diverges: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -408,12 +408,12 @@ fn evaluate_editor_convergence(
     facts: &WorkflowDoctorFacts,
 ) -> WorkflowInvariantResult {
     let mut result = WorkflowInvariantResult::new(invariant);
-    if facts.editor.live_buffer_diverges == Some(true) {
+    if facts.editor.lazily_current_diverges == Some(true) {
         result
             .disproof_markers
             .push("live editor buffer diverges from disk".to_string());
         return result.operator(
-            "editor proof sidecar reports a live unsaved buffer ahead of disk",
+            "the Lazily/CPC current document is ahead of disk",
             vec!["save the live editor buffer or let the plugin handle save_document IPC, then rerun agent-doc doctor <FILE>".to_string()],
         );
     }
@@ -426,14 +426,19 @@ fn evaluate_editor_convergence(
             operator_steps(invariant),
         );
     }
-    if facts.editor.legacy_ack_content_dir_present && !facts.editor.live_buffer_dir_present {
+    if facts.editor.legacy_ack_content_dir_present {
         result
             .disproof_markers
             .push("legacy ack-content directory is ignored as editor proof".to_string());
     }
-    if facts.editor.patches_dir_present || facts.editor.live_buffer_dir_present {
+    if facts.editor.legacy_live_buffer_dir_present {
+        result
+            .disproof_markers
+            .push("legacy live-buffer directory is ignored as editor proof".to_string());
+    }
+    if facts.editor.lazily_current_diverges == Some(false) {
         return result
-            .ok("editor IPC/lazily projection directories are present and no failure markers were found");
+            .ok("Lazily/CPC current is converged with disk and no failure markers were found");
     }
     result.blocked_missing(
         "editor_lazily_projection",
@@ -705,9 +710,9 @@ mod tests {
     }
 
     #[test]
-    fn doctor_marks_editor_convergence_operator_for_live_buffer_drift() {
+    fn doctor_marks_editor_convergence_operator_for_lazily_drift() {
         let mut facts = WorkflowDoctorFacts::default();
-        facts.editor.live_buffer_diverges = Some(true);
+        facts.editor.lazily_current_diverges = Some(true);
 
         let report = evaluate_catalog(
             Path::new("tasks/example.md"),

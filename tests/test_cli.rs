@@ -849,18 +849,21 @@ fn realtime_workflow_spec_pins_lazily_backed_authority() {
         realtime.contains("operator_text_authority_v1")
             && realtime.contains("capability-unknown frontend")
             && realtime.contains("safe delivery proof")
-            && realtime.contains("even when the reported buffer currently equals\ndisk:")
-            && realtime.contains("normalization repair")
+            && realtime.contains("current visible text itself remains in the CRDT")
+            && realtime.contains("newer monotone\nregistration")
             && realtime.contains("file-IPC fallback")
             && realtime.contains("expected editor text")
             && realtime.contains("Editor API success alone is not proof"),
         "realtime workflow spec must require frontend capability proof before trusting editor mutation delivery"
     );
     assert!(
-        realtime.contains("target the live plugin-owner `editor_id`")
+        realtime.contains("target the newest live reliable-sync editor registration")
             && realtime.contains("Untargeted file-IPC\n   fallback is not delivery proof")
-            && spec.contains("Editor delivery must target the live plugin-owner `editor_id`")
-            && spec.contains("untargeted file-IPC fallback is not delivery proof"),
+            && spec.contains(
+                "Editor delivery must target the `editor_id` from the newest live reliable-sync\n  registration"
+            )
+            && spec.contains("untargeted file-IPC fallback is not")
+            && spec.contains("delivery proof for an editor-owned document"),
         "realtime workflow spec must require targeted editor delivery for editor-owned documents"
     );
     assert!(
@@ -4145,11 +4148,9 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         queue_journal_io.contains("agent_doc_queue::queue_journal as queue_journal_policy")
             && queue_journal_io.contains("queue_journal_policy::queue_prompts(")
             && queue_journal_io.contains("queue_journal_policy::plan_append_entries(")
-            && queue_journal_io
-                .contains("queue_journal_policy::unique_queue_prompts_from_contents(")
             && queue_journal_io.contains("queue_journal_policy::replay_missing_entries(")
             && queue_journal_io.contains("queue_journal_path("),
-        "queue journal IO should call focused queue policy directly"
+        "legacy queue journal fixtures should call focused queue policy directly"
     );
     assert!(
         !manifest_dir
@@ -4160,9 +4161,11 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
     let start_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
-        start_run_source.contains("agent_doc_queue::queue_journal::merge_missing_into_content")
-            && !start_run_source.contains("crate::queue_journal::merge_missing_into_content"),
-        "startup replay should merge through the focused queue journal policy directly"
+        start_run_source.contains("fn retire_legacy_queue_journal(")
+            && start_run_source.contains("agent_doc_queue_io::queue_journal::clear(file)")
+            && !start_run_source
+                .contains("agent_doc_queue::queue_journal::merge_missing_into_content"),
+        "startup must delete legacy queue journals rather than replay deleted heads"
     );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
@@ -18945,7 +18948,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && start_io_source.contains(
                 "agent_doc_document_realtime_io::atomic_write_through_authority(file, &updated_content)"
             )
-            && start_io_source.contains(
+            && start_io_source.contains("retire_legacy_queue_journal(file)")
+            && !start_io_source.contains(
                 "agent_doc_document_realtime_io::atomic_write_through_authority(file, &merged)"
             )
             && orchestration_start_run.contains("prepare_start_runtime(file, force, route_owned)?"),
@@ -20184,20 +20188,13 @@ fn test_agent_doc_queue_has_no_manual_addition_compatibility_shim() {
         "fn queue_delete_counts(",
         "fn queue_counts_are_subset(",
         "fn queue_counts_have_deletion(",
-    ] {
-        assert!(
-            !maintenance_source.contains(forbidden),
-            "preflight maintenance must not re-own queue deletion identity policy: {forbidden}"
-        );
-    }
-    for required in [
         "agent_doc_queue::document_queue::queue_delete_counts",
         "agent_doc_queue::document_queue::queue_counts_are_subset",
         "agent_doc_queue::document_queue::queue_counts_have_deletion",
     ] {
         assert!(
-            maintenance_source.contains(required),
-            "preflight maintenance should call focused queue deletion policy directly: {required}"
+            !maintenance_source.contains(forbidden),
+            "preflight maintenance must not reconcile a second queue image: {forbidden}"
         );
     }
 }
@@ -21518,8 +21515,8 @@ fn test_agent_doc_preflight_io_owns_stale_warning_graph() {
         "stale_plugin_warnings(file)",
         "agent_doc_fs::install_freshness::locate_agent_doc_source_repo",
         "agent_doc_supervisor::config::classify_stale_install_artifacts",
-        "agent_doc_debounce::live_buffer_snapshots",
-        "agent_doc_debounce::live_buffer_snapshot_editor_is_live",
+        "agent_doc_controller_io::project_controller::live_editor_registrations_for_file",
+        "registration.editor_version",
         "option_env!(\"AGENT_DOC_EXPECTED_JETBRAINS_PLUGIN_VERSION\")",
     ] {
         assert!(
@@ -24701,11 +24698,8 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     let ipc_io_manifest: toml::Value = toml::from_str(&ipc_io_manifest).unwrap();
     let ipc_io_dependencies = ipc_io_manifest["dependencies"].as_table().unwrap();
     for required in [
-        "agent-doc-debounce",
-        "agent-doc-document-realtime",
         "agent-doc-ipc-protocol",
         "agent-doc-ops-log-io",
-        "agent-doc-plugin-owner",
         "anyhow",
         "interprocess",
         "serde_json",
@@ -24776,17 +24770,17 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     let ipc_io_editor_target_source =
         fs::read_to_string(manifest_dir.join("agent-doc-ipc-io/src/editor_target.rs")).unwrap();
     assert!(
-        ipc_io_editor_target_source.contains("pub fn live_editor_delivery_target(")
-            && ipc_io_editor_target_source
-                .contains("pub fn live_editor_delivery_has_operator_authority(")
-            && ipc_io_editor_target_source.contains("pub fn target_payload_to_live_editor(")
-            && ipc_io_editor_target_source.contains("pub fn target_payload_to_editor(")
-            && ipc_io_editor_target_source.contains("agent_doc_plugin_owner::")
+        ipc_io_editor_target_source.contains("pub fn target_payload_to_editor(")
+            && !ipc_io_editor_target_source.contains("live_editor_delivery_target(")
+            && !ipc_io_editor_target_source
+                .contains("live_editor_delivery_has_operator_authority(")
+            && !ipc_io_editor_target_source.contains("target_payload_to_live_editor(")
+            && !ipc_io_editor_target_source.contains("agent_doc_plugin_owner::")
             && !ipc_io_editor_target_source.contains("agent_doc_debounce::live_buffer_snapshots(")
             && !ipc_io_editor_target_source
                 .contains("agent_doc_document_realtime::select_live_editor_delivery_target(")
             && ipc_io_editor_target_source.contains("agent_doc_ops_log_io::log_op("),
-        "agent-doc-ipc-io editor_target should expose one captured legacy endpoint without treating live-buffer sidecars as endpoint authority"
+        "agent-doc-ipc-io editor_target should target an explicitly registered editor without selecting from filesystem sidecars or leases"
     );
 
     let ipc_forensics_manifest =
@@ -24998,7 +24992,7 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         admission_index < socket_send_index
             && write_ipc_transport_source.contains("EditorDeliveryAdmission::Detached")
             && write_ipc_transport_source
-                .contains("EditorDeliveryAdmission::RefuseAuthorityMismatch")
+                .contains("EditorDeliveryAdmission::RefuseIncompleteRegistration")
             && write_ipc_transport_source.contains("ipc_editor_delivery_refused"),
         "write IPC must fail closed on reliable-open-set versus legacy-endpoint disagreement before payload delivery"
     );
@@ -25041,7 +25035,8 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
             && write_ipc_io_source.contains("boundary_id_from_seed_with_summary")
             && write_ipc_io_source.contains("find_boundary_id")
             && write_ipc_io_source
-                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_live_editor"),
+                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_editor;")
+            && write_ipc_io_source.contains("live_editor_registration_for_file(file)"),
         "agent-doc-write-ipc-io should own reposition IPC transport and payload synthesis imports"
     );
     assert!(
@@ -25107,7 +25102,6 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         "fn existing_patch_is_reposition_only(",
         "crate::ipc_socket::is_already_applied_error",
         "pub use agent_doc_ipc_protocol",
-        "fn live_editor_delivery_target(",
         "fn live_editor_delivery_has_operator_authority(",
         "fn target_payload_to_live_editor(",
         "pub fn try_ipc_full_content(",
@@ -25129,10 +25123,12 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         write_converge_source.contains("use agent_doc_ipc_protocol::{")
             && write_converge_source.contains("is_socket_receipt_timeout_error")
             && write_converge_source.contains("is_socket_status_error")
-            && write_converge_source.contains("use agent_doc_ipc_io::editor_target::{")
-            && write_converge_source.contains("live_editor_delivery_has_operator_authority")
-            && write_converge_source.contains("target_payload_to_live_editor"),
-        "write convergence IO should import socket error classifiers and editor targeting from focused IPC crates"
+            && write_converge_source
+                .contains("use agent_doc_ipc_io::editor_target::target_payload_to_editor;")
+            && write_converge_source.contains("lazily_editor_has_operator_authority")
+            && write_converge_source.contains("target_payload_to_registered_editor")
+            && write_converge_source.contains("live_editor_registration_for_file(file)"),
+        "write convergence IO should use socket classifiers plus Lazily registration-based editor targeting"
     );
     for forbidden in [
         "fn is_socket_receipt_timeout_error(",
@@ -30697,7 +30693,7 @@ fn test_agent_doc_document_realtime_owns_exchange_recovery_policy() {
         "pub fn converge_document_or_disk(",
         "pub fn converge_or_disk_write(",
         "pub fn editor_convergence_payload(",
-        "pub fn live_buffer_delivery_missing_operator_text_authority_after_refresh(",
+        "pub fn editor_delivery_missing_operator_text_authority(",
         "fn try_editor_converge_file_ipc(",
         "fn try_detached_disk_write(",
         "pub struct FileIpcDeliveryOptions",

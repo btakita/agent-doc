@@ -2086,22 +2086,15 @@ Done.
 ";
         std::fs::write(&doc, bad_state).unwrap();
 
-        let indicator_path = doc
-            .canonicalize()
-            .unwrap_or_else(|_| doc.clone())
-            .to_string_lossy()
-            .to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &indicator_path,
-            bad_state,
-            Some("jetbrains-old-editor"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(
+            &doc,
+            "jetbrains-old-editor",
+            &[],
+        );
 
         let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
         let listener_root = dir.path().to_path_buf();
-        let listener_doc = doc.clone();
         let listener_count = call_count.clone();
         let captured_clone = captured.clone();
         std::fs::create_dir_all(listener_root.join(".agent-doc")).unwrap();
@@ -2110,18 +2103,6 @@ Done.
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v.clone());
-                if let Some(lines) = v.get("normalize_prefix_lines").and_then(|value| {
-                    value.as_array().map(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| item.as_str().map(str::to_string))
-                            .collect::<Vec<_>>()
-                    })
-                }) {
-                    let current = std::fs::read_to_string(&listener_doc).ok()?;
-                    let repaired = normalize_exchange_prefixes_for_targets(&current, &lines);
-                    let _ = std::fs::write(&listener_doc, repaired);
-                }
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
@@ -2150,21 +2131,12 @@ Done.
         );
         assert_eq!(
             call_count.load(std::sync::atomic::Ordering::SeqCst),
-            1,
-            "capability guard may only send one read-only authority refresh before blocking repair IPC"
+            0,
+            "capability guard must block without requesting any live-buffer projection or repair IPC"
         );
-        let msg = captured
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("listener should receive the authority refresh");
-        assert_eq!(msg["type"], "publish_live_buffer");
-        assert_eq!(msg["file"], indicator_path);
         assert!(
-            msg.get("content").is_none()
-                && msg.get("patches").is_none()
-                && msg.get("normalize_prefix_lines").is_none(),
-            "authority refresh must not carry repair or document mutation payload: {msg}"
+            captured.lock().unwrap().is_none(),
+            "capability guard must not send a sidecar-era live-buffer request"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
@@ -2172,12 +2144,6 @@ Done.
             ops_log.contains("skip=editor_capability_missing")
                 && ops_log.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
             "missing-capability redelivery skip should be logged:\n{ops_log}"
-        );
-        assert!(
-            ops_log
-                .contains("sidecar_normalization_fallback_narrow_repair_editor_authority_refresh")
-                && ops_log.contains("action=publish_live_buffer"),
-            "missing-capability redelivery should log the read-only authority refresh:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("sidecar_normalization_fallback_narrow_repair_attempt"),
@@ -3717,15 +3683,13 @@ mod committed_blob_authority_autoheal_tests {
     #[test]
     fn unblocks_when_stale_buffer_matches_a_committed_blob() {
         // disk == HEAD == NEW; the editor still holds committed ancestor OLD, and
-        // its live-buffer sidecar lacks the operator-text-authority capability.
-        let (_dir, file, canonical) = temp_git_doc(&[OLD, NEW]);
-        // Missing-capability sidecar holding the OLD committed blob.
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &canonical,
-            OLD,
-            Some("vscode-committed-blob"),
-        )
-        .unwrap();
+        // its reliable registration lacks the operator-text-authority capability.
+        let (_dir, file, _canonical) = temp_git_doc(&[OLD, NEW]);
+        agent_doc_test_support::seed_reliable_sync_editor_registration(
+            &file,
+            "vscode-committed-blob",
+            &[],
+        );
 
         // The stale buffer (expected_bad_state) IS a committed blob → proceed.
         let refuse = agent_doc_write_converge_io::redelivery_missing_operator_text_authority(
@@ -3757,14 +3721,13 @@ mod committed_blob_authority_autoheal_tests {
     fn still_refuses_when_stale_buffer_matches_no_committed_blob() {
         // SAFETY INVARIANT: disk == HEAD == NEW, but the editor holds a genuine
         // unsaved edit that matches NO commit. The gate MUST still refuse.
-        let (_dir, file, canonical) = temp_git_doc(&[OLD, NEW]);
+        let (_dir, file, _canonical) = temp_git_doc(&[OLD, NEW]);
         let unsaved = format!("{NEW}<!-- operator note -->\nGENUINELY UNSAVED WORK\n");
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &canonical,
-            &unsaved,
-            Some("vscode-unsaved-ahead"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(
+            &file,
+            "vscode-unsaved-ahead",
+            &[],
+        );
 
         let refuse = agent_doc_write_converge_io::redelivery_missing_operator_text_authority(
             &file,

@@ -141,31 +141,26 @@ pub(crate) fn captured_response_guard_evidence(
 }
 
 pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {
-    let file_key = file.to_string_lossy();
     let heading = heading.trim();
     if heading.is_empty() {
         return false;
     }
-    for snapshot in agent_doc_debounce::live_buffer_snapshots(&file_key) {
-        if !snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY) {
-            continue;
-        }
-        if !agent_doc_debounce::live_buffer_snapshot_editor_is_live(&snapshot) {
-            continue;
-        }
-        let Some(content) = snapshot.content.as_deref() else {
-            continue;
-        };
+    if let Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+        text: content,
+        live_editors,
+        ..
+    }) = agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file)
+        && live_editors > 0
+    {
         let content_norm =
-            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content);
+            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&content);
         if content_norm.lines().any(|line| line.trim() == heading) {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "session_check_committed_response_visible_in_live_buffer file={} heading={:?} editor_id={:?}",
+                    "session_check_committed_response_visible_in_current_document file={} heading={:?} authority=lazily_crdt",
                     file.display(),
                     heading,
-                    snapshot.editor_id
                 ),
             );
             return true;

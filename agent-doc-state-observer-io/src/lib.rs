@@ -34,15 +34,15 @@ fn closeout_phase_from_cycle(phase: CyclePhase) -> CloseoutPhase {
     }
 }
 
-/// Latest live-buffer edit/sync epochs for `file`, or `(0, 0)` (synced) when no
-/// live buffer snapshot exists.
+/// Derived Lazily reliable-sync state for `file`, represented as a minimal epoch
+/// pair for the advisory chart.
 fn editor_sync_epochs(file: &Path) -> (u64, u64) {
     let file_key = file.to_string_lossy();
-    agent_doc_debounce::live_buffer_snapshots(&file_key)
-        .into_iter()
-        .last()
-        .map(|s| (s.edit_epoch, s.last_synced_epoch))
-        .unwrap_or((0, 0))
+    if agent_doc_reliable_sync_io::plane_document_in_flight_for_path(&file_key).unwrap_or(false) {
+        (1, 0)
+    } else {
+        (0, 0)
+    }
 }
 
 /// `true` when a live IPC listener owns the document's project root. A missing /

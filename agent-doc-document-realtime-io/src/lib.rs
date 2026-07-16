@@ -652,12 +652,6 @@ fn publish_fresh_live_buffer_content(file: &Path, source: &str) -> Result<Option
     const PUBLISH_TIMEOUT_MS: u64 = 1_000;
 
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let path = canonical.to_string_lossy().to_string();
-    let before: std::collections::HashMap<Option<String>, u64> =
-        agent_doc_debounce::live_buffer_snapshots(&path)
-            .into_iter()
-            .map(|snapshot| (snapshot.editor_id, snapshot.edit_epoch))
-            .collect();
     let timeout = std::time::Duration::from_millis(PUBLISH_TIMEOUT_MS);
     agent_doc_crdt_relay_io::request_document_model_live_buffer_publish_with_timeout(
         &canonical, source, timeout,
@@ -665,26 +659,12 @@ fn publish_fresh_live_buffer_content(file: &Path, source: &str) -> Result<Option
 
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        let fresh = agent_doc_debounce::live_buffer_snapshots(&path)
-            .into_iter()
-            .filter(|snapshot| {
-                snapshot.content.is_some()
-                    && snapshot.len == snapshot.content.as_deref().map(str::len).unwrap_or(0)
-                    && before
-                        .get(&snapshot.editor_id)
-                        .is_none_or(|epoch| snapshot.edit_epoch > *epoch)
-            })
-            .max_by_key(|snapshot| (snapshot.edit_epoch, snapshot.timestamp_ms));
-        if let Some(snapshot) = fresh {
-            let content = snapshot.content.expect("filtered content-bearing snapshot");
-            if agent_doc_hash::content_hash(&content).eq_ignore_ascii_case(&snapshot.hash) {
-                clear_deferred_document_write_intent(
-                    &canonical,
-                    &snapshot.hash,
-                    "fresh_live_buffer_publish",
-                )?;
-                return Ok(Some(content));
-            }
+        if let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
+            query_live_editor_authority(&canonical, "fresh_live_buffer_publish")?
+        {
+            let hash = agent_doc_hash::content_hash(&text);
+            clear_deferred_document_write_intent(&canonical, &hash, "fresh_live_buffer_publish")?;
+            return Ok(Some(text));
         }
         if std::time::Instant::now() >= deadline {
             return Ok(None);
@@ -1275,11 +1255,15 @@ pub fn settle_retained_captured_projection_through_authority(
 /// Settle a retained document projection that is not owned by an active
 /// captured-response closeout.
 ///
-/// Preflight and editor-reconnect reconciliation can retain a deterministic
-/// document projection (for example, queue normalization) without capturing an
-/// assistant response. Once both canonical editor authority and disk equal the
-/// exact retained target, no response-materialization proof is applicable or
-/// necessary: the retained intent itself has reached its terminal state.
+/// Delivery-only reconciliation can retain a deterministic document projection
+/// without capturing an assistant response. Once both canonical editor
+/// authority and disk equal that exact retained target, no response proof is
+/// applicable or necessary.
+///
+/// Semantic rebase intents are deliberately excluded. Exact bytes do not prove
+/// that a target composed before a newer operator cut preserved deletions from
+/// that cut; settling one merely because it reached disk can bless a
+/// resurrection and erase the causal lineage needed to repair it.
 pub fn settle_retained_non_capture_projection_through_authority(
     path: &Path,
     source: &str,
@@ -1287,6 +1271,23 @@ pub fn settle_retained_non_capture_projection_through_authority(
     let Some(pending) = pending_document_write(path) else {
         return Ok(false);
     };
+    if !matches!(
+        pending.reason,
+        DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
+            | DocumentWriteDeferredReason::EditorDeliveryWorkerStale
+            | DocumentWriteDeferredReason::CrdtDeliveryAckPending
+    ) {
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_non_capture_projection_settlement_deferred file={} intent_id={} reason={} proof=missing_operator_cut_lineage",
+                path.display(),
+                pending.intent_id,
+                pending.reason,
+            ),
+        );
+        return Ok(false);
+    }
     let canonical = try_resolve_current_document_content(path, source)?;
     let target_hash = agent_doc_hash::content_hash(&pending.target_content);
     if canonical != pending.target_content
@@ -1732,9 +1733,13 @@ pub fn apply_canonical_replace_if_attached(
                         // exact merged target and refresh the supervisor/plugin
                         // bridge at the next safe capture-backed checkpoint.
                         let editor_delivery_worker_stale =
-                                agent_doc_ipc_io::editor_target::live_editor_delivery_has_operator_authority(file)
-                                    && agent_doc_ipc_io::editor_target::live_editor_delivery_target(file)
-                                        .is_none();
+                agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
+                    && agent_doc_controller_io::project_controller::live_editor_registration_for_file(
+                        file,
+                    )
+                    .ok()
+                    .flatten()
+                    .is_none();
                         if editor_delivery_worker_stale {
                             let intent_id = ensure_deferred_document_write_intent(
                                 file,
@@ -3910,8 +3915,7 @@ fn try_resolve_current_doc_with_disk_inner(
         } => {
             if live_editors == 0 {
                 // #live-editor-reactive (S2b/S3): route the zero-live-replica decision
-                // through the reactive open-docs projection (reconciled controller-side
-                // from the durable live-buffer sidecar ground truth) instead of demoting
+                // through the reliable-sync open-docs projection instead of demoting
                 // on the raw `live_editors == 0` poll. An editor that still has the doc
                 // open keeps editor authority — demoting to disk here is the phantom-
                 // `live_editors=0` wedge that stranded pane sync and logged `authority=disk`
@@ -4212,28 +4216,100 @@ mod tests {
         assert_eq!(recovered.matches("agent:boundary:").count(), 1);
     }
 
-    fn seed_reliable_sync_open(file: &std::path::Path, tag: &str) {
-        let document_hash = agent_doc_hash::document_id_for_path(file);
+    fn push_test_liveness(
+        file: &std::path::Path,
+        document_hash: &str,
+        ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
+    ) {
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
             .unwrap()
-            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-                document_hash,
+            .restore_liveness(ops);
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let project_root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
+        let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+            &project_root.join(".agent-doc/reliable_sync_outbox.db"),
+            document_hash.to_string(),
+        )
+        .unwrap();
+        let acked_through = outbox.acked_through();
+        let mut endpoint = agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
+            document_hash.to_string(),
+            outbox,
+            acked_through,
+        );
+        endpoint.enqueue(ops).unwrap();
+        let transport = agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(
+            &project_root,
+        );
+        let progress = endpoint.flush(&transport).unwrap();
+        assert!(
+            !progress.stalled && progress.retained == 0,
+            "realtime test reliable-sync liveness did not reach controller"
+        );
+    }
+
+    fn seed_reliable_sync_open(file: &std::path::Path, tag: &str) {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        push_test_liveness(
+            &canonical,
+            &document_hash,
+            &[
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: std::process::id().into(),
+                    tag: tag.to_string(),
+                },
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                    agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                        document_hash: document_hash.clone(),
+                        pid: std::process::id().into(),
+                        path: canonical.to_string_lossy().into_owned(),
+                        editor_id: tag.to_string(),
+                        editor_kind: "test".to_string(),
+                        editor_version: "test".to_string(),
+                        capabilities: vec![
+                            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string(),
+                            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),
+                        ],
+                        timestamp_ms,
+                    },
+                ),
+            ],
+        );
+    }
+
+    fn seed_reliable_sync_open_without_registration(file: &std::path::Path, tag: &str) {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        push_test_liveness(
+            &canonical,
+            &document_hash,
+            &[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.clone(),
                 pid: std::process::id().into(),
                 tag: tag.to_string(),
-            }]);
+            }],
+        );
     }
 
     fn seed_reliable_sync_close(file: &std::path::Path, tag: &str) {
-        let document_hash = agent_doc_hash::document_id_for_path(file);
-        agent_doc_reliable_sync_io::global_liveness_plane()
-            .lock()
-            .unwrap()
-            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
-                document_hash,
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        push_test_liveness(
+            &canonical,
+            &document_hash,
+            &[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
+                document_hash: document_hash.clone(),
                 pid: std::process::id().into(),
                 observed_tags: vec![tag.to_string()],
-            }]);
+            }],
+        );
     }
 
     fn ack_next_crdt_delivery(
@@ -4670,24 +4746,10 @@ mod tests {
         let target = "# Session\n\nvesting question\n\nagent response\n";
         let (dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-stale-delivery-worker";
-        seed_reliable_sync_open(&file, identity);
+        seed_reliable_sync_open_without_registration(&file, identity);
         test_support_register_replica_for_file(&file, identity)
             .unwrap()
             .expect("editor replica should attach");
-
-        let owner_dir = dir.path().join(".agent-doc/plugin-owner");
-        std::fs::create_dir_all(&owner_dir).unwrap();
-        let document_hash = agent_doc_fs::document_state_hash(&file).unwrap();
-        std::fs::write(
-            owner_dir.join(format!("{document_hash}.json")),
-            serde_json::json!({
-                "consumer_id": "jetbrains-stale-worker",
-                "pid": std::process::id(),
-                "heartbeat_secs": 0,
-            })
-            .to_string(),
-        )
-        .unwrap();
 
         let started = std::time::Instant::now();
         let err = atomic_write_through_authority(&file, target).unwrap_err();
@@ -5260,6 +5322,52 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn semantic_rebase_projection_does_not_settle_from_exact_bytes_alone() {
+        let editor_base = "# Session\n\n<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n<!-- /agent:queue -->\n";
+        let stale_target = "# Session\n\n<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n- do [#agent]\n<!-- /agent:queue -->\n";
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-semantic-rebase-non-capture-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            stale_target,
+            "semantic_rebase_exact_bytes_test",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(
+                client_id,
+                0,
+                editor_base.chars().count() as u32,
+                stale_target,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, stale_target).expect("simulate an exact but stale editor save");
+
+        assert!(
+            !settle_retained_non_capture_projection_through_authority(
+                &file,
+                "semantic_rebase_exact_bytes_settlement_test",
+            )
+            .unwrap(),
+            "semantic rebase lineage needs operator-cut proof, not byte equality",
+        );
+        let pending = pending_document_write(&file).expect("semantic intent must remain retained");
+        assert_eq!(
+            pending.reason,
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+        );
     }
 
     #[test]

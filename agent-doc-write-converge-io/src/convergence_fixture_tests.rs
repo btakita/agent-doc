@@ -128,12 +128,10 @@ pub(crate) fn converge_or_disk_write(
 }
 
 #[cfg(test)]
-pub(crate) fn live_buffer_delivery_missing_operator_text_authority_after_refresh(
+pub(crate) fn editor_delivery_missing_operator_text_authority(
     file: &Path,
-    content: &str,
-    source: &str,
-) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
-    super::live_buffer_delivery_missing_operator_text_authority_after_refresh(file, content, source)
+) -> Option<super::EditorAuthorityGap> {
+    super::editor_delivery_missing_operator_text_authority(file)
 }
 
 #[cfg(test)]
@@ -928,35 +926,28 @@ mod core_tests {
     }
 
     #[test]
-    fn converge_document_or_disk_blocks_diverged_under_capable_live_buffer_before_ipc() {
+    fn converge_document_or_disk_blocks_diverged_under_capable_registration_before_ipc() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &doc_str,
-            &format!("{source}\noperator typed text\n"),
-            Some("jetbrains-old"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(&doc, "jetbrains-old", &[]);
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
             .to_string();
         assert!(
             err.contains("operator_text_authority_v1"),
-            "under-capable editor sidecar must block with the missing capability: {err}"
+            "under-capable editor registration must block with the missing capability: {err}"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             source,
-            "under-capable editor sidecar must not let the converger mutate disk"
+            "under-capable editor registration must not let the converger mutate disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -969,35 +960,28 @@ mod core_tests {
     }
 
     #[test]
-    fn converge_document_or_disk_blocks_matching_under_capable_live_buffer_before_ipc() {
+    fn converge_document_or_disk_blocks_matching_under_capable_registration_before_ipc() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
         let target = agent_doc_test_support::queue_consume_convergence_target();
         fs::write(&doc, &source).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &doc_str,
-            &source,
-            Some("jetbrains-old"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(&doc, "jetbrains-old", &[]);
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
             .to_string();
         assert!(
             err.contains("operator_text_authority_v1"),
-            "matching under-capable editor sidecar must block delivery too: {err}"
+            "matching under-capable editor registration must block delivery too: {err}"
         );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             source,
-            "matching under-capable editor sidecar must not let the converger mutate disk"
+            "matching under-capable editor registration must not let the converger mutate disk"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
@@ -1010,158 +994,65 @@ mod core_tests {
     }
 
     #[test]
-    fn capability_guard_refreshes_live_buffer_sidecar_over_editor_ipc() {
+    fn capability_guard_does_not_request_live_buffer_over_editor_ipc() {
         let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
         let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &doc_str,
-            &source,
-            Some("jetbrains-old"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(&doc, "jetbrains-old", &[]);
 
         let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
         let captured_clone = captured.clone();
         let listener_root = dir.path().to_path_buf();
-        let doc_for_listener = doc_str.clone();
-        let source_for_listener = source.clone();
         let server = std::thread::spawn(move || {
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
                 *captured_clone.lock().unwrap() = Some(v.clone());
-                if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer") {
-                    let published =
-                        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                            &doc_for_listener,
-                            &source_for_listener,
-                            "jetbrains-old",
-                            "jetbrains",
-                            "test",
-                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                        );
-                    published.ok()?;
-                }
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
         std::thread::sleep(Duration::from_millis(120));
 
-        let missing = live_buffer_delivery_missing_operator_text_authority_after_refresh(
-            &doc,
-            &source,
-            "queue_consume",
+        let missing = editor_delivery_missing_operator_text_authority(&doc);
+        assert!(
+            missing.is_some(),
+            "an under-capable reliable registration must remain fail-closed"
         );
         assert!(
-            missing.is_none(),
-            "a capable editor refresh should clear the stale missing-authority sidecar"
+            captured.lock().unwrap().is_none(),
+            "the capability guard must not request a sidecar-era live-buffer publication"
         );
-        let msg = captured
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("listener saw publish_live_buffer");
-        assert_eq!(msg["type"], "publish_live_buffer");
-        assert_eq!(msg["file"], doc_str);
-
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("queue_consume_editor_authority_refresh")
-                && log.contains("transport=editor_ipc")
-                && log.contains("action=publish_live_buffer"),
-            "authority refresh should be logged as read-only editor IPC:\n{log}"
-        );
+        assert_eq!(doc_str, doc.to_string_lossy());
 
         let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
         drop(server);
     }
 
     #[test]
-    fn capability_guard_refreshes_live_buffer_sidecar_over_file_signal() {
+    fn capability_guard_does_not_request_live_buffer_over_file_signal() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("plan.md");
 
         let source = agent_doc_test_support::queue_consume_convergence_source();
         fs::write(&doc, &source).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &doc_str,
-            &source,
-            Some("vscode-old"),
-        )
-        .unwrap();
+        agent_doc_test_support::seed_reliable_sync_editor_registration(&doc, "vscode-old", &[]);
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
-        let captured_clone = captured.clone();
-        let signal_root = dir.path().to_path_buf();
-        let doc_for_signal = doc_str.clone();
-        let source_for_signal = source.clone();
-        let signal_thread = std::thread::spawn(move || {
-            let signal = signal_root
-                .join(".agent-doc")
-                .join("patches")
-                .join("publish-live-buffer.signal");
-            for _ in 0..100 {
-                if let Ok(raw) = fs::read_to_string(&signal) {
-                    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
-                    *captured_clone.lock().unwrap() = Some(v.clone());
-                    if v.get("type").and_then(|value| value.as_str()) == Some("publish_live_buffer")
-                    {
-                        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                            &doc_for_signal,
-                            &source_for_signal,
-                            "vscode-old",
-                            "vscode",
-                            "test",
-                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                        )
-                        .unwrap();
-                    }
-                    let _ = fs::remove_file(&signal);
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            panic!("publish-live-buffer file signal was not written");
-        });
-
-        let missing = live_buffer_delivery_missing_operator_text_authority_after_refresh(
-            &doc,
-            &source,
-            "queue_consume",
-        );
-        signal_thread.join().unwrap();
+        let missing = editor_delivery_missing_operator_text_authority(&doc);
         assert!(
-            missing.is_none(),
-            "a capable file-signal refresh should clear the stale missing-authority sidecar"
+            missing.is_some(),
+            "an under-capable reliable registration must remain fail-closed"
         );
-        let msg = captured
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("file signal was captured");
-        assert_eq!(msg["type"], "publish_live_buffer");
-        assert_eq!(msg["file"], doc_str);
+        let signal = agent_doc_dir
+            .join("patches")
+            .join("publish-live-buffer.signal");
         assert!(
-            msg.get("content").is_none() && msg.get("patches").is_none(),
-            "publish-live-buffer signal must be read-only: {msg}"
-        );
-
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("queue_consume_editor_authority_refresh")
-                && log.contains("transport=file_signal")
-                && log.contains("action=publish_live_buffer"),
-            "authority refresh should be logged as read-only file signal IPC:\n{log}"
+            !signal.exists(),
+            "the capability guard must not create a sidecar-era live-buffer signal"
         );
     }
 

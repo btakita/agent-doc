@@ -280,7 +280,7 @@ interface AgentDocLib : Library {
      */
     fun agent_doc_document_changed_digest_content(file_path: String, content: String)
 
-    /** Per-editor digest report used by the multi-editor broadcast sidecar bus. */
+    /** Legacy-shaped content report; registration travels with reliable-sync Open. */
     fun agent_doc_document_changed_digest_for_editor(
         file_path: String,
         content_len: Long,
@@ -288,7 +288,7 @@ interface AgentDocLib : Library {
         editor_id: String,
     )
 
-    /** Per-editor full-content report used by the multi-editor broadcast sidecar bus. */
+    /** Legacy-shaped content report; content authority remains the Lazily CRDT. */
     fun agent_doc_document_changed_digest_content_for_editor(
         file_path: String,
         content: String,
@@ -328,7 +328,7 @@ interface AgentDocLib : Library {
         capabilities_csv: String,
     )
 
-    /** Clear this editor instance's live-buffer sidecar for a closed document. */
+    /** Publish this editor instance's reliable-sync close for a document. */
     fun agent_doc_document_closed_for_editor(file_path: String, editor_id: String)
 
     /**
@@ -400,7 +400,7 @@ interface AgentDocLib : Library {
     /**
      * Capability-bearing editor content endpoint for a successfully applied
      * patch. It requires lazily receipt support and writes the derived content
-     * projection plus the matching synced live-buffer proof in one ABI call.
+     * projection plus the matching Lazily delivery receipt in one ABI call.
      */
     fun agent_doc_editor_content_applied_for_editor_v1(
         project_root: String,
@@ -644,6 +644,13 @@ interface AgentDocLib : Library {
         insertText: String?,
         deleteLen: Long,
     ): Int
+
+    /**
+     * End the current operator-op epoch before a remote/agent projection changes
+     * the editor frontier. This prevents later local edits from being appended
+     * to operations captured against the pre-projection merge base.
+     */
+    fun agent_doc_clear_editor_op_epoch(filePath: String): Int
 
     /**
      * Compute the base hash captured ops must be stamped with so the write-time

@@ -391,26 +391,28 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
     agent_doc_debounce::document_changed(path);
 }
 
-/// Whether a durable live-buffer sidecar should be written for `path`.
-///
-/// Sidecar-retirement (`#sidecar-retirement`): scope live-buffer writes to agent-doc
-/// session documents, exactly as the reliable-sync liveness plane already gates its
-/// pushes (`agent_doc_is_session_document`). Without this, an IDE writes a sidecar for
-/// every open tab — plain specs, `node_modules/**/README.md`, source files — which the
-/// plane correctly ignores; those non-session sidecars only inflate the `.agent-doc/
-/// live-buffer/` scans this retirement is removing. Classification reads the editor's
-/// in-memory `content` (no extra disk read on the per-keystroke hot path).
-fn live_buffer_sidecar_in_scope(path: &str, content: &str) -> bool {
-    agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(content, Path::new(path))
+/// Remove the obsolete full-buffer filesystem projection once per document in
+/// this native-library generation. Current content and liveness are owned by the
+/// Lazily/CPC CRDT + reliable-sync planes; no editor report may recreate this
+/// sidecar.
+fn retire_legacy_live_buffer_sidecar(path: &str) {
+    static RETIRED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let first = RETIRED
+        .lock()
+        .map(|mut paths| paths.insert(path.to_string()))
+        .unwrap_or(false);
+    if first && let Err(err) = agent_doc_debounce::clear_live_buffer(path) {
+        eprintln!("[ffi] failed to retire legacy live-buffer sidecar for {path}: {err}");
+    }
 }
 
-/// Record a document change plus full visible buffer content for one editor
-/// instance, including frontend metadata/capabilities.
+/// Compatibility change notification for one editor instance.
 ///
-/// `capabilities_csv` is a comma-separated list of stable capability tokens.
-/// Unknown/empty tokens are ignored. Old plugins use
-/// [`agent_doc_document_changed_digest_content_for_editor`] and therefore record
-/// no capability proof.
+/// The legacy-shaped signature still accepts visible content and frontend
+/// metadata, but neither is persisted here. Identity/version/capabilities travel
+/// with the reliable-sync `Open` epoch, and live text remains solely in the
+/// Lazily/CPC CRDT.
 ///
 /// # Safety
 ///
@@ -420,55 +422,27 @@ fn live_buffer_sidecar_in_scope(path: &str, content: &str) -> bool {
 pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2(
     file_path: *const c_char,
     content: *const c_char,
-    editor_id: *const c_char,
-    editor_kind: *const c_char,
-    editor_version: *const c_char,
-    capabilities_csv: *const c_char,
+    _editor_id: *const c_char,
+    _editor_kind: *const c_char,
+    _editor_version: *const c_char,
+    _capabilities_csv: *const c_char,
 ) {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
         Ok(path) => path,
         Err(_) => return,
     };
-    let text = match unsafe { CStr::from_ptr(content) }.to_str() {
+    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor) => editor,
-        Err(_) => return,
-    };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
-        Ok(kind) => kind,
-        Err(_) => return,
-    };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
-        Ok(version) => version,
-        Err(_) => return,
-    };
-    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
-        Ok(capabilities) => capabilities,
-        Err(_) => return,
-    };
-    let capabilities: Vec<&str> = capabilities_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|capability| !capability.is_empty())
-        .collect();
-    if live_buffer_sidecar_in_scope(path, text) {
-        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            path,
-            text,
-            editor,
-            kind,
-            version,
-            &capabilities,
-        );
-    }
+    retire_legacy_live_buffer_sidecar(path);
+    // Identity/version/capabilities are registered exactly once with the
+    // reliable-sync Open epoch. This compatibility content ABI never writes a
+    // second metadata stream and never persists `text` outside the CRDT.
     agent_doc_debounce::document_changed(path);
 }
 
-/// Record a document change plus full visible buffer content for one editor
-/// instance, with capabilities AND #falsetyping-guard replica-churn provenance.
+/// Compatibility change notification with replica-churn provenance.
 ///
 /// Identical to [`agent_doc_document_changed_digest_content_for_editor_v2`] but
 /// carries `no_unsaved_operator_edits`: pass `1` when the editor has proven the
@@ -487,10 +461,10 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2
 pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3(
     file_path: *const c_char,
     content: *const c_char,
-    editor_id: *const c_char,
-    editor_kind: *const c_char,
-    editor_version: *const c_char,
-    capabilities_csv: *const c_char,
+    _editor_id: *const c_char,
+    _editor_kind: *const c_char,
+    _editor_version: *const c_char,
+    _capabilities_csv: *const c_char,
     no_unsaved_operator_edits: i32,
 ) {
     let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
@@ -501,50 +475,19 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
         Ok(text) => text,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor) => editor,
-        Err(_) => return,
-    };
-    let kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
-        Ok(kind) => kind,
-        Err(_) => return,
-    };
-    let version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
-        Ok(version) => version,
-        Err(_) => return,
-    };
-    let capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
-        Ok(capabilities) => capabilities,
-        Err(_) => return,
-    };
-    let capabilities: Vec<&str> = capabilities_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|capability| !capability.is_empty())
-        .collect();
-    if live_buffer_sidecar_in_scope(path, text) {
-        let _ =
-            agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
-                path,
+    retire_legacy_live_buffer_sidecar(path);
+    if no_unsaved_operator_edits == 0
+        && agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, Path::new(path))
+        && let Err(err) =
+            agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_edit(
+                std::path::Path::new(path),
                 text,
-                editor,
-                kind,
-                version,
-                &capabilities,
-                no_unsaved_operator_edits != 0,
-            );
-        if no_unsaved_operator_edits == 0
-            && let Err(err) =
-                agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_editor_edit(
-                    std::path::Path::new(path),
-                    text,
-                    "operator_editor_content_advanced",
-                )
-        {
-            eprintln!(
-                "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
-            );
-        }
+                "operator_editor_content_advanced",
+            )
+    {
+        eprintln!(
+            "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
+        );
     }
     agent_doc_debounce::document_changed(path);
 }
@@ -597,8 +540,9 @@ pub unsafe extern "C" fn agent_doc_document_synced_digest_content_for_editor_v2(
     );
 }
 
-/// Clear one editor instance's live-buffer sidecar when the editor closes the
-/// document.
+/// Retire legacy buffer state and mirror a document-close hint. Durable
+/// multi-editor liveness is owned by the reliable-sync Lazily OR-set; this ABI
+/// never counts filesystem sidecars to decide whether an editor remains open.
 ///
 /// # Safety
 ///
@@ -612,19 +556,13 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
         Ok(path) => path,
         Err(_) => return,
     };
-    let editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
+    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
         Ok(editor) => editor,
         Err(_) => return,
     };
-    if let Err(e) = agent_doc_debounce::clear_live_buffer_for_editor(path, Some(editor)) {
-        eprintln!("[ffi] clear live buffer for editor failed for {path}: {e}");
-    }
-    // Mirror the close into the reactive editor open-document registry
-    // (`#live-editor-reactive`). Close is per-editor, so only mark the document fully
-    // closed once no live buffer sidecar remains — another editor may still hold it
-    // open (and it stays editor-authoritative until the last one closes).
-    if agent_doc_debounce::live_buffer_snapshots(path).is_empty() {
-        agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
+    retire_legacy_live_buffer_sidecar(path);
+    agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
+    if agent_doc_reliable_sync_io::plane_editor_live_for_path(path) == Some(false) {
         let file = std::path::Path::new(path);
         if let Err(err) =
             agent_doc_document_realtime_io::clear_pending_external_disk_decision_on_last_editor_close(
@@ -2034,6 +1972,45 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
     }
 }
 
+/// Close the current editor-op epoch before applying a non-operator projection.
+///
+/// Captured operator operations are meaningful only within one uninterrupted
+/// editor frontier. A remote/agent mutation changes that frontier even when the
+/// CRDT merge base sidecar has not advanced yet; retaining the old sidecar would
+/// concatenate later operator edits onto an obsolete base. Editor integrations
+/// call this immediately before applying any non-operator text mutation.
+///
+/// Returns `1` when the epoch was cleared (including an already-empty epoch), or
+/// `0` for invalid UTF-8 / I/O failure.
+///
+/// # Safety
+///
+/// `file_path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_clear_editor_op_epoch(file_path: *const c_char) -> i32 {
+    let Ok(file) = (unsafe { CStr::from_ptr(file_path) }).to_str() else {
+        eprintln!("[op-capture] agent_doc_clear_editor_op_epoch: non-UTF-8 path; retaining epoch");
+        return 0;
+    };
+    let file_path_buf = std::path::PathBuf::from(file);
+    match agent_doc_op_capture_io::clear_op_capture(&file_path_buf) {
+        Ok(()) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                "editor_op_epoch_closed cause=non_operator_projection action=cleared",
+            );
+            1
+        }
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                &file_path_buf,
+                &format!("editor_op_epoch_close_failed cause=non_operator_projection error={err}"),
+            );
+            0
+        }
+    }
+}
+
 /// Compute the `base_hash` the editor op reporters must stamp on captured ops
 /// (`#qnodemerge4wire`) so the write-time merge accepts them — the SHA256 hex of
 /// the same CRDT merge base text [`agent_doc_merge_io::merge_contents_crdt_with_ops`]
@@ -2643,6 +2620,62 @@ fn reliable_sync_outbox_path(project_root: &Path) -> PathBuf {
         .join("reliable_sync_outbox.db")
 }
 
+fn with_liveness_push_endpoint<T>(
+    project_root: &Path,
+    document_hash: &str,
+    operation: impl FnOnce(
+        &mut agent_doc_reliable_sync_io::push::LivenessPushEndpoint<
+            agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
+        >,
+    ) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let key = reliable_sync_registry_key(project_root, document_hash);
+    let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
+    let endpoint = match registry.entry(key) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+                &reliable_sync_outbox_path(project_root),
+                document_hash.to_string(),
+            )?;
+            let acked_through = outbox.acked_through();
+            entry.insert(
+                agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
+                    document_hash.to_string(),
+                    outbox,
+                    acked_through,
+                ),
+            )
+        }
+    };
+    operation(endpoint)
+}
+
+fn enqueue_liveness_ops(
+    project_root: &Path,
+    document_hash: &str,
+    ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
+) -> anyhow::Result<()> {
+    if !agent_doc_reliable_sync_io::dual_run_enabled() {
+        return Ok(());
+    }
+    with_liveness_push_endpoint(project_root, document_hash, |endpoint| {
+        endpoint.enqueue(ops)?;
+        Ok(())
+    })
+}
+
+fn flush_liveness_endpoint(project_root: &Path, document_hash: &str) -> anyhow::Result<u64> {
+    with_liveness_push_endpoint(project_root, document_hash, |endpoint| {
+        let transport = agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(
+            project_root,
+        );
+        Ok(endpoint.flush(&transport)?.acked_through)
+    })
+}
+
 fn document_op_channel_hash(file_path: &Path) -> String {
     format!(
         "{}:document-op",
@@ -2711,46 +2744,13 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
     ops_json: *const c_char,
 ) -> c_int {
     let result = (|| -> anyhow::Result<()> {
-        // The dual-run shadow plane is ON by default (2026-07-12); enqueuing
-        // durably records the liveness frame so the controller can fold it and the
-        // outbox can prune on ack. Explicitly disabled
-        // (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0`) ⇒ no-op so the durable outbox never
-        // grows when an operator keeps the plane dark.
-        if !agent_doc_reliable_sync_io::dual_run_enabled() {
-            return Ok(());
-        }
         let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
         let document_hash = unsafe { required_ffi_string(document_hash, "document_hash") }?;
         let ops_json = unsafe { required_ffi_string(ops_json, "ops_json") }?;
         let ops: Vec<agent_doc_reliable_sync_io::liveness::LivenessOp> =
             serde_json::from_str(&ops_json).context("parse liveness ops_json")?;
         let root = PathBuf::from(&project_root);
-        let key = reliable_sync_registry_key(&root, &document_hash);
-        let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
-            .lock()
-            .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
-        let endpoint = match registry.entry(key) {
-            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
-                    &reliable_sync_outbox_path(&root),
-                    document_hash.clone(),
-                )?;
-                // Resume the epoch counter past every epoch ever used (acked or
-                // still-retained) so a recycle never re-uses one the controller
-                // cursor would ignore.
-                let acked_through = outbox.acked_through();
-                entry.insert(
-                    agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
-                        document_hash.clone(),
-                        outbox,
-                        acked_through,
-                    ),
-                )
-            }
-        };
-        endpoint.enqueue(&ops)?;
-        Ok(())
+        enqueue_liveness_ops(&root, &document_hash, &ops)
     })();
     match result {
         Ok(()) => 0,
@@ -2779,17 +2779,7 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_flush(
         let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
         let document_hash = unsafe { required_ffi_string(document_hash, "document_hash") }?;
         let root = PathBuf::from(&project_root);
-        let key = reliable_sync_registry_key(&root, &document_hash);
-        let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
-            .lock()
-            .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
-        let Some(endpoint) = registry.get_mut(&key) else {
-            return Ok(0); // nothing enqueued for this document yet
-        };
-        let transport =
-            agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(&root);
-        let progress = endpoint.flush(&transport)?;
-        Ok(progress.acked_through)
+        flush_liveness_endpoint(&root, &document_hash)
     })();
     match result {
         Ok(ack) => ack as i64,
@@ -3448,24 +3438,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_buffer_sidecar_scoped_to_session_documents() {
-        // An agent-doc session document (frontmatter opt-in) writes a sidecar.
-        let session_doc = "---\nagent: claude\nagent_doc_format: template\n---\n\n## Exchange\n";
-        assert!(live_buffer_sidecar_in_scope("/tmp/plan.md", session_doc));
-        // A plain markdown tab (no agent-doc frontmatter) does not — the plane
-        // ignores it too, so no sidecar should accrue for it (#sidecar-retirement).
-        assert!(!live_buffer_sidecar_in_scope(
-            "/tmp/node_modules/foo/README.md",
-            "# Some library\n\nDocs.\n"
-        ));
-        // A source file is never a session document.
-        assert!(!live_buffer_sidecar_in_scope(
-            "/tmp/src/main.rs",
-            "fn main() {}\n"
-        ));
-    }
-
-    #[test]
     fn resolve_turn_phase_makes_document_model_authoritative() {
         use agent_doc_sqlite::state_store::ActorState;
         use agent_doc_turn::CyclePhase;
@@ -3983,6 +3955,50 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(ops.len(), 2, "failed ops must not be recorded");
+    }
+
+    #[test]
+    fn clear_editor_op_epoch_ffi_prevents_cross_projection_replay() {
+        use agent_doc_op_capture_io as op_capture;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("plan.md");
+        std::fs::write(&doc, "# plan\n").unwrap();
+
+        let base_text = "before projection\n";
+        let base_hash = agent_doc_hash::content_hash(base_text);
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let base_c = CString::new(base_hash.as_str()).unwrap();
+        let delete_kind = CString::new("delete").unwrap();
+        assert_eq!(
+            unsafe {
+                agent_doc_record_editor_op(
+                    file_c.as_ptr(),
+                    base_c.as_ptr(),
+                    delete_kind.as_ptr(),
+                    0,
+                    std::ptr::null(),
+                    1,
+                )
+            },
+            1
+        );
+        assert!(op_capture::has_pending_editor_ops(&doc));
+
+        assert_eq!(
+            unsafe { agent_doc_clear_editor_op_epoch(file_c.as_ptr()) },
+            1
+        );
+        assert!(
+            !op_capture::has_pending_editor_ops(&doc),
+            "a remote projection must end the previous op epoch"
+        );
+        assert!(
+            op_capture::editor_ops_for_base(&doc, base_text)
+                .unwrap()
+                .is_none(),
+            "later edits cannot inherit operations from the prior frontier"
+        );
     }
 
     #[test]
@@ -4818,14 +4834,22 @@ mod ack_content_tests {
     }
 
     #[test]
-    fn test_document_changed_digest_content_for_editor_v3_records_live_buffer_provenance() {
+    fn test_document_changed_digest_content_for_editor_v3_retires_live_buffer_sidecar() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
-        // A session document (frontmatter opt-in): live-buffer writes are scoped to
-        // session docs (#sidecar-retirement), so the digest content must be one.
         let doc_content = "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: remote\n";
         std::fs::write(&doc, doc_content).unwrap();
+        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
+            &doc.to_string_lossy(),
+            doc_content,
+            "legacy-editor",
+            "jetbrains",
+            "legacy",
+            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
+            false,
+        )
+        .unwrap();
         let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
         let content = CString::new(doc_content).unwrap();
         let editor_id = CString::new("jetbrains:test").unwrap();
@@ -4850,25 +4874,17 @@ mod ack_content_tests {
             )
         };
 
-        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
-            .expect("v3 full-content report should persist live-buffer sidecar");
-        assert_eq!(snapshot.content.as_deref(), Some(doc_content));
-        assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
-        assert!(snapshot.has_capability(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY));
-        assert!(snapshot.has_capability(agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY));
         assert!(
-            snapshot.no_unsaved_operator_edits,
-            "v3 provenance flag must survive the FFI bridge"
+            agent_doc_debounce::live_buffer_snapshots(&doc.to_string_lossy()).is_empty(),
+            "v3 reports must remove, never recreate, the legacy full-buffer sidecar"
         );
     }
 
     #[test]
-    fn test_document_changed_digest_content_for_editor_v2_records_live_buffer_without_provenance() {
+    fn test_document_changed_digest_content_for_editor_v2_does_not_create_live_buffer_sidecar() {
         let tmp = TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
-        // A session document (frontmatter opt-in): live-buffer writes are scoped to
-        // session docs (#sidecar-retirement), so the digest content must be one.
         let doc_content =
             "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: fallback\n";
         std::fs::write(&doc, doc_content).unwrap();
@@ -4895,11 +4911,10 @@ mod ack_content_tests {
             )
         };
 
-        let snapshot = agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy())
-            .expect("v2 full-content report should persist live-buffer sidecar");
-        assert_eq!(snapshot.content.as_deref(), Some(doc_content));
-        assert_eq!(snapshot.editor_kind.as_deref(), Some("jetbrains"));
-        assert!(!snapshot.no_unsaved_operator_edits);
+        assert!(
+            agent_doc_debounce::live_buffer_snapshots(&doc.to_string_lossy()).is_empty(),
+            "v2 reports are telemetry only; Lazily/CRDT owns current text"
+        );
     }
 
     #[test]

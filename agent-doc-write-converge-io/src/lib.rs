@@ -1,8 +1,8 @@
-//! Write convergence sidecar adapters.
+//! Write convergence adapters.
 //!
-//! This crate owns file-backed write-convergence decisions that sit between
-//! pure realtime/write policy and durable sidecars. It keeps those decision
-//! graphs out of the orchestration command crate.
+//! This crate connects pure realtime/write policy to the Lazily/CPC document
+//! authority and to purpose-specific durable recovery records. It keeps those
+//! decision graphs out of the orchestration command crate.
 
 use agent_doc_document::write_normalization::{
     AGENT_RESPONSE_COMPONENT, blank_components_except,
@@ -26,9 +26,7 @@ use agent_doc_element_exchange::{
     verify_sidecar_normalization,
 };
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
-use agent_doc_ipc_io::editor_target::{
-    live_editor_delivery_has_operator_authority, target_payload_to_live_editor,
-};
+use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
     FullContentRepairRedelivery, IpcDiskRepairReason, IpcLivePromptDriftState, IpcRepairDecision,
@@ -43,6 +41,33 @@ use agent_doc_turn::response_replay::{
 };
 use anyhow::{Context, Result};
 use lazily::{DeadlineCore, TimelineSource};
+
+fn live_editor_registration(
+    file: &Path,
+) -> Option<agent_doc_reliable_sync_io::liveness::EditorRegistration> {
+    agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+        .ok()
+        .flatten()
+}
+
+fn lazily_editor_has_operator_authority(file: &Path) -> bool {
+    agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
+}
+
+fn target_payload_to_registered_editor(
+    file: &Path,
+    payload: &mut serde_json::Value,
+    transport: &str,
+) -> Option<String> {
+    let registration = live_editor_registration(file)?;
+    target_payload_to_editor(file, payload, transport, &registration.editor_id);
+    Some(registration.editor_id)
+}
+
+#[derive(Debug, Clone)]
+pub struct EditorAuthorityGap {
+    pub editor_id: Option<String>,
+}
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -2466,7 +2491,7 @@ pub fn try_ipc_full_content_with_mode(
             effective_source_content,
             before_content.as_deref(),
         ]);
-    let authority = if live_editor_delivery_has_operator_authority(file) {
+    let authority = if lazily_editor_has_operator_authority(file) {
         WholeBufferAuthority::OperatorTextAuthority
     } else {
         WholeBufferAuthority::None
@@ -3062,107 +3087,27 @@ fn refresh_editor_after_ack_mismatch(
     }
 }
 
-pub fn live_buffer_delivery_missing_operator_text_authority_after_refresh(
-    file: &Path,
-    content: &str,
-    source: &str,
-) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
+pub fn editor_delivery_missing_operator_text_authority(file: &Path) -> Option<EditorAuthorityGap> {
     let canonical_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let indicator_path = canonical_file.to_string_lossy().to_string();
-    let missing = agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
-        &indicator_path,
-        content,
-    )?;
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
-    if !agent_doc_ipc_io::is_listener_active(&project_root) {
-        return match agent_doc_ipc_io::send_publish_live_buffer_file_signal(
-            &project_root,
-            &indicator_path,
-        ) {
-            Ok(true) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_editor_authority_refresh file={} transport=file_signal action=publish_live_buffer",
-                        file.display()
-                    ),
-                );
-                wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
-            }
-            Ok(false) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_unavailable action=editor_reload_required",
-                        file.display()
-                    ),
-                );
-                Some(missing)
-            }
-            Err(err) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_editor_authority_refresh file={} transport=blocked outcome=publish_live_buffer_file_signal_failed error={} action=editor_reload_required",
-                        file.display(),
-                        err
-                    ),
-                );
-                Some(missing)
-            }
-        };
-    }
-
-    match agent_doc_ipc_io::send_publish_live_buffer(&project_root, &indicator_path) {
-        Ok(true) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_editor_authority_refresh file={} transport=editor_ipc action=publish_live_buffer",
-                    file.display()
-                ),
-            );
-            wait_for_operator_text_authority_refresh(&indicator_path, content, missing)
-        }
-        Ok(false) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed action=editor_reload_required",
-                    file.display()
-                ),
-            );
-            Some(missing)
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_editor_authority_refresh file={} transport=blocked reason=publish_live_buffer_failed error={} action=editor_reload_required",
-                    file.display(),
-                    err
-                ),
-            );
-            Some(missing)
-        }
-    }
+    editor_authority_gap(&canonical_file)
 }
 
-fn wait_for_operator_text_authority_refresh(
-    indicator_path: &str,
-    content: &str,
-    mut latest_missing: agent_doc_debounce::LiveBufferSnapshot,
-) -> Option<agent_doc_debounce::LiveBufferSnapshot> {
-    for _ in 0..20 {
-        let still_missing =
-            agent_doc_debounce::live_buffer_delivery_missing_operator_text_authority(
-                indicator_path,
-                content,
-            )?;
-        latest_missing = still_missing;
-        std::thread::sleep(std::time::Duration::from_millis(25));
+fn editor_authority_gap(file: &Path) -> Option<EditorAuthorityGap> {
+    if !agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file) {
+        return None;
     }
-    Some(latest_missing)
+    let registration = live_editor_registration(file);
+    if registration.as_ref().is_some_and(|registration| {
+        registration
+            .capabilities
+            .iter()
+            .any(|capability| capability == agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+    }) {
+        return None;
+    }
+    Some(EditorAuthorityGap {
+        editor_id: registration.map(|registration| registration.editor_id),
+    })
 }
 
 fn content_matches_recent_committed_blob(file: &Path, content: &str, limit: usize) -> bool {
@@ -3243,11 +3188,7 @@ pub fn redelivery_missing_operator_text_authority(
     label: &str,
     source_patch_id: Option<&str>,
 ) -> bool {
-    let Some(live) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
-        file,
-        expected_bad_state,
-        label,
-    ) else {
+    let Some(live) = editor_delivery_missing_operator_text_authority(file) else {
         return false;
     };
     let editor_id = live.editor_id.as_deref().unwrap_or("unknown");
@@ -3297,8 +3238,8 @@ pub fn redelivery_missing_operator_text_authority(
             source_patch_id.unwrap_or("-"),
             agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
             editor_id,
-            live.len,
-            live.hash
+            expected_bad_state.len(),
+            agent_doc_hash::content_hash(expected_bad_state)
         ),
     );
     true
@@ -4076,11 +4017,7 @@ pub fn try_editor_converge(
         );
         return Ok(true);
     }
-    if let Some(snapshot) = live_buffer_delivery_missing_operator_text_authority_after_refresh(
-        &canonical_file,
-        current_content,
-        source,
-    ) {
+    if let Some(snapshot) = editor_delivery_missing_operator_text_authority(&canonical_file) {
         let editor_id = snapshot.editor_id.as_deref().unwrap_or("unknown");
         agent_doc_ops_log_io::log_op(
             file,
@@ -4089,8 +4026,8 @@ pub fn try_editor_converge(
                 file.display(),
                 agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
                 editor_id,
-                snapshot.len,
-                snapshot.hash
+                current_content.len(),
+                agent_doc_hash::content_hash(current_content)
             ),
         );
         anyhow::bail!(
@@ -4130,7 +4067,7 @@ pub fn try_editor_converge(
                     file.display()
                 );
             };
-            target_payload_to_live_editor(file, &mut payload, "file_ipc_convergence");
+            target_payload_to_registered_editor(file, &mut payload, "file_ipc_convergence");
             if try_editor_converge_file_ipc(
                 effects,
                 FileIpcConvergenceRequest {
@@ -4214,7 +4151,7 @@ pub fn try_editor_converge(
             file.display()
         );
     };
-    target_payload_to_live_editor(file, &mut payload, "editor_convergence");
+    target_payload_to_registered_editor(file, &mut payload, "editor_convergence");
 
     agent_doc_ops_log_io::log_op(
         file,

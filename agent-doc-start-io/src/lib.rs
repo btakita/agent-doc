@@ -345,7 +345,11 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
             .with_context(|| format!("failed to write {}", file.display()))?;
     }
 
-    let updated_content = replay_missing_operator_queue_items(file, updated_content);
+    // Lazily/CPC is the durable current-document authority. Retire the legacy
+    // append-only queue recovery journal instead of replaying it over that
+    // frontier; replay could not distinguish a crash-lost add from an
+    // operator-authored deletion and was the direct resurrection source.
+    retire_legacy_queue_journal(file);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
@@ -583,47 +587,8 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
     })
 }
 
-fn replay_missing_operator_queue_items(file: &Path, updated_content: String) -> String {
-    if let Err(err) = agent_doc_queue_io::queue_journal::record_live_buffer(file) {
-        eprintln!(
-            "[agent-doc] queue_journal: live-buffer record failed for {} ({err:#}) — continuing",
-            file.display()
-        );
-    }
-    let durable_content = agent_doc_snapshot_io::load(file).ok().flatten();
-    let missing = agent_doc_queue_io::queue_journal::replay_missing(
-        file,
-        &updated_content,
-        durable_content.as_deref(),
-    );
-    match agent_doc_queue::queue_journal::merge_missing_into_content(&missing, &updated_content) {
-        Ok(Some(merged)) => {
-            if let Err(err) =
-                agent_doc_document_realtime_io::atomic_write_through_authority(file, &merged)
-            {
-                eprintln!(
-                    "[agent-doc] queue_journal: failed to write replayed queue items to {} ({err:#})",
-                    file.display()
-                );
-                updated_content
-            } else {
-                eprintln!(
-                    "[agent-doc] queue_journal: replayed {} operator queue item(s) lost to a crash+restart for {}",
-                    missing.len(),
-                    file.display()
-                );
-                merged
-            }
-        }
-        Ok(None) => updated_content,
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] queue_journal: replay merge failed for {} ({err:#}) — continuing without replay",
-                file.display()
-            );
-            updated_content
-        }
-    }
+fn retire_legacy_queue_journal(file: &Path) {
+    agent_doc_queue_io::queue_journal::clear(file);
 }
 
 fn close_stale_start_actors(
@@ -1122,6 +1087,19 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn start_retires_legacy_queue_journal_instead_of_replaying_deleted_heads() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/queue-journal")).unwrap();
+        let file = dir.path().join("session.md");
+        let old = "<!-- agent:queue -->\n\n- deleted by operator\n";
+        agent_doc_queue_io::queue_journal::record(&file, old).unwrap();
+
+        retire_legacy_queue_journal(&file);
+
+        assert!(agent_doc_queue_io::queue_journal::replay_missing(&file, "", None).is_empty());
+    }
 
     #[test]
     fn session_id_short_never_panics_on_short_or_multibyte_sessions() {

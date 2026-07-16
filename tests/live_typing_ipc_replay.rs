@@ -83,27 +83,32 @@ fn doc_hash(doc: &Path) -> String {
     content_hash(canonical.to_string_lossy().as_ref())
 }
 
-fn record_operator_buffer(file: &Path, content: &str) {
-    let file_key = file.to_string_lossy();
-    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-        file_key.as_ref(),
-        content,
-        TEST_EDITOR_ID,
-        "jetbrains",
-        "test",
-        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-    )
-    .unwrap();
-}
-
 fn seed_reliable_sync_open(doc: &Path, tag: &str) {
     let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
     let document_hash = agent_doc_hash::document_id_for_path(doc);
-    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-        document_hash: document_hash.clone(),
-        pid: std::process::id().into(),
-        tag: tag.to_string(),
-    }];
+    let pid = std::process::id().into();
+    let ops = vec![
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid,
+            tag: tag.to_string(),
+        },
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: document_hash.clone(),
+                pid,
+                path: doc.to_string_lossy().into_owned(),
+                editor_id: tag.to_string(),
+                editor_kind: "test".to_string(),
+                editor_version: "test".to_string(),
+                capabilities: vec![
+                    "operator_text_authority_v1".to_string(),
+                    "lazily_transport_receipts_v1".to_string(),
+                ],
+                timestamp_ms: 1,
+            },
+        ),
+    ];
     agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
         &project_root
             .join(".agent-doc")
@@ -113,17 +118,6 @@ fn seed_reliable_sync_open(doc: &Path, tag: &str) {
         Some(&serde_json::to_string(&ops).unwrap()),
     )
     .expect("seed durable reliable-sync Open fact");
-}
-
-fn seed_legacy_editor_endpoint(doc: &Path, editor_id: &str) {
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(
-            doc.to_str().unwrap(),
-            editor_id,
-            std::process::id(),
-        ),
-        "test setup should acquire a live file-IPC endpoint"
-    );
 }
 
 fn start_project_controller(root: &Path) -> Child {
@@ -327,7 +321,6 @@ impl ReplayProject {
         let updated = current.replace("<!--\n-->\n", &format!("<!--\n{LIVE_TYPING_PROMPT}\n-->\n"));
         assert_ne!(current, updated, "fixture comment shell should be present");
         fs::write(&self.doc, &updated).unwrap();
-        record_operator_buffer(&self.doc, &updated);
     }
 }
 
@@ -532,7 +525,6 @@ fn patch_jsons(project: &ReplayProject) -> Vec<PathBuf> {
 #[test]
 fn socket_ipc_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
-    seed_legacy_editor_endpoint(&project.doc, TEST_EDITOR_ID);
     seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
     let mut controller = start_project_controller(project.root());
@@ -549,7 +541,6 @@ fn socket_ipc_replays_live_typing_during_finalize() {
                 return Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string());
             };
             let after_apply = apply_payload_to_file(&payload, &doc_for_listener)?;
-            record_operator_buffer(&doc_for_listener, &after_apply);
             publish_editor_text_via_project_controller(
                 &doc_for_listener,
                 &controller_replica,
@@ -613,7 +604,6 @@ fn socket_ipc_replays_live_typing_during_finalize() {
 #[test]
 fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
     let project = setup_replay_project(true);
-    seed_legacy_editor_endpoint(&project.doc, TEST_EDITOR_ID);
     seed_reliable_sync_open(&project.doc, TEST_EDITOR_ID);
     project.type_live_prompt_after_preflight();
     let mut controller = start_project_controller(project.root());
@@ -641,7 +631,6 @@ fn file_ipc_lazily_event_replays_live_typing_during_finalize() {
                     continue;
                 };
                 let after_apply = apply_payload_to_file(&payload, &doc_for_watcher).unwrap();
-                record_operator_buffer(&doc_for_watcher, &after_apply);
                 publish_editor_text_via_project_controller(
                     &doc_for_watcher,
                     &controller_replica,

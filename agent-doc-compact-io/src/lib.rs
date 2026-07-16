@@ -1752,19 +1752,16 @@ mod tests {
         );
     }
 
-    fn assert_editor_capability_compact_refusal(err: &anyhow::Error, ops_log: &str) {
-        let err = err.to_string();
+    fn assert_unavailable_editor_delivery_compact_refusal(err: &anyhow::Error, ops_log: &str) {
+        let err = format!("{err:#}");
         assert!(
-            err.contains("lacks required capability")
-                && err.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
-            "compact with an under-capable live editor buffer must fail closed: {err}"
+            err.contains("editor is the current authority")
+                && err.contains("CRDT relay has no registered replica yet"),
+            "compact without a reachable editor replica must fail closed: {err}"
         );
         assert!(
-            ops_log.contains("compact_writeback")
-                && ops_log.contains("transport=blocked")
-                && ops_log.contains("reason=editor_capability_missing")
-                && ops_log.contains(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY),
-            "under-capable compact refusal should be logged:\n{ops_log}"
+            !ops_log.contains("transport=disk_detached"),
+            "unavailable editor delivery must not fall back to detached disk:\n{ops_log}"
         );
     }
 
@@ -2480,7 +2477,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_without_listener_rejects_idle_unsaved_editor_buffer() {
+    fn component_compact_without_listener_rejects_idle_unsaved_crdt_editor_buffer() {
         let doc = concat!(
             "---\nagent_doc_session: test-compact-live-buffer\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2499,14 +2496,12 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
-        let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest(
-            &file_str,
-            live_buffer.len(),
-            &agent_doc_hash::content_hash(&live_buffer),
+        let _editor = CompactTestEditorBuffer::attach_without_delivery_pump(
+            &file,
+            "compact-unsaved-editor",
+            &live_buffer,
         )
         .unwrap();
 
@@ -2524,11 +2519,11 @@ mod tests {
             "failed compact must not advance the snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_editor_capability_compact_refusal(&err, &ops_log);
+        assert_unavailable_editor_delivery_compact_refusal(&err, &ops_log);
     }
 
     #[test]
-    fn component_compact_without_listener_rejects_stale_editor_cache_when_snapshot_is_stale() {
+    fn component_compact_without_listener_rejects_stale_crdt_editor_when_snapshot_is_stale() {
         let stale_snapshot = concat!(
             "---\nagent_doc_session: test-compact-stale-cache\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -2547,14 +2542,12 @@ mod tests {
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         agent_doc_snapshot_io::save(&file, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        let file_str = file.canonicalize().unwrap().to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest(
-            &file_str,
-            stale_snapshot.len(),
-            &agent_doc_hash::content_hash(stale_snapshot),
+        let _editor = CompactTestEditorBuffer::attach_without_delivery_pump(
+            &file,
+            "compact-stale-editor",
+            stale_snapshot,
         )
         .unwrap();
 
@@ -2578,7 +2571,7 @@ mod tests {
             "failed compact must not advance a stale snapshot"
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert_editor_capability_compact_refusal(&err, &ops_log);
+        assert_unavailable_editor_delivery_compact_refusal(&err, &ops_log);
     }
 
     #[test]
@@ -3767,16 +3760,65 @@ mod tests {
 
     impl CompactTestEditorBuffer {
         fn attach(file: &Path, editor_id: &str, seed: &str) -> Result<Self> {
+            Self::attach_with_delivery_pump(file, editor_id, seed, true)
+        }
+
+        fn attach_without_delivery_pump(file: &Path, editor_id: &str, seed: &str) -> Result<Self> {
+            Self::attach_with_delivery_pump(file, editor_id, seed, false)
+        }
+
+        fn attach_with_delivery_pump(
+            file: &Path,
+            editor_id: &str,
+            seed: &str,
+            start_delivery_pump: bool,
+        ) -> Result<Self> {
             let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
             let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+            let liveness_ops = vec![
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: std::process::id().into(),
+                    tag: format!("compact-test:{editor_id}:{}", canonical.display()),
+                },
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+                    agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                        document_hash: document_hash.clone(),
+                        pid: std::process::id().into(),
+                        path: canonical.to_string_lossy().into_owned(),
+                        editor_id: editor_id.to_string(),
+                        editor_kind: "test".to_string(),
+                        editor_version: "test".to_string(),
+                        capabilities: vec![
+                            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY.to_string(),
+                            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),
+                        ],
+                        timestamp_ms: 1,
+                    },
+                ),
+            ];
             agent_doc_reliable_sync_io::global_liveness_plane()
                 .lock()
                 .map_err(|_| anyhow::anyhow!("compact test liveness plane mutex poisoned"))?
-                .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-                    document_hash,
-                    pid: std::process::id().into(),
-                    tag: format!("compact-test:{editor_id}:{}", canonical.display()),
-                }]);
+                .restore_liveness(&liveness_ops);
+            let project_root = agent_doc_fs::find_project_root(&canonical)
+                .context("compact test could not resolve project root")?;
+            let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
+                &project_root.join(".agent-doc/reliable_sync_outbox.db"),
+                document_hash.clone(),
+            )?;
+            let mut endpoint =
+                agent_doc_reliable_sync_io::push::LivenessPushEndpoint::new(document_hash, outbox);
+            endpoint.enqueue(&liveness_ops)?;
+            let transport =
+                agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(
+                    &project_root,
+                );
+            let progress = endpoint.flush(&transport)?;
+            anyhow::ensure!(
+                !progress.stalled && progress.retained == 0,
+                "compact test reliable-sync registration did not reach controller"
+            );
             let replica_identity = format!("{}:{}", editor_id, canonical.display());
             let (client_id, bootstrap) =
                 agent_doc_crdt_relay_io::register_replica_for_file(file, &replica_identity)?
@@ -3791,8 +3833,12 @@ mod tests {
             if editor.content != seed {
                 editor.publish(file, seed)?;
             }
-            let _ =
-                agent_doc_test_support::start_crdt_delivery_pump(file, &editor.replica_identity);
+            if start_delivery_pump {
+                let _ = agent_doc_test_support::start_crdt_delivery_pump(
+                    file,
+                    &editor.replica_identity,
+                );
+            }
             Ok(editor)
         }
 
@@ -3812,19 +3858,6 @@ mod tests {
     }
 
     fn record_compact_lazily_receipt(file: &Path, patch_id: &str, content: &str) -> Option<()> {
-        let file_key = file.to_string_lossy();
-        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            file_key.as_ref(),
-            content,
-            COMPACT_TEST_EDITOR_ID,
-            "test",
-            "test",
-            &[
-                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-                agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-            ],
-        )
-        .ok()?;
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file, patch_id, content, "compact_test",
         )

@@ -1,48 +1,5 @@
 use std::path::Path;
 
-pub fn live_editor_delivery_target(file: &Path) -> Option<String> {
-    let mut file_keys = Vec::new();
-    if let Ok(canonical) = file.canonicalize() {
-        file_keys.push(canonical.to_string_lossy().to_string());
-    }
-    let raw = file.to_string_lossy().to_string();
-    if !file_keys.iter().any(|key| key == &raw) {
-        file_keys.push(raw);
-    }
-
-    file_keys
-        .iter()
-        .find_map(|file_key| agent_doc_plugin_owner::fresh_plugin_owner_consumer_id(file_key))
-}
-
-pub fn live_editor_delivery_has_operator_authority(file: &Path) -> bool {
-    let mut file_keys = Vec::new();
-    if let Ok(canonical) = file.canonicalize() {
-        file_keys.push(canonical.to_string_lossy().to_string());
-    }
-    let raw = file.to_string_lossy().to_string();
-    if !file_keys.iter().any(|key| key == &raw) {
-        file_keys.push(raw);
-    }
-
-    file_keys
-        .iter()
-        // PID liveness is intentionally stronger than delivery freshness here:
-        // a stale plugin worker can still leave unsaved operator text in the
-        // live IDE buffer, so disk must remain fenced.
-        .any(|file_key| agent_doc_plugin_owner::live_plugin_owner_consumer_id(file_key).is_some())
-}
-
-pub fn target_payload_to_live_editor(
-    file: &Path,
-    payload: &mut serde_json::Value,
-    transport: &str,
-) -> Option<String> {
-    let editor_id = live_editor_delivery_target(file)?;
-    target_payload_to_editor(file, payload, transport, &editor_id);
-    Some(editor_id)
-}
-
 pub fn target_payload_to_editor(
     file: &Path,
     payload: &mut serde_json::Value,
@@ -64,97 +21,18 @@ pub fn target_payload_to_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]
-    fn ipc_payload_targets_live_plugin_owner() {
+    fn ipc_payload_targets_explicit_registered_editor() {
         let tmp = TempDir::new().unwrap();
-        for subdir in ["plugin-owner", "logs"] {
-            fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
-        }
+        std::fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         let doc = tmp.path().join("session.md");
-        fs::write(&doc, "saved").unwrap();
-        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
-
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &doc_str,
-            "jetbrains-test-owner",
-            std::process::id(),
-        ));
-
         let mut payload = serde_json::json!({});
-        let target = target_payload_to_live_editor(&doc, &mut payload, "test");
-
-        assert_eq!(target.as_deref(), Some("jetbrains-test-owner"));
+        target_payload_to_editor(&doc, &mut payload, "test", "jetbrains-test-owner");
         assert_eq!(
             payload.get("editor_id").and_then(|value| value.as_str()),
             Some("jetbrains-test-owner")
-        );
-    }
-
-    #[test]
-    fn ipc_payload_ignores_newer_live_buffer_sidecar() {
-        let tmp = TempDir::new().unwrap();
-        for subdir in ["live-buffer", "plugin-owner", "logs"] {
-            fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
-        }
-        let doc = tmp.path().join("session.md");
-        fs::write(&doc, "saved").unwrap();
-        let doc_str = doc.canonicalize().unwrap().to_string_lossy().to_string();
-
-        assert!(agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &doc_str,
-            "jetbrains-owner",
-            std::process::id(),
-        ));
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            "saved plus newer non-owner buffer",
-            "jetbrains-newer-nonowner",
-            "jetbrains",
-            "0.2.197",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let mut payload = serde_json::json!({});
-        let target = target_payload_to_live_editor(&doc, &mut payload, "test");
-
-        assert_eq!(target.as_deref(), Some("jetbrains-owner"));
-        assert_eq!(
-            payload.get("editor_id").and_then(|value| value.as_str()),
-            Some("jetbrains-owner")
-        );
-    }
-
-    #[test]
-    fn stale_delivery_worker_remains_disk_authority_but_is_not_routable() {
-        let tmp = TempDir::new().unwrap();
-        let owner_dir = tmp.path().join(".agent-doc/plugin-owner");
-        fs::create_dir_all(&owner_dir).unwrap();
-        let doc = tmp.path().join("session.md");
-        fs::write(&doc, "saved").unwrap();
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        fs::write(
-            owner_dir.join(format!("{hash}.json")),
-            serde_json::json!({
-                "consumer_id": "jetbrains-stale-worker",
-                "pid": std::process::id(),
-                "heartbeat_secs": 0,
-            })
-            .to_string(),
-        )
-        .unwrap();
-
-        assert!(
-            live_editor_delivery_has_operator_authority(&doc),
-            "the live IDE process may still own unsaved operator text",
-        );
-        assert_eq!(
-            live_editor_delivery_target(&doc),
-            None,
-            "a stale delivery component must not receive more payloads",
         );
     }
 }

@@ -207,14 +207,15 @@ function resetBindings(): void {
 }
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
-const EDITOR_PLUGIN_KIND = 'vscode';
-const EDITOR_PLUGIN_VERSION = '0.2.52';
+export const EDITOR_PLUGIN_KIND = 'vscode';
+export const EDITOR_PLUGIN_VERSION = '0.2.52';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
-const EDITOR_CAPABILITIES = [
-    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-    LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-].join(',');
+export const EDITOR_CAPABILITY_LIST = [
+OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+];
+const EDITOR_CAPABILITIES = EDITOR_CAPABILITY_LIST.join(',');
 
 function findLibrary(projectRoot?: string): string | null {
     // 1. Explicit env var
@@ -1890,8 +1891,8 @@ export function documentChangedDigest(
  * Record a document change plus the editor's FULL visible buffer content (#pcp6).
  * Mirrors the JetBrains plugin: lets the CLI visible-write reconcile guard
  * positively confirm the editor buffer equals on-disk content (no unsaved edit
- * ahead of disk) instead of inferring from a len/hash digest. The text stays
- * local to the project `.agent-doc/` state dir.
+* ahead of disk) instead of inferring from a len/hash digest. The compatibility
+* ABI does not persist this text; current content stays in the Lazily CRDT.
  */
 export function documentChangedDigestContent(
     filePath: string,
@@ -1933,7 +1934,7 @@ export function documentChangedDigestContent(
 }
 
 /**
- * Clear this editor instance's durable live-buffer sidecar on close.
+ * Publish this editor instance's reliable-sync close for the document.
  */
 export function documentClosedForEditor(
     filePath: string,

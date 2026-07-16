@@ -12,7 +12,7 @@ use agent_doc_element_exchange::{
 };
 use agent_doc_flow::types::{FlowOutcome, FlowStage};
 use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
-use agent_doc_ipc_io::editor_target::{live_editor_delivery_target, target_payload_to_editor};
+use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, FullContentIpcMode, IpcSnapshotSource,
     build_ipc_node_patches_json, effective_unmatched_for_patch_payload,
@@ -36,6 +36,13 @@ use agent_doc_write_converge_io::{
     save_ipc_snapshot_and_crdt_nonfatal, visible_write_disk_proof,
     write_visible_write_through_to_disk,
 };
+
+fn registered_editor_delivery_target(file: &Path) -> Option<String> {
+    agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+        .ok()
+        .flatten()
+        .map(|registration| registration.editor_id)
+}
 use anyhow::Result;
 use std::path::Path;
 
@@ -339,18 +346,18 @@ fn try_ipc_inner(
     // Clean up any legacy degraded marker from older versions
     cleanup_legacy_ipc_degraded(&project_root);
 
-    let editor_delivery_target = live_editor_delivery_target(file);
+    let editor_delivery_target = registered_editor_delivery_target(file);
     let reliable_editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
     match decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
         reliable_editor_live,
-        legacy_endpoint_live: editor_delivery_target.is_some(),
+        registration_available: editor_delivery_target.is_some(),
     }) {
         EditorDeliveryAdmission::DeliverToLiveEditor => {}
         EditorDeliveryAdmission::Detached => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "ipc_editor_delivery_skipped file={} reliable_editor_live=false legacy_endpoint_live=false action=detached_fallback",
+                    "ipc_editor_delivery_skipped file={} reliable_editor_live=false registration_available=false action=detached_fallback",
                     file.display()
                 ),
             );
@@ -360,18 +367,18 @@ fn try_ipc_inner(
                 skipped_committed_cycle: false,
             });
         }
-        EditorDeliveryAdmission::RefuseAuthorityMismatch => {
+        EditorDeliveryAdmission::RefuseIncompleteRegistration => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "ipc_editor_delivery_refused file={} reliable_editor_live={} legacy_endpoint_live={} action=fail_closed_before_payload",
+                    "ipc_editor_delivery_refused file={} reliable_editor_live={} registration_available={} action=fail_closed_before_payload",
                     file.display(),
                     reliable_editor_live,
                     editor_delivery_target.is_some(),
                 ),
             );
             anyhow::bail!(
-                "refused editor IPC for {} because reliable document liveness and the legacy endpoint disagree (reliable_editor_live={}, legacy_endpoint_live={}); refresh or update the editor integration before retrying closeout",
+                "refused editor IPC for {} because reliable document liveness has no matching editor registration (reliable_editor_live={}, registration_available={}); refresh or update the editor integration before retrying closeout",
                 file.display(),
                 reliable_editor_live,
                 editor_delivery_target.is_some(),

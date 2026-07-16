@@ -2,26 +2,21 @@
 //!
 //! The set of files currently open in an editor — and the agent-doc subset of it —
 //! exposed as a reactive signal on the lazily thread-safe backbone. This is the
-//! ground-truth input for the authority question *"could the editor buffer differ
-//! from disk?"*: a file open in an editor has a live buffer that may have diverged
-//! from disk, so it is editor-authoritative; a file that is not open in any editor
-//! cannot diverge, so it is disk-authoritative.
+//! process-local advisory input for the authority question *"could the editor
+//! buffer differ from disk?"*. Cross-process authority lives in the durable
+//! reliable-sync liveness projection.
 //!
-//! This registry is deliberately the **strong** liveness signal. The CRDT relay's
-//! per-replica liveness ([`crate::crdt_relay`]) can go stale (a dropped lease) while
-//! the editor still genuinely holds the buffer open; when that happens the open-doc
-//! signal is authoritative and the relay liveness should be *repaired* toward it,
-//! not demoted to disk.
+//! This registry never overrides the CRDT/reliable-sync plane. It exists for local
+//! UI observation and is rebuilt from reliable editor events after a recycle.
 //!
 //! ## Source-agnostic driving
 //!
-//! Editor open/close reports arrive cross-process (as live-buffer sidecars), so the
-//! registry is driven through a source-agnostic API rather than being bound to one
-//! transport:
+//! Editor open/close reports arrive cross-process on the reliable-sync Lazily
+//! plane, so the registry is driven through a source-agnostic API:
 //! - [`EditorOpenDocs::mark_open`] / [`EditorOpenDocs::mark_closed`] — event-at-a-time
 //!   updates, used by the in-process FFI editor-report path.
 //! - [`EditorOpenDocs::reconcile`] — a whole-set refresh, used by a process (e.g. the
-//!   project controller) that observes the open set by scanning sidecars.
+//!   project controller) that observes the controller-owned open set.
 //!
 //! Classification (`is_agent_doc`) is supplied by the caller so this module stays a
 //! pure reactive model with no frontmatter/IO dependency.
@@ -207,7 +202,7 @@ impl EditorOpenDocs {
     /// Reconcile the registry against the **full** current open set (path,
     /// is_agent_doc). Any document currently marked open but absent from `open` is
     /// closed; every entry in `open` is marked open. This is the whole-set refresh a
-    /// cross-process observer (sidecar scan) uses.
+    /// cross-process reliable-sync observer uses.
     pub fn reconcile(&self, open: &[(String, bool)]) {
         let open_paths: HashSet<&str> = open.iter().map(|(path, _)| path.as_str()).collect();
         for key in self.docs.present_keys() {
@@ -298,7 +293,7 @@ impl Default for EditorOpenDocs {
 }
 
 /// The process-global editor open-document registry. In-process editor reports (FFI)
-/// and any controller-side sidecar reconcile drive this single instance.
+/// and any controller-side reliable-sync reconcile drive this single instance.
 pub fn editor_open_docs() -> &'static EditorOpenDocs {
     static GLOBAL: OnceLock<EditorOpenDocs> = OnceLock::new();
     GLOBAL.get_or_init(EditorOpenDocs::new)

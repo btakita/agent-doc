@@ -111,30 +111,30 @@ pub const fn decide_crdt_retry_admission(backoff_scheduled: bool) -> CrdtRetryAd
 
 pub use agent_doc_merge::document_replay::{ExactDocumentReplay, coalesce_exact_document_replay};
 
-/// Admission policy for legacy editor patch transports under reliable document
-/// liveness. Payload delivery is allowed only when both authorities agree that
-/// an editor is live. A disagreement is fail-closed; an agreed detached state
-/// lets the caller use its normal disk-authority path.
+/// Admission policy for editor patch transports under reliable document
+/// liveness. Payload delivery requires both an open-set fact and its editor
+/// registration on the same Lazily plane. An incomplete registration is
+/// fail-closed; an agreed detached state lets the caller use disk authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorDeliveryAdmission {
     DeliverToLiveEditor,
     Detached,
-    RefuseAuthorityMismatch,
+    RefuseIncompleteRegistration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorDeliveryAdmissionFacts {
     pub reliable_editor_live: bool,
-    pub legacy_endpoint_live: bool,
+    pub registration_available: bool,
 }
 
 pub const fn decide_editor_delivery_admission(
     facts: EditorDeliveryAdmissionFacts,
 ) -> EditorDeliveryAdmission {
-    match (facts.reliable_editor_live, facts.legacy_endpoint_live) {
+    match (facts.reliable_editor_live, facts.registration_available) {
         (true, true) => EditorDeliveryAdmission::DeliverToLiveEditor,
         (false, false) => EditorDeliveryAdmission::Detached,
-        _ => EditorDeliveryAdmission::RefuseAuthorityMismatch,
+        _ => EditorDeliveryAdmission::RefuseIncompleteRegistration,
     }
 }
 
@@ -4655,27 +4655,27 @@ fn crdt_retry_admission_keeps_external_events_behind_backoff() {
 }
 
 #[test]
-fn editor_delivery_admission_fails_closed_on_authority_mismatch() {
+fn editor_delivery_admission_fails_closed_on_incomplete_registration() {
     assert_eq!(
         decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
             reliable_editor_live: true,
-            legacy_endpoint_live: true,
+            registration_available: true,
         }),
         EditorDeliveryAdmission::DeliverToLiveEditor,
     );
     assert_eq!(
         decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
             reliable_editor_live: false,
-            legacy_endpoint_live: false,
+            registration_available: false,
         }),
         EditorDeliveryAdmission::Detached,
     );
     assert_eq!(
         decide_editor_delivery_admission(EditorDeliveryAdmissionFacts {
             reliable_editor_live: false,
-            legacy_endpoint_live: true,
+            registration_available: true,
         }),
-        EditorDeliveryAdmission::RefuseAuthorityMismatch,
-        "a process-live legacy endpoint must not receive recovery payloads after the reliable open-set reports zero live editors",
+        EditorDeliveryAdmission::RefuseIncompleteRegistration,
+        "a registration without a reliable open-set fact must not receive recovery payloads",
     );
 }

@@ -588,12 +588,12 @@ mod tests {
     }
 
     #[test]
-    fn session_check_accepts_latest_committed_response_visible_in_operator_live_buffer() {
+    fn session_check_accepts_latest_committed_response_visible_in_operator_crdt() {
         // When an attached editor is authoritative, the operator-visible
-        // document is the editor buffer, not stale disk. If the live-buffer
-        // sidecar proves the latest committed response is visible in that
-        // editor, session-check must not ask recovery to merge it into disk and
-        // risk racing the operator buffer.
+        // document is the Lazily/CPC editor replica, not stale disk. If CRDT
+        // authority proves the latest committed response is visible there,
+        // session-check must not ask recovery to merge it into disk and risk
+        // racing the operator buffer.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         partial_staging_git(root, &["init"]);
@@ -635,15 +635,11 @@ mod tests {
         fs::write(&doc, visible_disk_lost_latest).unwrap();
         agent_doc_snapshot_io::save(&doc, visible_disk_lost_latest, agent_doc_ops_log_io::log_op)
             .unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc.to_string_lossy(),
-            committed,
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
             "jetbrains-test",
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
+            committed,
+        );
         agent_doc_cycle_state_io::start_preflight(
             &doc,
             Some(visible_disk_lost_latest),
@@ -665,13 +661,16 @@ mod tests {
                 assert!(msg.contains("ok"), "expected ok, got: {msg}");
             }
             SessionCheckStatus::Interrupted(msg) => {
-                panic!("expected Ok because live buffer contains response, got Interrupted: {msg}");
+                panic!(
+                    "expected Ok because CRDT authority contains response, got Interrupted: {msg}"
+                );
             }
         }
         let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("session_check_committed_response_visible_in_live_buffer"),
-            "expected live-buffer proof marker in ops log:\n{ops_log}"
+            ops_log.contains("session_check_committed_response_visible_in_current_document")
+                && ops_log.contains("authority=lazily_crdt"),
+            "expected Lazily/CRDT proof marker in ops log:\n{ops_log}"
         );
     }
 
@@ -4284,17 +4283,10 @@ Body\n\
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\nPrompt\n";
         fs::write(&doc, content).unwrap();
         agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-            &doc.to_string_lossy(),
-            content,
-            Some("jetbrains-old"),
-        )
-        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_editor_convergence_required(
             &doc,
@@ -4323,9 +4315,6 @@ Body\n\
                     !message.contains("then run `agent-doc write --commit"),
                     "{message}"
                 );
-                assert!(message.contains("operator_text_authority_v1"), "{message}");
-                assert!(message.contains("jetbrains-old"), "{message}");
-                assert!(message.contains("reload or restart"), "{message}");
             }
             other => panic!("expected blocked closeout interruption, got {other:?}"),
         }

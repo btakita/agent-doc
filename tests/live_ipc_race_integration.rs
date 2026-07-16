@@ -22,37 +22,12 @@ fn doc_hash(doc: &Path) -> String {
     content_hash(canonical.to_string_lossy().as_ref())
 }
 
-fn record_operator_buffer(file: &Path, content: &str) {
-    let file_key = file.to_string_lossy();
-    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-        file_key.as_ref(),
-        content,
-        TEST_EDITOR_ID,
-        "jetbrains",
-        "test",
-        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-    )
-    .unwrap();
-}
-
 fn record_visible_write_receipt(
     file: &Path,
     replica: &ProjectControllerReplica,
     patch_id: &str,
     content: &str,
 ) {
-    let file_key = file.to_string_lossy();
-    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-        file_key.as_ref(),
-        content,
-        TEST_EDITOR_ID,
-        "jetbrains",
-        "test",
-        &[
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-        ],
-    );
     let live_replica = publish_editor_text_via_project_controller(file, replica, content);
     start_project_controller_delivery_pump(file, replica, live_replica);
     wait_for_project_controller_delivery_convergence(file, content);
@@ -68,11 +43,29 @@ fn record_visible_write_receipt(
 fn seed_reliable_sync_open(doc: &Path, tag: &str) {
     let project_root = agent_doc_fs::find_project_root(doc).expect("test project root");
     let document_hash = agent_doc_hash::document_id_for_path(doc);
-    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-        document_hash: document_hash.clone(),
-        pid: std::process::id().into(),
-        tag: tag.to_string(),
-    }];
+    let pid = std::process::id().into();
+    let ops = vec![
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid,
+            tag: tag.to_string(),
+        },
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: document_hash.clone(),
+                pid,
+                path: doc.to_string_lossy().into_owned(),
+                editor_id: tag.to_string(),
+                editor_kind: "test".to_string(),
+                editor_version: "test".to_string(),
+                capabilities: vec![
+                    "operator_text_authority_v1".to_string(),
+                    "lazily_transport_receipts_v1".to_string(),
+                ],
+                timestamp_ms: 1,
+            },
+        ),
+    ];
     agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
         &project_root
             .join(".agent-doc")
@@ -82,17 +75,6 @@ fn seed_reliable_sync_open(doc: &Path, tag: &str) {
         Some(&serde_json::to_string(&ops).unwrap()),
     )
     .expect("seed durable reliable-sync Open fact");
-}
-
-fn seed_legacy_editor_endpoint(doc: &Path, editor_id: &str) {
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(
-            doc.to_str().unwrap(),
-            editor_id,
-            std::process::id(),
-        ),
-        "test setup should acquire a live targeted editor endpoint"
-    );
 }
 
 fn start_project_controller(root: &Path) -> Child {
@@ -428,8 +410,6 @@ fn write_commit_adopts_live_non_codex_editor_response_after_committed_snapshot_d
 
     fs::write(&doc, &editor_buffer).unwrap();
     seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
-    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
-    record_operator_buffer(&doc, &editor_buffer);
     let mut controller = start_project_controller(tmp.path());
     let editor_replica = register_editor_replica_via_project_controller(&doc);
     let editor_replica_state =
@@ -523,8 +503,6 @@ fn finalize_file_ipc_commits_response_without_absorbing_visible_write_live_queue
     );
     fs::write(&doc, &current_with_queue).unwrap();
     seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
-    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
-    record_operator_buffer(&doc, &current_with_queue);
     let mut controller = start_project_controller(tmp.path());
     let controller_replica = register_editor_replica_via_project_controller(&doc);
 
@@ -730,8 +708,6 @@ fn finalize_commits_response_with_visible_write_cycle_1779845677327_scratch_dire
         .replace("<!--\n-->", &scratch_comment);
     fs::write(&doc, &current_with_scratch).unwrap();
     seed_reliable_sync_open(&doc, TEST_EDITOR_ID);
-    seed_legacy_editor_endpoint(&doc, TEST_EDITOR_ID);
-    record_operator_buffer(&doc, &current_with_scratch);
     let mut controller = start_project_controller(tmp.path());
     let controller_replica = register_editor_replica_via_project_controller(&doc);
 

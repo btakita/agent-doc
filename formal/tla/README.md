@@ -25,6 +25,8 @@ external request.
 `CrdtLineageFence.tla` exhaustively checks the finite recovery control state:
 
 - queue tombstones and editor-authored deletions never regress;
+- the latest operator frontier retracts deleted heads from the Lazily lineage, while a
+  clean crash-lost add remains durable and eventually recovers;
 - a whole-document replacement preserves durable pending agent intent;
 - stale-lineage frames cannot corrupt or resurrect canonical content;
 - quarantined stale frames eventually advance the ACK cursor; and

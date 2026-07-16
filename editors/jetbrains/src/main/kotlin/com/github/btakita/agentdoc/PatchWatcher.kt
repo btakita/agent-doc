@@ -654,8 +654,8 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             "publish_live_buffer" -> {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
-                if (TypingTracker.publishLiveBufferNow(file)) {
-                    recordDocumentActivity(file, "socket-publish-live-buffer")
+                if (TypingTracker.publishCurrentDocumentNow(file)) {
+                    recordDocumentActivity(file, "socket-publish-current-document")
                     APPLY_APPLIED
                 } else {
                     APPLY_FAILED

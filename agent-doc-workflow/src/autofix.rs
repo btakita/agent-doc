@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn autofix_gates_operator_editor_convergence() {
         let mut facts = quiet_ok_facts();
-        facts.editor.live_buffer_diverges = Some(true);
+        facts.editor.lazily_current_diverges = Some(true);
 
         let report = report_from_facts(facts, BTreeSet::new());
         let step = step_for(&report, WorkflowInvariantId::EditorConvergence);

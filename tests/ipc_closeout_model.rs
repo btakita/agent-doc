@@ -218,12 +218,30 @@ fn setup_project(with_patches_dir: bool) -> (TempDir, PathBuf, PathBuf, String) 
 }
 
 fn seed_durable_editor_delivery_open(root: &Path, doc: &Path) {
-    let document_hash = agent_doc_hash::document_id_for_path(doc);
-    let ops = vec![agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
-        document_hash: document_hash.clone(),
-        pid: std::process::id().into(),
-        tag: TEST_EDITOR_ID.to_string(),
-    }];
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let ops = vec![
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: std::process::id().into(),
+            tag: TEST_EDITOR_ID.to_string(),
+        },
+        agent_doc_reliable_sync_io::liveness::LivenessOp::Register(
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: document_hash.clone(),
+                pid: std::process::id().into(),
+                path: canonical.to_string_lossy().into_owned(),
+                editor_id: TEST_EDITOR_ID.to_string(),
+                editor_kind: "test".to_string(),
+                editor_version: "test".to_string(),
+                capabilities: vec![
+                    "operator_text_authority_v1".to_string(),
+                    "lazily_transport_receipts_v1".to_string(),
+                ],
+                timestamp_ms: 1,
+            },
+        ),
+    ];
     agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
         &root.join(".agent-doc/reliable_sync_outbox.db"),
         &document_hash,

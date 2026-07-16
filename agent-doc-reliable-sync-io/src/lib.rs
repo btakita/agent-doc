@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 /// NDJSON `type` tag for a reliable-sync control frame on the shared socket.
 pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
 
-/// Env var gating the reliable-sync dual-run (sidecar-retirement Phase 3C cutover).
+/// Legacy-named environment gate for the reliable-sync plane.
 pub const DUAL_RUN_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_DUAL_RUN";
 
 /// Env var promoting the reliable-sync plane to the hot-path CRDT authority
@@ -105,12 +105,27 @@ pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
     Some(projection.live_docs().contains(&document_hash))
 }
 
+/// Plane-primary sync-in-flight read for one document. This is the filesystem-
+/// free replacement for comparing live-buffer sidecar edit/sync epochs.
+pub fn plane_document_in_flight_for_path(file: &str) -> Option<bool> {
+    if !authority_enabled() {
+        return None;
+    }
+    let plane = global_liveness_plane().lock().ok()?;
+    let projection = plane.projection();
+    let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
+    if !projection.tracks_document(&document_hash) {
+        return None;
+    }
+    Some(projection.document_in_flight(&document_hash))
+}
+
 /// Whether the controller should run the reliable-sync liveness plane.
 ///
 /// **Default ON.** Both the controller process and plugin-loaded native library
 /// call this gate, so one setting covers sender and receiver. The historical
 /// name remains for rollout compatibility; the plane is now authoritative and
-/// the sidecar model is diagnostic parity evidence only. Explicitly disable with
+/// there is no live-buffer sidecar fallback. Explicitly disable with
 /// a falsey value (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0|false|no|off`).
 pub fn dual_run_enabled() -> bool {
     !matches!(
@@ -126,7 +141,7 @@ const MSGPACK_CODEC: &str = "msgpack";
 ///
 /// Serializes with an internally-tagged `type` field so it coexists with every
 /// other message on the `agent-doc-ipc-io` socket (`patch`, queue convergence,
-/// live-buffer signals, …). Non-reliable-sync messages never parse into this
+/// compatibility publish requests, …). Non-reliable-sync messages never parse into this
 /// struct, so [`decode_envelope`] can cheaply reject them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReliableSyncEnvelope {

@@ -51,9 +51,9 @@ Notable invariants:
   coalesces that replay to one projection through the same CRDT/ACK path before
   parsing, diffing, or dispatch; the agent must never run a document-repair
   workflow for this transport artifact. Non-identical content is never eligible.
-  Editor delivery must target the live plugin-owner `editor_id` when an owner
-  lease exists; untargeted file-IPC fallback is not delivery proof for an
-  editor-owned document.
+  Editor delivery must target the `editor_id` from the newest live reliable-sync
+  registration when an owner lease exists; untargeted file-IPC fallback is not
+  delivery proof for an editor-owned document.
   See
   [Real-Time Workflow Authority](specs/14-realtime-workflow.md)
   and [Turn Lifecycle Authority](specs/15-turn-lifecycle.md).

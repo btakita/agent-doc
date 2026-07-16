@@ -1,6 +1,7 @@
 //! Crash-durable operator queue-edit journal (`#qdurcrash`).
 
 use anyhow::Result;
+use fs2::FileExt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -28,19 +29,6 @@ pub fn record(file: &Path, content: &str) -> Result<()> {
     append_prompts(file, queue_journal_policy::queue_prompts(content))
 }
 
-/// Journal operator queue prompts from durable live-editor buffer sidecars.
-pub fn record_live_buffer(file: &Path) -> Result<()> {
-    let Some(file_str) = file.to_str() else {
-        return Ok(());
-    };
-    let snapshots = agent_doc_debounce::live_buffer_snapshots(file_str);
-    let buffers = snapshots
-        .iter()
-        .filter_map(|snapshot| snapshot.content.as_deref());
-    let prompts = queue_journal_policy::unique_queue_prompts_from_contents(buffers);
-    append_prompts(file, prompts)
-}
-
 fn append_prompts(file: &Path, prompts: Vec<QueuePrompt>) -> Result<()> {
     if prompts.is_empty() {
         return Ok(());
@@ -48,25 +36,6 @@ fn append_prompts(file: &Path, prompts: Vec<QueuePrompt>) -> Result<()> {
     let Some(path) = queue_journal_path(file) else {
         return Ok(());
     };
-    let existing = read_journal(&path);
-    let entries = queue_journal_policy::plan_append_entries(&existing, prompts);
-    let mut appended = String::new();
-    for entry in entries {
-        match serde_json::to_string(&entry) {
-            Ok(line) => {
-                appended.push_str(&line);
-                appended.push('\n');
-            }
-            Err(err) => {
-                eprintln!(
-                    "[agent-doc] queue_journal: failed to serialize entry ({err:#}); skipping"
-                );
-            }
-        }
-    }
-    if appended.is_empty() {
-        return Ok(());
-    }
     if let Some(parent) = path.parent()
         && let Err(err) = std::fs::create_dir_all(parent)
     {
@@ -76,34 +45,73 @@ fn append_prompts(file: &Path, prompts: Vec<QueuePrompt>) -> Result<()> {
         );
         return Ok(());
     }
-    match std::fs::OpenOptions::new()
+    with_exclusive_journal_lock(&path, || {
+        let existing = read_journal(&path);
+        let entries = queue_journal_policy::plan_append_entries(&existing, prompts);
+        let mut appended = String::new();
+        for entry in entries {
+            match serde_json::to_string(&entry) {
+                Ok(line) => {
+                    appended.push_str(&line);
+                    appended.push('\n');
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[agent-doc] queue_journal: failed to serialize entry ({err:#}); skipping"
+                    );
+                }
+            }
+        }
+        if appended.is_empty() {
+            return Ok(());
+        }
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                if let Err(err) = f.write_all(appended.as_bytes()) {
+                    eprintln!(
+                        "[agent-doc] queue_journal: failed to append to {} ({err:#})",
+                        path.display()
+                    );
+                    return Ok(());
+                }
+                if let Err(err) = f.sync_all() {
+                    eprintln!(
+                        "[agent-doc] queue_journal: fsync failed for {} ({err:#})",
+                        path.display()
+                    );
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "[agent-doc] queue_journal: failed to open {} for append ({err:#})",
+                    path.display()
+                );
+            }
+        }
+        Ok(())
+    })
+}
+
+fn with_exclusive_journal_lock<T>(path: &Path, action: impl FnOnce() -> Result<T>) -> Result<T> {
+    let lock_path = path.with_extension("lock");
+    let lock = std::fs::OpenOptions::new()
         .create(true)
-        .append(true)
-        .open(&path)
-    {
-        Ok(mut f) => {
-            if let Err(err) = f.write_all(appended.as_bytes()) {
-                eprintln!(
-                    "[agent-doc] queue_journal: failed to append to {} ({err:#})",
-                    path.display()
-                );
-                return Ok(());
-            }
-            if let Err(err) = f.sync_all() {
-                eprintln!(
-                    "[agent-doc] queue_journal: fsync failed for {} ({err:#})",
-                    path.display()
-                );
-            }
-        }
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] queue_journal: failed to open {} for append ({err:#})",
-                path.display()
-            );
-        }
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    lock.lock_exclusive()?;
+    let result = action();
+    let unlock = FileExt::unlock(&lock);
+    match (result, unlock) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err.into()),
     }
-    Ok(())
 }
 
 /// Return journaled operator queue prompts absent from the current document and

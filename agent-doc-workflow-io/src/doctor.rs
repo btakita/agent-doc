@@ -2,7 +2,7 @@
 //!
 //! The doctor is a diagnostic surface. It gathers durable facts from the
 //! current document, optional preflight/session-check JSON captures, cycle state,
-//! ops logs, controller inspection, git state, and editor sidecars, then
+//! ops logs, controller inspection, git state, and the Lazily current document, then
 //! evaluates the workflow invariant catalog into typed outcomes.
 
 use anyhow::{Context, Result};
@@ -51,7 +51,7 @@ pub trait WorkflowDoctorEffects {
 
     fn inspect_actor(&mut self, project_root: &Path, file: &Path) -> Result<ActorDoctorFacts>;
 
-    fn live_buffer_diverges(
+    fn lazily_current_diverges(
         &mut self,
         file: &Path,
         disk_content: &str,
@@ -70,7 +70,7 @@ impl WorkflowDoctorEffects for NoopWorkflowDoctorEffects {
         Ok(ActorDoctorFacts::default())
     }
 
-    fn live_buffer_diverges(
+    fn lazily_current_diverges(
         &mut self,
         _file: &Path,
         _disk_content: &str,
@@ -315,17 +315,17 @@ fn read_editor_facts(
     let disk = match std::fs::read_to_string(file) {
         Ok(content) => content,
         Err(err) => {
-            warnings.push(format!("editor live-buffer check unavailable: {err}"));
+            warnings.push(format!("Lazily current-document check unavailable: {err}"));
             String::new()
         }
     };
-    let live_buffer_diverges = if disk.is_empty() {
+    let lazily_current_diverges = if disk.is_empty() {
         None
     } else {
-        match effects.live_buffer_diverges(file, &disk, root) {
+        match effects.lazily_current_diverges(file, &disk, root) {
             Ok(value) => value,
             Err(err) => {
-                warnings.push(format!("editor live-buffer check unavailable: {err}"));
+                warnings.push(format!("Lazily current-document check unavailable: {err}"));
                 None
             }
         }
@@ -333,8 +333,8 @@ fn read_editor_facts(
     EditorDoctorFacts {
         patches_dir_present: root.join(".agent-doc/patches").is_dir(),
         legacy_ack_content_dir_present: root.join(".agent-doc/ack-content").is_dir(),
-        live_buffer_dir_present: root.join(".agent-doc/live-buffer").is_dir(),
-        live_buffer_diverges,
+        legacy_live_buffer_dir_present: root.join(".agent-doc/live-buffer").is_dir(),
+        lazily_current_diverges,
     }
 }
 

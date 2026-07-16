@@ -1737,8 +1737,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         private fun nonOperatorMutationEpoch(filePath: String): Long =
             nonOperatorMutationEpochs[filePath]?.get() ?: 0L
 
-        private fun advanceNonOperatorMutationEpoch(filePath: String): Long =
-            nonOperatorMutationEpochs.computeIfAbsent(filePath) { AtomicLong(0L) }.incrementAndGet()
+        private fun advanceNonOperatorMutationEpoch(filePath: String): Long {
+            val epoch = nonOperatorMutationEpochs
+                .computeIfAbsent(filePath) { AtomicLong(0L) }
+                .incrementAndGet()
+            try {
+                AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)
+            } catch (_: UnsatisfiedLinkError) {
+                // An older hot-loaded cdylib cannot clear the sidecar. The
+                // generation fence still suppresses the event; the new symbol
+                // becomes available on the normal mtime reload.
+            } catch (_: NoSuchMethodError) {
+                // Same compatibility path for an older JNA proxy.
+            }
+            return epoch
+        }
     }
 
     private fun ownsFilePath(filePath: String): Boolean {

@@ -21,86 +21,15 @@ Deliverable files are in the working tree (resume + mail are submodules — unco
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-Please create a profile for haiven https://haiven.gg/
-And craig-fryer https://www.linkedin.com/in/craigfryar/
+### Session Summary
 
-Here is the job post. https://www.linkedin.com/jobs/view/4433645177/
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/e715e181b73b2efd56586b6dc037817620083b669835f8f4d448e1adedf65952-20260716-005410.md`*
 
-Please help me prepare for an ai screening interview https://www.linkedin.com/hiring/interview-ai-intro/?jobId=4433645177&profileId=ACoAAAC0KQ4BlxIAK5Vbm7Gssr6SzIaiyNG0e68&saveVideo=true&sessionId=a2b3a71a-1a49-49a2-8ce3-bc11a43ec1b0
+Compacted content:
+- Archived 28 response topic(s): Haiven; Craig Fryar; The job; 25 more
+- Prior summary/context: Please create a profile for haiven https://haiven.gg/ And craig-fryer https://www.linkedin.com/in/craigfryar/ Here is...
 
-Help me explain how we match in an organized way. Include my lazily ecosystem including the new lazily-go package. Include presence-ai realtime video avatars, milyoni social events + video on demand, and other experience + libraries that are a good fit.
-
-I have minor Golang experience with go-fuse and cerebrium's cli.
-
-Should I also mention agent-doc to the ai interviewer...which include realtime steering and queuing tasks for orchestration?
-
-Here is the job posting inline:
-```
-Job Overview
-
-Location: Remote – US preferred
-
-Employment Type: Full-time 
-
-Experience Level: Mid-to-Senior level (3 to 5 years) 
-
-Salary Range: $80,000 – $100,000 FT salary based on experience (adjusted regionally)
-
-Industry: Digital Distribution Platforms, Communications, AI, Gaming, Payments (on-chain), 
-
-Required: Ability to communicate complex technical concepts clearly in English. 
-
-NOTE: Haiven is located in Washington State. State-side U.S. citizens are preferred for the role.
-
-About the Role
-
-We are hiring an experienced Backend Engineer to join our talented team and help build and scale our digital distribution and communications platform. You will focus on designing, building, and maintaining backend services in Go (including REST APIs), WebSocket-driven real-time systems, database modeling, and cloud infrastructure on AWS. You will also contribute to frontend features using SolidJS and JavaScript when needed, ensuring seamless integration between the client and server. We're building real-time chat and direct messaging, community social hubs, developer studios, a virtual economy with on-chain payment processing, an AI-powered trust and safety engine - all backed by a Go monolith designed to scale into microservices. You will work across these systems, shipping features used by real developers and players, and help evolve the platform as we move through Alpha and into Beta. Apply your skills using Agile SCRUM methodologies, rapid prototyping,, and use of AI to augment code review and testing. Reporting to the VP of Product.
-
-U.S. legal citizens and residents of the United States are preferred for this role. If offshore, you must be available at least 3-hours each day during afternoons in the U.S. Pacific Time Zone.
-
-What You'll Do
-- Design, build, and maintain backend services and REST APIs in Go for the platform
-- Architect then build and extend real-time systems including WebSocket-based chat, direct messaging, notifications, and presence
-- Design and optimize PostgreSQL schemas, queries, and scalable data models
-- Integrate with AWS services including ECS, S3, CloudFront, Cognito, and CloudWatch
-- Build and consume event-driven pipelines using NATS and JetStream for our proprietary trust and safety engine and signals system
-- Implement backend logic for platform features such as studio management, game publishing workflows, virtual currency, and payment processing
-- Contribute to frontend development using SolidJS and JavaScript/TypeScript, connecting UI components to backend APIs via TanStack Query
-- Debug production issues, improve performance, and contribute to platform stability
-- Participate in and lead code reviews, technical discussions, and architectural decisions
-- Contribute to improving engineering processes, testing, and documentation
-
-Who You Are
-- 3 to 5 years of professional software development experience
-- Demonstrated experience building backend services and APIs in Go or a similar systems-level language
-- Experience designing, querying, and optimizing relational databases (PostgreSQL)
-- Working knowledge of JavaScript or TypeScript and at least one modern frontend framework (SolidJS, React, or Vue)
-- Experience working with cloud infrastructure on AWS (ECS, S3, IAM, or similar services)
-- Experience with real-time communication patterns such as WebSockets, event queues, or pub/sub systems
-- Experience designing and consuming RESTful APIs
-- Experience supporting production systems with real users
-- Familiarity with caching technologies such as Redis or Valkey
-- Ability to work independently and take ownership of features end-to-end
-- Strong communication skills and comfort working in a small, fast-moving team
-
-Preferred Qualifications
-- Experience with Go in production environments
-- Experience with SolidJS or reactive frontend frameworks
-- Experience with message brokers or event streaming (NATS, Kafka, RabbitMQ)
-- Experience with Terraform or other infrastructure-as-code tooling
-- Experience working with AI or ML-backed features at the application level (content moderation, scoring, or recommendations)
-- Experience building developer-facing tools, admin dashboards, or internal platforms
-- Experience with on-chain and payment integrations (Stripe or similar)
-- Experience in gaming, community platforms, or digital marketplaces
-- Experience in startup companies, ideally digital distribution platforms
-
-What We Offer
-- Competitive FT salary range between $80,000 – $100,000, plus meaningful equity
-- High-impact ownership and "fingerprints factor" in a small team environment
-- Opportunity to grow with the company as the platform scales
-- Work on a product used by real game creators and players
-```
-
+In the assumptions list, please not whatever
 ### Re: Haiven — company profile — opus-4-8
 
 **Haiven, Inc.** (haiven.gg) — "the indie game platform that pays." A player-first digital distribution + communications platform for indie game developers, based in Washington State, currently moving from Alpha into Beta.
@@ -896,9 +825,17 @@ Done, committed, and pushed to GitHub.
 **Verified:** `go build`/`go vet` clean, `go test ./...` all pass (incl. e2e).
 
 **Committed + pushed to `github.com:btakita/haiven-websocket-hub` (`main`):** `a1c466a` (slices.Clone + DESIGN change log), `bfeb360` (Go 1.26.4 assumption). Superproject gitlink bumps `f8a483b66` + `67d0e3c75` pushed to `agent-loop` main.
-<!-- agent:boundary:a79c0e7a -->
 
 In the assumptions list, please not whatever
+
+### Re: note Go 1.26.4 assumption in the assumptions list — opus-4-8
+
+Added to `DESIGN.md` §1 (Assumptions & constraints), not just the change log:
+
+> Build toolchain is Go `1.26.4` (pinned in `go.mod`). The code uses standard-library `slices.Clone` for frame snapshots; that API is available since Go 1.21, so any toolchain `>= 1.21` compiles it, and `1.26.4` is the assumed baseline.
+
+Committed + pushed: submodule `4915d5d` → `github.com:btakita/haiven-websocket-hub` (`bfeb360..4915d5d`); `agent-loop` gitlink bump `ecbf1e751`.
+<!-- agent:boundary:a79c0e7a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -929,4 +866,5 @@ c.writing.CompareAndSwap(false, true)
 - 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
 - 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 <!-- /agent:done -->
+
 

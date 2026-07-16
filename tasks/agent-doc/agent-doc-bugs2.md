@@ -42,6 +42,14 @@ Compacted content:
 
 ### Re: editor save-flush authority and agent-doc churn — gpt-5
 
+> **Queue prompt:**
+>
+> 📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
+> ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
+> ```
+
+
 Yes. An editor save followed by an exact byte-for-byte flush to disk is now a first-class resolution event. That saved editor cut becomes authoritative and clears any older pending disk candidate. A disk watcher event by itself cannot clear the pending state, because it cannot prove whether the write came from the editor, agent-doc, Git, a formatter, or another process.
 
 #### Editor authority and pending disk state
@@ -80,7 +88,7 @@ The release is agent-doc `0.34.136` at submodule commit `a979baafa`. I did not r
 JetBrains and VS Code are at behavior parity for deferred reconnect, visible-buffer rebootstrap, exact candidate proof, save-flush resolution, and no component merge of disk candidates. The JetBrains 0.2.262 artifact is installed, but this preflight reports the currently running IDEA process still has 0.2.261 loaded. Because 0.2.262 was installed after your last restart, one additional IDEA restart is required to activate the Kotlin plugin update. The native library reload/recycle was already broadcast; no waiting or controller-kill loop is needed.
 
 Verification is green locally: the full suite passed 7,713 tests with 240 skipped, VS Code passed 158 tests, JetBrains `test buildPlugin` passed, Lean `lake build` passed, and skill generation/install passed 82 tests. The single requested CI inspection showed the new 0.34.136 CI run in progress, not red; per policy I did not poll it. The repository policy now explicitly says to inspect CI once and fix it only when that inspection is red.
-<!-- agent:boundary:1008c904 -->
+<!-- agent:boundary:a7e19ce2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -93,7 +101,7 @@ Verification is green locally: the full suite passed 7,713 tests with 240 skippe
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
 ```
 ---
-- re: realtime steering, please immediately commit exchange prompts with the prefix so the diff can detect additional steering changes.
+- ~~re: realtime steering, please immediately commit exchange prompts with the prefix so the diff can detect additional steering changes.~~
 ---
 📌 haiven.md thrash issue:
 ```

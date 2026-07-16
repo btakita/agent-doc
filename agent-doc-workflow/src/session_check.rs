@@ -575,6 +575,21 @@ pub fn blocked_closeout_message(input: BlockedCloseoutMessage<'_>) -> String {
         .detail
         .map(|value| format!(" detail={value}"))
         .unwrap_or_default();
+    if input.kind == "editor_convergence_required" {
+        return format!(
+            "[session-check] INTERRUPTED: closeout blocked by `{}` for cycle `{}` (phase={} last_event={} source={} reason={}{}{}{}).{} The response/patch is durably retained under its original capture identity. The binary-owned supervisor will resume reconcile, editor delivery, and exact-once commit after the editor replica converges; `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, kill the controller, or use `--force-disk` for this capture.",
+            input.kind,
+            input.cycle_id,
+            input.phase.as_str(),
+            input.last_event,
+            input.source,
+            input.reason,
+            patch,
+            recovery,
+            detail,
+            input.editor_authority_note,
+        );
+    }
     let retry = input
         .recovery_command
         .map(str::to_string)
@@ -811,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn blocked_closeout_message_uses_default_retry_and_optional_fields() {
+    fn editor_convergence_message_is_binary_owned_and_status_only() {
         let message = blocked_closeout_message(BlockedCloseoutMessage {
             file: "task.md",
             kind: "editor_convergence_required",
@@ -831,8 +846,10 @@ mod tests {
         assert!(message.contains("phase=write_applied"));
         assert!(message.contains("patch_id=patch-7 recovery=retry detail=needs save"));
         assert!(message.contains("Live editor `jb` lacks capability."));
-        assert!(message.contains("run `agent-doc write --commit task.md`"));
-        assert!(message.contains("Use `agent-doc write --commit task.md --force-disk`"));
+        assert!(message.contains("binary-owned supervisor"));
+        assert!(message.contains("`session-check` is status-only"));
+        assert!(message.contains("Do not rerun `finalize`"));
+        assert!(!message.contains("then run `agent-doc write --commit"));
     }
 
     #[test]

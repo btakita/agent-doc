@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.137
+
+- **Captured closeout status is binary-owned end to end.** `editor_convergence_required` no longer records or prints a manual `write --commit` recovery command, and terminal authority/disk divergence now schedules replica settlement while declaring `session-check` status-only. Regression tests reject guidance that would stack another finalize/write operation or elect force-disk over the retained capture.
+
 ## 0.34.136
 
 - **Harness skill installs preserve binary-owned finalize recovery.** The bundled `SKILL.md` is now the same source of truth as the development Claude skill, and an install-time regression guard prevents OpenCode, Codex, Claude, or Cursor from reverting to agent-driven settle/retry churn.

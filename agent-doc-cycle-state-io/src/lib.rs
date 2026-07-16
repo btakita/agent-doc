@@ -1739,14 +1739,16 @@ pub fn record_editor_convergence_required(
     let Some(mut state) = load(file)? else {
         return Ok(None);
     };
-    let recovery_command = format!("agent-doc write --commit {}", file.display());
     let blocked = BlockedCloseout {
         kind: "editor_convergence_required".to_string(),
         reason: reason.to_string(),
         source: source.to_string(),
         patch_id: patch_id.map(str::to_string),
         recovery: Some("retry_without_disk_write".to_string()),
-        recovery_command: Some(recovery_command),
+        // A captured response is resumed by the keyed supervisor worker. A
+        // manual closeout command here caused agents to stack another write on
+        // top of the still-live capture.
+        recovery_command: None,
         detail: detail.map(str::to_string),
     };
     if state.blocked_closeout.as_ref() != Some(&blocked) {

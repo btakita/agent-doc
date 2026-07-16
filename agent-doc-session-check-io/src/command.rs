@@ -215,7 +215,7 @@ fn ensure_terminal_authority_disk_convergence(
             "session_check_terminal_convergence",
         );
     anyhow::bail!(
-        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic supervisor recycle status: {}. Retry the binary-owned finalize/session-check path after the editor replica reconnects; do not repair or force-disk the response.",
+        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic supervisor recycle status: {}. Replica re-registration and projection settlement are scheduled automatically; `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
         file.display(),
         agent_doc_hash::content_hash(authority_content),
         agent_doc_hash::content_hash(disk_content),
@@ -1522,7 +1522,9 @@ mod terminal_convergence_tests {
         .expect_err("session-check must fail when authority and disk differ");
         let message = format!("{err:#}");
         assert!(message.contains("refusing a false successful closeout"));
-        assert!(message.contains("do not repair or force-disk the response"));
+        assert!(message.contains("scheduled automatically"));
+        assert!(message.contains("`session-check` is status-only"));
+        assert!(message.contains("Do not rerun `finalize`"));
         let request =
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
                 .expect("session-check divergence must request supervisor recovery");

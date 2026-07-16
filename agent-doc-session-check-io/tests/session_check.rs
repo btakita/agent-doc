@@ -4315,8 +4315,11 @@ Body\n\
                     message.contains("recovery=retry_without_disk_write"),
                     "{message}"
                 );
-                assert!(message.contains("agent-doc write --commit"), "{message}");
+                assert!(message.contains("binary-owned supervisor"), "{message}");
+                assert!(message.contains("status-only"), "{message}");
+                assert!(message.contains("Do not rerun `finalize`"), "{message}");
                 assert!(message.contains("--force-disk"), "{message}");
+                assert!(!message.contains("then run `agent-doc write --commit"), "{message}");
                 assert!(message.contains("operator_text_authority_v1"), "{message}");
                 assert!(message.contains("jetbrains-old"), "{message}");
                 assert!(message.contains("reload or restart"), "{message}");

@@ -208,7 +208,23 @@ Fixed and active in agent-doc `0.34.145` / JetBrains `0.2.265`:
 Regression coverage is green: the JetBrains source-policy test covers all delta, REPLACE, and deferred-reconnect save paths; Rust proves an editor-saved canonical projection is a no-op; and the new `JetBrainsFileCache.tla` model proves no cache conflict, saved-canonical-before-ACK, stamp alignment, and zero redundant controller rewrites under concurrent VFS refresh. The existing passive tmux TLA+ model also remains green. Alloy is not needed here: these are temporal ordering/liveness invariants, which TLA+ models directly; Alloy would add value later for arbitrary-N static topology or schema constraints.
 
 Released commit: `42c8b8a34` (`v0.34.145`). Full `make check`, JetBrains `test buildPlugin`, install, and local version checks passed. CI was in progress at the required one-time inspection.
-<!-- agent:boundary:169ca6c8 -->
+
+### Re: JetBrains/editor churn fixed and dog-fooded
+
+Fixed and released the contributing agent-doc issues across v0.34.145–v0.34.148.
+
+- JetBrains File Cache Conflict churn: editor authority no longer gets rewritten behind a live buffer, recursive refresh/save loops are suppressed, stale plugin/native generations are reloaded coherently, and the matching 0.2.265 plugin is installed in all four existing JetBrains installations.
+- Passive document switching: selecting another agent document on the same editor side now queues exact-visible tmux synchronization and swaps to that document's pane; manual `Sync Tmux Layout` remains the explicit recovery control.
+- Retained Haiven closeouts: `session-check` now recognizes replacement-replica bootstrap with an empty historical ACK queue, proves exact retained-target/canonical/disk equality plus response materialization, clears the deferred lineage, refreshes the snapshot, and commits the same `(cycle, capture, response)` exactly once. It does not ask an agent to reconstruct or resubmit the payload.
+- Retry guidance: the misleading `await_editor_replica_no_disk_write_then_retry_finalize` runtime contract is replaced by `...then_session_check`. Retained paths now explicitly forbid another `finalize`, `write --commit`, repair, or `--force-disk` submission.
+- Pending-capture guard: a response that explicitly closes a named follow-up as “now done/complete” is accepted without requiring a duplicate backlog mutation.
+
+Live dog-food succeeded: the retained Haiven capture resumed and committed as `7c9b4450f`; the distinct batch-3 high-scale/spec response committed as `585bdfca0`; installed v0.34.148 now reports Haiven cycle `cycle-1784182838224` committed and clean at the document level.
+
+Verification is green: focused Rust recovery tests, full `make check`, documentation/managed-skill audit, plugin-version check, and all four PlusCal/TLA+ models. `CloseoutChurn.tla` now proves replacement bootstrap eventually settles and commits the same capture without duplication. Alloy is not warranted for this bug class: it is an ordering/liveness/exact-once problem, where TLA+ is the stronger fit. Add Alloy when we need arbitrary-N relational/topology or schema invariants rather than temporal convergence.
+
+Released and pushed: agent-doc `c2acade43`, tag `v0.34.148`; workspace integration `26657f067`. The latest agent-doc CI run was in progress at the single required observation.
+<!-- agent:boundary:4e7c4954 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -291,12 +307,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ---
 - ~~📌 haiven.md response was not committed.~~
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
-- 📌 do [#zqv8]
-- 📌 do [#crde]
-- 📌 do [#steeringobservableset]
+- ⏭️ 📌 do [#zqv8]
+- ⏭️ 📌 do [#crde]
+- ⏭️ 📌 do [#steeringobservableset]
 - ~~📌 do [#jbcompactexchange]~~
-- 📌 do [#goal1d0k]
-- 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#idlewatchturnactive]
 - 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
@@ -397,9 +413,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#jbcompactexchange]~~
 - ⏭️ 📌 do [#goal1d0k]
 - ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
-- haiven.md response was not committed.
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
 <!-- /agent:queue -->
 
 ## Notes

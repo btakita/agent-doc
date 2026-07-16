@@ -114,12 +114,16 @@ pub struct StaleCaptureRetirementEvidence {
     pub replay_baseline_drifted: bool,
     pub captured_response_body_missing: bool,
     pub captured_response_heading_answered: bool,
+    pub retained_document_write: bool,
 }
 
 pub const fn decide_stale_capture_retirement(
     evidence: StaleCaptureRetirementEvidence,
 ) -> StaleCaptureRetirementDecision {
     if !evidence.captured_response_body_missing {
+        return StaleCaptureRetirementDecision::Keep;
+    }
+    if evidence.retained_document_write {
         return StaleCaptureRetirementDecision::Keep;
     }
 
@@ -401,6 +405,7 @@ mod tests {
             replay_baseline_drifted: true,
             captured_response_body_missing: true,
             captured_response_heading_answered: false,
+            retained_document_write: false,
         });
 
         assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
@@ -413,6 +418,7 @@ mod tests {
             replay_baseline_drifted: false,
             captured_response_body_missing: true,
             captured_response_heading_answered: true,
+            retained_document_write: false,
         });
 
         assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
@@ -425,6 +431,7 @@ mod tests {
             replay_baseline_drifted: true,
             captured_response_body_missing: false,
             captured_response_heading_answered: true,
+            retained_document_write: false,
         });
 
         assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
@@ -437,6 +444,7 @@ mod tests {
             replay_baseline_drifted: true,
             captured_response_body_missing: true,
             captured_response_heading_answered: false,
+            retained_document_write: false,
         });
         assert_eq!(no_supersession, StaleCaptureRetirementDecision::Keep);
 
@@ -445,11 +453,25 @@ mod tests {
             replay_baseline_drifted: false,
             captured_response_body_missing: true,
             captured_response_heading_answered: true,
+            retained_document_write: false,
         });
         assert_eq!(
             superseded,
             StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan
         );
+    }
+
+    #[test]
+    fn stale_capture_retirement_keeps_inflight_retained_document_write() {
+        let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
+            state: CaptureState::Captured,
+            replay_baseline_drifted: false,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: true,
+            retained_document_write: true,
+        });
+
+        assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
     }
 
     #[test]
@@ -464,6 +486,7 @@ mod tests {
                 replay_baseline_drifted: true,
                 captured_response_body_missing: true,
                 captured_response_heading_answered: true,
+                retained_document_write: false,
             });
             assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
         }

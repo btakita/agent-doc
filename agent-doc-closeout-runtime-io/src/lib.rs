@@ -204,9 +204,68 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         use agent_doc_session_check_io::CapturedFinalizeResumeOutcome as Outcome;
         use agent_doc_turn::CyclePhase;
 
-        let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        let Some(mut state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
             return Ok(Outcome::NotApplicable);
         };
+        let mut reactivated_false_stale_capture = false;
+        let false_stale_reactivation_cycle = (state.phase == CyclePhase::Abandoned
+            && state.last_event == "repair_retire_superseded_captured_only_orphan")
+            || (state.phase == CyclePhase::ResponseCaptured
+                && state.last_event == "session_check_reactivated_false_stale_capture_retirement");
+        if false_stale_reactivation_cycle
+            && let (Some(capture_id), Some(response_sha256)) =
+                (state.capture_id.as_deref(), state.response_sha256.as_deref())
+            && let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)?
+            && capture.cycle_id == state.cycle_id
+            && capture.response_sha256 == response_sha256
+            && matches!(
+                (capture.state, capture.discarded_at),
+                (agent_doc_capture_io::CaptureState::Discarded, Some(_))
+                    | (agent_doc_capture_io::CaptureState::Captured, None)
+            )
+            && let Some(_settled_content) =
+                agent_doc_document_realtime_io::settle_acknowledged_captured_projection_through_authority(
+                    file,
+                    &capture.response_body,
+                    "session_check_false_stale_capture_retirement_settlement",
+                )?
+        {
+            let capture_reactivated = agent_doc_capture_io::reactivate_false_stale_retirement(
+                file,
+                capture_id,
+                response_sha256,
+            )?;
+            let cycle_reactivated =
+                agent_doc_cycle_state_io::reactivate_false_stale_capture_retirement(
+                file,
+                capture_id,
+                response_sha256,
+            )?;
+            if !capture_reactivated || !cycle_reactivated {
+                return Ok(Outcome::Retained {
+                    reason: "false-stale capture reactivation remains partially applied"
+                        .to_string(),
+                });
+            }
+            let Some(reactivated) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+            else {
+                return Ok(Outcome::Retained {
+                    reason: "false-stale capture reactivation lost its cycle projection"
+                    .to_string(),
+                });
+            };
+            if reactivated.phase != CyclePhase::ResponseCaptured
+                || reactivated.capture_id.as_deref() != Some(capture_id)
+                || reactivated.response_sha256.as_deref() != Some(response_sha256)
+            {
+                return Ok(Outcome::Retained {
+                    reason: "false-stale capture reactivation did not converge on the same cycle"
+                        .to_string(),
+                });
+            }
+            state = reactivated;
+            reactivated_false_stale_capture = true;
+        }
         if !matches!(
             state.phase,
             CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
@@ -252,7 +311,7 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                         .to_string(),
                 });
             }
-        } else if state.phase != CyclePhase::WriteApplied {
+        } else if state.phase != CyclePhase::WriteApplied && !reactivated_false_stale_capture {
             return Ok(Outcome::NotApplicable);
         }
 

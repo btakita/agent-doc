@@ -38,7 +38,8 @@
 //! - `mark_committed_updates_capture_state`
 
 use agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason;
-use agent_doc_workflow::capture::{CaptureState, capture_state_can_advance};
+pub use agent_doc_workflow::capture::CaptureState;
+use agent_doc_workflow::capture::capture_state_can_advance;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -1113,6 +1114,48 @@ pub fn mark_discarded(file: &Path) -> Result<()> {
     update_active_state(file, CaptureState::Discarded)
 }
 
+/// Reactivate only the exact capture that the stale-capture repair path
+/// discarded while its retained CRDT write was still in flight. The caller
+/// must separately prove response materialization and restore the matching
+/// cycle projection; ordinary discarded captures remain terminal.
+pub fn reactivate_false_stale_retirement(
+    file: &Path,
+    capture_id: &str,
+    expected_response_sha256: &str,
+) -> Result<bool> {
+    let Some(mut record) = load_by_id(file, capture_id)? else {
+        return Ok(false);
+    };
+    if record.capture_id != capture_id
+        || record.response_sha256 != expected_response_sha256
+        || record.response_body.trim().is_empty()
+    {
+        return Ok(false);
+    }
+    if record.state == CaptureState::Captured && record.discarded_at.is_none() {
+        return Ok(true);
+    }
+    if record.state != CaptureState::Discarded || record.discarded_at.is_none() {
+        return Ok(false);
+    }
+
+    record.state = CaptureState::Captured;
+    record.discarded_at = None;
+    record.updated_at = now_secs();
+    write_record(file, &record)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "capture_false_stale_retirement_reactivated file={} capture_id={} cycle_id={} response_sha256={}",
+            file.display(),
+            record.capture_id,
+            record.cycle_id,
+            record.response_sha256,
+        ),
+    );
+    Ok(true)
+}
+
 /// `#stale-capture-after-compaction-blocks-route`: discard the capture sidecars
 /// whose response body was just archived out of the live document by `compact`.
 ///
@@ -1441,6 +1484,42 @@ mod tests {
             Some(captured_baseline.as_str())
         );
         assert_eq!(projected.baseline_content, record.baseline_content);
+    }
+
+    #[test]
+    fn exact_false_stale_retirement_can_reactivate_same_capture() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        std::fs::write(
+            &doc,
+            "---\nsession: sid\nagent: codex\nmodel: gpt-5\n---\n\n## User\n\nHello\n",
+        )
+        .unwrap();
+        agent_doc_snapshot_io::save(
+            &doc,
+            &std::fs::read_to_string(&doc).unwrap(),
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let record = capture_response(&doc, "response body").unwrap();
+        mark_discarded(&doc).unwrap();
+        assert!(
+            reactivate_false_stale_retirement(&doc, &record.capture_id, &record.response_sha256,)
+                .unwrap()
+        );
+        let reactivated = load_active(&doc).unwrap().unwrap();
+        assert_eq!(reactivated.capture_id, record.capture_id);
+        assert_eq!(reactivated.state, CaptureState::Captured);
+        assert!(reactivated.discarded_at.is_none());
+        assert!(
+            reactivate_false_stale_retirement(&doc, &record.capture_id, &record.response_sha256,)
+                .unwrap(),
+            "recovery must remain idempotent after the capture sidecar advances first"
+        );
+        assert!(
+            !reactivate_false_stale_retirement(&doc, "wrong", &record.response_sha256).unwrap()
+        );
     }
 
     #[test]

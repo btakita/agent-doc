@@ -17,6 +17,8 @@ If the editor then reconnects by replacement registration, its bootstrap is
 already the retained canonical target and its delivery queue is empty.  A fair
 session-check settles that historical deferred slot, refreshes the response
 snapshot, and commits the same capture without requiring an impossible ACK.
+Concurrent repair may observe only a reused response heading while that retained
+write is still in flight; it must keep, never retire, the active capture.
 ***************************************************************************)
 
 (* --fair algorithm ChurnFreeCloseout
@@ -41,6 +43,9 @@ replacementReplicaBootstrapped = FALSE,
 replacementAckQueueEmpty = FALSE,
 snapshotMatchesCapture = FALSE,
 sessionCheckRecovered = FALSE,
+retainedWriteInFlight = TRUE,
+captureRetired = FALSE,
+retirementAttempted = FALSE,
 documentQueueMatches = 3,
 snapshotQueueMatches = 2,
 documentQueueMarked = 0,
@@ -135,11 +140,28 @@ CommitRecoveredCapture:
     assert cycleState = "rotated_open" /\ captureCopies = 1;
     cycleState := "committed_response";
     sessionCheckRecovered := TRUE;
-    committed := TRUE;
+committed := TRUE;
+retainedWriteInFlight := FALSE;
 SessionCheckDone:
     while TRUE do
         skip;
     end while;
+end process;
+
+process ConcurrentRepair = "concurrent_repair"
+begin
+ObservePartialResponseDuringRetainedWrite:
+await responseCopies = 1;
+retirementAttempted := TRUE;
+if retainedWriteInFlight \/ committed then
+skip;
+else
+captureRetired := TRUE;
+end if;
+RepairDone:
+while TRUE do
+skip;
+end while;
 end process;
 
 process StrictMarkerGuard = "marker_guard"
@@ -206,7 +228,10 @@ TypeOK ==
     /\ replacementReplicaBootstrapped \in BOOLEAN
     /\ replacementAckQueueEmpty \in BOOLEAN
     /\ snapshotMatchesCapture \in BOOLEAN
-    /\ sessionCheckRecovered \in BOOLEAN
+/\ sessionCheckRecovered \in BOOLEAN
+/\ retainedWriteInFlight \in BOOLEAN
+/\ captureRetired \in BOOLEAN
+/\ retirementAttempted \in BOOLEAN
     /\ documentQueueMatches \in Nat
     /\ snapshotQueueMatches \in Nat
     /\ documentQueueMarked \in Nat
@@ -230,6 +255,7 @@ QueueMismatchNeverBlocks == queueSyncDone =>
     /\ snapshotQueueMarked = snapshotQueueMatches
 StrictUnmarkedNeverMutates == ~unmarkedApplied
 PressureMarkerDoesNotChurn == pressureMarkerWrites <= 1
+RetainedWriteCannotLoseCapture == retainedWriteInFlight => ~captureRetired
 CommitRequiresObservedAckAndFullBody == committed =>
     /\ ackObserved
     /\ fullResponseInHead
@@ -250,5 +276,6 @@ EventuallySameCaptureCommitsExactlyOnce == <>(committed /\ responseCopies = 1)
 EventuallyPostProofAdvanceRebases == <>(postProofRebases = 1)
 EventuallyReplacementBootstrapSettlesSameCapture ==
     <>(sessionCheckRecovered /\ ~deferredDelivery /\ snapshotMatchesCapture)
+EventuallyConcurrentRepairKeepsCapture == <>(retirementAttempted /\ ~captureRetired)
 
 =============================================================================

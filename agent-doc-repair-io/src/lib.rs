@@ -2000,6 +2000,8 @@ pub fn retire_stale_capture_if_drifted(
                 )?,
             captured_response_body_missing,
             captured_response_heading_answered,
+            retained_document_write: agent_doc_document_realtime_io::pending_document_write(file)
+                .is_some(),
         },
     );
 

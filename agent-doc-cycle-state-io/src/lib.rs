@@ -1835,6 +1835,44 @@ pub fn mark_abandoned(
     Ok(state)
 }
 
+/// Restore the exact cycle that was incorrectly abandoned by the
+/// `retire_superseded_captured_only_orphan` repair while a retained document
+/// write was still in flight. This is deliberately narrower than an ordinary
+/// abandoned-cycle reopen: both durable identities and the precise retirement
+/// event must match.
+pub fn reactivate_false_stale_capture_retirement(
+    file: &Path,
+    capture_id: &str,
+    response_sha256: &str,
+) -> Result<bool> {
+    let Some(mut state) = load(file)? else {
+        return Ok(false);
+    };
+    if state.phase == CyclePhase::ResponseCaptured
+        && state.capture_id.as_deref() == Some(capture_id)
+        && state.response_sha256.as_deref() == Some(response_sha256)
+    {
+        return Ok(true);
+    }
+    if state.phase != CyclePhase::Abandoned
+        || state.last_event != "repair_retire_superseded_captured_only_orphan"
+        || state.cycle_id != capture_id
+        || state.capture_id.as_deref() != Some(capture_id)
+        || state.response_sha256.as_deref() != Some(response_sha256)
+    {
+        return Ok(false);
+    }
+
+    state.phase = CyclePhase::ResponseCaptured;
+    state.last_event = "session_check_reactivated_false_stale_capture_retirement".to_string();
+    state.updated_at = now_secs();
+    state.blocked_closeout = None;
+    save(file, &state)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
+    append_phase_event_to_session_log(file, &state, None);
+    Ok(true)
+}
+
 fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_content: Option<&str>) {
     let Some(content) = file_content else {
         return;
@@ -3382,6 +3420,55 @@ mod tests {
         assert_eq!(state.phase, CyclePhase::Abandoned);
         assert_eq!(state.last_event, "abandon_empty_preflight");
         assert!(!state.is_open());
+    }
+
+    #[test]
+    fn exact_false_stale_retirement_can_reactivate_same_cycle() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        let captured = mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "response-sha",
+            Some(&started.cycle_id),
+        )
+        .unwrap();
+        mark_abandoned(
+            &doc,
+            "repair_retire_superseded_captured_only_orphan",
+            Some("snap"),
+            Some("body"),
+        )
+        .unwrap();
+
+        assert!(
+            reactivate_false_stale_capture_retirement(
+                &doc,
+                captured.capture_id.as_deref().unwrap(),
+                "response-sha",
+            )
+            .unwrap()
+        );
+        let reactivated = load(&doc).unwrap().unwrap();
+        assert_eq!(reactivated.cycle_id, started.cycle_id);
+        assert_eq!(reactivated.phase, CyclePhase::ResponseCaptured);
+        assert_eq!(
+            reactivated.last_event,
+            "session_check_reactivated_false_stale_capture_retirement"
+        );
+        assert!(
+            reactivate_false_stale_capture_retirement(
+                &doc,
+                captured.capture_id.as_deref().unwrap(),
+                "response-sha",
+            )
+            .unwrap(),
+            "recovery must remain idempotent after the cycle projection advances first"
+        );
     }
 
     #[test]

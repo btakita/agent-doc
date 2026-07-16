@@ -1116,10 +1116,8 @@ pub fn settle_retained_captured_projection_through_authority(
         return Ok(false);
     };
     let canonical = try_resolve_current_document_content(path, source)?;
-    let disk = resolve_disk_current_document_content(path, source)?;
     let target_hash = agent_doc_hash::content_hash(&pending.target_content);
     if canonical != pending.target_content
-        || disk != pending.target_content
         || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
         || !agent_doc_turn::response_replay::response_materialized_in_content(
             captured_response,
@@ -1127,6 +1125,25 @@ pub fn settle_retained_captured_projection_through_authority(
         )
     {
         return Ok(false);
+    }
+
+    let mut disk = resolve_disk_current_document_content(path, source)?;
+    if disk != pending.target_content {
+        let Some(projected) = settle_acknowledged_captured_projection_through_authority(
+            path,
+            captured_response,
+            source,
+        )?
+        else {
+            return Ok(false);
+        };
+        if projected != pending.target_content {
+            return Ok(false);
+        }
+        disk = resolve_disk_current_document_content(path, source)?;
+        if disk != pending.target_content {
+            return Ok(false);
+        }
     }
 
     clear_all_deferred_document_write_intents(path, source)?;
@@ -1140,6 +1157,53 @@ pub fn settle_retained_captured_projection_through_authority(
         ),
     );
     Ok(true)
+}
+
+/// Finish the disk half of a response projection only after a live editor has
+/// acknowledged the exact canonical frontier. This is the asynchronous twin of
+/// the foreground `atomic_write_through_authority` materialization step: it is
+/// safe after a delayed ACK because the editor buffer already contains the same
+/// response-bearing bytes, and it never overwrites a newer editor cut.
+pub fn settle_acknowledged_captured_projection_through_authority(
+    path: &Path,
+    captured_response: &str,
+    source: &str,
+) -> Result<Option<String>> {
+    let current = observe_live_editor_authority_after_model_ensure(path, source)?;
+    let agent_doc_crdt_relay_io::CurrentText::Current {
+        text,
+        live_editors,
+        delivery_converged: true,
+        ..
+    } = current
+    else {
+        return Ok(None);
+    };
+    if live_editors == 0
+        || !agent_doc_turn::response_replay::response_materialized_in_content(
+            captured_response,
+            &text,
+        )
+    {
+        return Ok(None);
+    }
+
+    let disk_rewritten = materialize_canonical_disk_projection_if_needed(path, &text)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    if disk != text {
+        return Ok(None);
+    }
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "acknowledged_captured_projection_settled file={} content_hash={} live_editors={} delivery_converged=true disk_rewritten={} captured_response_materialized=true",
+            path.display(),
+            agent_doc_hash::content_hash(&text),
+            live_editors,
+            disk_rewritten,
+        ),
+    );
+    Ok(Some(text))
 }
 
 /// Repair-only zero-replica recovery.
@@ -4549,7 +4613,11 @@ mod tests {
             .unwrap(),
             captured_target,
         );
-        std::fs::write(&file, &captured_target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            editor_base,
+            "replacement bootstrap ACK can precede the editor's disk save"
+        );
 
         assert!(
             settle_retained_captured_projection_through_authority(
@@ -4558,7 +4626,7 @@ mod tests {
                 "retained_captured_replacement_bootstrap_test",
             )
             .unwrap(),
-            "replacement bootstrap plus exact disk save should settle without an impossible ACK"
+            "replacement bootstrap should settle the acknowledged canonical target and finish its disk projection"
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(

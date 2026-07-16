@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.149
+
+- **Concurrent repair no longer retires a captured response whose editor delivery is still in flight.** Stale-capture policy now treats the retained document-write slot as durable ownership evidence, so a reused response heading cannot misclassify the exact active capture as a superseded captured-only orphan.
+- **`session-check` repairs the historical false-retirement shape without recapture.** When the identical discarded capture and abandoned cycle still match by capture ID and response hash, and the full response body is proven in a converged editor/canonical/disk cut, recovery reactivates that same capture/cycle, refreshes the snapshot, and commits it exactly once. Genuinely superseded or incomplete captures remain retired.
+- **PlusCal/TLA+ covers concurrent repair during retained delivery.** `CloseoutChurn.tla` now requires that an in-flight retained write cannot lose its capture and that the repair attempt eventually preserves the same capture through settlement.
+
 ## 0.34.148
 
 - **`session-check` now finishes a retained capture after replacement-replica bootstrap.** When JetBrains has installed and saved the exact retained canonical target, replacement registration legitimately has an empty ACK queue. The check recognizes exact canonical/target/disk convergence, retires the historical deferred slot, refreshes the response snapshot, and commits the same durable capture without asking the agent to finalize again.

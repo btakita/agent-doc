@@ -1076,7 +1076,7 @@ fn inspect_core_with_captured_resume(
         && cycle_state.as_ref().is_some_and(|state| {
             matches!(
                 state.phase,
-                CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
+                CyclePhase::ResponseCaptured | CyclePhase::WriteApplied | CyclePhase::Abandoned
             )
         })
     {

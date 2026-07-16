@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.159
+
+- **Exact non-capture editor-reconnect projections now settle monotonically.** A queue-normalization or other deterministic preflight projection is no longer misclassified as a captured assistant response. Once the retained target hash, canonical editor/CRDT authority, and native-saved disk bytes are identical, `session-check` clears that intent without requiring inapplicable response-materialization proof; unresolved instances retain the same intent and use non-capture diagnostics. The CRDT relay regression fixture covers ACK-before-save retention followed by exact-save settlement.
+
 ## 0.34.158
 
 - **A converged CRDT delivery ACK no longer writes the session file behind an active editor.** The binary asks the owning editor to save its already-authoritative buffer, requires disk to contain that exact editor version, and revalidates the canonical version before settlement. A newer operator edit invalidates the old proof while preserving the durable agent intent for rebase; a missing save keeps the same capture retained. This removes the direct-disk race that caused JetBrains File Cache Conflict, stale-disk restoration, and retained closeout wedges.

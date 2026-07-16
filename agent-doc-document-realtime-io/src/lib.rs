@@ -1272,6 +1272,46 @@ pub fn settle_retained_captured_projection_through_authority(
     Ok(true)
 }
 
+/// Settle a retained document projection that is not owned by an active
+/// captured-response closeout.
+///
+/// Preflight and editor-reconnect reconciliation can retain a deterministic
+/// document projection (for example, queue normalization) without capturing an
+/// assistant response. Once both canonical editor authority and disk equal the
+/// exact retained target, no response-materialization proof is applicable or
+/// necessary: the retained intent itself has reached its terminal state.
+pub fn settle_retained_non_capture_projection_through_authority(
+    path: &Path,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_document_write(path) else {
+        return Ok(false);
+    };
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let target_hash = agent_doc_hash::content_hash(&pending.target_content);
+    if canonical != pending.target_content
+        || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
+    {
+        return Ok(false);
+    }
+    let disk = resolve_disk_current_document_content(path, source)?;
+    if disk != pending.target_content {
+        return Ok(false);
+    }
+
+    clear_all_deferred_document_write_intents(path, source)?;
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "retained_non_capture_projection_settled file={} intent_id={} target_hash={} canonical_disk_exact=true deferred_lineage=cleared",
+            path.display(),
+            pending.intent_id,
+            target_hash,
+        ),
+    );
+    Ok(true)
+}
+
 /// Finish the disk half of a response projection only after a live editor has
 /// acknowledged the exact canonical frontier. This is the asynchronous twin of
 /// the foreground `atomic_write_through_authority` materialization step: it is
@@ -5161,6 +5201,65 @@ mod tests {
             captured_target,
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_target);
+    }
+
+    #[test]
+    fn retained_non_capture_projection_settles_when_authority_and_disk_are_exact() {
+        let editor_base = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
+        let normalized_target =
+            "# Session\n\n<!-- agent:queue -->\nnormalized\n<!-- /agent:queue -->\n";
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-non-capture-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            normalized_target,
+            editor_base,
+            "retained_non_capture_zero_replica_test",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+        );
+
+        let (_replacement_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should bootstrap from retained canonical");
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_non_capture_replacement_bootstrap_current",
+            )
+            .unwrap(),
+            normalized_target,
+        );
+        assert!(
+            !settle_retained_non_capture_projection_through_authority(
+                &file,
+                "retained_non_capture_before_editor_save_test",
+            )
+            .unwrap(),
+            "canonical convergence without the native disk save must remain retained",
+        );
+        assert!(pending_document_write(&file).is_some());
+
+        std::fs::write(&file, normalized_target).expect("simulate the editor's native save");
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "retained_non_capture_after_editor_save_test",
+            )
+            .unwrap(),
+            "an exact non-capture projection must settle without response proof",
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
     }
 
     #[test]

@@ -1090,6 +1090,7 @@ fn retained_pending_write_message(
     source: &str,
     target_hash: &str,
     resume_reason: Option<&str>,
+    captured_closeout: bool,
 ) -> String {
     let resume_detail = resume_reason
         .map(|reason| {
@@ -1099,16 +1100,29 @@ fn retained_pending_write_message(
             )
         })
         .unwrap_or_default();
-    format!(
-        "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
-        intent_id,
-        file.display(),
-        reason,
-        source,
-        target_hash,
-        resume_detail,
-        file.display(),
-    )
+    if captured_closeout {
+        format!(
+            "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
+            intent_id,
+            file.display(),
+            reason,
+            source,
+            target_hash,
+            resume_detail,
+            file.display(),
+        )
+    } else {
+        format!(
+            "[session-check] INTERRUPTED: binary-owned document projection `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same intent will resume automatically after editor/controller delivery converges.{} Do not issue a closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
+            intent_id,
+            file.display(),
+            reason,
+            source,
+            target_hash,
+            resume_detail,
+            file.display(),
+        )
+    }
 }
 
 fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
@@ -1186,6 +1200,25 @@ fn inspect_core_with_captured_resume(
         }
     }
 
+    let captured_closeout = cycle_state.as_ref().is_some_and(|state| {
+        matches!(
+            state.phase,
+            CyclePhase::ResponseCaptured | CyclePhase::WriteApplied | CyclePhase::Abandoned
+        )
+    });
+    if !closeout_committed && !captured_closeout {
+        match agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
+            file,
+            "session_check_retained_non_capture_projection_settlement",
+        ) {
+            Ok(true) | Ok(false) => {}
+            Err(err) => {
+                captured_resume_reason = Some(format!(
+                    "non-capture projection is not yet safe to settle: {err:#}"
+                ));
+            }
+        }
+    }
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
         && !closeout_committed
     {
@@ -1197,6 +1230,7 @@ fn inspect_core_with_captured_resume(
                 &pending.source,
                 &pending.target_hash,
                 captured_resume_reason.as_deref(),
+                captured_closeout,
             ),
         ));
     }
@@ -1935,6 +1969,7 @@ mod terminal_convergence_tests {
             "write_stream",
             "new",
             None,
+            true,
         );
         assert!(message.contains("same capture will resume"));
         assert!(message.contains("Do not issue another closeout payload"));
@@ -1942,5 +1977,24 @@ mod terminal_convergence_tests {
         assert!(message.contains("retry only `agent-doc session-check session.md`"));
         assert!(!message.contains("agent-doc finalize"));
         assert!(!message.contains("write --commit"));
+    }
+
+    #[test]
+    fn retained_pending_write_guidance_distinguishes_non_capture_projection() {
+        let file = Path::new("session.md");
+        let message = retained_pending_write_message(
+            file,
+            "intent-2",
+            "merge_unsaved_editor_cut_with_deferred_target",
+            "editor_reconnect",
+            "normalized",
+            None,
+            false,
+        );
+        assert!(message.contains("binary-owned document projection"));
+        assert!(message.contains("same intent will resume"));
+        assert!(message.contains("Do not issue a closeout payload"));
+        assert!(!message.contains("binary-owned response delivery"));
+        assert!(!message.contains("same capture will resume"));
     }
 }

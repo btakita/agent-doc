@@ -93,7 +93,23 @@ So I recorded it as **PRD decision D4** and put the implementation on `#fundlink
 Worth flagging: **D4 governs the pull/bind direction only, so it is _not_ blocked by #dzmm/#7a4d.** Those gate the EFS→TMO *push* (`#fundlink3`). That means the TMO-wins bind is implementable now — it doesn't have to wait on the TMO write field map. Say go and I'll take `#fundlink2`.
 
 One caveat on scope: I verified via `make check` + the worker bundle, not against the live portal — driving the real card needs a seeded lender with vestings. If you want live confirmation before this counts as shipped, say so and I'll run the local portal recipe.
-<!-- agent:boundary:9f1a1e6c -->
+
+### Re: Options 1 → 2 → 3 complete — opus-4-8
+
+All three shipped. EFS `1bb5c02` (pushed) closes options 1 and 3; option 2 landed last cycle (`0ac4402`). `make check` green: **1660 pass / 0 fail**.
+
+**1. `#fund-vesting-fk` — done.** Migration `0139` adds `funds.lender_vesting_id` as a real FK to `lender_vestings`. That replaces the implied deal↔vesting link (matching `funds.account_number` against `lender_vestings.tmo_lender_account` — TMO-derived, nullable, and simply absent for a never-synced vesting) with a first-class internal relationship. `account_number` is now just a derived mirror for TMO wire compat. `admin_fund_create_` takes a picked vesting (authoritative) or recovers it from the account, and the create-funding endpoint passes it through. **Nullable on purpose** — the FK is advisory and must never hard-gate deal progress, per the PRD's non-goals.
+
+**2. `#lender-sync-tmo-ui` — done last cycle** (`0ac4402`): per-vesting `TmoLenderPicker` + "Sync with TMO" card on the lender profile.
+
+**3. `#fundlink2` (PRD D4) — done.** This one turned up a real bug: `tmo_unmatched_funding_bind_` **always inserted a new fund**, so binding a TMO funding to a deal EFS already tracked produced a *second* position — exactly the `#5q7z` duplicate-funding class. It now reconciles the existing deal+lender fund to TMO: every conflicting field is overwritten from the pulled row, and an audit blob of precisely what was overridden lands in `tmo_response_json` (the bind also returns the overrides).
+
+One judgement call worth surfacing: **an absent TMO value does not blank out what EFS already knows.** "TMO is the source of truth" shouldn't mean a TMO row that merely omits a field wipes good EFS data — only a *present, differing* TMO value wins. If you'd rather TMO's silence be authoritative too, that's a one-line change in `fund_tmo_override_plan_`.
+
+Verification is stronger here than last cycle: alongside the pure `fund_tmo_override_plan_` unit tests, I added **behavioral** tests against real SQLite proving reconcile-not-duplicate, TMO winning the conflicting fields, the right vesting chosen among several, and bind still succeeding when no vesting maps. Fixing those also exposed that the test fixture was missing `lender_vestings` — now aligned to the real schema.
+
+Still not live-verified (no seeded lender with vestings on a real portal); the D1 migration `0139` also needs applying wherever you run it.
+<!-- agent:boundary:62d81c24 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -104,7 +120,7 @@ One caveat on scope: I verified via `make check` + the worker bundle, not agains
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
 - ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~
-- ⏭️ do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.
+- ~~do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.~~
 - go...do options 1 -> 2 -> 3
 <!-- /agent:queue -->
 

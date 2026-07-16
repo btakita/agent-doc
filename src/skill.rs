@@ -2504,6 +2504,17 @@ mod tests {
     }
 
     #[test]
+    fn development_claude_skill_version_matches_the_bundle() {
+        let development_skill = include_str!("../.claude/skills/agent-doc/SKILL.md");
+        let expected = format!("agent-doc-version: \"{VERSION}\"");
+        assert!(SKILL_TEMPLATE.contains(&expected));
+        assert!(
+            development_skill.contains(&expected),
+            "development Claude skill must track the bundled release version {VERSION}"
+        );
+    }
+
+    #[test]
     fn bundled_skill_contains_finalize_commit_invariant() {
         assert!(SKILL_TEMPLATE.contains("agent-doc finalize <FILE>"));
         assert!(

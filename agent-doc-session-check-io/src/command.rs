@@ -332,7 +332,11 @@ pub fn run_with_options(
         // idempotent resume before returning the generic integrity error. This
         // breaks the former cycle: integrity blocked the only recovery capable
         // of restoring integrity.
-        if !resume_captured_finalize_before_integrity(file, effects)? {
+        if !resume_captured_finalize_for_recovery(
+            file,
+            effects,
+            "session_check_integrity_recovered_from_retained_capture",
+        )? {
             return Err(error);
         }
         let recovered = crate::resolve_current_document_content(
@@ -345,10 +349,34 @@ pub fn run_with_options(
             agent_doc_ops_log_io::log_op,
         )?;
     }
-    let authority_content =
+    let mut authority_content =
         crate::resolve_current_document_content(file, "session_check_terminal_convergence")?;
-    let disk_content =
+    let mut disk_content =
         crate::resolve_disk_document_content(file, "session_check_terminal_convergence")?;
+    // A replacement/re-register may remove structural duplication while leaving
+    // a clean retained response visible only in canonical authority. Do not let
+    // the generic authority/disk divergence guard block the exact captured
+    // response that owns the lossless replay recipe.
+    if resume_captured_finalize_before_terminal_convergence(
+        file,
+        &authority_content,
+        &disk_content,
+        effects,
+    )? {
+        authority_content = crate::resolve_current_document_content(
+            file,
+            "session_check_terminal_convergence_after_captured_resume",
+        )?;
+        disk_content = crate::resolve_disk_document_content(
+            file,
+            "session_check_terminal_convergence_after_captured_resume",
+        )?;
+        agent_doc_lint_io::validate_integrity_on_content_with_logger(
+            file,
+            &authority_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
+    }
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
     self_heal_transiently_stale_committed_projection(file, &authority_content, effects)?;
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
@@ -627,9 +655,10 @@ pub fn run_with_options(
     }
 }
 
-fn resume_captured_finalize_before_integrity(
+fn resume_captured_finalize_for_recovery(
     file: &Path,
     effects: &impl SessionCheckEffects,
+    recovered_log_event: &str,
 ) -> Result<bool> {
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let resumable = cycle_state.as_ref().is_some_and(|state| {
@@ -643,15 +672,28 @@ fn resume_captured_finalize_before_integrity(
     }
     match effects.resume_captured_finalize(file)? {
         CapturedFinalizeResumeOutcome::Committed | CapturedFinalizeResumeOutcome::Superseded => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                "session_check_integrity_recovered_from_retained_capture",
-            );
+            agent_doc_ops_log_io::log_op(file, recovered_log_event);
             Ok(true)
         }
         CapturedFinalizeResumeOutcome::NotApplicable
         | CapturedFinalizeResumeOutcome::Retained { .. } => Ok(false),
     }
+}
+
+fn resume_captured_finalize_before_terminal_convergence(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+    effects: &impl SessionCheckEffects,
+) -> Result<bool> {
+    if authority_content == disk_content {
+        return Ok(false);
+    }
+    resume_captured_finalize_for_recovery(
+        file,
+        effects,
+        "session_check_divergence_recovered_from_retained_capture",
+    )
 }
 
 pub fn inspect(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
@@ -1672,6 +1714,96 @@ mod terminal_convergence_tests {
         fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
             Ok(CapturedFinalizeResumeOutcome::NotApplicable)
         }
+    }
+
+    struct ResumeEffects;
+
+    impl SessionCheckEffects for ResumeEffects {
+        fn closeout_recovery_hint(&self, file: &Path) -> String {
+            TestEffects.closeout_recovery_hint(file)
+        }
+
+        fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
+            TestEffects.atomic_write(file, content)
+        }
+
+        fn settle_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_current: &str,
+        ) -> Result<()> {
+            TestEffects.settle_committed_projection(file, committed_content, expected_current)
+        }
+
+        fn settle_retained_committed_projection(
+            &self,
+            file: &Path,
+            committed_content: &str,
+            expected_disk: &str,
+        ) -> Result<bool> {
+            TestEffects.settle_retained_committed_projection(file, committed_content, expected_disk)
+        }
+
+        fn repair_committed_historical_snapshot_drift(
+            &self,
+            file: &Path,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.repair_committed_historical_snapshot_drift(file)
+        }
+
+        fn recover_missing_commit_boundary(
+            &self,
+            file: &Path,
+            event: &str,
+        ) -> Result<Option<&'static str>> {
+            TestEffects.recover_missing_commit_boundary(file, event)
+        }
+
+        fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+            Ok(CapturedFinalizeResumeOutcome::Committed)
+        }
+    }
+
+    #[test]
+    fn session_check_resumes_retained_capture_before_terminal_divergence_guard() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce retained response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &file,
+            "### Re: retained response — gpt-5\n\nRecovered body.\n",
+            baseline,
+        )
+        .unwrap();
+
+        assert!(
+            resume_captured_finalize_before_terminal_convergence(
+                &file,
+                "editor-authoritative response",
+                baseline,
+                &ResumeEffects,
+            )
+            .unwrap()
+        );
+        assert!(
+            !resume_captured_finalize_before_terminal_convergence(
+                &file,
+                baseline,
+                baseline,
+                &ResumeEffects,
+            )
+            .unwrap(),
+            "converged authority must not replay a retained capture"
+        );
     }
 
     #[test]

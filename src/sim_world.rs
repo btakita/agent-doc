@@ -296,7 +296,10 @@ mod crdt_lineage_fence_model {
         }
 
         fn assert_invariants(&self) {
-            assert!(!self.corrupted, "stale replay corrupted the canonical: {self:?}");
+            assert!(
+                !self.corrupted,
+                "stale replay corrupted the canonical: {self:?}"
+            );
             assert!(
                 !self.queue_tombstone || !self.queue_visible,
                 "deleted queue item resurrected: {self:?}"

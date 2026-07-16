@@ -1499,8 +1499,7 @@ mod tests {
     fn replacement_rotates_lineage_and_quarantines_stale_durable_deltas() {
         let mut hub = RelayHub::from_text(1, "clean\n");
         let old_lineage = hub.lineage().to_string();
-        let stale_editor =
-            ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        let stale_editor = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
         let stale_frontier = stale_editor.state_vector();
         stale_editor.apply_local_edit(6, 0, "resurrected\n");
         let stale_delta = stale_editor.diff(&stale_frontier).unwrap();
@@ -1521,8 +1520,7 @@ mod tests {
         assert_eq!(hub.canonical_text(), "rebuilt\n");
 
         let current_lineage = hub.lineage().to_string();
-        let current_editor =
-            ReplicaState::from_encoded(3, &hub.canonical_encoded_state()).unwrap();
+        let current_editor = ReplicaState::from_encoded(3, &hub.canonical_encoded_state()).unwrap();
         let current_frontier = current_editor.state_vector();
         current_editor.apply_local_edit(8, 0, "current\n");
         let current_delta = current_editor.diff(&current_frontier).unwrap();

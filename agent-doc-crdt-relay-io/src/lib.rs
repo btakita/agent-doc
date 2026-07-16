@@ -110,11 +110,7 @@ fn write_crdt_lineage_metadata(file: &Path, projection: &[u8], lineage: &str) ->
     agent_doc_snapshot_io::write_crdt_state_file(&path, &bytes)
 }
 
-fn save_crdt_projection_with_lineage(
-    file: &Path,
-    projection: &[u8],
-    lineage: &str,
-) -> Result<()> {
+fn save_crdt_projection_with_lineage(file: &Path, projection: &[u8], lineage: &str) -> Result<()> {
     agent_doc_snapshot_io::save_crdt(file, projection)?;
     write_crdt_lineage_metadata(file, projection, lineage)
 }
@@ -2741,9 +2737,10 @@ pub fn adopt_editor_text_for_file(file: &Path, text: &str) -> Result<Option<bool
 /// applying the delta is idempotent + commutative, so a duplicate / out-of-order /
 /// stale frame converges rather than corrupting the canonical.
 pub fn apply_document_op_delta_for_file(file: &Path, delta: &[u8]) -> Result<Option<bool>> {
-    Ok(apply_document_op_delta_for_file_in_lineage(file, None, delta)?.map(|outcome| {
-        matches!(outcome, DocumentOpDeltaOutcome::Applied { changed: true })
-    }))
+    Ok(
+        apply_document_op_delta_for_file_in_lineage(file, None, delta)?
+            .map(|outcome| matches!(outcome, DocumentOpDeltaOutcome::Applied { changed: true })),
+    )
 }
 
 /// Lineage-fenced durable document-op ingest. Stale/ambiguous frames are
@@ -3151,16 +3148,18 @@ mod tests {
     #[test]
     fn durable_lineage_metadata_is_bound_to_exact_projection() {
         let (_dir, doc) = temp_doc("lineage-projection.md");
-        let projection = RelayHub::from_text(CANONICAL_CLIENT_ID, "projection one\n")
-            .projection_bytes();
+        let projection =
+            RelayHub::from_text(CANONICAL_CLIENT_ID, "projection one\n").projection_bytes();
         write_crdt_lineage_metadata(&doc, &projection, "lineage-one").unwrap();
         assert_eq!(
-            load_matching_crdt_lineage(&doc, &projection).unwrap().as_deref(),
+            load_matching_crdt_lineage(&doc, &projection)
+                .unwrap()
+                .as_deref(),
             Some("lineage-one")
         );
 
-        let replacement = RelayHub::from_text(CANONICAL_CLIENT_ID, "projection two\n")
-            .projection_bytes();
+        let replacement =
+            RelayHub::from_text(CANONICAL_CLIENT_ID, "projection two\n").projection_bytes();
         assert_eq!(
             load_matching_crdt_lineage(&doc, &replacement).unwrap(),
             None,

@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.157
+
+- **Retained-capture recovery now runs before the terminal authority/disk divergence guard as well as before integrity failure.** Live recovery of `agent-doc-bugs2.md` showed a second valid state: replica replacement had already removed the duplicate boundary, so integrity passed, while the clean response remained retained only in canonical editor authority. `session-check` now gives that resumable captured/write-applied/abandoned cycle one exact-once replay, re-resolves and revalidates both projections, and only then applies the generic divergence refusal. A focused regression proves divergent authority triggers replay while converged authority never does.
+
 ## 0.34.156
 
 - **Whole-document CRDT replacements now fence obsolete replicas by lineage instead of union-merging their stale Yjs updates into a new document.** Registration returns the canonical lineage; JetBrains and VS Code attach it to every durable document-op frame; replacements rotate it; and stale or legacy frames after rotation are terminally quarantined while their reliable-sync cursor still advances. This prevents the observed full-exchange duplication, duplicate boundary markers, deleted-queue resurrection, and unbounded ACK retry after an editor/model rebase.

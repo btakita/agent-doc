@@ -8456,9 +8456,10 @@ fn handle_reliable_sync(
         let batch = decoded.with_context(|| {
             format!("reliable_sync_document_op_frame_malformed hash={document_hash}")
         })?;
-        let delta = agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
-            format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
-        })?;
+        let delta =
+            agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
+                format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
+            })?;
         agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
             file,
             batch.lineage.as_deref(),

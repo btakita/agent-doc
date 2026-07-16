@@ -35,7 +35,9 @@
 //! gate.
 
 use anyhow::{Result, anyhow};
-use lazily::{CrdtOp, CrdtSync, IpcMessage, IpcValue, NodeId, NodeKey, TextCrdt, TextOp, WireStamp};
+use lazily::{
+    CrdtOp, CrdtSync, IpcMessage, IpcValue, NodeId, NodeKey, TextCrdt, TextOp, WireStamp,
+};
 use serde::{Deserialize, Serialize};
 
 /// Reserved graph node id carrying document-op deltas. Mirrors
@@ -100,7 +102,10 @@ pub fn encode_document_op_frame_in_lineage(
 pub fn encode_document_op_json_frame(delta_json: &str) -> Result<Option<IpcMessage>> {
     let envelope = serde_json::from_str::<LineagedDocumentOpJson>(delta_json).ok();
     let (lineage, delta_json) = match envelope.as_ref() {
-        Some(envelope) => (Some(envelope.lineage.as_str()), envelope.delta_json.as_str()),
+        Some(envelope) => (
+            Some(envelope.lineage.as_str()),
+            envelope.delta_json.as_str(),
+        ),
         None => (None, delta_json),
     };
     let ops = agent_doc_merge::crdt_sync::decode_update_ops(delta_json.as_bytes())
@@ -350,7 +355,10 @@ mod tests {
             .expect("is a document-op frame")
             .expect("decodes");
         assert_eq!(decoded.lineage, None);
-        assert_eq!(decoded.ops, ops, "round-trip preserves the op list verbatim");
+        assert_eq!(
+            decoded.ops, ops,
+            "round-trip preserves the op list verbatim"
+        );
     }
 
     #[test]
@@ -363,7 +371,10 @@ mod tests {
             .unwrap()
             .expect("non-empty compact frame");
         assert_eq!(
-            decode_document_op_frame(&compact_frame).unwrap().unwrap().ops,
+            decode_document_op_frame(&compact_frame)
+                .unwrap()
+                .unwrap()
+                .ops,
             ops
         );
 
@@ -372,7 +383,10 @@ mod tests {
             .unwrap()
             .expect("non-empty legacy frame");
         assert_eq!(
-            decode_document_op_frame(&legacy_frame).unwrap().unwrap().ops,
+            decode_document_op_frame(&legacy_frame)
+                .unwrap()
+                .unwrap()
+                .ops,
             ops
         );
     }

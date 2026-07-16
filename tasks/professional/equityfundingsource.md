@@ -191,16 +191,16 @@ Built the foundation first, since `#lender-sync-tmo` (and the deal-funding picke
 **Deploy note:** 0138 is additive/nullable and safe, but `investor_vestings_R_` now SELECTs the new columns, so **the migration must be applied to prod D1 before the next code deploy** (else the vestings read breaks). I did *not* deploy or migrate-remote this cycle (preset is commit-push) — flagging so it goes out with the deploy.
 
 `#lender-sync-tmo` is now unblocked and next in the queue: the per-vesting "Sync with TMO" action on the lender detail page (link an existing account or create one, push gated on #dzmm/#7a4d). Still open from before: whether TMO exposes a LOS lender-list API to bulk-pull the roster, or sync stays per-lender by account.
-<!-- agent:boundary:413a83a4 -->
+<!-- agent:boundary:1c98f33b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
 - ~~Can we create loan funding records in the api?~~
-- 🚧 do [#lender-sync-tmo]
-- do [#h8rz]
-- do [#fundlink1]
-- do [#fundlink2]
+- ⏭️ do [#lender-sync-tmo]
+- ⏭️ do [#h8rz]
+- ⏭️ do [#fundlink1]
+- ⏭️ do [#fundlink2]
 <!-- /agent:queue -->
 
 ## Notes

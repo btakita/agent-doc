@@ -65,7 +65,24 @@ The enabler was that `Conn` is built to run with a nil `gconn` (delivery-only), 
 - Lean proves properties of a *mathematical model* you write, not of the running Go. To use it you would re-encode the hub (event loop, sockets, timing) as an abstraction and prove lemmas about *that*. You would be proving the model, while the bugs that actually bite live in the code — exactly what the deterministic simulation + `-race` exercise directly. For a v1 service (and a take-home), running the real code under seeded fault schedules is far higher signal per hour.
 - Where formal methods *do* pay off here is the lock-free send-queue drain (the `kick`/`writeNext` CAS ownership you asked about) and the at-least-once outbox/cursor protocol under crash + reconnect interleavings — state spaces too large to enumerate by testing. For *those*, the standard tool is a model checker that explores all interleavings, and **TLA+ (or Alloy) fits better than Lean** for concurrency/liveness. A short TLA+ spec of the resume/ack protocol would be a strong, low-cost formal artifact.
 - So: keep the simulation suite as the primary correctness net; if you want a formal complement for the interview, write a small TLA+ spec of the at-least-once protocol rather than a Lean model. Lean would be the right call only if you were proving pure algorithmic/data-structure correctness with a machine-checked proof as a hard deliverable.
-<!-- agent:boundary:e421c9df -->
+
+### Re: Can we get to 100% coverage? — opus-4-8
+
+Short answer: I pushed it from 90.0% to **97.3%**, and every library package is now at or near 100% — but literal 100% is the wrong target, and here is exactly why.
+
+**Where it landed** (`go test ./...`): envelope 100%, server 100%, downstream/chat 100%, `hub` 99.8%, auth 92.3%, `cmd/hubd` 65.1%. All green, `go vet` clean, `-race` clean on `hub` + `server`. Committed `e8def4e`, gitlink `66c403556`, pushed.
+
+I added branch coverage for every reachable path: all send-queue overflow policies, the breaker's half-open probe cycle, control unsubscribe/ack/resume and their error paths, slow-consumer shedding, write-error close, the encode-error branches, registry supersede + topic cleanup, `Validate`/`MustEncode`, auth issuer/audience enforcement, and the server's full upgrade handshake (query-param + `Authorization` header, buffered-bytes drain, post-upgrade read-error).
+
+**The remaining 2.7% is four things I deliberately did not chase:**
+
+1. **`cmd/hubd.main()`** (the 0% that dominates the gap) — flag parsing + signal wiring + `log.Fatal`. A process entrypoint is only coverable by building a `-cover` binary and running it as a subprocess with `GOCOVERDIR`. That is fragile integration machinery, and `main()` is the textbook case that coverage targets *exclude*.
+2. **`run` — one `log.Printf`** that only fires if the HTTP listener fails to bind (needs a port-conflict race to hit).
+3. **`auth.Verify` — a `non-MapClaims` guard** that `jwt.Parse` cannot actually produce; it is defensive code for an impossible state.
+4. **`writeNext`'s lost-wakeup re-arm** — reachable only under a genuine enqueue-vs-drain data race. Forcing it means goroutine-racing tests that flake, which is exactly what the deterministic simulation suite was built to avoid.
+
+**Recommendation:** stop here. 97% with the libraries at ~100% is the honest, high-signal number; the residue is an entrypoint, two defensive branches for states that can't occur, and a concurrency race. Chasing them makes the *tests* worse (flaky, fragile) without making the *code* safer. If a reviewer wants the headline to read 100%, the clean move is to scope the coverage target to the library packages (exclude `cmd/hubd`), which reports ~99.7% — I can wire that into a `make cover` target if you want it.
+<!-- agent:boundary:bf5a6a95 -->
 <!-- /agent:exchange -->
 
 ## Queue

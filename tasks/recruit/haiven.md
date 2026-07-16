@@ -93,28 +93,79 @@ It loses on everything else, and one measurement carries the argument:
 DESIGN §7.1 now carries the general rule: **if a fan-out feature's per-connection subscription count is a function of *other users*, it breaks capacity planning** — bound it by what the client can actually render.
 
 `make check` green. Commits `e718a49` + `b43c7a7`, gitlink `2405b94f1`.
-<!-- agent:boundary:031ce327 -->
+
+### Re: opportunistic batching, max-size caps, and whether in-process still wins — opus-4-8
+
+Built it, measured it, and it **corrected my own committed claim**.
+
+**Does batching remove the cliff?** Partly. At `pool=1`, `-ds-batch 64` took shed from **89.9% → 46.0%** at **4.9× throughput** (2,181 → 10,630/s), zero extra sockets. But it doesn't rescue one connection:
+
+| pool | batch | shed | throughput | writes | avg batch |
+|---|---|---|---|---|---|
+| 1 | 1 | 89.9% | 2.2 k/s | 50,036 | 1.0 |
+| 1 | 64 | 46.0% | 10.6 k/s | 1,800 | **15.0** |
+| 2 | 1 | 86.7% | 2.9 k/s | 6,643 | 1.0 |
+| 2 | 64 | **0%** | 19.7 k/s | 4,633 | **10.8** |
+| 4 | 1 | 0% | 20.0 k/s | 50,000 | 1.0 |
+| 4 | 64 | 0% | 20.3 k/s | **7,707** | **6.5** |
+
+**Batching halves the pool you need** (pool=2+batch sheds nothing; unbatched needed pool=4) but doesn't replace it. My caveat in `cd43b4b` claimed batching would fix the cliff *without* extra sockets — **too strong, now corrected**. They compose: batching amortizes the syscall, the pool buys parallelism across clients.
+
+Two things I didn't predict: it's **free even when unneeded** (pool=4 holds ~20k/s while cutting writes 50,000 → 7,707, **6.5× fewer syscalls**), and **`avg batch` self-tunes into a pressure gauge** — 15.0 → 10.8 → 6.5 as the pool grows, because a leg that keeps up has an empty queue and nothing to batch. Alert on it; don't tune it.
+
+### Should we cap batch size? Yes — but not for the reason implied
+
+**A cap does NOT protect the downstream from overload.** It only chunks the same load; if arrival exceeds capacity you still shed. The bounded queue, the breaker (§6.4), and rate limiting (§4.2) are what shed. Conflating the two would be a design error.
+
+What the cap actually bounds, all four real:
+- **Last-in-batch latency** — it waits behind everything ahead of it: `N_max ≈ latency_budget / per_message_service_time`.
+- **Frame size** — §6.3's `MaxFrameBytes` is 64 KiB → ~320 messages at ~200 B.
+- **Interleaving** — a huge batch monopolizes the connection.
+- **Retry blast radius** — at-least-once retries the whole batch, so bigger batches duplicate more.
+
+### With batching, would I still keep services in-process?
+
+**Yes — but my committed reasoning was wrong, and I withdrew it.** §2.4.1 said "route by volume." Batching kills that: a batched leg runs ~0.5–4 M/s against a ~360 k/s need, and the boundary's ~50–100 µs is **0.3% of a 1–50 ms internet path**. Volume was only a proxy for "can the leg carry it."
+
+Two things survive, neither throughput:
+- **The failure mode.** In-process `Handle` cannot drop, disconnect, or trip a breaker. Batching makes the leg *better*, not *nonexistent* (§9: keep failure modes legible).
+- **Resource-profile mismatch.** The hub wants low latency, small heap, predictable GC. A service wanting a big heap, sustained CPU, or a GPU (an ML moderation classifier) hurts the hub *from inside* via GC pressure and scheduler contention. **That's** the eviction criterion — not traffic share. It keeps chat in-process for a different reason than volume would: chat is I/O-bound persistence that coexists fine.
+
+So the decision reverts to organizational — what §2.4 framed before any of this was measured. For v1 all five stay in-process on YAGNI grounds (§12), and batching means the transport won't be what stops you when that changes.
+
+### Session-doc recovery
+
+The editor restart cleared the 0.2.271→0.2.272 plugin gap. The merge kept your gRPC prompt (the irreplaceable side) and dropped `do [#haivenresume]` / `[#haivenapply]` / `[#haivenprofiles]` — **no real loss: all three were already complete per Status (2026-07-06)**, so they were stale entries.
+
+Closed `#friendfanout` (it said "implement resolve mode", which we decided against in favour of the friend-frame). `make check` green, wspool tests pass under `-race`. Pushed: submodule `1a55783` + superproject gitlink, both in sync with origin.
+
+**Next: the take-home v2 review** — the actual deliverable, and where I'd put the remaining time.
+<!-- agent:boundary:313b81c1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+/goal Implement backlog item(s): #b10a
 - ⏭️ /goal Implement backlog item(s): #yyzn
-- ~~Please go through LOADTEST.md. Simplify based on the existing benchmarks. Show before/after for interesting code events such as no sharding vs sharding. We should be able to replicate no sharding with a sharding of 1. Please simplify LOADTEST.md + DESIGN.md + README.md. They have accumulated cruft as we iterated...some of the content is outdated + inaccurate with the current system.~~ — auto-struck: answered this cycle (#ftstrike)
-- Please add a websocket pool to the downstream connections. Load test with 1 websocket connection per downstream service...then load test with the websocket pool. Compare dropped connections + dropped messages/retries.
+- ~~Please go through LOADTEST.md. Simplify based on the existing benchmarks. Show before/after for interesting code events such as no sharding vs sharding. We should be able to replicate no sharding with a sharding of 1. Please simplify LOADTEST.md + DESIGN.md + README.md. They have accumulated cruft as we iterated...some of the content is outdated + inaccurate with the current system.~~
+- ~~Please add a websocket pool to the downstream connections. Load test with 1 websocket connection per downstream service...then load test with the websocket pool. Compare dropped connections + dropped messages/retries.~~
+- Implement grpc with opportunistic batching and benchmark.
+- do [#friendsnapshot]
+- ~~do [#friendfanout]~~
+- do [#yyzn-clarify]
+- do [#haivenwsopt]
+- do [#tnpa]
+- I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog queue -->
 - [ ] [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
-- [ ] [#friendfanout] haiven-websocket-hub: implement -friends-fanout=subscribe|resolve in the realistic loadtest — resolve mode drops friend-topic subscriptions and has the presence service resolve i's online friends (reverse adjacency, built once in the harness = the service's store) issuing SendToClient per friend. Then re-run the friends-median sweep to confirm hub per-conn heap stays flat at the friends-off row (~2.31 KiB) at any median, and measure the CPU/throughput cost of the trade (1 SendToTopic -> F SendToClient per presence update). This is the fix for the unbounded friend-presence memory documented in docs/LOADTEST.md.
 - [ ] [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
-- [ ] [#haivenresume] Generate tailored resume for Haiven Backend Platform Engineer via agent-resume (gaming + real-time + Go/reactive profile) [recommended]
-- [ ] [#haivenapply] Draft LinkedIn application survey answers ("why you're a perfect fit") for Haiven role
-- [ ] [#haivenprofiles] Persist Haiven + Craig Fryar profiles as standalone files (tasks/recruit/, mail/contacts/craig-fryar/)
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -128,6 +179,7 @@ DESIGN §7.1 now carries the general rule: **if a fan-out feature's per-connecti
 - 2026-07-06 [#haivenscreen] Write full rehearsal script (6 STAR answers) for the LinkedIn AI screening interview
 - 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 - 2026-07-16 [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
+- 2026-07-16 [#friendfanout] haiven-websocket-hub: implement -friends-fanout=subscribe|resolve in the realistic loadtest — resolve mode drops friend-topic subscriptions and has the presence service resolve i's online friends (reverse adjacency, built once in the harness = the service's store) issuing SendToClient per friend. Then re-run the friends-median sweep to confirm hub per-conn heap stays flat at the friends-off row (~2.31 KiB) at any median, and measure the CPU/throughput cost of the trade (1 SendToTopic -> F SendToClient per presence update). This is the fix for the unbounded friend-presence memory documented in docs/LOADTEST.md.
 <!-- /agent:done -->
 
 

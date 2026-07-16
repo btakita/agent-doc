@@ -217,15 +217,33 @@ Committed + pushed (EFS `90fdcc6`), `make check` green (1638 tests, 0 fail; buil
 Vestings sort first so the roster name/email wins; still LOS-only, no LSS, and the picker keeps free-text for a brand-new account.
 
 Practical note: this surfaces vestings **once they're mapped** to a TMO account, which happens through `#lender-sync-tmo`'s endpoint — and the admin UI to drive that (`#lender-sync-tmo-ui`) is still queued. So until that UI ships (or accounts are set via the endpoint directly), the union's vesting side is empty and the picker behaves as before. Next in queue: **#fundlink1 → #fundlink2 → #lender-sync-tmo-ui**.
-<!-- agent:boundary:9d637ff1 -->
+
+### Re: Shipped #fundlink1 backend — create funding on lender-select — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#fundlink1]
+
+
+Committed + pushed (EFS `5a9979d`), `make check` green (1642 tests, 0 fail; build + build:worker ok).
+
+**`POST /api/admin/deals/:id/funds`** materializes a `funds` row the moment a lender is selected on a deal — the create-on-lender-select behavior you asked for:
+- **No ready-for-funding gate** (unlike confirm-wire) and non-blocking — selecting the lender is what brings the funding into existence.
+- `source='efs'`, `status='pending'` until the wire is confirmed; validates lender (`user_id`) + TMO `account_number` + a positive `amount_funded`.
+- New repo helper `admin_fund_create_` (also re-exported through `admin/shared`); the TMO push stays on the gated writeback path (`#fundlink3`).
+
+Caught and fixed a re-export gap along the way: `admin_fund_create_` had to be surfaced through `admin/shared.ts` (where `investor_management` resolves its repo imports), else several test files failed to load — full suite is green now.
+
+UI queued as **#fundlink1-ui** (lender picker + amount + position on the deal funding panel). Next in queue: **#fundlink2 → #lender-sync-tmo-ui → #fundlink1-ui**.
+<!-- agent:boundary:611e28f5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
 - ~~Can we create loan funding records in the api?~~
 - ~~do [#lender-sync-tmo]~~
-- ⏭️ do [#h8rz]
-- ⏭️ do [#fundlink1]
+- ~~do [#h8rz]~~
+- ~~⏭️ do [#fundlink1]~~
 - ⏭️ do [#fundlink2]
 - 🚧 do [#lender-sync-tmo-ui]
 <!-- /agent:queue -->

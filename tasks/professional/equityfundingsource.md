@@ -37,7 +37,35 @@ complete
 Compacted content:
 - Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown of TMO lenders for the lender-account field; LOS lenders only; 11 more
 - Prior summary/context: prior compacted content: Archived 7 response topic(s): Remove "Wiring Instructions (Secure Link)" from the deal Fundi...
-<!-- agent:boundary:ab3d5013 -->
+
+### Re: Binding a deal to a vesting — opus-4-8
+
+Bind through the **funding record** (`funds`), keyed by a real FK to the vesting — not through the TMO account string. Here's the model and why it feels unreliable today.
+
+**The three links, and which are reliable now**
+
+| Link | Mechanism today | Reliable? |
+|------|-----------------|-----------|
+| vesting → lender | `lender_vestings.user_id → users.id` FK | ✅ yes — one lender = one `users` row → many vestings |
+| deal → vesting | *only* implied by `funds.account_number` == `lender_vestings.tmo_lender_account` (string match) | ❌ fragile — TMO-derived, nullable, breaks for never-synced vestings |
+| vesting → TMO account | `lender_vestings.tmo_lender_account` (mig 0138, nullable) | sync attribute only |
+
+`funds` today is `(id, deal_id, user_id, loan_number, account_number, amount_funded, status, …)`. It joins a deal to a *lender* (`user_id`) and to a TMO account *string* (`account_number`), but has **no column pointing at the vesting row**. That string is the only thing tying a funding to a vesting — and it's exactly what makes the link feel unreliable.
+
+**Recommendation: add `funds.lender_vesting_id` (FK → `lender_vestings.id`).**
+
+The funding is already the per-deal + per-lender join row; make it per-deal + per-**vesting** — the correct grain, since a lender funds a deal through one specific vesting. Then:
+
+- **deal ↔ vesting** = `funds.deal_id` + `funds.lender_vesting_id` — deterministic, internal, zero TMO dependency.
+- **vesting ↔ lender** = keep `lender_vestings.user_id` as the source of truth (derive/verify `funds.user_id` from it).
+- **account_number** becomes a *derived mirror* of the vesting's `tmo_lender_account` (copied when present) for TMO wire compatibility — no longer the binding key.
+
+This slots straight into create-on-lender-select (#fundlink1): pick vesting → set `funds.lender_vesting_id`; if the vesting has a `tmo_lender_account`, copy it into `funds.account_number` for the later (gated) TMO push; if not, the binding still holds locally.
+
+**April's question — do we even need EFS↔TMO vesting linking? No, not for binding.** The deal↔vesting↔lender chain is fully FK-expressible with zero TMO involvement. `tmo_lender_account` is only needed when you actually push/pull a funding to/from TMO (`AddLoanFunding` / `GetLoanFundings` key by account), and that path is already gated behind #dzmm/#7a4d. So you can bind a deal to a vesting **today** for a vesting that has never been synced to TMO — the TMO link is an optional sync attribute, not part of the core binding. That also decouples your internal binding's reliability from TMO sync timing and sidesteps the string-match ambiguity behind the #5q7z duplicate-funding class.
+
+**Net:** one small migration (`funds.lender_vesting_id` FK) turns the deal↔vesting bind from a fragile TMO-string join into a first-class internal relationship. Queued as `#fund-vesting-fk` — say the word and I'll implement it (migration + repo + create-on-select wiring).
+<!-- agent:boundary:33fcadb8 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -48,6 +76,7 @@ Compacted content:
 - ~~do [#fundlink1]~~
 - ~~do [#fundlink2]~~
 - ⏭️ do [#lender-sync-tmo-ui]
+- Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.
 <!-- /agent:queue -->
 
 ## Notes

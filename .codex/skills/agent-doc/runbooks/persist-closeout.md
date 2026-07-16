@@ -92,6 +92,14 @@ foreground rebase budget is exhausted, the retained operation continues through
 the supervisor and `session-check`; the agent still must not recapture, rerun
 `finalize` or `write --commit`, or force a disk projection.
 
+A replacement editor replica may bootstrap from that retained canonical target
+with an empty delivery queue. In that state no later ACK exists to retire the
+historical deferred slot. `session-check` recognizes exact
+canonical/target/disk equality plus captured-response materialization, clears
+only that retained lineage, refreshes the response snapshot, advances the same
+capture to `write_applied`, and commits it. Retry only `session-check`; another
+finalize/write payload would create closeout churn rather than recovery.
+
 Rule-based ambiguity resolution requires positive evidence. A duplicate semantic
 operation is deduped; a causally newer editor/replica epoch wins over its stale
 projection; compatible concurrent CRDT histories merge. Missing causal lineage or

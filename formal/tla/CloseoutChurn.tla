@@ -10,6 +10,9 @@ in HEAD; only full response-body identity may skip replay.  A recovery snapshot
 has fewer duplicate queue matches than the live document, but each overlap is
 still marked and the count mismatch cannot block closeout.  An unmarked strict
 template response is rejected before mutation.
+After the first delivery proof, an editor advances canonical authority before
+disk projection.  The document actor rebases the same retained intent; neither
+the response nor its backlog mutation is captured/applied a second time.
 ***************************************************************************)
 
 (* --fair algorithm ChurnFreeCloseout
@@ -24,6 +27,11 @@ fullResponseInHead = FALSE,
 cycleState = "committed_unrelated",
 captureCopies = 1,
 responseCopies = 0,
+backlogMutationCopies = 0,
+deliveryProof = FALSE,
+editorAdvancePending = TRUE,
+canonicalAdvancedAfterProof = FALSE,
+postProofRebases = 0,
 documentQueueMatches = 3,
 snapshotQueueMatches = 2,
 documentQueueMarked = 0,
@@ -69,6 +77,18 @@ ObserverDone:
     end while;
 end process;
 
+process PostProofEditor = "post_proof_editor"
+begin
+AdvanceAfterProof:
+    await deliveryProof;
+    canonicalAdvancedAfterProof := TRUE;
+    editorAdvancePending := FALSE;
+EditorDone:
+    while TRUE do
+        skip;
+    end while;
+end process;
+
 process QueueSync = "queue"
 begin
 MarkLiveMatches:
@@ -104,9 +124,19 @@ FullBodyIdentityGate:
     end if;
 AwaitRetainedConvergence:
     await ackObserved /\ queueSyncDone;
+RecordDeliveryProof:
+    deliveryProof := TRUE;
+AwaitPostProofEditorCut:
+    await ~editorAdvancePending;
+RebaseSameIntent:
+    if canonicalAdvancedAfterProof then
+        postProofRebases := postProofRebases + 1;
+        canonicalAdvancedAfterProof := FALSE;
+    end if;
 ApplySameCapture:
     assert cycleState = "rotated_open" /\ captureCopies = 1;
     responseCopies := responseCopies + 1;
+    backlogMutationCopies := backlogMutationCopies + 1;
     fullResponseInHead := TRUE;
 CommitExactlyOnce:
     cycleState := "committed_response";
@@ -130,6 +160,11 @@ TypeOK ==
                         "skipped_exact_duplicate", "committed_response"}
     /\ captureCopies \in Nat
     /\ responseCopies \in Nat
+    /\ backlogMutationCopies \in Nat
+    /\ deliveryProof \in BOOLEAN
+    /\ editorAdvancePending \in BOOLEAN
+    /\ canonicalAdvancedAfterProof \in BOOLEAN
+    /\ postProofRebases \in Nat
     /\ documentQueueMatches \in Nat
     /\ snapshotQueueMatches \in Nat
     /\ documentQueueMarked \in Nat
@@ -141,6 +176,12 @@ TypeOK ==
 
 NoCaptureRecapture == captureCopies = 1
 ResponseAppliedAtMostOnce == responseCopies <= 1
+BacklogMutationAppliedAtMostOnce == backlogMutationCopies <= 1
+PostProofAdvanceRebasesSameIntent ==
+    /\ postProofRebases <= 1
+    /\ postProofRebases = 1 =>
+        /\ ~editorAdvancePending
+        /\ ~canonicalAdvancedAfterProof
 HeadingAloneNeverSkips == cycleState # "skipped_exact_duplicate"
 QueueMismatchNeverBlocks == queueSyncDone =>
     /\ documentQueueMarked = documentQueueMatches
@@ -151,11 +192,14 @@ CommitRequiresObservedAckAndFullBody == committed =>
     /\ ackObserved
     /\ fullResponseInHead
     /\ responseCopies = 1
+    /\ backlogMutationCopies = 1
+    /\ postProofRebases = 1
     /\ queueSyncDone
 
 EventuallyForegroundObservesLandedAck == <>ackObserved
 EventuallyPartialQueueSyncCompletes == <>queueSyncDone
 EventuallyMalformedResponseRejected == <>malformedRejected
 EventuallySameCaptureCommitsExactlyOnce == <>(committed /\ responseCopies = 1)
+EventuallyPostProofAdvanceRebases == <>(postProofRebases = 1)
 
 =============================================================================

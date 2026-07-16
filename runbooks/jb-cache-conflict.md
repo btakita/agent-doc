@@ -38,6 +38,16 @@ Response-only finalize uses the same barrier. A durable `ResponseCellAdded` fact
 
 The durable visible-write receipt must carry the complete editor-visible content. Its hashes are validation and lookup fields only. When an older hash-only receipt answers `already_applied`, the binary requests one bounded publication of the current live buffer and records the content-bearing upgrade for that same patch. It never falls through to file IPC. If the publication does not prove the retained response, response authority is kept for an authoritative retry rather than restoring Git `HEAD` or adopting a stale worktree cut.
 
+Delivery proof is not a disk-projection lock. If the canonical document advances
+after the proof but before disk projection, the binary retains the original
+projection base and complete target, rebases that same intent over the new editor
+cut, and repeats the CRDT delivery/ACK barrier. It must not ask the agent to
+recapture the response, repeat `finalize` or `write --commit`, or use
+`--force-disk`. Response cells and queued follow-up mutations remain part of one
+semantic intent and therefore apply at most once. After the bounded foreground
+rebases, `session-check` reports the retained binary-owned operation while the
+supervisor continues it.
+
 ## Automatic Legacy-Replay Convergence
 
 The agent should never need to repair a document. On ordinary preflight, before prompt parsing or diff generation, the binary checks one deliberately narrow legacy corruption signature: the complete agent-doc projection is present byte-for-byte twice (or a power-of-two number of times). After typing settles, the binary coalesces those identical copies through the same CRDT replacement and visible-replica acknowledgement path, then continues preflight from the converged text. It logs `preflight_exact_document_replay action=coalesce|converged transport=crdt` and emits a small `exact_document_replay_coalesced` warning instead of expanding the replay into a giant diff or bogus orchestration request.

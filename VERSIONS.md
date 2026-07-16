@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.147
+
+- **A live editor advance after CRDT delivery proof no longer turns a successful capture into an agent retry.** The document authority internally rebases the same retained projection intent over the newer canonical cut, repeats the ACK barrier, and preserves operator text while applying the response and any backlog mutation exactly once. If the bounded foreground retry cannot settle, `session-check` reports binary-owned continuation and explicitly forbids recapture, another finalize/write, or force-disk recovery.
+- **PlusCal/TLA+ covers the post-proof race.** `CloseoutChurn.tla` now checks the transient editor advance, eventual same-intent rebase, exact-once response/backlog application, and the rule that commit cannot precede the rebased delivery proof.
+
 ## 0.34.146
 
 - **Retained JetBrains closeouts no longer overload their own ACK path.** CRDT bootstrap/delta operations now use a compact, UTF-8-safe zstd/MessagePack envelope over the existing plugin string FFI seam while retaining legacy-JSON decode compatibility. Foreground canonical-text proof gets a five-second controller budget, idle revision polling remains at 750 ms, and repeated pressure signals are cooldown-coalesced. This is a native-library/control-plane update and does not change the JetBrains Kotlin ABI.

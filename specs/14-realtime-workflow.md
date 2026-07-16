@@ -164,6 +164,16 @@ failure. Retry admission is single-flight: external CRDT events may record more
 work, but cannot start another drain while the adapter's bounded ACK backoff is
 active.
 
+The delivery receipt is a proof of one frontier, not a lock on canonical
+authority. A live editor delta may advance canonical text between that receipt
+and disk projection. The document actor must retain the original projection base
+and complete target and re-enter the same CRDT replace/ACK operation against the
+advanced frontier. This is an internal rebase of one semantic intent: response
+and backlog mutations apply at most once, operator text survives, and no new
+capture/finalize/force-disk operation is admitted. A bounded foreground retry may
+hand the unchanged intent to asynchronous supervisor recovery, but must never
+misreport the retained delivery as an instruction for the agent to retry it.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,

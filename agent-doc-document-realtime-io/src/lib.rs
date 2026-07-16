@@ -67,6 +67,33 @@ fn controller_document_mutation_in_progress() -> bool {
     CONTROLLER_DOCUMENT_MUTATION.with(Cell::get)
 }
 
+#[cfg(test)]
+fn install_post_delivery_proof_hook(file: PathBuf, hook: impl FnOnce(&Path) + Send + 'static) {
+    *POST_DELIVERY_PROOF_HOOK.lock().unwrap() = Some((file, Box::new(hook)));
+}
+
+fn run_post_delivery_proof_hook(file: &Path) {
+    #[cfg(not(test))]
+    let _ = file;
+    #[cfg(test)]
+    {
+        let hook = {
+            let mut slot = POST_DELIVERY_PROOF_HOOK.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|(hook_file, _)| hook_file == file)
+            {
+                slot.take().map(|(_, hook)| hook)
+            } else {
+                None
+            }
+        };
+        if let Some(hook) = hook {
+            hook(file);
+        }
+    }
+}
+
 fn unix_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -106,14 +133,20 @@ static DOCUMENT_WRITE_INTENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static DOCUMENT_AUTHORITY_OBSERVATIONS: LazyLock<
     Mutex<HashMap<PathBuf, DocumentAuthorityObservation>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
+#[cfg(test)]
+type PostDeliveryProofHook = Box<dyn FnOnce(&Path) + Send>;
+#[cfg(test)]
+static POST_DELIVERY_PROOF_HOOK: LazyLock<Mutex<Option<(PathBuf, PostDeliveryProofHook)>>> =
+    LazyLock::new(|| Mutex::new(None));
 const CURRENT_DOC_DISK_FALLBACK_DEBOUNCE_MS: u64 = 500;
+const CRDT_POST_PROOF_REBASE_LIMIT: usize = 3;
 
 #[cfg(test)]
 const CRDT_WRITE_SETTLE_MS: u64 = 10;
 #[cfg(not(test))]
 const CRDT_WRITE_SETTLE_MS: u64 = 500;
 #[cfg(test)]
-const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_000;
+const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_500;
 #[cfg(not(test))]
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
@@ -127,6 +160,9 @@ const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 2_000;
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 1_800;
 #[cfg(not(test))]
 const CRDT_ACK_RECOVERY_TIMEOUT_MS: u64 = 8_000;
+const _: () = assert!(
+    CRDT_WRITE_CONVERGENCE_TIMEOUT_MS > CRDT_ACK_RECOVERY_TIMEOUT_MS + CRDT_WRITE_BACKOFF_MAX_MS
+);
 
 #[derive(Debug)]
 struct AwaitEditorReplicaNoDiskWrite(String);
@@ -762,43 +798,114 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
         // the best available merge base for this legacy no-CAS API; the CRDT
         // convergence path rebases `content` over a newer operator cut.
         let projection_base = std::fs::read_to_string(path).unwrap_or_default();
-        if let Some(relay_write) = apply_canonical_replace_if_attached(
-            path,
-            &projection_base,
-            content,
-            "serialized_atomic_write",
-        )? {
-            let canonical = match observe_live_editor_authority_after_model_ensure(
+        let mut post_proof_rebases = 0usize;
+        loop {
+            let Some(relay_write) = apply_canonical_replace_if_attached(
+                path,
+                &projection_base,
+                content,
+                "serialized_atomic_write",
+            )?
+            else {
+                break;
+            };
+
+            if !relay_write.delivery_converged {
+                return Err(await_editor_replica_no_disk_write(format!(
+                    "serialized_atomic_write: binary-owned write for {} remains retained after the foreground editor ACK deadline (content_hash={}); the same intent will resume through session-check/supervisor recovery. Do not recapture or rerun finalize/write --commit, and do not force disk",
+                    path.display(),
+                    relay_write.content_hash,
+                )));
+            }
+
+            // Deterministic unit coverage injects the exact race observed in the
+            // Haiven live session: an editor delta lands after the delivery proof
+            // but before the disk projection observation.
+            run_post_delivery_proof_hook(path);
+
+            let current = observe_live_editor_authority_after_model_ensure(
                 path,
                 "serialized_atomic_write_projection",
-            )? {
+            )?;
+            match current {
                 agent_doc_crdt_relay_io::CurrentText::Current {
                     text,
                     delivery_converged: true,
                     ..
-                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => text,
-                current => {
-                    anyhow::bail!(
-                        "refusing disk projection for {}: CRDT canonical advanced after its delivery proof ({current:?}); retry through the document actor",
-                        path.display(),
+                } if agent_doc_hash::content_hash(&text) == relay_write.content_hash => {
+                    let disk_rewritten =
+                        materialize_canonical_disk_projection_if_needed(path, &text)?;
+                    let transport = if disk_rewritten {
+                        "crdt_then_disk_projection"
+                    } else {
+                        "crdt_editor_saved_projection"
+                    };
+                    agent_doc_ops_log_io::log_op(
+                        path,
+                        &format!(
+                            "write_authority action=materialized transport={transport} len={} hash={} delivery_converged=true disk_rewritten={disk_rewritten} post_proof_rebases={post_proof_rebases}",
+                            text.len(),
+                            relay_write.content_hash,
+                        ),
                     );
+                    return Ok(());
                 }
-            };
-            let disk_rewritten = materialize_canonical_disk_projection_if_needed(path, &canonical)?;
-            let transport = if disk_rewritten {
-                "crdt_then_disk_projection"
-            } else {
-                "crdt_editor_saved_projection"
-            };
-            agent_doc_ops_log_io::log_op(
-                path,
-                &format!(
-                    "write_authority action=materialized transport={transport} len={} hash={} delivery_converged=true disk_rewritten={disk_rewritten}",
-                    canonical.len(),
-                    relay_write.content_hash,
-                ),
-            );
-            return Ok(());
+                agent_doc_crdt_relay_io::CurrentText::Detached
+                    if std::fs::read_to_string(path)
+                        .map(|disk| agent_doc_hash::content_hash(&disk) == relay_write.content_hash)
+                        .unwrap_or(false) =>
+                {
+                    agent_doc_ops_log_io::log_op(
+                        path,
+                        &format!(
+                            "write_authority action=materialized transport=crdt_editor_saved_projection_after_detach hash={} delivery_converged=true disk_rewritten=false post_proof_rebases={post_proof_rebases}",
+                            relay_write.content_hash,
+                        ),
+                    );
+                    return Ok(());
+                }
+                current => {
+                    post_proof_rebases += 1;
+                    let observed_hash = match &current {
+                        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+                            agent_doc_hash::content_hash(text)
+                        }
+                        _ => "unavailable".to_string(),
+                    };
+                    let intent_id = ensure_deferred_document_write_intent(
+                        path,
+                        &projection_base,
+                        content,
+                        "serialized_atomic_write_projection_rebase",
+                        DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+                    )?;
+                    let retry_same_intent = post_proof_rebases <= CRDT_POST_PROOF_REBASE_LIMIT;
+                    agent_doc_ops_log_io::log_op(
+                        path,
+                        &format!(
+                            "serialized_atomic_write_post_proof_rebase file={} attempt={} limit={} intent_id={} proven_hash={} observed_hash={} observed={current:?} action={}",
+                            path.display(),
+                            post_proof_rebases,
+                            CRDT_POST_PROOF_REBASE_LIMIT,
+                            intent_id,
+                            relay_write.content_hash,
+                            observed_hash,
+                            if retry_same_intent {
+                                "rebase_same_intent"
+                            } else {
+                                "retain_same_intent_for_async_reconnect"
+                            },
+                        ),
+                    );
+                    if retry_same_intent {
+                        continue;
+                    }
+                    return Err(await_editor_replica_no_disk_write(format!(
+                        "serialized_atomic_write: editor authority for {} kept advancing after delivery proof; binary-owned intent {intent_id} remains retained and will merge the unsaved editor cut before commit. Do not recapture or rerun finalize/write --commit, and do not force disk; session-check/supervisor recovery resumes this same intent",
+                        path.display(),
+                    )));
+                }
+            }
         }
     }
 
@@ -3848,6 +3955,94 @@ mod tests {
         assert_eq!(current, target);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("transport=crdt_then_disk_projection"));
+    }
+
+    #[test]
+    fn serialized_atomic_write_rebases_post_proof_editor_advance_exactly_once() {
+        let baseline = concat!(
+            "# Session\n\n",
+            "<!-- agent:backlog -->\n- [ ] existing #existing\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:queue -->\n- existing queue\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nReady.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n",
+        );
+        let target = baseline
+            .replace(
+                "- [ ] existing #existing\n",
+                "- [ ] existing #existing\n- [ ] randomized high-scale follow-up #haivensharreg\n",
+            )
+            .replace(
+                "Ready.\n<!-- agent:boundary:old -->",
+                "Ready.\n\n### Re: Haiven load test\n\nCaptured exactly once.\n<!-- agent:boundary:new -->",
+            );
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-post-proof-rebase";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        install_post_delivery_proof_hook(file.clone(), move |hook_file| {
+            agent_doc_crdt_relay_io::with_hub(hook_file, |hub| {
+                let current = hub.canonical_text();
+                let operator = current.replace(
+                    "- existing queue\n",
+                    "- existing queue\n- operator typed after delivery proof\n",
+                );
+                hub.apply_local(client_id, 0, current.chars().count() as u32, &operator)
+                    .unwrap();
+            })
+            .unwrap();
+        });
+        let ack = ack_crdt_deliveries(file.clone(), identity, 2, std::time::Duration::ZERO);
+
+        atomic_write_through_authority(&file, &target).unwrap();
+        ack.join().unwrap();
+
+        let disk = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(disk.matches("### Re: Haiven load test").count(), 1);
+        assert_eq!(disk.matches("#haivensharreg").count(), 1);
+        assert!(disk.contains("operator typed after delivery proof"));
+        let canonical = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                delivery_converged: true,
+                ..
+            } => text,
+            other => panic!("expected converged CRDT text, got {other:?}"),
+        };
+        assert_eq!(canonical, disk);
+        assert_eq!(canonical.matches("### Re: Haiven load test").count(), 1);
+        assert_eq!(canonical.matches("#haivensharreg").count(), 1);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(log.contains("serialized_atomic_write_post_proof_rebase"));
+        assert!(log.contains("action=rebase_same_intent"));
+        assert!(log.contains("post_proof_rebases=1"));
+    }
+
+    #[test]
+    fn serialized_atomic_write_retained_ack_timeout_forbids_agent_recapture() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: retained\n\nExactly once.\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-atomic-retained-ack";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("binary-owned write"), "{message}");
+        assert!(message.contains("same intent"), "{message}");
+        assert!(message.contains("Do not recapture"), "{message}");
+        assert!(message.contains("do not force disk"), "{message}");
+        assert!(
+            !message.contains("retry through the document actor"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        let pending = pending_document_write(&file).expect("retained write intent");
+        assert_eq!(pending.target_hash, agent_doc_hash::content_hash(target));
     }
 
     #[test]

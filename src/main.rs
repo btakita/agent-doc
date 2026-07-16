@@ -3570,6 +3570,9 @@ enum PluginAction {
         /// Exact JetBrains plugins directory (required for ambiguous non-interactive discovery)
         #[arg(long, value_name = "PATH")]
         plugins_dir: Option<PathBuf>,
+        /// Install into every JetBrains IDE that already has agent-doc installed
+        #[arg(long, conflicts_with = "plugins_dir", requires = "local")]
+        all_installed: bool,
     },
     /// Update an installed plugin to the latest version
     Update {
@@ -4106,8 +4109,11 @@ fn try_main() -> anyhow::Result<()> {
                 editor,
                 local,
                 plugins_dir,
+                all_installed,
             } => {
-                if local {
+                if all_installed {
+                    plugin::install_local_all_existing(&editor)
+                } else if local {
                     if let Some(plugins_dir) = plugins_dir.as_deref() {
                         plugin::install_local_with_plugins_dir(&editor, Some(plugins_dir))
                     } else {

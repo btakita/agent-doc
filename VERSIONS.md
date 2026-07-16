@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.142
+
+- **`make install` now converges every existing JetBrains agent-doc package instead of refreshing only the CLI/native library.** The local package is rebuilt, installed non-interactively into each IDE that already has agent-doc, and verified against the exact build version; failures stop the install, while the activation message correctly requires an IDE restart.
+- **The plugin CLI has an explicit all-installations coherence path.** `agent-doc plugin install jetbrains --local --all-installed` updates only existing agent-doc installations, avoids ambiguous single-IDE selection, and fails closed when no matching installation exists.
+- **PlusCal/TLA+ joins Lean and SimWorld in `make check`.** A pinned, checksum-verified TLC runner translates the concurrent install/editor/closeout algorithm and checks response uniqueness, steering preservation, generation separation/adoption, bounded ACK recovery, and eventual commit.
+
 ## 0.34.141
 
 - **Replay/ACK recovery recognizes a plugin updated after the turn started.** The repair boundary re-reads the latest live editor registration and explicitly supersedes a stale preflight generation. Diagnostics now distinguish plugin-package code from `libagent_doc`: `admin reload-lib` refreshes only the native cdylib and is no longer suggested as a substitute for installing/restarting an older JetBrains or VS Code plugin.

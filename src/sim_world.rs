@@ -493,7 +493,8 @@ mod plugin_generation_capture_rebase_model {
         CaptureResponse,
         AddSteering,
         ConflictingEdit,
-        UpdatePlugin,
+        MakeInstall,
+        RestartEditor,
         ReloadNativeOnly,
         RevalidateLiveGeneration,
         RebaseCapture,
@@ -501,11 +502,12 @@ mod plugin_generation_capture_rebase_model {
         Commit,
     }
 
-    const ACTIONS: [Action; 9] = [
+    const ACTIONS: [Action; 10] = [
         Action::CaptureResponse,
         Action::AddSteering,
         Action::ConflictingEdit,
-        Action::UpdatePlugin,
+        Action::MakeInstall,
+        Action::RestartEditor,
         Action::ReloadNativeOnly,
         Action::RevalidateLiveGeneration,
         Action::RebaseCapture,
@@ -515,6 +517,9 @@ mod plugin_generation_capture_rebase_model {
 
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     struct World {
+        source_plugin_generation: u8,
+        installed_plugin_generations: [u8; 2],
+        install_completed: bool,
         preflight_plugin_generation: u8,
         live_plugin_generation: u8,
         recognized_plugin_generation: u8,
@@ -532,6 +537,9 @@ mod plugin_generation_capture_rebase_model {
     impl Default for World {
         fn default() -> Self {
             Self {
+                source_plugin_generation: 2,
+                installed_plugin_generations: [1, 1],
+                install_completed: false,
                 preflight_plugin_generation: 1,
                 live_plugin_generation: 1,
                 recognized_plugin_generation: 1,
@@ -550,6 +558,8 @@ mod plugin_generation_capture_rebase_model {
 
     #[derive(Debug, Default)]
     struct Coverage {
+        make_install_converged_existing_packages: bool,
+        make_install_did_not_claim_live_activation: bool,
         live_generation_superseded_preflight: bool,
         native_reload_did_not_upgrade_plugin: bool,
         steering_rebase_replayed_once: bool,
@@ -575,7 +585,23 @@ mod plugin_generation_capture_rebase_model {
                     self.baseline_drifted = true;
                     self.monotonic_extension = false;
                 }
-                Action::UpdatePlugin => self.live_plugin_generation = 2,
+                Action::MakeInstall => {
+                    let live_before = self.live_plugin_generation;
+                    self.installed_plugin_generations = [self.source_plugin_generation; 2];
+                    self.native_generation = self.source_plugin_generation;
+                    self.install_completed = true;
+                    coverage.make_install_converged_existing_packages = self
+                        .installed_plugin_generations
+                        .iter()
+                        .all(|generation| *generation == self.source_plugin_generation);
+                    coverage.make_install_did_not_claim_live_activation =
+                        self.live_plugin_generation == live_before;
+                }
+                Action::RestartEditor => {
+                    if self.install_completed {
+                        self.live_plugin_generation = self.installed_plugin_generations[0];
+                    }
+                }
                 Action::ReloadNativeOnly => {
                     let before = self.live_plugin_generation;
                     self.native_generation = 2;
@@ -644,6 +670,14 @@ mod plugin_generation_capture_rebase_model {
 
     fn assert_invariants(world: &World) {
         assert!(
+            !world.install_completed
+                || world
+                    .installed_plugin_generations
+                    .iter()
+                    .all(|generation| *generation == world.source_plugin_generation),
+            "make install left an existing package stale: {world:?}"
+        );
+        assert!(
             world.response_apply_count <= 1,
             "duplicate response: {world:?}"
         );
@@ -688,8 +722,9 @@ mod plugin_generation_capture_rebase_model {
         for action in [
             Action::CaptureResponse,
             Action::AddSteering,
-            Action::UpdatePlugin,
             Action::ReloadNativeOnly,
+            Action::MakeInstall,
+            Action::RestartEditor,
             Action::RevalidateLiveGeneration,
             Action::RebaseCapture,
             Action::ReplayResponse,
@@ -700,6 +735,8 @@ mod plugin_generation_capture_rebase_model {
         }
         assert!(world.committed);
         assert!(world.steering_durable);
+        assert!(coverage.make_install_converged_existing_packages);
+        assert!(coverage.make_install_did_not_claim_live_activation);
         assert!(coverage.live_generation_superseded_preflight);
         assert!(coverage.native_reload_did_not_upgrade_plugin);
         assert!(coverage.steering_rebase_replayed_once);
@@ -708,7 +745,9 @@ mod plugin_generation_capture_rebase_model {
     #[test]
     fn exhaustive_plugin_update_rebase_schedules_preserve_invariants() {
         let mut coverage = Coverage::default();
-        explore(9, &mut coverage);
+        explore(11, &mut coverage);
+        assert!(coverage.make_install_converged_existing_packages);
+        assert!(coverage.make_install_did_not_claim_live_activation);
         assert!(coverage.live_generation_superseded_preflight);
         assert!(coverage.native_reload_did_not_upgrade_plugin);
         assert!(coverage.steering_rebase_replayed_once);

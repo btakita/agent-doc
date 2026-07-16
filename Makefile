@@ -1,4 +1,4 @@
-.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-hooks clean init-python wheel publish publish-pypi bump-plugin lean
+.PHONY: build build-release release test sim-medium tmux-ci clippy check precommit timings install install-full install-editor-plugins install-hooks clean init-python wheel publish publish-pypi bump-plugin lean tla
 
 CPU_COUNT ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TEST_THREADS ?= 2
@@ -153,8 +153,12 @@ lean:
 		echo "[lean] lake not found on PATH — skipping formal proof build (install elan/lean to verify formal/ proofs)"; \
 	fi
 
-# clippy + test + deterministic medium simulator corpus + version sync + Lean proofs
-check: clippy test sim-medium version-sync lean
+# clippy + tests + deterministic simulator corpus + version sync + formal checks
+check: clippy test sim-medium version-sync lean tla
+
+# Translate the PlusCal concurrency model and check its TLA+ safety/liveness properties.
+tla:
+	@./scripts/run_tla.sh
 
 # Pre-commit: clippy + test + audit-docs + plugin version check
 precommit: check plugin-version-check
@@ -174,6 +178,7 @@ install:
 	@"$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc" binary-install --source "$(LOCAL_INSTALL_TARGET_DIR)/$(LOCAL_INSTALL_PROFILE)/agent-doc"
 	@$(LOCAL_CARGO_ENV) cargo build --profile "$(LOCAL_INSTALL_PROFILE)" --target-dir "$(LOCAL_INSTALL_TARGET_DIR)" --lib
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
+	@$(MAKE) install-editor-plugins
 
 # Full optimized local install for pre-release parity.
 install-full:
@@ -181,6 +186,18 @@ install-full:
 	@target/release/agent-doc binary-install --source target/release/agent-doc
 	@cargo build --release --lib
 	@agent-doc lib-install
+	@$(MAKE) install-editor-plugins
+
+# Keep every existing JetBrains agent-doc package on the source generation.
+# The native cdylib and editor package are separate install surfaces: updating
+# only the former leaves running turns reporting the older package generation.
+install-editor-plugins:
+	@if agent-doc plugin list 2>/dev/null | grep -q '^jetbrains'; then \
+		( cd editors/jetbrains && ./gradlew buildPlugin ); \
+		agent-doc plugin install jetbrains --local --all-installed; \
+	else \
+		echo "No existing JetBrains agent-doc package; editor package sync skipped."; \
+	fi
 
 
 # Remove the legacy full-suite pre-commit hook (works for both standalone repos and submodules)

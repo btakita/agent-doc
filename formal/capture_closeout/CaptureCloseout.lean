@@ -214,6 +214,44 @@ theorem native_reload_does_not_upgrade_plugin (s : RuntimeGenerations) (next : N
     (reloadNativeOnly s next).pluginGeneration = s.pluginGeneration := by
   rfl
 
+/- `make install` owns two distinct transitions: it converges every existing
+package on disk and refreshes the native generation, but it cannot claim that a
+running editor has activated the package before the editor restarts. -/
+
+structure InstallState where
+  sourceGeneration : Nat
+  installedPackages : List Nat
+  liveGeneration : Nat
+  nativeGeneration : Nat
+deriving DecidableEq, Repr
+
+def makeInstall (s : InstallState) : InstallState :=
+  { s with
+      installedPackages := s.installedPackages.map (fun _ => s.sourceGeneration)
+      nativeGeneration := s.sourceGeneration }
+
+def restartEditorAfterInstall (s : InstallState) : InstallState :=
+  { s with liveGeneration := s.sourceGeneration }
+
+theorem make_install_preserves_package_count (s : InstallState) :
+    (makeInstall s).installedPackages.length = s.installedPackages.length := by
+  simp [makeInstall]
+
+theorem make_install_converges_every_existing_package (s : InstallState) :
+    ∀ generation ∈ (makeInstall s).installedPackages,
+      generation = s.sourceGeneration := by
+  intro generation member
+  simp [makeInstall] at member
+  exact member.2.symm
+
+theorem make_install_does_not_claim_live_activation (s : InstallState) :
+    (makeInstall s).liveGeneration = s.liveGeneration := by
+  rfl
+
+theorem restart_after_install_publishes_source_generation (s : InstallState) :
+    (restartEditorAfterInstall (makeInstall s)).liveGeneration = s.sourceGeneration := by
+  rfl
+
 /- A retained response may adopt a newer authoritative cut only when the cut is
    a monotonic extension of the matching open-cycle baseline. This admits later
    steering while blocking edits, deletions, reorders, and unrelated captures. -/

@@ -145,7 +145,6 @@ Let's create the funding when the lender is selected instead of when the loan is
 Do we have any access to the lender roster? Can we add lenders from previous fundings? Can we add lenders who have not part of a funding?
 
 My intention is I want the admin to sync a lender with TMO from the lender record and from a deal.
-
 ### Re: Create funding on lender-select + lender roster — opus-4-8
 
 **Timing — got it, flipping to create-on-select.** A funding needs a lender, so the funding is materialized the moment a lender is picked/entered in the funding UI — not deferred to loan acceptance. That supersedes the old D2 (link-at-acceptance) and actually simplifies #fundlink1: lender-select *is* the create trigger, still local-first and non-blocking, TMO push stays behind the gated writeback path (#fundlink3). PRD updated (`prds/funding-lender-linking.md`).
@@ -163,7 +162,23 @@ My intention is I want the admin to sync a lender with TMO from the lender recor
 Recommendation (**D3**): union the two sources in the picker (`#fundpick-roster` — lender-role users ∪ funding-derived, dedup by account, free-text preserved). That makes "add a lender not part of a funding" work from the roster instead of only free-text, still LOS-only.
 
 Queued **#fundpick-roster** (recommended), **#fundlink1** (revised to create-on-select), **#fundlink2**. Say "go" (or "go, skip roster" if you want free-text-only) and I'll build — #fundpick-roster first since #fundlink1's picker depends on it.
-<!-- agent:boundary:c62e5c20 -->
+
+### Re: Vestings + syncing a lender to TMO from two places — opus-4-8
+
+Both new points land cleanly on structure EFS already has — and they sharpen the roster answer above.
+
+**Vestings — you're exactly right, and EFS already models the EFS side.** One EFS lender = one `users` row (role `lender`) → **many** `lender_vestings` rows (`individual/joint/trust/llc/entity/ira/other`). TMO holds one lender **account per vesting** — Mark Leonard = `MARKDBPP` / `MARKL` / `MARKPERSON` / `MARKROTHIR`, same person, different account+vesting. So cardinality is **1 EFS lender ↔ N TMO accounts, one per vesting**, and the *selectable unit for a funding is the vesting* (→ its TMO account), not the person.
+
+The one missing link: `lender_vestings` has **no `tmo_lender_account` column** yet — the vestings are EFS-local (#rpzm phase 4), unmapped to TMO. Note `users.lender_account` is single-valued and *can't* hold Mark's four vestings, so the TMO account must live on the **vesting**, not the user. Queued **#lender-vesting-tmo** to add that column + UI. Once it exists, the picker lists vesting-level entries (person ▸ vesting ▸ TMO account), deduped by account — `funds.account_number` already keys a funding to a specific TMO account, so a funding binds to a vesting for free.
+
+**"Sync a lender with TMO from the lender record and from a deal" — two surfaces, one operation** (ensure the EFS vesting ↔ TMO account mapping exists, create in TMO when needed):
+- **From the lender record** (admin lender detail): per vesting, "Sync with TMO" — link an existing TMO account (store `tmo_lender_account` now) or create the account (the *push* rides the existing #dzmm/#7a4d writeback gate). Lender-centric, no deal needed. Queued **#lender-sync-tmo**.
+- **From a deal** (funding UI): create-on-select — pick lender → pick vesting → funding uses that vesting's TMO account. That's **#fundlink1**.
+
+**One thing I couldn't confirm:** the TMO screen you showed is the LOS "All Lenders" master (`LoanOrigination/LoLenders`, 14 lenders) — a full roster incl. all vestings. I don't see a LOS API in our client to *pull* that list (we only derive lenders from `GetLoanFundings`; `LSS.svc/GetLenders` is the master but EFS is LOS-only). If TMO exposes a LOS lender-list endpoint, that'd be the ideal roster source (all vestings, incl. never-funded). Do you know if there's a LOS API for the lender list, or should sync stay per-lender (link/create by account) without a bulk pull?
+
+Revised build order: **#lender-vesting-tmo → #lender-sync-tmo / #fundpick-roster → #fundlink1 → #fundlink2**. Say "go" and I'll start with the vesting→TMO-account mapping.
+<!-- agent:boundary:3d1f0911 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -192,6 +207,10 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lender-sync-tmo] — sync a lender with TMO from the lender record: admin 'Sync with TMO' per vesting on the lender detail page — link an existing TMO account (store tmo_lender_account now) or create it (push gated on #dzmm/#7a4d). Second entry point (from a deal) is #fundlink1's create-on-select. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#h8rz] [recommended] #fundpick-roster — union the lender picker sources: GET /api/admin/tmo-lenders returns lender-role users (users.lender_account) ∪ funding-derived lenders (tmo_lenders_from_fundings_), deduped by account, free-text preserved, so never-funded lenders are selectable. LOS-only, no LSS. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#fundlink1] — create funding on lender-select (not at acceptance): when a lender is picked/entered in the funding UI, create the funds row + loan_funding cache row for that lender, no ready-for-funding gate, non-blocking. Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding (reuse tmo_unmatched_fundings bind). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 
 ## Review

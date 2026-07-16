@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.143
+
+- **JetBrains tab selection now swaps the matching tmux pane on the same editor side.** Automatic exact-visible sync was submitted correctly but then preserved the stale layout because the SQLite migration made safe-passive ownership proof skip every authoritative actor lookup. Controller-owned sync now consumes the authoritative actor row as a local SQLite read, allowing the existing no-autostart atomic swap path to run; standalone passive CLI sync still avoids a nested Project Controller RPC. Regression coverage keeps the two proof modes distinct.
+
 ## 0.34.142
 
 - **`make install` now converges every existing JetBrains agent-doc package instead of refreshing only the CLI/native library.** The local package is rebuilt, installed non-interactively into each IDE that already has agent-doc, and verified against the exact build version; failures stop the install, while the activation message correctly requires an IDE restart.

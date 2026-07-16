@@ -2145,7 +2145,12 @@ fn run_with_options_internal_at_root(
         exact_visible_safe_passive(auto_start_mode, exact_visible_projection);
     let skip_sync_status_updates = skip_sync_status_updates_for_mode(auto_start_mode);
     let proof_cache = if skip_autostart_diagnostics {
-        SyncProofCache::safe_passive()
+        let controller_local_actor_lookup =
+            agent_doc_controller_io::process::is_same_project_controller_pid(
+                &sync_project_root,
+                std::process::id(),
+            );
+        SyncProofCache::safe_passive(controller_local_actor_lookup)
     } else {
         SyncProofCache::default()
     };

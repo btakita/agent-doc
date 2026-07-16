@@ -208,10 +208,11 @@ focus <FILE>` selects the resolved pane when it is already visible, but skips
 - Declaratively mirrors editor layout into tmux columns.
 - Files with session ids are managed even when their current registry entry was pruned; `claim` is the only command that creates a new session id.
 - Sync must synthesize a per-run tmux-router registry from each visible file's own nearest `.agent-doc` root instead of forcing all files through the caller's current root.
-- When `.agent-doc/session-actors.json` has a live authoritative record for a
-  visible document, sync must treat that actor-owned pane as the owner-of-record
-  and refresh `sessions.json` only as a projection of that binding.
+- When `.agent-doc/state.db` has a live authoritative actor row for a visible
+document, sync must treat that actor-owned pane as the owner-of-record and keep
+tmux-router registry metadata only as a projection of that binding.
 - An alive pane is not reusable solely because the pane id exists; normal sync may reuse the live authoritative actor pane returned by the controller, then supervisor-backed registry compatibility evidence for that specific document.
+- A Project Controller-owned exact-visible passive sync must treat its local authoritative SQLite actor row as resolved ownership proof. This lets an already-running hidden pane replace the stale same-side pane on editor tab selection without autostarting anything; standalone passive CLI sync must still avoid a nested actor-binding RPC.
 - When ownership falls back to legacy associated-pane evidence (`session-log`, `registry_rebind`, generic same-file process tree), sync must fail closed and require explicit claim/repair instead of choosing a winner automatically.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
 - If two visible files point at the same pane, sync must either find one decisive owner or drop the duplicate from the synthetic registry so tmux-router cannot alias both files onto one pane.

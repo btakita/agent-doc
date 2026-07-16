@@ -12,9 +12,13 @@ pub(crate) struct SyncProofCache {
 }
 
 impl SyncProofCache {
-    pub(crate) fn safe_passive() -> Self {
+    pub(crate) fn safe_passive(controller_local_actor_lookup: bool) -> Self {
         Self {
-            skip_authoritative_actor_lookup: true,
+            // A standalone safe-passive CLI must not turn its hot path into a
+            // nested Project Controller RPC. Controller-owned editor commands,
+            // however, can read the authoritative SQLite actor row locally and
+            // need that proof to swap an already-running hidden pane into view.
+            skip_authoritative_actor_lookup: !controller_local_actor_lookup,
             ..Self::default()
         }
     }
@@ -1026,8 +1030,7 @@ mod tests {
         assert_eq!(cached.generation, 42);
     }
     #[test]
-    fn safe_passive_proof_cache_skips_authoritative_actor_lookup() {
-        let proof_cache = SyncProofCache::safe_passive();
+    fn safe_passive_proof_cache_allows_only_controller_local_actor_lookup() {
         let file = Path::new("/tmp/agent-doc-cache-hit.md");
         let session_id = "cache-session";
         let record = agent_doc_sqlite::state_store::ActorRecord {
@@ -1046,9 +1049,10 @@ mod tests {
                 new_generation: 42,
             },
         };
-        proof_cache.actor_records.borrow_mut().insert(
+        let external_cache = SyncProofCache::safe_passive(false);
+        external_cache.actor_records.borrow_mut().insert(
             (sync_proof_file_key(file), session_id.to_string()),
-            Some(record),
+            Some(record.clone()),
         );
 
         assert!(
@@ -1056,10 +1060,27 @@ mod tests {
                 &Tmux::default_server(),
                 file,
                 session_id,
-                &proof_cache,
+                &external_cache,
             )
             .is_none(),
-            "safe-passive editor sync must not use controller actor lookups, even from cache"
+            "standalone safe-passive sync must not issue or consume controller actor lookups"
+        );
+
+        let controller_cache = SyncProofCache::safe_passive(true);
+        controller_cache.actor_records.borrow_mut().insert(
+            (sync_proof_file_key(file), session_id.to_string()),
+            Some(record),
+        );
+        assert_eq!(
+            load_live_authoritative_actor_record_cached(
+                &Tmux::default_server(),
+                file,
+                session_id,
+                &controller_cache,
+            )
+            .map(|record| record.pane_id),
+            Some("%cached".to_string()),
+            "controller-owned safe-passive sync must retain local SQLite actor proof for exact-visible pane swaps"
         );
     }
     #[test]

@@ -2,24 +2,33 @@
 
 ## agent-doc Recovery & Dogfooding
 
-- **Crash/handoff/spin**: [start-crash cross-root autostart](reference_agent_doc_start_crash_cross_root_submodule_autostart.md) #sync-cross-root-autostart fixed 447e6c53, [stranded handoff→IPC drift](feedback_stranded_handoff_socket_causes_ipc_snapshot_drift.md) #stuckhandoffselfheal, [controller+JB spin on corrupt HEAD](feedback_wedged_controller_and_jb_ide_spin_on_corrupt_crdt_response_in_head.md).
-- **force-disk/commit repair**: [editorless resurrects deleted queue items](feedback_forcedisk_editorless_scramble_reset_fromcurrent_repair.md), [reload-lib hang→commit](feedback_reload_lib_cant_unhang_wedged_plugin_handler_writecommit_hang_recover_via_commit.md), [live editor blocks commit→reset+force-disk+commit](feedback_turn_unfinalized_live_editor_authority_blocks_commit_forcedisk_gitcommit.md), [stuck response_captured→mv cycles json](feedback_stuck_response_captured_cycle_mv_state_cycles_json.md), [hung pending-add→commit](feedback_hung_pending_add_recover_via_agent_doc_commit.md).
-- **Concurrency/shared tree**: [force-push superproject→verify+STOP](feedback_concurrent_sessions_force_push_shared_superproject.md), [refactor churns tree→commit selectively, clean worktree](feedback_concurrent_agent_doc_refactor_session_build_coordination.md), [JB route-owned pane→check owner](feedback_jb_run_agentdoc_route_owned_pane_processing_prompt_collision.md).
+- **Editor thrash on restart** (~1295% CPU): [JB restart thrash = 400GB reindex + leftover DEBUG log-category](reference_jb_editor_thrash_on_restart_indexing_and_debug_logcat.md) — IDE-config fixes; sample `/proc/task/*/stat` for real CPU, jstack `emitAllInternal` is the coroutine-dump not a Flow storm.
+- **Crash/handoff/spin**: [start-crash cross-root autostart](reference_agent_doc_start_crash_cross_root_submodule_autostart.md), [stranded handoff→IPC drift](feedback_stranded_handoff_socket_causes_ipc_snapshot_drift.md), [controller+JB spin on corrupt HEAD](feedback_wedged_controller_and_jb_ide_spin_on_corrupt_crdt_response_in_head.md).
+- **force-disk/commit repair**: force-disk wedge + queue/pending recovery procedures → see [recovery index](reference_agent_doc_recovery_index.md) (covers this category).
+- **Concurrency/shared tree**: [force-push superproject→verify+STOP](feedback_concurrent_sessions_force_push_shared_superproject.md), [refactor churns tree→commit selectively](feedback_concurrent_agent_doc_refactor_session_build_coordination.md), [JB route-owned pane→check owner](feedback_jb_run_agentdoc_route_owned_pane_processing_prompt_collision.md).
+- **Concurrent agent-doc DEV session stalls your closeout**: [stale binary + 100s uncommitted src/agent-doc files → editor/disk divergence, auto-recycle never idles](reference_concurrent_agentdoc_dev_session_stalls_closeout_recycle.md) — don't force finalize/write/repair/force-disk (binary refuses correctly); commit+push real work to its OWN repo remote first, then report the stuck session-doc bookkeeping and stop.
 - **Facts**: [bugs2.done.md=ARCHIVE (live agent-doc-bugs2.md)](reference_agent_doc_bugs2_done_is_archive_not_session.md), [boundary accum worktree-only](feedback_boundary_accum_worktree_only_ipc_repair_checkout_head.md) #boundaryaccum1.
-- **Detailed failure/recovery pointers** (stale-binary escapes, preflight/HEAD corruption, queue/pending recovery, no_ack/dead-editor, reset/checkout-HEAD, force-disk marker/wedge, queue quirks, misc) → [recovery index](reference_agent_doc_recovery_index.md).
+- **Detailed failure/recovery pointers** → [recovery index](reference_agent_doc_recovery_index.md) (stale-binary, preflight/HEAD corruption, queue/pending, no_ack, force-disk wedge, misc).
+- **Stale-plugin-heartbeat wedge (IDE alive, buffer behind)**: [restart controller → force-disk → manual commit → reset](reference_agent_doc_stale_plugin_heartbeat_forcedisk_recovery.md) — auto-heal skips (IDE pid alive); corruption in live plugin, disk clean.
+- **Stale-plugin delivery-ACK wedge** (finalize loops `delivery_ack_pending`, `stale_plugin` warn): [`admin reload-lib` then re-run `write --commit`](reference_agent_doc_stale_plugin_ack_wedge_reload_lib_unwedge.md) — response already on reliable-sync plane; NON-destructive, prefer over force-disk; escalate to make install + recycle only if it fails.
+- **Recovery replay duplicates boundary marker → integrity gate wedges everything**: [2 `agent:boundary` in editor authority; gate hard-fails preflight AND session-check first, so recovery can't run](reference_agent_doc_recovery_replay_duplicate_boundary_wedges_integrity_gate.md) — response in live buffer, absent on disk; no self-heal; don't force/repair.
+- **Resurrected operator-deleted queue head** (dangling `[#id]`, e.g. #sy71): [stale baseline overlay.yrs + wedged controller IPC model](reference_agent_doc_dangling_queue_head_resurrect_baseline_overlay_and_controller_model_wedge.md) — `read`=live controller model not snapshot; `reset --from-current` skips `.baselines/<h>.overlay.yrs`; `admin recycle` defers→**kill `controller serve` pid**; commit clean HEAD first.
 
 ## agent-doc Project Intent
 
-- [Patchboard markets FIRST; agent-doc long-term](project_product_sequencing_patchboard_first_agentdoc_later.md) — #spb1–9 planned. Signals Patchboard #spb1–#spb20 now COMPLETE (patchboard ace0852; #spbwasm iceboxed); doc tasks/software/signals-patchboard.md.
-- [patchboard-app Slint zoom + drag technique](reference_patchboard_app_slint_zoom_and_drag_technique.md) — logical zoom via zpx()/no transform:scale; ancestor TouchArea for wheel-over-nodes; drag-to-connect drop hit-tested in Rust.
-- [Realtime merge expertise = marketable alpha](project_realtime_merge_experience_marketable_alpha.md) — demand map in tasks/session-findings-2026-07-04.md.
+- [Patchboard markets FIRST; agent-doc long-term](project_product_sequencing_patchboard_first_agentdoc_later.md) — Signals Patchboard #spb1–#spb20 COMPLETE (ace0852; #spbwasm iceboxed); doc tasks/software/signals-patchboard.md.
+- [patchboard-app Slint zoom + drag](reference_patchboard_app_slint_zoom_and_drag_technique.md) — logical zoom via zpx(); ancestor TouchArea wheel; drag hit-tested in Rust.
+- [Realtime merge expertise = marketable alpha](project_realtime_merge_experience_marketable_alpha.md) — demand map in session-findings-2026-07-04.md.
 - [IPC root-cause audit + #stale-plugin-detect](project_ipc_audit_and_stale_plugin_detect.md) — 5 causes A-E; patchboard NOT IPC.
 - [provauth1/2/3 — 3b blocked on crdtauth6](project_provauth_series_status.md) — 1/2 DONE, 3 binary-half 0.34.57.
 - [Per-cell CRDT merge isolation = deeper fix](project_agent_doc_percell_crdt_merge_intent.md) — #qcellmerge1. [[feedback_stop_cutting_agent_doc_releases]]
-- [Supervisor-in-process migration (08b) CODE-COMPLETE](project_agent_doc_supervisor_migration_intent.md) — rollback flags deleted (BREAKING).
+- [Reliable-sync plane IS authority; sidecar = durability only](project_reliable_sync_plane_is_authority_sidecar_durability_only.md) — directive 2026-07-12: `AGENT_DOC_RELIABLE_SYNC_AUTHORITY` always true; plane primary + sidecar cold-miss backstop.
+- [live_editor→reactive-family initiative](project_live_editor_reactive_family_initiative.md) — S1–S5 done; S6 sidecar-retirement DONE 2026-07-12 (authority flip + #lzsync 3B wire flip + lazily-lib mirror retirement); release still gated. [[project_reliable_sync_plane_is_authority_sidecar_durability_only]]
+- [Supervisor-in-process migration (08b) CODE-COMPLETE](project_agent_doc_supervisor_migration_intent.md) — rollback flags deleted.
 - [#fintol2/#pcwc fight carry-forward invariant](project_fintol_pcwc_carry_forward_invariant.md) — need operator go + Phase-0 re-baseline.
 - [agent-doc decomposition progress](project_agent_doc_module_decomposition.md) — preflight/sync/session_check/git/start/template left.
 - [Split functionality + tests together](feedback_module_split_functionality_with_tests.md)
+- [SimWorld over mocks for sync/tmux tests](feedback_simworld_over_mocks_for_sync_tmux.md) — deterministic model + shared pure decision fn; don't touch fixed-seed fuzz.
 
 ## agent-doc Release Conventions
 
@@ -34,37 +43,51 @@
 - **Ship core/FFI via `agent-doc lib-install`** (cdylib hot-reloads by mtime) ([f](feedback_jb_plugin_cdylib_hot_reload.md)).
 - **JB version bump per .kt edit** ([f](feedback_jb_plugin_version_bump_per_edit.md)); **build on bump** ([f](feedback_build_on_version_bump.md)); **manual test before publish** ([f](feedback_testing_before_release.md)).
 
+## lazily / Design
+
+- [Realtime + distributed primitives — 8 families](project_lazily_realtime_distributed_primitives.md) — #lztime/#lzrateshape/#lzmemb/#lzcoord/#lzpresence/#lzwindow/#lzresilience/#lzservice RELEASED 2026-07-14 (rs 0.40.0, kt 0.29.0, js 0.19.0 npm-owed, spec/formal 0.34.0); Signal demoted core→derived; py/zig/dart/go/cpp mirroring.
+- [RelayCell + algebra-backed backpressure design](project_relaycell_backpressure_design.md) — **FULL 8-BINDING PARITY 2026-07-13** (rs 0.36.0, py 0.26.0, kt 0.25.0, js 0.16.0, dart 0.15.0, go v0.11.0, zig v0.20.0, cpp v0.14.0). **ONLY gap = js npm publish (USER 2FA/OIDC)**. 6 invariants; Phase 0 = reader-kinds Cell→Slot; Signal→Slot.eager.
+
 ## lazily / Releases
 
-- [corky linkedin publish format](reference_corky_linkedin_publish_format.md) — mail/social/*-linkedin.md w/ frontmatter; escape little-text (FIXED e147ef9).
-- [lazily release targets](reference_lazily_release_targets.md) — rs→crates.io 0.12.3; py→PyPI 0.10.2 (0.11.0 pending 2FA); js→npm; spec→Pages; zig→GitHub.
+- **[Reliable Sync full parity — all 8 bindings](reference_reliable_sync_full_parity_all_bindings.md)** — ✅ 2026-07-12: `#lzsync`+`#sync-driver` (ResyncCoordinator/DurableOutbox/OrSet/LWW/SyncDriver + FFI kinds 4/5). Released py 0.23.0, go v0.8.0, zig v0.17.0, dart v0.12.0. [[reference_lazily_release_targets]]
+- **[ReactiveMap keyed-collection migration](project_reactivemap_keyed_collection_migration.md)** — ✅ COMPLETE 2026-07-12, all 10 repos (spec v0.27.0/formal v0.28.0/rs v0.33.0/kt v0.22.0/py v0.22.0/zig v0.16.0/cpp v0.11.0/dart v0.11.0/go v0.7.0). **js 0.15.0 npm publish still owed by USER** (2FA); superproject gitlinks not bumped.
+- [lazily release targets](reference_lazily_release_targets.md) — per-lang versions/targets; **py 0.21.0 = FULL parity (25 rows)**; #lzbenchver bump BENCHMARKS.md on rs release. Detail in topic file.
+- [lazily-cpp family/wire model](reference_lazily_cpp_family_features_wire_level_model.md) — **v0.10.0 reliable sync (#lzsync) = FULL parity** (reliable_sync.hpp from kt; CrdtPlaneRuntime wire-level); publish=tag+`gh release`. Detail in topic file.
+- [lazily-js npm Trusted Publisher E404](reference_lazily_js_npm_trusted_publisher_e404.md) — #lzzcpy shipped js 0.9.0 (isomorphic); publish blocked E404-on-PUT (OIDC not configured on npm pkg) — owner fix then rerun.
 - [cargo publish token in passage](reference_cargo_publish_token_passage.md) — credentials.toml stale (403); use `CARGO_REGISTRY_TOKEN="$(passage show btak/CARGO_REGISTRY_TOKEN)"`.
 - [lazily publish + coverage generator](reference_lazily_publish_and_coverage_generator.md) — js npm 2FA; kt→GitHub Packages on v* tag; `make coverage-check`.
-- [lazily-zig v1.1.0 — deadlock + cold_recalc fixed](reference_lazily_zig_test_suite_and_coldrecalc_bottleneck.md) — ParkingMutex lost-wakeup fix (`swap(CONTESTED)`); `#lzedgeinline`/`#lzinline`/`#lzcachegop`; `-Dfilters`; publish=tag+`gh release`.
+- [lazily-kt release = immutable GitHub Packages](reference_lazily_kt_release_immutable_packages.md) — check registry before tagging (409 kills publish); **kt 0.21.0 = FULL PARITY**. CI gotcha: bundle fixtures into `src/test/resources/conformance/` (CI has no lazily-spec sibling).
+- [lazily-zig test suite + coldrecalc](reference_lazily_zig_test_suite_and_coldrecalc_bottleneck.md) — publish=tag+`gh release` (no CI). **v0.14.0 FULL PARITY 32/32**; v0.15.0 ThreadSafeContext + AsyncContext(V). Detail in topic file.
+- [zig master gutted std.posix/std.fs file API](reference_zig_master_posix_file_api_moved_to_os_linux.md) — use `std.os.linux` raw syscalls for fd/shm; `mise run test` on master.
+- [coverage.json is a hot multi-session file](reference_lazily_coverage_json_hot_multisession_file.md) — committing it swallows other sessions' pending flips; one-commit-per-binding. [[feedback_concurrent_sessions_force_push_shared_superproject]]
 - [Queue `go` overrides queue:stop](feedback_queue_go_marker_overrides_stop_churn.md) — remove `go` AND set stop.
+- [lazily-dart CI missing lazily-spec sibling](reference_lazily_dart_ci_missing_spec_sibling.md) — `test` skips `../lazily-spec` → sibling-only conformance red is baseline; copy fixtures locally.
 
 ## Decision / Communication
 
-- [Refactor-spiral pattern + guardrails](user_refactor_spiral_pattern_guardrails.md) — spike-before-commit, conviction gates, recovery-rate tripwire.
+- [Refactor-spiral pattern + guardrails](user_refactor_spiral_pattern_guardrails.md) — spike-before-commit, conviction gates, recovery tripwire.
 - [AskUserQuestion no-option + note](feedback_askuserquestion_no_option_confirm_actual_choice.md) — note ≠ endorsement; confirm actual choice.
 - [Explain decisions plainly](feedback_explain_decisions_plainly_not_jargon.md) — plain-English + recommended default.
 - [No sycophancy](feedback_no_sycophancy.md).
 - [Don't oversimplify when asked "simpler"](feedback_no_oversimplify.md) — keep terse; elaborate the action.
 - [Brian's Communication Priorities](user_communication_priorities.md) — bias-stripped prioritization.
-- [Robert Ross closeout](project_robert_ross_engagement_status.md) — Brian fired 2026-05-27.
 
 ## equityfundingsource
 
-- [Gold palette contrast correction](reference_efs_gold_palette_contrast_correction.md) — #C9A227→#A67C00 (split-by-surface: gold=light bg, gold-light=navy, gold-dark=text); overlay tokens; hovers deepen; color-scheme:light; live `/styleguide` route.
-- [Funding-commit stage REMOVED](reference_efs_funding_commit_stage_removed.md) — no lender `POST /funds`; selected lender wires ENTIRE loan; selection emails lender. Deployed 2026-07-10 (e4127f5).
+- [Gold palette contrast correction](reference_efs_gold_palette_contrast_correction.md) — #C9A227→#A67C00 split-by-surface; `/styleguide`.
+- [Funding-commit stage REMOVED](reference_efs_funding_commit_stage_removed.md) — selected lender wires ENTIRE loan; emails lender. Deployed 2026-07-10.
 - [Legacy `applications` table collision](project_efs_legacy_applications_table.md) — apply4 uses `full_applications`; don't reuse.
-- [EFS prod D1 queryable (#cftk RESOLVED)](reference_efs_d1_token_working.md) — passage token is D1-Edit scoped.
-- [Closing gate REMOVED + accreditation denormalization](reference_efs_accreditation_denormalization_and_closing_gate_removed.md) — gate read stale `users.accreditation_status`. No blockers now.
-- [users can't be hard-deleted — soft-delete trigger](reference_efs_users_soft_delete_trigger.md) — `UPDATE ... status='suspended'`, not DELETE.
-- [SITE_URL unset in prod → use request origin](reference_efs_site_url_unset_use_request_origin.md) — `env.SITE_URL?.trim() || new URL(c.req.url).origin`; #dpkt-portal-abs-url.
-- [security_events audit log ≠ admin badge feed](reference_efs_security_events_audit_log.md) — mig 0121; deduped 5min, email ≥3/24h; panel /admin/security.
-- [Deal card false "pending annual requirements"](reference_efs_deal_card_pending_annual_requirements_stale_read.md) — stale `u.accreditation_status`; fix `COALESCE(acc.status,...)` (mig 0123). Deployed.
-- [Loan Package (was Deal Packet) — per-lender visibility REMOVED + Message Lender](reference_efs_per_lender_deal_packet_and_message_lender.md) — RENAMED Deal Packet→Loan Package 2026-07-10 (c312d0f, mig 0128 `loan_package_links`); **per-lender document visibility REMOVED 2026-07-10 (4dab80c): all interested lenders see all Required Documents; `deal_document_lender_visibility` gate now DEAD/unread**; Message Lender + unread cursor (mig 0125). "deal package" send-workflow term still pending.
+- [EFS prod D1 queryable (#cftk RESOLVED)](reference_efs_d1_token_working.md) — passage token D1-Edit scoped.
+- [Closing gate REMOVED + accreditation denormalization](reference_efs_accreditation_denormalization_and_closing_gate_removed.md) — gate read stale `users.accreditation_status`.
+- [users can't be hard-deleted — soft-delete trigger](reference_efs_users_soft_delete_trigger.md) — `UPDATE ... status='suspended'`.
+- [SITE_URL unset in prod → request origin](reference_efs_site_url_unset_use_request_origin.md) — `env.SITE_URL?.trim() || new URL(c.req.url).origin`.
+- [security_events audit log ≠ admin badge feed](reference_efs_security_events_audit_log.md) — mig 0121; dedup 5min, email ≥3/24h.
+- [Deal card false "pending annual requirements"](reference_efs_deal_card_pending_annual_requirements_stale_read.md) — stale read; `COALESCE(acc.status,...)` mig 0123.
+- [Loan Package (was Deal Packet) + Message Lender](reference_efs_per_lender_deal_packet_and_message_lender.md) — mig 0128; per-lender visibility DEAD; unread mig 0125.
+- [Loan Package tab REAL component + #tmo-doc-sync](reference_efs_loan_package_tab_real_component_and_tmo_doc_sync.md) — tab=`AdminLoanDocumentsManager`; mig 0129; `Sync with TMO`.
+- [TMO LOS attachment/document API](reference_tmo_los_attachment_document_api.md) — `LOS.svc/Get|AddAttachment`; base64; Postman `37774064/2sAXjGcE4E`.
+- [EFS repo has NO CI workflow](reference_efs_repo_has_no_ci_workflow.md) — local `make check` + verified live deploy are the only gates; source-assertion tests pin exact markup (update when you change it).
 
 ## tsift
 
@@ -88,6 +111,7 @@
 ## JetBrains Plugins (general)
 
 - **ActionPromoter breaks intentions** in .md — self-disabling `update()`. **python-intentions verifier false positives** (bare IU lacks PythonCore) — src ~/work/btakita/python-intentions. **Build both zips**; full uninstall only for structural class changes.
+- **agent-doc JB plugin** = K2/JVM21/IntelliJ 2024.2 (sinceBuild 242); consume lazily-kt via **conditional Gradle composite** (`includeBuild(...).exists()` + dependencySubstitution + `mavenLocal()` fallback). **NEVER bundle platform transitives** — `exclude(group="org.jetbrains.kotlinx")` (breaks IDE dispatcher), kotlin/annotations/jna too; verify `unzip -l <zip>`.
 
 ## Misc Conventions
 
@@ -107,20 +131,13 @@
 
 ## References
 
-- [`.bin/agent-doc` symlink is repo-root-relative](reference_bin_agent_doc_symlink_is_reporoot_relative.md) — target `src/agent-doc/...`; don't "fix" to `../src/...`.
-- [Verify EFS deploy via string-grep](reference_efs_verify_deploy_via_string_grep.md) — admin 401s; grep unique literals in fetched bundles.
-- [Concurrent session clobbers EFS deploy](feedback_concurrent_session_clobbers_efs_worker_deploy.md) — `deploy:worker` replaces worker wholesale; verify served hash.
-- [Isolated EFS deploy via clean worktree](reference_efs_isolated_deploy_clean_worktree.md) — clean worktree@HEAD `no-migrate`; RACE→commit to HEAD, deploy once, STOP.
-- [Commit to HEAD to stop concurrent deploy clobber](feedback_commit_to_head_to_stop_concurrent_deploy_clobber.md) — scoped-commit my files, deploy isolated.
-- [Commit only your files via temp-index + compare-and-swap](feedback_efs_commit_only_your_files_via_temp_index_compare_and_swap.md) — read-tree HEAD→add paths→commit-tree→`update-ref main <new> <old>`.
-- [Worktree as deploy AND commit source (clobber-immune)](reference_efs_worktree_as_deploy_and_commit_source_clobber_immune.md) — port edits into clean HEAD worktree, build/deploy/commit there, CAS main.
-- [EFS document type catalogue locations](reference_efs_document_type_catalogue_locations.md) — new `dt_*` needs seed migration + 4 client mirrors.
-- [EFS deploy from main checkout, NOT fresh-install worktree](reference_efs_deploy_from_main_checkout_not_fresh_install_worktree.md) — fresh `bun install` breaks CSS; force-rebase can DROP your commit.
-- [Drive EFS portal locally to verify](reference_efs_local_portal_drive_recipe.md) — migrate:local, seed, mint `efs_session` JWT, CDP setCookie.
-- [Verify EFS lender changes on PROD via curl login](reference_efs_prod_lender_login_verify_recipe.md) — curl POST /login, efs_session cookie, GET /api/investor/deals; `investment_deals.status` drives spoken-for.
-- [cargo install vs workspace-patch divergence](reference_cargo_install_workspace_patch_divergence.md) — failing install often unrelated sibling work.
-- [agent-doc build-worktree needs sibling ../tmux-router](reference_agent_doc_build_worktree_needs_sibling_tmux_router.md) — build-worktrees under src/, not /tmp.
-- [Resume build source](reference_resume_build_source.md) — resume/ builds from data.toml via agent-resume.
-- [Markdown Annotations](reference_markdown_annotations.md) — iA Writer annotation spec as prior art.
-- [monsterrodholders SSH](reference_monsterrodholders_ssh.md) — `ssh monsterrodholders-server`→root@50.28.2.199, /opt/monsterrodholders/app.
-- [WordPress/CRS ops → wp-liquidweb-ops skill](reference_monsterrodholders_waf_933120.md) — use skill over memory.
+- [`.bin/agent-doc` symlink is repo-root-relative](reference_bin_agent_doc_symlink_is_reporoot_relative.md) — target `src/agent-doc/...`; don't "fix".
+- **EFS concurrent-deploy (clobber-immune)** — winner: [worktree as deploy AND commit source](reference_efs_worktree_as_deploy_and_commit_source_clobber_immune.md) (edits into clean HEAD worktree, build/deploy/commit there, CAS main). Verify: [string-grep bundles](reference_efs_verify_deploy_via_string_grep.md) (admin 401s). Gotcha: [deploy from main, NOT fresh-install worktree](reference_efs_deploy_from_main_checkout_not_fresh_install_worktree.md) (fresh `bun install` breaks CSS). Related: [[feedback_efs_commit_only_your_files_via_temp_index_compare_and_swap]] [[feedback_concurrent_session_clobbers_efs_worker_deploy]].
+- [EFS document type catalogue locations](reference_efs_document_type_catalogue_locations.md) — new `dt_*` = seed migration + 4 client mirrors.
+- [Drive EFS portal locally](reference_efs_local_portal_drive_recipe.md) — migrate:local, seed, mint `efs_session` JWT, CDP setCookie.
+- [Verify EFS lender on PROD via curl login](reference_efs_prod_lender_login_verify_recipe.md) — POST /login, efs_session cookie, GET /api/investor/deals.
+- [agent-doc build-worktree needs sibling ../tmux-router](reference_agent_doc_build_worktree_needs_sibling_tmux_router.md) — under src/, not /tmp.
+- [monsterrodholders SSH](reference_monsterrodholders_ssh.md) — `ssh monsterrodholders-server`→root@50.28.2.199. WordPress/CRS ops → use [wp-liquidweb-ops skill](reference_monsterrodholders_waf_933120.md).
+- [monsterrodholders "down" = expired origin cert](reference_monsterrodholders_origin_cert_expiry_outage.md) — Cloudflare→origin 443 leg; certbot-renew.timer was enabled-but-never-started (inactive 98d). Fixed: renew+reload, started timer, added httpd deploy hook. HTTP works / HTTPS hangs = check origin cert expiry.
+- [NEVER set CSF DOCKER=1 on monsterrodholders VPS](feedback_never_set_csf_docker_1_monsterrodholders.md) — flushes Docker NAT chain → outage (May-4 mechanism). Keep `DOCKER="0"`; a Claude session set it to 1 on 2026-07-14 11:33 → down. Verify via `check-firewall-stack.sh`.
+- [monsterrodholders monitoring+alerting stack](reference_monsterrodholders_monitoring_alerting_stack.md) — boost-health worker: 5-min public probe + email/SMS via CF `send_email` (NO MX change), `/alert` relay, `?selftest=1`; csf-drift-check cron auto-reverts DOCKER=1 + pages. Recipients brian(email/vtext)+Ron(att, pending verify). Worker/script deployed but UNCOMMITTED.

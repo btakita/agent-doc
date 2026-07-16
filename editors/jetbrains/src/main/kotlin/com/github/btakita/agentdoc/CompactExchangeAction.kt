@@ -8,6 +8,8 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 class CompactExchangeAction : AnAction() {
+    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CompactExchangeAction::class.java)
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
@@ -19,7 +21,22 @@ class CompactExchangeAction : AnAction() {
         )
         ApplicationManager.getApplication().invokeLater {
             try {
-                FileDocumentManager.getInstance().saveAllDocuments()
+                // Compact Exchange is document-scoped. Saving every open
+                // document can synchronously wake a retained ACK recovery for
+                // an unrelated session and make this command fail with that
+                // other file's error. The live target document/CRDT remains
+                // authoritative even if IntelliJ's best-effort save fails.
+                val fdm = FileDocumentManager.getInstance()
+                fdm.getDocument(file)?.let { document ->
+                    try {
+                        fdm.saveDocument(document)
+                    } catch (t: Throwable) {
+                        log.warn(
+                            "[compact] active document save failed; continuing with editor authority: ${t.message}",
+                            t,
+                        )
+                    }
+                }
                 TerminalUtil.compactExchange(project, file) {
                     refresher.clearTransientStatus(file.path, statusToken)
                 }

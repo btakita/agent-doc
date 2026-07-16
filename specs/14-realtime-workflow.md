@@ -453,6 +453,12 @@ cut, and then replays the deferred agent-intent journal. Thus an operator-only
 `queue: stop` survives while duplicated agent content is discarded. This repair
 is automatic and does not require or authorize a force-disk reset.
 
+Document-scoped editor actions must not create cross-document authority edges.
+In particular, JetBrains Compact Exchange saves only its selected document
+before routing; `saveAllDocuments()` is forbidden because it can synchronously
+wake an unrelated document's retained delivery and surface that ACK failure as
+the selected document's compact result.
+
 When the deferred reconnect result differs from the open JetBrains document, a
 forced refresh must install those exact bytes into the visible `Document` before
 registering the replacement replica. Installation is compare-and-swap against the

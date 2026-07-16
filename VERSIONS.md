@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.155
+
+- **JetBrains Compact Exchange no longer wakes unrelated document recovery (JetBrains plugin 0.2.267).** The action saves only its selected Markdown document before routing instead of calling `saveAllDocuments()`, so a retained EFS ACK recovery cannot make a Monster Rod Holders compact fail with EFS's delivery error. A target-save failure is logged and compaction continues from live editor/CRDT authority.
+
 ## 0.34.154
 
 - **Corrupted editor projections recover without sacrificing operator intent.** When agent-written CRDT content duplicates an exchange or boundary, reconnect reconstructs the operator cut from durable editor ops over the expected base, validates it, and replays agent intents; buffer-only directives such as `queue: stop` survive without a force-disk reset.

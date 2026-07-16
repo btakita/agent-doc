@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-git-io"
-version = "0.34.154"
+version = "0.34.155"
 edition = "2024"
 description = "Git command I/O adapters for agent-doc"
 license = "MIT"
@@ -11,20 +11,20 @@ publish = false
 name = "agent_doc_git_io"
 
 [dependencies]
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.154" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.154" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.154" }
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.154" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.154" }
-agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.34.154" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.154" }
-agent-doc-git = { path = "../agent-doc-git", version = "0.34.154" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.154" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.154" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.154" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.154" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.154" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.154" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.155" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.155" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.155" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.155" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.34.155" }
+agent-doc-element-exchange-io = { path = "../agent-doc-element-exchange-io", version = "0.34.155" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.155" }
+agent-doc-git = { path = "../agent-doc-git", version = "0.34.155" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.155" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.155" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.155" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.155" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.155" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.155" }
 anyhow = "1"
 fs2 = "0.4"
 similar = "2"

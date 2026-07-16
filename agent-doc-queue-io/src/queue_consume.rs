@@ -1095,7 +1095,9 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // Preserve the fail-closed active-queue guard: an active component with no
     // prompt is malformed, while a first id-backed prompt is classified below
     // and left untouched without an explicit done/ack signal.
-    let consume_count = leading_done_consume_count.max(free_text_prefix_count).max(1);
+    let consume_count = leading_done_consume_count
+        .max(free_text_prefix_count)
+        .max(1);
     let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(

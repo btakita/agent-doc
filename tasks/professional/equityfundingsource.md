@@ -109,7 +109,7 @@ One judgement call worth surfacing: **an absent TMO value does not blank out wha
 Verification is stronger here than last cycle: alongside the pure `fund_tmo_override_plan_` unit tests, I added **behavioral** tests against real SQLite proving reconcile-not-duplicate, TMO winning the conflicting fields, the right vesting chosen among several, and bind still succeeding when no vesting maps. Fixing those also exposed that the test fixture was missing `lender_vestings` — now aligned to the real schema.
 
 Still not live-verified (no seeded lender with vestings on a real portal); the D1 migration `0139` also needs applying wherever you run it.
-<!-- agent:boundary:62d81c24 -->
+<!-- agent:boundary:7132438c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -145,7 +145,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fundlink2] — link an accepted loan to an existing pre-wire TMO funding. Surface+bind SHIPPED (EFS 71327b0, reuses tmo_unmatched_fundings bind). REMAINING = PRD D4 conflict resolution (operator 2026-07-16): on bind, the TMO funding is the SOURCE OF TRUTH and must OVERRIDE conflicting funds fields (amount, account, dates, status) from the pulled loan_funding cache row instead of preserving local values, recording what it overrode for audit. Pull/bind direction only — NOT gated on #dzmm/#7a4d (those gate the EFS→TMO push, #fundlink3). Plan: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 
 ## Review

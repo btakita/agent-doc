@@ -69,6 +69,7 @@ const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
+const PLUGIN_OWNER_HEARTBEAT_MS = 5_000;
 const LIVE_BUFFER_REPORT_DELAY_MS = 75;
 const PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS = 30_000;
 
@@ -2230,6 +2231,9 @@ class PatchWatcher implements vscode.Disposable {
     private pendingPatchRetries = new Set<string>();
     /** Documents for which this VS Code instance has published plugin-owner proof. */
     private ownedDocs = new Set<string>();
+    /** Recursive timeout (never a fixed-interval poll) proving the delivery event loop is alive. */
+    private pluginOwnerHeartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+    private disposed = false;
     /**
      * #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
      * disk. Set when a non-remoteCrdtApply text change lands; cleared when the
@@ -2258,6 +2262,7 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     start(): void {
+        this.disposed = false;
         const patchesDir = this.findPatchesDir();
         if (!patchesDir) {
             this.outputChannel.appendLine('PatchWatcher: no .agent-doc/patches/ directory found');
@@ -2323,9 +2328,11 @@ class PatchWatcher implements vscode.Disposable {
             },
         });
         this.crdtReplicas.start();
+        this.schedulePluginOwnerHeartbeat(projectRoot, 0);
         this.openListener = vscode.workspace.onDidOpenTextDocument((document) => {
             if (!this.targetsProjectMarkdown(document, projectRoot)) return;
             const text = document.getText();
+            this.ownsDocument(document.uri.fsPath, projectRoot);
             seedEditorOpShadow(document.uri.fsPath, text);
             void this.crdtReplicas?.attachDocument(document.uri.fsPath, text);
             this.scheduleLiveBufferReport(document, projectRoot);
@@ -2616,6 +2623,21 @@ class PatchWatcher implements vscode.Disposable {
             this.ownedDocs.delete(filePath);
         }
         return owns;
+    }
+
+    private schedulePluginOwnerHeartbeat(projectRoot: string, delayMs = PLUGIN_OWNER_HEARTBEAT_MS): void {
+        if (this.disposed || this.pluginOwnerHeartbeatTimer) return;
+        this.pluginOwnerHeartbeatTimer = setTimeout(() => {
+            this.pluginOwnerHeartbeatTimer = undefined;
+            if (this.disposed) return;
+            // Running on the same extension event loop as CRDT apply/ACK makes
+            // lease freshness a delivery-component proof. A hung extension
+            // keeps its PID-based disk fence but naturally stops being routed.
+            for (const { filePath } of this.currentProjectMarkdownSnapshots(projectRoot)) {
+                this.ownsDocument(filePath, projectRoot);
+            }
+            this.schedulePluginOwnerHeartbeat(projectRoot);
+        }, delayMs);
     }
 
     private async onPatchFileCreated(uri: vscode.Uri): Promise<void> {
@@ -3435,6 +3457,7 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     dispose(): void {
+        this.disposed = true;
         this.watcher?.dispose();
         this.signalWatcher?.dispose();
         this.saveSignalWatcher?.dispose();
@@ -3447,6 +3470,8 @@ class PatchWatcher implements vscode.Disposable {
         this.openListener?.dispose();
         this.saveListener?.dispose();
         this.closeListener?.dispose();
+        if (this.pluginOwnerHeartbeatTimer) clearTimeout(this.pluginOwnerHeartbeatTimer);
+        this.pluginOwnerHeartbeatTimer = undefined;
         for (const filePath of this.ownedDocs) {
             native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
         }

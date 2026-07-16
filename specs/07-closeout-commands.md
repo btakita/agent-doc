@@ -51,6 +51,22 @@ convergence times out while waiting for a terminal receipt—that stage must
 schedule an automatic safe-boundary editor/supervisor recycle before returning.
 Stale-route detection is continuous across the turn, not entry-only.
 
+An editor process lease protects unsaved-buffer authority; it does not prove the
+plugin delivery worker is routable. Maintained plugins publish a separate
+periodic owner heartbeat from the delivery execution context. Closeout may route
+a canonical target only to a fresh worker heartbeat. If the process remains live
+but that heartbeat expires, closeout retains the exact target, refuses disk
+projection, and requests supervisor recycle at the first checkpoint with no IPC
+handler in flight. An open capture-backed cycle does not defer this recycle,
+because the missing delivery ACK is itself what prevents the cycle from closing.
+
+Editor-visible convergence is never proved by an empty replica set. When the
+last live replica disappears during a pending delivery, settlement requires an
+exact durable visible-write receipt for the target; otherwise the target remains
+retained for reconnect recovery. Likewise, a failed tmux liveness query is an
+unknown observation, not evidence that every actor pane died, so registry prune
+must preserve its records and retry later.
+
 ## commit
 
 `agent-doc commit <FILE>`

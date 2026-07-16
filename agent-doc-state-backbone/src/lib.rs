@@ -55,6 +55,7 @@ pub enum StateDomain {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocumentWriteDeferredReason {
     EditorOwnerWithoutRegisteredReplica,
+    EditorDeliveryWorkerStale,
     CrdtDeliveryAckPending,
     MergeUnsavedEditorCutWithDeferredTarget,
     RetainEditorReconnectLineageBeforeDiskProjection,
@@ -67,6 +68,7 @@ impl DocumentWriteDeferredReason {
     pub fn token(&self) -> &str {
         match self {
             Self::EditorOwnerWithoutRegisteredReplica => "editor_owner_without_registered_replica",
+            Self::EditorDeliveryWorkerStale => "editor_delivery_worker_stale",
             Self::CrdtDeliveryAckPending => "crdt_delivery_ack_pending",
             Self::MergeUnsavedEditorCutWithDeferredTarget => {
                 "merge_unsaved_editor_cut_with_deferred_target"
@@ -87,6 +89,7 @@ impl From<&str> for DocumentWriteDeferredReason {
     fn from(value: &str) -> Self {
         match value {
             "editor_owner_without_registered_replica" => Self::EditorOwnerWithoutRegisteredReplica,
+            "editor_delivery_worker_stale" => Self::EditorDeliveryWorkerStale,
             "crdt_delivery_ack_pending" => Self::CrdtDeliveryAckPending,
             "merge_unsaved_editor_cut_with_deferred_target" => {
                 Self::MergeUnsavedEditorCutWithDeferredTarget

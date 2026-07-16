@@ -141,6 +141,8 @@ describe('patchGuard', () => {
         assert.ok(ownerIdx >= 0 && ownerIdx < ackIdx, 'VS Code must acquire/publish plugin-owner proof before recording receipt');
         assert.ok(source.includes('private ownsDocument('));
         assert.ok(source.includes('native.pluginOwnerTryAcquire(filePath, EDITOR_ID, process.pid, projectRoot)'));
+        assert.ok(source.includes('PLUGIN_OWNER_HEARTBEAT_MS = 5_000'));
+        assert.ok(source.includes('schedulePluginOwnerHeartbeat(projectRoot'));
         assert.ok(source.includes('native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot())'));
         assert.ok(nativeSource.includes('agent_doc_plugin_owner_try_acquire'));
         assert.ok(nativeSource.includes('export function pluginOwnerTryAcquire('));

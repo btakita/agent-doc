@@ -40,6 +40,11 @@ private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 // events still trigger an immediate drain, so only passive remote-only observation on an
 // otherwise-idle doc sees up to 30s of extra latency.
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
+// Delivery routability is a component-level fact, not merely an IDE-process
+// fact. Refresh from the same serialized executor that pulls/applies/ACKs CRDT
+// deliveries: if that worker stalls, this heartbeat stalls too and Rust stops
+// targeting it while continuing to protect its possibly-unsaved buffer.
+private const val CRDT_PLUGIN_OWNER_HEARTBEAT_MS = 5_000L
 
 private data class PendingRemoteAck(
     val forwarder: CrdtReplicaForwarder,
@@ -237,6 +242,42 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     fun start() {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
+        schedulePluginOwnerHeartbeat(0L)
+    }
+
+    private fun schedulePluginOwnerHeartbeat(delayMs: Long = CRDT_PLUGIN_OWNER_HEARTBEAT_MS) {
+        if (disposed.get()) return
+        try {
+            executor.schedule({
+                try {
+                    refreshPluginOwnerHeartbeats()
+                } catch (t: Throwable) {
+                    // ScheduledExecutorService cancels future executions when a
+                    // task escapes. Keep this self-healing across JNA reload and
+                    // transient filesystem/controller failures.
+                    log.warn("[crdt-replica] plugin-owner heartbeat failed: ${t.message}")
+                } finally {
+                    schedulePluginOwnerHeartbeat()
+                }
+            }, delayMs, TimeUnit.MILLISECONDS)
+        } catch (_: RejectedExecutionException) {
+            // Normal during project disposal.
+        }
+    }
+
+    private fun refreshPluginOwnerHeartbeats() {
+        if (disposed.get() || forwarders.isEmpty()) return
+        // get() also polls the installed cdylib mtime, providing a fallback when
+        // an IDE VFS reload-broadcast event was missed.
+        val lib = AgentDocLib.get() ?: return
+        val pid = ProcessHandle.current().pid()
+        for (filePath in forwarders.keys) {
+            try {
+                lib.agent_doc_plugin_owner_try_acquire(filePath, EditorIdentity.id, pid)
+            } catch (t: Throwable) {
+                log.warn("[crdt-replica] plugin-owner heartbeat failed for ${File(filePath).name}: ${t.message}")
+            }
+        }
     }
 
     override fun dispose() {

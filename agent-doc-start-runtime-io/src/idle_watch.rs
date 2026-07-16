@@ -2284,11 +2284,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // `RecycleImmediate` whether or not the running binary reads stale. The
                 // marker is cleared immediately before the `execve` below so the fresh
                 // process does not re-loop on it.
-                let recycle_requested = agent_doc_supervisor_io::recycle_request::fresh_recycle_request(
-                    &file,
-                    current_epoch_secs(),
-                )
-                .is_some();
+                let recycle_request =
+                    agent_doc_supervisor_io::recycle_request::fresh_recycle_request(
+                        &file,
+                        current_epoch_secs(),
+                    );
+                let recycle_requested = recycle_request.is_some();
+                let stale_editor_replica_requested = recycle_request.as_ref().is_some_and(|request| {
+                    request.reason
+                        == agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE
+                });
                 let explicit_admin_recycle = recycle_requested;
                 // `#lazily-recycle-request`: mirror the pending recycle/restart request
                 // onto the lazily statechart (phase `Requested`) so route callers and
@@ -2301,11 +2306,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if recycle_requested
                     && let Ok(canonical) = path.canonicalize()
                 {
-                    let reason = agent_doc_supervisor_io::recycle_request::read_recycle_request(
-                        &canonical.to_string_lossy(),
-                    )
-                    .map(|request| request.reason)
-                    .unwrap_or_else(|| "supervisor_recycle_requested".to_string());
+                    let reason = recycle_request
+                        .as_ref()
+                        .map(|request| request.reason.clone())
+                        .unwrap_or_else(|| "supervisor_recycle_requested".to_string());
                     if let Err(err) =
                         agent_doc_controller_io::project_controller::supervisor_recycle_requested_for_file(
                             &canonical, &reason,
@@ -2357,6 +2361,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let stale_safe_checkpoint =
                     stale_recycle_safe_checkpoint(supervisor_stale, inflight_handlers);
                 let write_wedged = wedge_needs_recycle && at_safe_checkpoint;
+                let editor_delivery_stale =
+                    stale_editor_replica_requested && at_safe_checkpoint;
                 if wedge_needs_recycle && !at_safe_checkpoint {
                     agent_doc_ops_log_io::log_op(
                         &path,
@@ -2368,6 +2374,22 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         ),
                     );
                 }
+                if stale_editor_replica_requested {
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "supervisor_stale_editor_replica_recycle file={} pane={} inflight={} action={} reason=refresh_delivery_worker_preserve_capture (#editor-delivery-liveness)",
+                            path.display(),
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            inflight_handlers,
+                            if editor_delivery_stale {
+                                "recycle_at_safe_checkpoint"
+                            } else {
+                                "defer_until_safe_checkpoint"
+                            },
+                        ),
+                    );
+                }
                 let recycle_action = supervisor_recycle_action(
                     supervisor_stale,
                     recycle_auto_enabled,
@@ -2375,6 +2397,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     head_pending,
                     explicit_admin_recycle,
                     write_wedged,
+                    editor_delivery_stale,
                     reexec_failed,
                     // A stale supervisor's safe intra-turn checkpoint owns the durable
                     // resume handoff, so an open cycle does not block that hot reload.
@@ -2459,6 +2482,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             head_pending,
                             explicit_admin_recycle,
                             write_wedged,
+                            editor_delivery_stale,
                             reexec_failed,
                             false,
                         ),
@@ -3812,11 +3836,32 @@ mod tests {
                 /* head_pending */ true,
                 /* explicit_admin */ false,
                 /* write_wedged */ false,
+                /* editor_delivery_stale */ false,
                 /* reexec_failed */ false,
                 cycle_open_while_open,
             ),
             SupervisorRecycleAction::DeferCycleOpen,
             "an open cycle must defer the execve recycle so it cannot sever the live finalize"
+        );
+
+        // A stale editor delivery worker is different: the open cycle is waiting
+        // for that worker to ACK, so deferring recycle on the cycle would be a
+        // circular wait. At a handler-safe checkpoint the exact idle-watch wiring
+        // must recycle immediately while the capture-backed cycle remains durable.
+        assert_eq!(
+            supervisor_recycle_action(
+                /* stale */ false,
+                /* auto_recycle */ false,
+                /* turn_boundary */ false,
+                /* head_pending */ false,
+                /* explicit_admin */ true,
+                /* write_wedged */ false,
+                /* editor_delivery_stale */ true,
+                /* reexec_failed */ false,
+                cycle_open_while_open,
+            ),
+            SupervisorRecycleAction::RecycleImmediate,
+            "stale editor delivery must break the open-cycle circular wait at a safe checkpoint"
         );
 
         // Commit the cycle: now it is no longer open and (in this single-threaded
@@ -3846,6 +3891,7 @@ mod tests {
                 true,
                 true,
                 true,
+                false,
                 false,
                 false,
                 false,

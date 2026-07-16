@@ -1309,6 +1309,7 @@ impl SimWorld {
             head_pending,
             self.recycle_clear.operator_recycle_marked,
             write_wedged,
+            false, // editor-delivery stale requests are exercised by the runtime/policy seam
             self.recycle_clear.reexec_failed,
             // `#midturn-recycle-resume`: an open agent-doc cycle defers the recycle so
             // the `execve` cannot sever the in-flight finalize IPC connection — UNLESS

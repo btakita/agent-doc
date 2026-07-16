@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.153
+
+- **Editor-delivery recovery now distinguishes a live IDE buffer from a live plugin worker.** Maintained JetBrains and VS Code plugins heartbeat from their delivery execution context; stale workers are removed from routing while their unsaved buffers remain authoritative, the exact response target stays retained, and safe-checkpoint hot-reexec breaks the former open-cycle/ACK circular wait without force-disk recovery.
+- **Empty replica sets no longer satisfy delivery convergence.** A pending target with zero live replicas requires an exact durable visible-write receipt, so editor disappearance cannot vacuously authorize settlement or disk projection.
+- **Transient tmux observation failures no longer erase actor state.** `tmux-router` exposes a fallible live-pane snapshot and destructive registry prune preserves all records when that snapshot fails.
+
 ## 0.34.152
 
 - **Supervisor hot-reexec transport state no longer poisons the preserved capability-proof fingerprint.** The replacement now consumes the child-pid, PTY-fd, and preserved-contract handoff before resolving the managed child environment, and launch-spec assembly defensively strips those supervisor-only variables as well. Repeated reexecs therefore compute the same exact child contract and reuse the proven gate instead of running another network probe merely because a file descriptor or prior fingerprint changed.

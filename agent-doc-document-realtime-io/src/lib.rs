@@ -1427,6 +1427,26 @@ pub fn apply_canonical_replace_if_attached(
                 } => {
                     if let Some(applied_target) = pending_target.as_ref() {
                         if delivery_converged && relay_text == *applied_target {
+                            // A vanished replica makes the relay quorum
+                            // vacuously converged. That is not editor-visible
+                            // proof: the live IDE process can still hold an
+                            // unsaved operator cut. Settle only if the editor
+                            // already published/saved the exact target.
+                            if !delivery_convergence_is_editor_visible(
+                                live_editors,
+                                durable_visible_write_content_proves_target(file, applied_target),
+                            ) {
+                                let relay_write = pending_write
+                                    .as_ref()
+                                    .expect("pending CRDT target must retain its write receipt");
+                                let recycle_status = agent_doc_controller_io::project_controller::
+                                        schedule_stale_editor_replica_pcp_recycle(file, source);
+                                return Err(await_editor_replica_no_disk_write(format!(
+                                    "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}",
+                                    file.display(),
+                                    relay_write.content_hash,
+                                )));
+                            }
                             let mut relay_write = pending_write
                                 .take()
                                 .expect("pending CRDT target must retain its write receipt");
@@ -1536,6 +1556,41 @@ pub fn apply_canonical_replace_if_attached(
                                 &merged, content,
                             )
                         };
+
+                        // Buffer authority and delivery health are separate:
+                        // keep the live IDE PID as the disk fence, but do not
+                        // issue a canonical delivery to a component whose
+                        // replica/ACK worker stopped heartbeating. Retain the
+                        // exact merged target and refresh the supervisor/plugin
+                        // bridge at the next safe capture-backed checkpoint.
+                        let editor_delivery_worker_stale =
+                                agent_doc_ipc_io::editor_target::live_editor_delivery_has_operator_authority(file)
+                                    && agent_doc_ipc_io::editor_target::live_editor_delivery_target(file)
+                                        .is_none();
+                        if editor_delivery_worker_stale {
+                            let intent_id = ensure_deferred_document_write_intent(
+                                file,
+                                &relay_text,
+                                &effective_target,
+                                source,
+                                DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
+                            )?;
+                            let recycle_status = agent_doc_controller_io::project_controller::
+                                    schedule_stale_editor_replica_pcp_recycle(file, source);
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_editor_delivery_worker_stale file={} intent_id={} content_hash={} authority=live_ide_pid delivery=fresh_heartbeat_missing recovery=pcp_recycle_no_disk_write recycle_status={recycle_status}",
+                                    file.display(),
+                                    intent_id,
+                                    agent_doc_hash::content_hash(&effective_target),
+                                ),
+                            );
+                            return Err(await_editor_replica_no_disk_write(format!(
+                                "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but the live editor delivery worker heartbeat is stale; disk was not written; recycle_status={recycle_status}",
+                                file.display(),
+                            )));
+                        }
 
                         let zero_replica_visible_write_proven = live_editors == 0
                             && relay_text == effective_target
@@ -1948,6 +2003,13 @@ fn durable_visible_write_content_proves_target(file: &Path, content: &str) -> bo
         })
         .and_then(|candidate| candidate.commit_candidate_content)
         .is_some_and(|candidate_content| candidate_content == content)
+}
+
+fn delivery_convergence_is_editor_visible(
+    live_editors: usize,
+    durable_visible_write_proven: bool,
+) -> bool {
+    live_editors > 0 || durable_visible_write_proven
 }
 
 fn ensure_deferred_document_write_intent(
@@ -4238,6 +4300,71 @@ mod tests {
             .expect("deferred write should merge with later editor text");
         assert!(merged.contains("agent:boundary id=deferred"));
         assert!(merged.contains("operator note"));
+    }
+
+    #[test]
+    fn stale_delivery_worker_retains_target_without_ack_wait_or_disk_write() {
+        let baseline = "# Session\n\nvesting question\n";
+        let target = "# Session\n\nvesting question\n\nagent response\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-stale-delivery-worker";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let owner_dir = dir.path().join(".agent-doc/plugin-owner");
+        std::fs::create_dir_all(&owner_dir).unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&file).unwrap();
+        std::fs::write(
+            owner_dir.join(format!("{document_hash}.json")),
+            serde_json::json!({
+                "consumer_id": "jetbrains-stale-worker",
+                "pid": std::process::id(),
+                "heartbeat_secs": 0,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "a stale component must fail fast instead of burning the ACK deadline",
+        );
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("delivery worker heartbeat is stale"),
+            "{message}"
+        );
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some(),
+            "the closeout classifier must retain the no-disk recovery branch: {message}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+
+        let projection =
+            agent_doc_controller_io::project_controller::load_state_backbone_projection(dir.path())
+                .unwrap();
+        let document_id = agent_doc_hash::document_id_for_path(&file);
+        let pending = projection
+            .document(&document_id)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .expect("the exact target must remain retained");
+        assert_eq!(pending.target_content, target);
+        assert_eq!(pending.reason, "editor_delivery_worker_stale");
+    }
+
+    #[test]
+    fn zero_member_ack_quorum_is_not_editor_visible_without_durable_proof() {
+        assert!(delivery_convergence_is_editor_visible(1, false));
+        assert!(delivery_convergence_is_editor_visible(0, true));
+        assert!(
+            !delivery_convergence_is_editor_visible(0, false),
+            "a disappeared replica must not make an unsaved IDE buffer safe to overwrite",
+        );
     }
 
     #[test]

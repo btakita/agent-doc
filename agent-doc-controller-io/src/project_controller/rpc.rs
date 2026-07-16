@@ -14258,8 +14258,8 @@ mod tests {
             supervisor_recycle_action(
                 /* stale */ true, /* auto_recycle */ true, /* turn_boundary */ true,
                 /* head_pending */ true, /* explicit_admin */ false,
-                /* write_wedged */ false, /* reexec_failed */ false,
-                /* cycle_open */ false,
+                /* write_wedged */ false, /* editor_delivery_stale */ false,
+                /* reexec_failed */ false, /* cycle_open */ false,
             ),
             SupervisorRecycleAction::RecycleImmediate,
             "a stale supervisor with a pending queue head must self-recycle before the next item"

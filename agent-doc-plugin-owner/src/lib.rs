@@ -14,7 +14,8 @@
 //! election is a filesystem lease (mirrors the queue drain-owner sidecar) with an
 //! atomic `create_new` (O_EXCL) claim so two instances racing for an unowned or
 //! stale lease cannot both win. Ownership is sticky while the owner keeps
-//! refreshing (it calls [`try_acquire_plugin_owner`] on every patch event), and
+//! refreshing (the delivery worker calls [`try_acquire_plugin_owner`] periodically
+//! and on patch events), and
 //! self-healing: a stale heartbeat OR a provably-dead owner pid hands ownership
 //! to the next live consumer, so closing the owner window never wedges patch
 //! application. Closing the owner explicitly via [`release_plugin_owner`] hands
@@ -214,11 +215,10 @@ pub fn disk_write_permitted_for_file(file: &str) -> bool {
 /// the two cases: every shipped plugin maintains a per-document owner lease
 /// (`#8bfz`) recording its IDE process pid; a CLI-only session never wrote one.
 ///
-/// Keys off **pid liveness**, not heartbeat freshness: the plugin refreshes the
-/// lease heartbeat only on patch events, so an idle editor with the document
-/// open keeps a live pid but a stale heartbeat. Gating on freshness would
-/// misclassify an idle real editor as CLI-only and route a disk write straight
-/// into its live buffer — the exact File Cache Conflict the guard prevents.
+/// Keys off **pid liveness**, not heartbeat freshness: a delivery worker can
+/// stop while its IDE process and unsaved document buffer remain alive. Gating
+/// disk authority on component freshness would route a disk write straight into
+/// that live buffer — the exact File Cache Conflict the guard prevents.
 ///
 /// Fail-safe bias: returns `true` (treat as editor-attached → keep the guard)
 /// whenever a lease with a live pid exists. Only an absent lease, or a lease
@@ -228,11 +228,24 @@ pub fn live_editor_endpoint_attached(file: &str) -> bool {
 }
 
 /// Return the live plugin-owner consumer id for `file` when the lease owner pid
-/// is still alive. This is the editor delivery target for targeted IPC: the
-/// same lease that suppresses non-owner patch application should also decide
-/// which editor id receives file/socket fallback payloads.
+/// is still alive. This is the buffer-authority identity, not proof that the
+/// component which drains and ACKs deliveries is currently responsive.
 pub fn live_plugin_owner_consumer_id(file: &str) -> Option<String> {
     live_plugin_owner_consumer_id_for_lease(read_plugin_owner_lease(file), pid_is_live)
+}
+
+/// Return the plugin-owner consumer id only while the delivery worker is
+/// heartbeating. The owning IDE process can remain alive after the plugin's
+/// replica/ACK executor has stopped; routing more payloads to that stale
+/// component creates an ACK wait that can never settle. Disk authority remains
+/// deliberately PID-based via [`live_editor_endpoint_attached`].
+pub fn fresh_plugin_owner_consumer_id(file: &str) -> Option<String> {
+    fresh_plugin_owner_consumer_id_for_lease(
+        read_plugin_owner_lease(file),
+        pid_is_live,
+        now_secs(),
+        plugin_owner_ttl(),
+    )
 }
 
 /// Testable core of [`live_plugin_owner_consumer_id`].
@@ -242,6 +255,19 @@ pub fn live_plugin_owner_consumer_id_for_lease(
 ) -> Option<String> {
     let lease = lease?;
     is_pid_live(lease.pid)
+        .then_some(lease.consumer_id)
+        .filter(|consumer_id| !consumer_id.trim().is_empty())
+}
+
+/// Testable core of [`fresh_plugin_owner_consumer_id`].
+pub fn fresh_plugin_owner_consumer_id_for_lease(
+    lease: Option<PluginOwnerLease>,
+    is_pid_live: impl Fn(u32) -> bool,
+    now: u64,
+    ttl: Duration,
+) -> Option<String> {
+    let lease = lease?;
+    (is_pid_live(lease.pid) && agent_doc_lease::timestamp_is_fresh(lease.heartbeat_secs, now, ttl))
         .then_some(lease.consumer_id)
         .filter(|consumer_id| !consumer_id.trim().is_empty())
 }
@@ -563,6 +589,41 @@ mod tests {
         assert_eq!(
             live_plugin_owner_consumer_id_for_lease(None, |_| true),
             None
+        );
+    }
+
+    #[test]
+    fn fresh_delivery_consumer_requires_live_pid_and_fresh_worker_heartbeat() {
+        let lease = PluginOwnerLease {
+            consumer_id: "jetbrains-4242-uuid".to_string(),
+            pid: 4242,
+            heartbeat_secs: 100,
+        };
+        let ttl = Duration::from_secs(30);
+
+        assert_eq!(
+            fresh_plugin_owner_consumer_id_for_lease(
+                Some(lease.clone()),
+                |pid| pid == 4242,
+                120,
+                ttl,
+            )
+            .as_deref(),
+            Some("jetbrains-4242-uuid"),
+        );
+        assert_eq!(
+            fresh_plugin_owner_consumer_id_for_lease(
+                Some(lease.clone()),
+                |pid| pid == 4242,
+                131,
+                ttl,
+            ),
+            None,
+            "a live IDE pid with a stale delivery-worker heartbeat is not routable",
+        );
+        assert_eq!(
+            fresh_plugin_owner_consumer_id_for_lease(Some(lease), |_| false, 120, ttl),
+            None,
         );
     }
 

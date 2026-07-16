@@ -92,6 +92,7 @@ pub fn supervisor_recycle_action(
     head_pending: bool,
     explicit_admin: bool,
     write_wedged: bool,
+    editor_delivery_stale: bool,
     reexec_failed: bool,
     cycle_open: bool,
 ) -> SupervisorRecycleAction {
@@ -107,7 +108,12 @@ pub fn supervisor_recycle_action(
     // flag on the dewedge marker before the execve so this is once-per-episode and
     // cannot recycle-loop. The in-flight response is capture-backed and is recovered
     // via redispatch/replay on the fresh supervisor.
-    if write_wedged {
+    // A typed stale editor-delivery request has the same liveness shape as a
+    // proven write wedge: the open closeout cycle cannot reach its boundary
+    // until the replica worker is refreshed. The caller only raises this at a
+    // capture-backed safe checkpoint, so deferring on `cycle_open` would be a
+    // circular wait while an immediate in-place recycle preserves the response.
+    if write_wedged || editor_delivery_stale {
         return if reexec_failed {
             SupervisorRecycleAction::EscalateKillRelaunch
         } else {
@@ -127,7 +133,7 @@ pub fn supervisor_recycle_action(
         if reexec_failed {
             return SupervisorRecycleAction::EscalateKillRelaunch;
         }
-        if explicit_admin || write_wedged {
+        if explicit_admin {
             return SupervisorRecycleAction::RecycleImmediate;
         }
         if !auto_recycle {
@@ -202,23 +208,23 @@ mod tests {
         use SupervisorRecycleAction::*;
 
         assert_eq!(
-            supervisor_recycle_action(false, true, true, true, false, false, false, false),
+            supervisor_recycle_action(false, true, true, true, false, false, false, false, false),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, false, false, false, false),
+            supervisor_recycle_action(true, true, false, true, false, false, false, false, false),
             None
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, false, false, false),
+            supervisor_recycle_action(true, false, true, false, false, false, false, false, false),
             Detect
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, false),
+            supervisor_recycle_action(true, true, true, true, false, false, false, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, false, false, false, false, false),
+            supervisor_recycle_action(true, true, true, false, false, false, false, false, false),
             RecycleDebounced
         );
     }
@@ -228,35 +234,35 @@ mod tests {
         use SupervisorRecycleAction::*;
 
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, false, true),
+            supervisor_recycle_action(true, true, true, true, false, false, false, false, true),
             DeferCycleOpen
         );
         assert_eq!(
-            supervisor_recycle_action(false, false, true, false, true, false, false, true),
+            supervisor_recycle_action(false, false, true, false, true, false, false, false, true),
             DeferCycleOpen
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false, true),
+            supervisor_recycle_action(true, false, true, false, true, false, false, false, true),
             DeferCycleOpen
         );
         // `#midturn-wedge-recycle`: a proven write wedge no longer defers on
         // cycle_open — the wedged cycle is precisely the one that never closes, so
         // deferring would deadlock. Covered by `wedge_recycles_immediately_mid_turn`.
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, true, true),
+            supervisor_recycle_action(true, true, true, true, false, false, false, true, true),
             DeferCycleOpen
         );
 
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, true, false, false, false),
+            supervisor_recycle_action(true, false, true, false, true, false, false, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, false, true, false, false, true, false, false),
+            supervisor_recycle_action(true, false, true, false, false, true, false, false, false),
             RecycleImmediate
         );
         assert_eq!(
-            supervisor_recycle_action(true, true, true, true, false, false, true, false),
+            supervisor_recycle_action(true, true, true, true, false, false, false, true, false),
             EscalateKillRelaunch
         );
     }
@@ -265,34 +271,56 @@ mod tests {
     fn wedge_recycles_immediately_mid_turn() {
         use SupervisorRecycleAction::*;
 
-        // Args: (stale, auto, turn_boundary, head_pending, admin, write_wedged, reexec_failed, cycle_open)
+        // Args: (stale, auto, turn_boundary, head_pending, admin, write_wedged,
+        // editor_delivery_stale, reexec_failed, cycle_open)
         // The whole point of `#midturn-wedge-recycle`: a proven wedge recycles even
         // when NOT at a turn boundary — the wedged turn can never reach one.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, false, false),
+            supervisor_recycle_action(false, false, false, false, false, true, false, false, false),
             RecycleImmediate
         );
         // ...and even mid-cycle: the open cycle is the one that is wedged.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, false, true),
+            supervisor_recycle_action(false, false, false, false, false, true, false, false, true),
             RecycleImmediate
         );
         // Fires on a fresh (non-stale) binary — this session's exact case, where the
         // supervisor was `fresh` yet the editor-IPC write never converged.
         assert_eq!(
-            supervisor_recycle_action(false, true, false, false, false, true, false, true),
+            supervisor_recycle_action(false, true, false, false, false, true, false, false, true),
             RecycleImmediate
         );
         // A wedge whose in-place execve already failed escalates to kill+relaunch
         // instead of re-execing a binary that cannot converge.
         assert_eq!(
-            supervisor_recycle_action(false, false, false, false, false, true, true, true),
+            supervisor_recycle_action(false, false, false, false, false, true, false, true, true),
             EscalateKillRelaunch
         );
         // No wedge, mid-turn: unchanged — nothing recycles off a boundary.
         assert_eq!(
-            supervisor_recycle_action(true, true, false, true, true, false, false, false),
+            supervisor_recycle_action(true, true, false, true, true, false, false, false, false),
             None
+        );
+    }
+
+    #[test]
+    fn stale_editor_delivery_recycles_capture_backed_open_cycle() {
+        use SupervisorRecycleAction::*;
+
+        assert_eq!(
+            supervisor_recycle_action(
+                /* stale binary */ false, /* auto */ false,
+                /* turn boundary */ false, /* head pending */ false,
+                /* admin */ false, /* write wedged */ false,
+                /* editor delivery stale */ true, /* reexec failed */ false,
+                /* cycle open */ true,
+            ),
+            RecycleImmediate,
+            "the stale replica refresh must not wait for the cycle it unblocks",
+        );
+        assert_eq!(
+            supervisor_recycle_action(false, false, false, false, false, false, true, true, true),
+            EscalateKillRelaunch,
         );
     }
 

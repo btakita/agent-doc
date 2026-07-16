@@ -57,6 +57,11 @@ matches the intended set, commit only that validated set, then let `finalize` /
 
 ## Finalize / session-check contract
 
+Strict template closeout accepts only explicit exchange patch blocks. A response
+missing either `<!-- patch:exchange mode="append" -->` or
+`<!-- /patch:exchange -->` fails before capture or mutation; add the markers and
+retry the same closeout rather than converting it into a plain append implicitly.
+
 `finalize` requires the cycle to reach `committed` and the post-commit
 `session-check` guard to pass before success, including prompt-only exchange-tail
 checks. `agent-doc write --commit <FILE>` shares that fail-closed boundary for
@@ -71,7 +76,9 @@ projection byte-for-byte. A zero-replica or authority/disk mismatch schedules
 automatic supervisor recovery of the same durable `(cycle, capture, response)`
 operation. Once the response is captured, the binary owns reconcile, replay,
 dedupe, ACK proof, and commit retry; the agent must not recapture the response or
-rerun finalize. The Stop hook is a status gate for that operation, not another
+rerun finalize. For a non-committed closeout, `session-check` reports this
+retained intent directly instead of misclassifying it as a manual patchback; a
+committed cycle still follows ordinary terminal validation. The Stop hook is a status gate for that operation, not another
 write-loop driver. Recovery always stays on the editor/CRDT authority path: it
 does not kill the controller or elect `--force-disk`. Only a typed
 `needs_operator` result for competing user-authored intent pauses automatic

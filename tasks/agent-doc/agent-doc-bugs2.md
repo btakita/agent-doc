@@ -117,6 +117,16 @@ One live prerequisite remains visible in this cycle: IDEA is still running JetBr
 
 ### Re: Compact Exchange, closeout churn, and plugin-generation drift — gpt-5
 
+> **Queue prompt:**
+>
+> 📌 haiven.md thrash issue:
+> ```
+> ● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
+>   reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
+>   recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
+> ```
+
+
 > **Queue prompt:** 📌 haiven.md thrash issue: the response was retained after a delivery-ACK wedge, and the proposed recovery was `admin reload-lib` followed by another commit attempt.
 
 Fixed and released in agent-doc `v0.34.141` and `v0.34.142`.
@@ -139,7 +149,37 @@ Verification passed:
 For the broader formal-method stack, keep PlusCal/TLC as the current temporal regression gate; evaluate Quint+TLC as the typed authoring layer for the larger controller/supervisor/editor protocol. Alloy is complementary for bounded ownership/identity topology, while FizzBee is best treated as an exploratory and visualization surface rather than the canonical liveness gate.
 
 Source commits: `000a021de` (live generation/rebase) and `80f8e621b` (install coherence/TLA+). Tags `v0.34.141` and `v0.34.142` plus the superproject gitlink are pushed. The one-shot CI inspection found the `v0.34.142` run in progress, not red.
-<!-- agent:boundary:ae436c5e -->
+
+
+### Re: JetBrains cache conflicts, editor-tab tmux sync, and Haiven pane identity — gpt-5
+
+Fixed, installed, and released.
+
+The frequent JetBrains `File Cache Conflict` dialogs had two remaining plugin-side triggers:
+
+- external-commit signals recursively refreshed every open project file, including unrelated unsaved agent-document buffers;
+- CRDT delivery validated disk bytes but could still save through a stale IntelliJ `VirtualFile` modification stamp.
+
+JetBrains plugin `0.2.264` now marks only the VCS dirty scope after external commits. A CRDT delivery refreshes only its clean target file before mutation, rechecks that the document stayed clean, and fails closed to exact-editor-baseline retry when editor memory is unsaved. This preserves operator/editor authority and removes both the workspace-wide refresh trigger and the byte-equal-but-stamp-stale save trigger. IDEA was restarted and preflight proved the live registration is `0.2.264`, matching the installed package.
+
+The same-side editor-tab tmux bug is fixed in agent-doc `0.34.143`. Automatic exact-visible/no-autostart sync had been proof-starved by treating controller-local actor lookup like an external passive RPC. Controller-local execution can now use authoritative actor proof while external passive requests remain lookup-free. A live acceptance swap moved the existing Haiven pane `%15` to the stash and brought the Equity Funding Source pane `%26` onto the visible editor side. It did not replace either session: the original Haiven Claude child remained the same live process and returns when `haiven.md` is selected. Your clarification that the active editor was `equityfundingsource.md` therefore matches the observed, intended swap.
+
+Formal coverage is in `formal/tla/PassiveTmuxSync.tla` and runs from `make tla` / `make check`. TLC checks controller-local proof acquisition, eventual atomic visible/stashed pane swap, partition uniqueness, external-passive fail-closed behavior, and the no-autostart invariant. Alloy is not needed for this two-actor temporal transition: TLA+ directly covers its safety and liveness. Alloy would add distinct value later if the layout model grows into arbitrary-N relational topology or schema constraints.
+
+Verification completed:
+
+- focused JetBrains conflict regression suite: passed;
+- full JetBrains `test buildPlugin`: passed;
+- full `make check`, including TLA+: passed;
+- optimized `make install-full`: passed;
+- installed CLI: `0.34.144`;
+- installed and live JetBrains plugin: `0.2.264`;
+- live automatic exact-visible swap: applied without autostart or session replacement.
+
+Source commits are `165841b8d` (automatic pane sync), `363863437` (TLA+ model), and `6adc18cc0` (File Cache Conflict fix). Tags `v0.34.143` and `v0.34.144` are pushed. The required one-shot CI inspection found the `v0.34.144` CI run in progress, not red.
+
+The old Haiven delivery-ACK recovery prompt is also resolved by the corrected contract: `admin reload-lib` refreshes only the native library, not the Kotlin plugin package. The retained response required no force-disk or controller kill; installing/restarting the updated plugin restored the current editor generation, and preflight recovered the interrupted cycle.
+<!-- agent:boundary:114b0f63 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -153,52 +193,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ~~~
 - ~~re: realtime steering, please immediately commit exchange prompts with the prefix so the diff can detect additional steering changes.~~
----
-🚧 📌 haiven.md thrash issue:
-```
-● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
-  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
-  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
-```
----
----
-⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
-```
-● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-  controller pid, retry the commit):
-
-  Ran 1 shell command
-
-● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-  Waiting, then retrying:
-
-  Ran 1 shell command
-
-● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-  tree? committed? is the editor replica alive?) before any further infra action.
-
-  Ran 1 shell command
-
-● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-```
----
----
-📌 JB `Compact Exchange` on monsterrodholders.md
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-```
----
-- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
----
+~~~done
 📌 haiven.md thrash issue:
 ```
 ● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
   reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
   recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
 ```
----
+~~~
 ---
 ⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
 ```
@@ -223,21 +225,51 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-📌 JB `Compact Exchange` on monsterrodholders.md
+🚧 📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ---
-- 📌 haiven.md response was not committed.
+- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
+---
+⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
+```
+● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+  controller pid, retry the commit):
+
+  Ran 1 shell command
+
+● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+  the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+  Waiting, then retrying:
+
+  Ran 1 shell command
+
+● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+  tree? committed? is the editor replica alive?) before any further infra action.
+
+  Ran 1 shell command
+
+● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+  are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+```
+---
+---
+🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+```
+---
+- ~~📌 haiven.md response was not committed.~~
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
 - ⏭️ 📌 do [#steeringobservableset]
 - ⏭️ 📌 do [#jbcompactexchange]
 - ⏭️ 📌 do [#goal1d0k]
-- 📌 do [#idlewatchturnactive]
-- 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#idlewatchturnactive]
+- ⏭️ 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - 📌 do [#tmuxfocusfollow]
@@ -263,15 +295,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ~~~
 ---
-📍 haiven.md thrash issue:
-```
-● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
-  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
-  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
-```
----
----
-⏭️ 📍 haiven.md session had a JB `File Cache Conflict`.
+⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
 ```
 ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
   controller pid, retry the commit):
@@ -294,7 +318,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-📍 JB `Compact Exchange` on monsterrodholders.md
+🚧 📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
@@ -307,18 +331,10 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ~~~
 - ~~In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
 - haiven.md response was not committed.
-- t
-- Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
+- 📌 t
+- 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 ---
-📍 haiven.md thrash issue:
-```
-● Delivery-ACK wedge — the known stale-plugin condition. The response is safely retained on the CRDT + Lazily
-  reliable-sync plane (message explicitly says "no force-disk or operator recovery required"). Per the documented
-  recovery: agent-doc admin reload-lib to refresh the plugin's native path so the ACK lands, then retry the commit.
-```
----
----
-⏭️ 📍 haiven.md session had a JB `File Cache Conflict`.
+⏭️ 📌 haiven.md session had a JB `File Cache Conflict`.
 ```
 ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
   controller pid, retry the commit):
@@ -341,12 +357,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ---
 ---
-📍 JB `Compact Exchange` on monsterrodholders.md
+🚧 📌 JB `Compact Exchange` on monsterrodholders.md
 ```
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ---
-- do [#5qjj]
+- 📌 do [#5qjj]
 <!-- /agent:queue -->
 
 ## Notes

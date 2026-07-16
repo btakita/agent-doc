@@ -114,7 +114,32 @@ The other churn paths are closed as well:
 Local verification passed 7,725 tests with 240 skipped, plus the Lean, focused controller/compact/realtime/response-cell, and JetBrains tests. The one-shot CI inspection found the `v0.34.140` run in progress rather than red.
 
 One live prerequisite remains visible in this cycle: IDEA is still running JetBrains plugin `0.2.261`, not the shipped `0.2.263`. Install/update the `0.2.263` plugin and restart IDEA before judging the live banner/ACK behavior; otherwise the old Kotlin adapter can still reproduce the event-storm side of the incident. After that update, rerun Compact Exchange once. Do not kill the controller, use force-disk, or submit another finalize for a retained target.
-<!-- agent:boundary:2fc3a77a -->
+
+### Re: Compact Exchange, closeout churn, and plugin-generation drift — gpt-5
+
+> **Queue prompt:** 📌 haiven.md thrash issue: the response was retained after a delivery-ACK wedge, and the proposed recovery was `admin reload-lib` followed by another commit attempt.
+
+Fixed and released in agent-doc `v0.34.141` and `v0.34.142`.
+
+The churn-causing diagnosis is now corrected: `admin reload-lib` refreshes only the native cdylib; it cannot update or activate the JetBrains Kotlin package. Replay and repair now re-read the latest live editor registration at the closeout boundary, so a plugin installed or restarted after the turn began supersedes the stale preflight generation. The dogfood preflight for this cycle proved that path live by recognizing JetBrains `0.2.263` and explicitly superseding the earlier stale warning.
+
+Retained captures are no longer retired merely because the authoritative document advanced. If the current editor/disk content is a monotonic extension of the matching cycle baseline, repair rebases the capture while preserving the exact response and later steering, then replays once. Conflicting edits still fail closed. `exchange add-prompt` also preserves the active capture and typed live-editor authority, which covers prompts arriving while finalize or Compact Exchange is processing—including the EFS lender/vesting steering.
+
+`make install` now closes the other source of drift. It installs CLI/native `0.34.142`, rebuilds the local JetBrains package, updates every IDE that already has agent-doc through `plugin install jetbrains --local --all-installed`, and verifies the exact installed JAR version. The live install converged all four detected JetBrains installations from mixed versions to `0.2.263`. A running IDE still needs one restart to activate newly written package bytes; the installer says so without pretending a native reload changed the package generation.
+
+The recovery rule is therefore: do not kill the controller, use force-disk, or alternate finalize/write retries for a retained response. Submit finalize once; the keyed closeout worker owns ACK recovery and exact-once commit. A genuinely new console prompt is first persisted through `exchange add-prompt`, after which the same capture can rebase and continue.
+
+Verification passed:
+
+- full `make check`: 7,736 tests across 161 binaries, 240 skipped;
+- Lean proofs for package convergence, no false live activation, live-generation adoption, monotonic rebase, response preservation, and steering preservation;
+- exhaustive SimWorld schedules for install/restart/revalidate/rebase/replay/commit, duplicate prevention, native/package separation, and conflicts;
+- PlusCal translated to TLA+ and checked by TLC: 44 states generated, all 16 distinct reachable states exhausted, with three temporal properties and all safety invariants passing.
+
+For the broader formal-method stack, keep PlusCal/TLC as the current temporal regression gate; evaluate Quint+TLC as the typed authoring layer for the larger controller/supervisor/editor protocol. Alloy is complementary for bounded ownership/identity topology, while FizzBee is best treated as an exploratory and visualization surface rather than the canonical liveness gate.
+
+Source commits: `000a021de` (live generation/rebase) and `80f8e621b` (install coherence/TLA+). Tags `v0.34.141` and `v0.34.142` plus the superproject gitlink are pushed. The one-shot CI inspection found the `v0.34.142` run in progress, not red.
+<!-- agent:boundary:ae436c5e -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -207,9 +232,9 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.
 - ⏭️ 📌 do [#zqv8]
 - ⏭️ 📌 do [#crde]
-- 📌 do [#steeringobservableset]
-- 📌 do [#jbcompactexchange]
-- 📌 do [#goal1d0k]
+- ⏭️ 📌 do [#steeringobservableset]
+- ⏭️ 📌 do [#jbcompactexchange]
+- ⏭️ 📌 do [#goal1d0k]
 - 📌 do [#idlewatchturnactive]
 - 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]

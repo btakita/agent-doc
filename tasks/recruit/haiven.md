@@ -82,7 +82,16 @@ I added branch coverage for every reachable path: all send-queue overflow polici
 4. **`writeNext`'s lost-wakeup re-arm** — reachable only under a genuine enqueue-vs-drain data race. Forcing it means goroutine-racing tests that flake, which is exactly what the deterministic simulation suite was built to avoid.
 
 **Recommendation:** stop here. 97% with the libraries at ~100% is the honest, high-signal number; the residue is an entrypoint, two defensive branches for states that can't occur, and a concurrency race. Chasing them makes the *tests* worse (flaky, fragile) without making the *code* safer. If a reviewer wants the headline to read 100%, the clean move is to scope the coverage target to the library packages (exclude `cmd/hubd`), which reports ~99.7% — I can wire that into a `make cover` target if you want it.
-<!-- agent:boundary:bf5a6a95 -->
+### Re: Can we simulate the enqueue-vs-drain race? — opus-4-8
+
+Yes — and I did it two ways, which together push `hub` to **100%** (overall now 97.5%; server/envelope/chat also 100%). Committed `fa19836`, gitlink `e86173875`, pushed. `-race` clean.
+
+**1. A faithful concurrency simulation** (`TestConcurrentEnqueueDrainNeverLosesFrames`). The reason a plain fake can't exercise the race is that its `AsyncWrite` completes *synchronously*, so the whole drain runs on the enqueuing goroutine — no window. The fix is an `asyncConn` whose `AsyncWrite` returns immediately and fires the completion callback on its **own goroutine**, exactly like gnet's real poller. Now producer enqueues genuinely race the drain's `writing`-flag clear and re-arm. The test runs 200 rounds × 4 concurrent producers into a queue large enough that nothing is dropped by policy, then asserts **every** frame reached the socket and none is stranded (`QueueLen == 0`). A broken lost-wakeup guard would leave a frame stuck with no drainer — the assertion catches it, and `-race` catches any torn access to the shared flag. This is the honest simulation of the race.
+
+**2. Deterministic coverage of the exact branch.** The catch: that concurrent test hits the lost-wakeup *window* only *probabilistically* (it's a few instructions wide), so it does not reliably cover the re-arm line for coverage purposes — which is the whole reason I'd flagged it as race-only. To close that deterministically I extracted the empty-pop re-arm out of `writeNext` into `Conn.rearmIfRefilled()` — a small refactor that also names the concept — and `TestRearmIfRefilled` drives it directly: set the drain-owner flag (as if a drain just popped empty), enqueue a "late" frame into the window, call `rearmIfRefilled`, and assert it re-acquires and drains it (plus the no-refill case just clears the flag).
+
+So the race is now both **exercised for real** (concurrency + `-race`) and **pinned deterministically** (unit test), rather than left to chance. The only branches still under 100% are `cmd/hubd.main()` (the process entrypoint — subprocess-only) and one HTTP-bind-error log line; the earlier `auth` non-`MapClaims` guard remains a defensive branch `jwt.Parse` can't produce.
+<!-- agent:boundary:0f5ec144 -->
 <!-- /agent:exchange -->
 
 ## Queue

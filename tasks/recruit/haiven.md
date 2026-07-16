@@ -48,7 +48,24 @@ Please increase test coverage: `total:									(statements)		42.9%`
 Verified `go build`/`go vet`/`go test ./...` all green. Committed `555fb32`, gitlink `2d4d47403`, pushed to GitHub.
 
 Note: `hub/hub.go` has an uncommitted one-line `s.mu.Lock(); defer s.mu.Unlock()` edit (yours, matching your terse style) — it builds/vets but is **not gofmt-clean** (`gofmt` would split it back to two lines). Left it untouched for you to keep or reformat.
-<!-- agent:boundary:4cb87d25 -->
+
+### Re: coverage to 90%, simulation testing, and Lean — opus-4-8
+
+**Coverage: 52.7% -> 90.0%** (`go test ./...`; cross-attributed with `-coverpkg` it is 90.6%). Per package: `hub` 92.8%, `downstream/chat` 100%, `auth` 92.3%, `envelope` 91.7%, `server` 85.1%, `cmd/hubd` 60.5% (only `main()` flag parsing is left — I extracted `buildServer`/`run` so the serving path is tested on ephemeral ports). All green, `go vet` clean, `-race` clean on `hub` + `server`. Committed `d44c6c7`, gitlink `504259a36`, pushed.
+
+The enabler was that `Conn` is built to run with a nil `gconn` (delivery-only), plus a small embedded-interface `gnet.Conn` fake for the socket-write paths. New tests cover frame decode (text/fragmented/ping/close/bad/oversized/partial), the send-queue drain chain, Accept/supersede, at-least-once vs at-most-once delivery, control ack/resume, spill-to-outbox, the router (rate-limit / breaker / unknown-service / error paths), the token bucket, and the server HTTP endpoints + the OnTraffic upgrade handshake (accept + reject).
+
+**Simulation testing** (added, `hub/sim_test.go`) — deterministic, fixed-seed so it never flakes and any failure reproduces:
+- *at-least-once never loses*: drive 250 messages at a depth-4 slow consumer; assert every seq survives in the queue **or** the outbox, and the queue never exceeds its cap.
+- *no head-of-line starvation*: a saturated slow consumer never blocks a fast peer on the same topic (the fast one receives all 50 broadcasts).
+- *bookkeeping invariant*: a randomized 500-round accept/send/disconnect schedule keeps `metrics.Live == connects - disconnects == registry.Count`.
+
+**Should we use a Lean model?** My recommendation: no, not for this — it is the wrong cost/benefit, and there is a better formal option if you want one.
+
+- Lean proves properties of a *mathematical model* you write, not of the running Go. To use it you would re-encode the hub (event loop, sockets, timing) as an abstraction and prove lemmas about *that*. You would be proving the model, while the bugs that actually bite live in the code — exactly what the deterministic simulation + `-race` exercise directly. For a v1 service (and a take-home), running the real code under seeded fault schedules is far higher signal per hour.
+- Where formal methods *do* pay off here is the lock-free send-queue drain (the `kick`/`writeNext` CAS ownership you asked about) and the at-least-once outbox/cursor protocol under crash + reconnect interleavings — state spaces too large to enumerate by testing. For *those*, the standard tool is a model checker that explores all interleavings, and **TLA+ (or Alloy) fits better than Lean** for concurrency/liveness. A short TLA+ spec of the resume/ack protocol would be a strong, low-cost formal artifact.
+- So: keep the simulation suite as the primary correctness net; if you want a formal complement for the interview, write a small TLA+ spec of the at-least-once protocol rather than a Lean model. Lean would be the right call only if you were proving pure algorithmic/data-structure correctness with a machine-checked proof as a hard deliverable.
+<!-- agent:boundary:e421c9df -->
 <!-- /agent:exchange -->
 
 ## Queue

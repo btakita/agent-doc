@@ -309,15 +309,19 @@ mod tests {
     }
 
     #[test]
-    fn autofix_gates_operator_editor_convergence() {
+    fn autofix_routes_editor_convergence_to_binary_owned_session_check() {
         let mut facts = quiet_ok_facts();
         facts.editor.lazily_current_diverges = Some(true);
 
         let report = report_from_facts(facts, BTreeSet::new());
         let step = step_for(&report, WorkflowInvariantId::EditorConvergence);
 
-        assert_eq!(step.status, WorkflowAutofixStepStatus::OperatorGated);
-        assert_eq!(step.action, "ask_operator_live_editor_proof");
+        assert_eq!(step.status, WorkflowAutofixStepStatus::Planned);
+        assert_eq!(step.action, "use_editor_ipc_writeback");
+        assert_eq!(
+            step.command.as_deref(),
+            Some("agent-doc session-check tasks/example.md")
+        );
     }
 
     #[test]

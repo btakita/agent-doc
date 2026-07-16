@@ -1208,20 +1208,58 @@ pub fn settle_retained_captured_projection_through_authority(
     let Some(pending) = pending_document_write(path) else {
         return Ok(false);
     };
-    let canonical = try_resolve_current_document_content(path, source)?;
-    let target_hash = agent_doc_hash::content_hash(&pending.target_content);
-    if canonical != pending.target_content
-        || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
-        || !agent_doc_turn::response_replay::response_materialized_in_content(
-            captured_response,
-            &canonical,
-        )
+    let retained_target_hash = agent_doc_hash::content_hash(&pending.target_content);
+    if !pending
+        .target_hash
+        .eq_ignore_ascii_case(&retained_target_hash)
     {
         return Ok(false);
     }
 
+    // The retained target was composed against an older authority cut.  A live
+    // editor may have advanced before its ACK, or the operator may have saved
+    // that newer cut before asynchronous recovery resumed.  Replay the same
+    // retained journal over the current canonical text; never require Ctrl+S,
+    // preflight repair, recapture, or a force-disk reset to make progress.
+    let mut canonical = try_resolve_current_document_content(path, source)?;
+    if canonical != pending.target_content {
+        let Some(rebased_target) = deferred_document_write_reconnect_content(path, &canonical)?
+        else {
+            return Ok(false);
+        };
+        if !agent_doc_turn::response_replay::response_materialized_in_content(
+            captured_response,
+            &rebased_target,
+        ) {
+            return Ok(false);
+        }
+        if rebased_target != canonical {
+            let Some(relay_write) = apply_canonical_replace_if_attached(
+                path,
+                &canonical,
+                &rebased_target,
+                "retained_captured_projection_rebase",
+            )?
+            else {
+                return Ok(false);
+            };
+            if !relay_write.delivery_converged {
+                return Ok(false);
+            }
+        }
+        canonical = try_resolve_current_document_content(path, source)?;
+    }
+    if !agent_doc_turn::response_replay::response_materialized_in_content(
+        captured_response,
+        &canonical,
+    ) {
+        return Ok(false);
+    }
+    validate_canonical_document_target(path, &canonical, source)?;
+    let settled_target_hash = agent_doc_hash::content_hash(&canonical);
+
     let mut disk = resolve_disk_current_document_content(path, source)?;
-    if disk != pending.target_content {
+    if disk != canonical {
         let Some(projected) = settle_acknowledged_captured_projection_through_authority(
             path,
             captured_response,
@@ -1230,11 +1268,11 @@ pub fn settle_retained_captured_projection_through_authority(
         else {
             return Ok(false);
         };
-        if projected != pending.target_content {
+        if projected != canonical {
             return Ok(false);
         }
         disk = resolve_disk_current_document_content(path, source)?;
-        if disk != pending.target_content {
+        if disk != canonical {
             return Ok(false);
         }
     }
@@ -1243,10 +1281,12 @@ pub fn settle_retained_captured_projection_through_authority(
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "retained_captured_projection_settled file={} intent_id={} target_hash={} canonical_disk_exact=true captured_response_materialized=true deferred_lineage=cleared",
+            "retained_captured_projection_settled file={} intent_id={} retained_target_hash={} settled_target_hash={} canonical_disk_exact=true captured_response_materialized=true same_intent_rebased={} deferred_lineage=cleared",
             path.display(),
             pending.intent_id,
-            target_hash,
+            retained_target_hash,
+            settled_target_hash,
+            retained_target_hash != settled_target_hash,
         ),
     );
     Ok(true)
@@ -1463,6 +1503,7 @@ pub fn apply_cpc_write_through_relay_authority(
     content: &str,
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+    validate_canonical_document_target(file, content, source)?;
     if controller_document_mutation_in_progress() || test_local_crdt_relay_enabled(file) {
         return agent_doc_crdt_relay_io::apply_cpc_write_for_file(
             file,
@@ -1931,6 +1972,9 @@ pub fn apply_canonical_replace_if_attached(
 }
 
 fn agent_projection_integrity_valid(content: &str) -> bool {
+    if agent_doc_element::element::structural_corruption_reason(content).is_some() {
+        return false;
+    }
     let boundary_singleton = content.matches("<!-- agent:boundary:").count() <= 1
         && agent_doc_template::collapse_adjacent_boundary_markers(content)
             .is_ok_and(|normalized| normalized == content);
@@ -1939,6 +1983,21 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
         .flatten()
         .is_none();
     boundary_singleton && single_exchange
+}
+
+fn validate_canonical_document_target(file: &Path, content: &str, source: &str) -> Result<()> {
+    if let Some(reason) = agent_doc_element::element::structural_corruption_reason(content) {
+        anyhow::bail!(
+            "{source}: refusing structurally invalid canonical target for {} ({reason}); current Lazily/editor authority is unchanged and pending intents remain retained",
+            file.display(),
+        );
+    }
+    anyhow::ensure!(
+        agent_projection_integrity_valid(content),
+        "{source}: refusing structurally invalid canonical target for {} (duplicate exchange or boundary marker); current Lazily/editor authority is unchanged and pending intents remain retained",
+        file.display(),
+    );
+    Ok(())
 }
 
 /// Resolve the operator-authored editor cut independently from agent projection
@@ -1986,11 +2045,7 @@ fn canonicalize_and_validate_agent_rebase(
 ) -> Result<String> {
     let canonical =
         agent_doc_template::canonicalize_boundary_after_document_merge(merged, response_branch);
-    anyhow::ensure!(
-        agent_projection_integrity_valid(&canonical),
-        "{source}: refusing structurally invalid agent rebase for {} (duplicate exchange or boundary marker); pending intents remain retained",
-        file.display(),
-    );
+    validate_canonical_document_target(file, &canonical, source)?;
     Ok(canonical)
 }
 
@@ -2282,6 +2337,7 @@ fn ensure_deferred_document_write_intent(
     source: &str,
     reason: DocumentWriteDeferredReason,
 ) -> Result<String> {
+    validate_canonical_document_target(file, content, source)?;
     let mut expected_content = expected_current.to_string();
     let mut target_content = content.to_string();
     let requested_target_hash = agent_doc_hash::content_hash(content);
@@ -2413,6 +2469,7 @@ fn ensure_deferred_document_write_intent(
             }
         }
     }
+    validate_canonical_document_target(file, &target_content, source)?;
     let target_hash = agent_doc_hash::content_hash(&target_content);
     let pending_for_target = if external_disk_candidate {
         pending_external_disk_candidate_for_target(file, &target_hash)
@@ -2471,6 +2528,11 @@ pub fn deferred_document_write_reconnect_content(
             &editor_hash,
         ) {
             agent_doc_document_realtime::ExternalDiskDecision::AcceptedInEditor => {
+                validate_canonical_document_target(
+                    file,
+                    &pending.target_content,
+                    "external_disk_editor_reconnect",
+                )?;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -2519,6 +2581,11 @@ pub fn deferred_document_write_reconnect_content(
         return Ok(None);
     };
     if editor_hash.eq_ignore_ascii_case(&pending.target_hash) {
+        validate_canonical_document_target(
+            file,
+            &pending.target_content,
+            "editor_reconnect_retained_target",
+        )?;
         return Ok(Some(pending.target_content));
     }
 
@@ -2614,8 +2681,14 @@ pub fn deferred_document_write_reconnect_content(
         )?;
     }
     if agent_doc_hash::content_hash(&merged).eq_ignore_ascii_case(&pending.target_hash) {
+        validate_canonical_document_target(
+            file,
+            &pending.target_content,
+            "editor_reconnect_retained_target",
+        )?;
         return Ok(Some(pending.target_content));
     }
+    validate_canonical_document_target(file, &merged, "editor_reconnect")?;
     ensure_deferred_document_write_intent(
         file,
         &pending.target_content,
@@ -4206,14 +4279,45 @@ mod tests {
             "### Re: duplicated tail\n\nDuplicate.\n<!-- agent:boundary:def456 -->\n<!-- /agent:exchange -->",
             1,
         );
+        let unclosed_exchange = operator_cut.replacen("<!-- /agent:exchange -->\n", "", 1);
 
         assert!(!agent_projection_integrity_valid(&poisoned));
         assert!(!agent_projection_integrity_valid(&duplicate_boundary));
+        assert!(!agent_projection_integrity_valid(&unclosed_exchange));
         let recovered =
             editor_operator_cut_for_agent_rebase(&file, base, &poisoned, "test_reconnect");
         assert_eq!(recovered, operator_cut);
         assert!(recovered.contains("queue: stop"));
         assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+        assert_eq!(
+            editor_operator_cut_for_agent_rebase(&file, base, &unclosed_exchange, "test_reconnect"),
+            operator_cut
+        );
+    }
+
+    #[test]
+    fn malformed_canonical_target_is_rejected_before_relay_mutation() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "Question.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let malformed = "<!-- agent:exchange -->\nQuestion.\n";
+        let (_dir, file, _) = temp_doc(baseline);
+
+        let err = apply_cpc_write_through_relay_authority(
+            &file,
+            baseline,
+            malformed,
+            "test_malformed_target",
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("structurally invalid canonical target")
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
     }
 
     fn push_test_liveness(
@@ -4664,7 +4768,7 @@ mod tests {
     #[test]
     fn serialized_atomic_write_defers_zero_replica_editor_owner_without_touching_disk() {
         let baseline = "# Session\n\nbody\n";
-        let target = "# Session\n\nbody\n\n<!-- agent:boundary id=deferred -->\n";
+        let target = "# Session\n\nbody\n\n<!-- agent:boundary:deferred -->\n";
         let (dir, file, _canonical) = temp_doc(baseline);
         let identity = "test-crdt-zero-replica-defer";
         seed_reliable_sync_open(&file, identity);
@@ -4736,7 +4840,7 @@ mod tests {
         let merged = deferred_document_write_reconnect_content(&file, &editor_with_unsaved_note)
             .unwrap()
             .expect("deferred write should merge with later editor text");
-        assert!(merged.contains("agent:boundary id=deferred"));
+        assert!(merged.contains("agent:boundary:deferred"));
         assert!(merged.contains("operator note"));
     }
 
@@ -5263,6 +5367,96 @@ mod tests {
             captured_target,
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_target);
+    }
+
+    #[test]
+    fn retained_capture_rebases_over_operator_save_without_preflight_or_recapture() {
+        let editor_base = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n- original item\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n",
+        );
+        let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
+        let captured_target = format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:queue -->\n- original item\n<!-- /agent:queue -->\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            ),
+            captured_response.trim_end()
+        );
+        let operator_saved_cut = editor_base.replace(
+            "- original item\n",
+            "- original item\n- operator item saved before recovery\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-capture-operator-save";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            &captured_target,
+            editor_base,
+            "retained_capture_operator_save_zero_replica_test",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+        );
+
+        let (replacement_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should bootstrap");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            let current = hub.canonical_text();
+            hub.apply_local(
+                replacement_id,
+                0,
+                current.chars().count() as u32,
+                &operator_saved_cut,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, &operator_saved_cut)
+            .expect("simulate the operator saving the newer editor cut");
+
+        let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        let settled_synchronously = settle_retained_captured_projection_through_authority(
+            &file,
+            captured_response,
+            "retained_capture_operator_save_rebase_test",
+        )
+        .unwrap();
+        ack.join().unwrap();
+
+        let rebased = try_resolve_current_document_content(
+            &file,
+            "retained_capture_operator_save_rebased_current",
+        )
+        .unwrap();
+        assert!(rebased.contains("operator item saved before recovery"));
+        assert_eq!(rebased.matches("Fixed the retained closeout.").count(), 1);
+        if !settled_synchronously {
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), operator_saved_cut);
+            std::fs::write(&file, &rebased).expect("simulate the requested native editor save");
+            assert!(
+                settle_retained_captured_projection_through_authority(
+                    &file,
+                    captured_response,
+                    "retained_capture_operator_save_after_native_save_test",
+                )
+                .unwrap(),
+                "the binary should settle the same retained capture without preflight repair"
+            );
+        }
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), rebased);
     }
 
     #[test]

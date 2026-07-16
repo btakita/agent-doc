@@ -202,6 +202,8 @@ mod crdt_lineage_fence_model {
     enum Action {
         OperatorDelete,
         CaptureAgentIntent,
+        CaptureTrackedMutation,
+        CaptureMalformedAgentTarget,
         ReplaceAndRebase,
         DeliverStale,
         DeliverCurrent,
@@ -212,12 +214,15 @@ mod crdt_lineage_fence_model {
         OperatorAdvanceAfterSaveRequest,
         CrashDropsCleanQueue,
         RecoverDurableQueue,
+        DeliverMalformedAgentTarget,
         Commit,
     }
 
-    const ACTIONS: [Action; 13] = [
+    const ACTIONS: [Action; 16] = [
         Action::OperatorDelete,
         Action::CaptureAgentIntent,
+        Action::CaptureTrackedMutation,
+        Action::CaptureMalformedAgentTarget,
         Action::ReplaceAndRebase,
         Action::DeliverStale,
         Action::DeliverCurrent,
@@ -228,6 +233,7 @@ mod crdt_lineage_fence_model {
         Action::OperatorAdvanceAfterSaveRequest,
         Action::CrashDropsCleanQueue,
         Action::RecoverDurableQueue,
+        Action::DeliverMalformedAgentTarget,
         Action::Commit,
     ];
 
@@ -240,6 +246,10 @@ mod crdt_lineage_fence_model {
         clean_queue_replayed: bool,
         pending_agent_intent: bool,
         agent_intent_applied: bool,
+        pending_tracked_mutation: bool,
+        tracked_mutation_applied: bool,
+        malformed_agent_target_pending: bool,
+        malformed_agent_target_rejected: bool,
         stale_frame_pending: bool,
         current_frame_pending: bool,
         ack_cursor: u8,
@@ -266,16 +276,30 @@ mod crdt_lineage_fence_model {
                     self.queue_tombstone = true;
                     self.stale_frame_pending = true;
                 }
-                Action::CaptureAgentIntent => {
+                Action::CaptureAgentIntent if !self.committed => {
                     self.pending_agent_intent = true;
                     if self.lineage > 0 && !self.agent_intent_applied {
                         self.current_frame_pending = true;
                     }
                 }
+                Action::CaptureTrackedMutation if self.pending_agent_intent && !self.committed => {
+                    // finalize owns one response + tracked-work envelope. Once
+                    // requested, the bookkeeping half remains a commit
+                    // precondition across ACK timeout and reconnect.
+                    self.pending_tracked_mutation = true;
+                    if self.lineage > 0 && !self.tracked_mutation_applied {
+                        self.current_frame_pending = true;
+                    }
+                }
+                Action::CaptureMalformedAgentTarget => {
+                    self.malformed_agent_target_pending = true;
+                }
                 Action::ReplaceAndRebase if self.queue_tombstone && self.lineage == 0 => {
                     self.lineage = 1;
                     self.agent_intent_applied = self.pending_agent_intent;
-                    self.current_frame_pending = self.pending_agent_intent;
+                    self.tracked_mutation_applied = self.pending_tracked_mutation;
+                    self.current_frame_pending =
+                        self.pending_agent_intent || self.pending_tracked_mutation;
                 }
                 Action::DeliverStale if self.stale_frame_pending && self.lineage > 0 => {
                     // Production outcome: StaleLineage/LegacyQuarantined. The
@@ -286,6 +310,7 @@ mod crdt_lineage_fence_model {
                 Action::DeliverCurrent if self.current_frame_pending => {
                     self.current_frame_pending = false;
                     self.agent_intent_applied = true;
+                    self.tracked_mutation_applied = self.pending_tracked_mutation;
                     self.ack_cursor = self.ack_cursor.saturating_add(1);
                 }
                 Action::RestartMatchingProjection => {
@@ -296,6 +321,9 @@ mod crdt_lineage_fence_model {
                     // only be quarantined; durable agent intent remains journaled.
                     self.lineage = self.lineage.saturating_add(1);
                     if self.pending_agent_intent && !self.agent_intent_applied {
+                        self.current_frame_pending = true;
+                    }
+                    if self.pending_tracked_mutation && !self.tracked_mutation_applied {
                         self.current_frame_pending = true;
                     }
                 }
@@ -335,9 +363,16 @@ mod crdt_lineage_fence_model {
                     self.queue_visible = true;
                     self.clean_queue_replayed = true;
                 }
+                Action::DeliverMalformedAgentTarget if self.malformed_agent_target_pending => {
+                    // The canonical/deferred write validity fence consumes the
+                    // attempt without changing either Lazily or editor authority.
+                    self.malformed_agent_target_pending = false;
+                    self.malformed_agent_target_rejected = true;
+                }
                 Action::Commit
                     if self.pending_agent_intent
                         && self.agent_intent_applied
+                        && (!self.pending_tracked_mutation || self.tracked_mutation_applied)
                         && !self.current_frame_pending
                         && self.disk_has_agent_intent =>
                 {
@@ -364,6 +399,10 @@ mod crdt_lineage_fence_model {
             assert!(
                 !self.committed || (self.agent_intent_applied && self.disk_has_agent_intent),
                 "commit preceded the exact native editor save: {self:?}"
+            );
+            assert!(
+                !self.committed || !self.pending_tracked_mutation || self.tracked_mutation_applied,
+                "response committed without its tracked-work mutation: {self:?}"
             );
             if self.pending_agent_intent && self.lineage > 0 {
                 assert!(
@@ -395,6 +434,12 @@ mod crdt_lineage_fence_model {
         assert!(visited.iter().any(|world| world.lineage >= 2));
         assert!(visited.iter().any(|world| world.editor_save_requested));
         assert!(visited.iter().any(|world| world.clean_queue_replayed));
+        assert!(visited.iter().any(|world| world.tracked_mutation_applied));
+        assert!(
+            visited
+                .iter()
+                .any(|world| world.malformed_agent_target_rejected)
+        );
     }
 }
 

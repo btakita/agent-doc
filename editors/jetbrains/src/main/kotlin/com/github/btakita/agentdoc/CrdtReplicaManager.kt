@@ -110,6 +110,14 @@ internal fun templateStructureProjectionStateUtil(
     else -> TemplateStructureProjectionState.RepairRequired
 }
 
+internal fun remoteReplaceStructureAcceptedUtil(
+    remoteState: TemplateStructureProjectionState,
+): Boolean = remoteState == TemplateStructureProjectionState.Exact
+
+internal fun replicaRegistrationStructureAcceptedUtil(
+    editorState: TemplateStructureProjectionState,
+): Boolean = editorState != TemplateStructureProjectionState.Invalid
+
 internal enum class RemoteTemplateProjectionDecision {
     QueueRemote,
     AdoptExactEditorBaseline,
@@ -383,6 +391,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     NativePatching.deferredWriteReconnectContent(filePath, text)
                 } else null
                 val registrationText = deferredReconnect ?: text
+                val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
+                if (!replicaRegistrationStructureAcceptedUtil(registrationState)) {
+                    log.warn(
+                        "[crdt-replica] refused malformed open-document replica registration for ${File(filePath).name}; " +
+                            "recovery=retry_deferred_intent_rebase operator_action=none",
+                    )
+                    return@attach false
+                }
                 if (registrationText != text &&
                     !installDeferredReconnectContent(filePath, document, text, registrationText)
                 ) {
@@ -820,6 +836,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         expectedText: String,
         canonical: String,
     ): Boolean {
+        val remoteState = templateStructureState(filePath, canonical, "replace-remote")
+        if (!remoteReplaceStructureAcceptedUtil(remoteState)) {
+            recoverRejectedRemoteCanonical(
+                filePath = filePath,
+                expectedText = expectedText,
+                remoteText = canonical,
+                staleForwarder = forwarder,
+                remoteState = remoteState,
+            )
+            return false
+        }
         if (hasPendingLocal(filePath)) return false
         val started = System.nanoTime()
         var installed = false

@@ -16,7 +16,7 @@ use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::done_archive::archive_pending_done;
+use crate::done_archive::{archive_pending_done, external_done_archive_ids};
 use agent_doc_element::element;
 use agent_doc_element::element::is_backlog_component;
 use agent_doc_element_backlog::backlog;
@@ -115,7 +115,16 @@ fn tracked_work_id_already_resolved(file: &Path, id: &str) -> Result<bool> {
     }
 
     let content = read_command_document(file, "backlog_resolved_id")?;
-    backlog::content_has_resolved_tracked_work_id(&content, &id)
+    if backlog::content_has_resolved_tracked_work_id(&content, &id)? {
+        return Ok(true);
+    }
+
+    // External `agent:done archive=...` is the canonical completed-work
+    // surface for large sessions. A pending-only closeout repair may arrive
+    // after mark -> reap moved the item there; treating that as "not found"
+    // makes the otherwise-idempotent `--done` repair impossible and leaves the
+    // committed cycle permanently failing session-check.
+    Ok(external_done_archive_ids(file, &content)?.contains(&id))
 }
 
 fn log_symptom_dedupe(file: &Path, surface: &str, id: &str, key: &backlog::SymptomDedupeKey) {
@@ -1204,6 +1213,31 @@ mod tests {
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("- [ ] [#keep1] Keep backlog item"));
         assert!(content.contains("- 2026-05-09 [#done1] Already completed"));
+    }
+
+    #[test]
+    fn done_noops_when_item_was_already_reaped_to_external_archive() {
+        let (tmp, doc) = setup_test_dir();
+        fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
+        let archive = tmp.path().join("doc.done.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:pending -->\n",
+            "- [ ] [#keep1] Keep backlog item\n",
+            "<!-- /agent:pending -->\n\n",
+            "<!-- agent:done archive=doc.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        fs::write(&archive, "- 2026-07-16 [#done1] Already reaped\n").unwrap();
+
+        force_pending(|| done(&doc, "done1"));
+
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(
+            fs::read_to_string(&archive).unwrap(),
+            "- 2026-07-16 [#done1] Already reaped\n"
+        );
     }
 
     #[test]

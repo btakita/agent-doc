@@ -4109,6 +4109,23 @@ Existing answer.
         );
     }
     #[test]
+    fn normalize_editor_visible_template_structure_rejects_duplicate_boundaries() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "question\n",
+            "<!-- agent:boundary:first -->\n",
+            "response\n",
+            "<!-- agent:boundary:second -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let err = normalize_editor_visible_template_structure(doc).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("duplicate_exchange_boundary:2"),
+            "unexpected error: {err:#}"
+        );
+    }
+    #[test]
     fn normalize_editor_visible_template_structure_rejects_mixed_duplicate_scaffold() {
         let doc = concat!(
             "<!-- agent:exchange patch=append -->\n",

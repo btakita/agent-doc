@@ -4,6 +4,14 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.161
+
+- **Retained captures now rebase over the current Lazily/CPC editor authority before settlement.** Recovery preserves unsaved or newly saved operator text, replays the same content-bearing intent journal, delivers the response once, and requests the plugin's native save automatically; it never asks for Ctrl+S, preflight repair, recapture, or force-disk recovery.
+- **Malformed CRDT and REPLACE projections are fenced before they enter the editor.** The shared structural validator now rejects duplicate exchange boundaries, every retained target is validated before Lazily/CRDT retention or reconnect delivery, and JetBrains validates whole-document REPLACE payloads and replica-registration text so a duplicated document is recovered from the exact coherent editor baseline rather than made authoritative.
+- **Response closeout and tracked-work mutation are one monotonic envelope.** ACK-retained write outcomes keep the same `--done`/backlog mutation facts, and a replayed `--done` is idempotent after the item has already been reaped into the external archive.
+- **Background control-plane work cannot change the operator's selected JetBrains document.** Startup refreshes open document replicas without installing the reverse tmux-to-editor focus mirror; only explicit operator selection controls IDE focus.
+- **Recovery policy and simulation coverage now match the authority model.** Doctor/autofix classify Lazily-ahead-of-disk as binary-owned recovery with no operator-save action, and exhaustive lineage transitions cover tracked-mutation capture, commit gating, malformed-target rejection, and monotonic progress.
+
 ## 0.34.160
 
 - **Live editor text now has one authority: the Lazily/CPC CRDT.** Full `.agent-doc/live-buffer` snapshots are no longer written or read for content, liveness, targeting, stale-plugin detection, or capability proof. Open/close state, sync epochs, editor identity/version, and capabilities travel as monotone reliable-sync registrations; legacy live-buffer files are delete-only. JetBrains 0.2.270 also closes the native editor-op epoch before applying an agent or remote projection.

@@ -17,7 +17,7 @@ class ReliableSyncLivenessGraphTest {
             "/tmp/doc.md",
             "jetbrains-42-test",
             "jetbrains",
-            "0.2.270",
+            "0.2.271",
             "operator_text_authority_v1,lazily_transport_receipts_v1",
         )
         assertNotNull(opened)

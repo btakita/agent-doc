@@ -1046,6 +1046,17 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
         return Some(reason);
     }
 
+    let boundary_count = doc
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
+        })
+        .count();
+    if boundary_count > 1 {
+        return Some(format!("duplicate_exchange_boundary:{boundary_count}"));
+    }
+
     let components = match parse(doc) {
         Ok(c) => c,
         Err(e) => return Some(format!("parse_error: {e}")),
@@ -2481,6 +2492,16 @@ Fix applied to skip non-agent <!-- sequences.
         assert!(
             reason.contains("duplicate_singleton_component") && reason.contains("queue=2"),
             "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn structural_corruption_flags_duplicate_exchange_boundary() {
+        let doc = "<!-- agent:exchange -->\nq\n<!-- agent:boundary:first -->\n\
+                   response\n<!-- agent:boundary:second -->\n<!-- /agent:exchange -->\n";
+        assert_eq!(
+            structural_corruption_reason(doc).as_deref(),
+            Some("duplicate_exchange_boundary:2")
         );
     }
 

@@ -888,6 +888,30 @@ fn apply_pending_and_status_mutations(
     }
 
     if has_pending_ops {
+        // Record the requested mutation envelope before its editor projection.
+        // A response write may already be retained in Lazily/CRDT and its ACK
+        // worker may settle concurrently with this follow-up projection. The
+        // cycle must therefore know that tracked work is still part of the same
+        // closeout before any individual backlog write can block on its own ACK.
+        // Concrete content guards still prove that promised ids actually land.
+        agent_doc_cycle_state_io::mark_pending_mutations(file)?;
+        if !options.pending_done.is_empty() {
+            agent_doc_cycle_state_io::record_pending_done_ids(file, &options.pending_done)?;
+        }
+        if !options.pending_add.is_empty()
+            || !options.pending_add_to.is_empty()
+            || !options.pending_add_gated.is_empty()
+            || !options.pending_add_after.is_empty()
+            || !options.pending_add_before.is_empty()
+            || !options.pending_add_back.is_empty()
+            || !options.icebox_add.is_empty()
+            || !options.icebox_add_after.is_empty()
+            || !options.icebox_add_before.is_empty()
+            || !options.icebox_add_back.is_empty()
+            || !options.review_add.is_empty()
+        {
+            agent_doc_cycle_state_io::mark_pending_added(file)?;
+        }
         agent_doc_element_backlog_io::with_backlog_command_effects(
             &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
             || {
@@ -1094,6 +1118,14 @@ fn apply_pending_and_status_mutations(
     }
 
     Ok(())
+}
+
+fn write_outcome_retains_closeout_mutations(write_result: &Result<()>) -> bool {
+    write_result.is_ok()
+        || write_result
+            .as_ref()
+            .err()
+            .is_some_and(error_requests_retry_without_disk)
 }
 
 fn run_command(options: CommandOptions, commit_mode: CommitMode) -> Result<()> {
@@ -1471,13 +1503,29 @@ fn run_command_inner(
         }
     };
 
-    if write_result.is_ok() {
+    let response_write_retained =
+        write_result.is_err() && write_outcome_retains_closeout_mutations(&write_result);
+
+    if write_outcome_retains_closeout_mutations(&write_result) {
         apply_pending_and_status_mutations(
             file,
             &options,
             &pending_kept_open_ids,
             has_pending_ops,
-        )?;
+        )
+        .with_context(|| {
+            if response_write_retained {
+                format!(
+                    "response target for {} is retained; failed to retain the same closeout's tracked-work mutations",
+                    file.display()
+                )
+            } else {
+                format!(
+                    "failed to apply tracked-work mutations for {}",
+                    file.display()
+                )
+            }
+        })?;
     }
 
     if write_result.is_ok() {
@@ -2254,6 +2302,18 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    #[test]
+    fn retained_response_outcome_keeps_same_closeout_mutation_envelope() {
+        let retained = Err(anyhow::anyhow!(
+            "canonical target retained; retry_without_disk_write"
+        ));
+        let semantic_failure = Err(anyhow::anyhow!("malformed component tree"));
+
+        assert!(write_outcome_retains_closeout_mutations(&Ok(())));
+        assert!(write_outcome_retains_closeout_mutations(&retained));
+        assert!(!write_outcome_retains_closeout_mutations(&semantic_failure));
+    }
 
     #[allow(clippy::too_many_arguments)]
     fn try_ipc(

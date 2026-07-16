@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import java.nio.file.Files
 import java.nio.file.Paths
 import org.junit.Test
@@ -18,5 +19,12 @@ class PluginLifecycleListenerTest {
         assertFalse(source.contains("agent-doc\", \"resync"))
         assertFalse(source.contains("agent-doc\", \"resync\", \"--fix"))
         assertFalse(source.contains("agent-doc-resync"))
+        assertTrue(
+            source.contains(
+                "CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, \"plugin-startup\")"
+            )
+        )
+        assertFalse(source.contains("openFile("))
+        assertFalse(source.contains("TmuxPaneFocusSync.install(project)"))
     }
 }

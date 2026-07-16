@@ -892,7 +892,7 @@ fn ensure_document_model_with_current_text_observer_inner(
             );
             ensure_guard.record_failure(last_label);
             anyhow::bail!(
-                "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; last_observer_error={}; recovery=retry_without_disk_write; reload or save the editor buffer, then retry",
+                "document model startup/reconciliation failed for {}: editor authority stayed in {last_label} after a bounded publish-live-buffer request; disk remained non-authoritative and was not read as a fallback; last_observer_error={}; recovery=retry_without_disk_write; binary-owned replica re-registration and retained-intent replay continue asynchronously; operator_action=none",
                 file.display(),
                 last_observer_error.as_deref().unwrap_or("none")
             );
@@ -1120,7 +1120,7 @@ fn suppressed_document_model_ensure_result(
     suppression: DocumentModelEnsureSuppression,
 ) -> Result<CurrentText> {
     anyhow::bail!(
-        "document model startup/reconciliation for {} suppressed duplicate publish-live-buffer request from {source}; reason={}; editor authority stayed in {}; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; retry after the active recovery attempt finishes, or reload/save the editor buffer",
+        "document model startup/reconciliation for {} suppressed duplicate publish-live-buffer request from {source}; reason={}; editor authority stayed in {}; disk remained non-authoritative and was not read as a fallback; recovery=retry_without_disk_write; binary-owned replica re-registration and retained-intent replay continue asynchronously; operator_action=none",
         file.display(),
         suppression.reason,
         suppression.state,

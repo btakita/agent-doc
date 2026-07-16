@@ -211,7 +211,7 @@ pub fn evaluate_catalog(
                 evaluate_closeout_commit(invariant, &facts, file)
             }
             WorkflowInvariantId::EditorConvergence => {
-                evaluate_editor_convergence(invariant, &facts)
+                evaluate_editor_convergence(invariant, &facts, file)
             }
             WorkflowInvariantId::GenerationRedirect => {
                 evaluate_generation_redirect(invariant, &facts)
@@ -406,15 +406,16 @@ fn evaluate_closeout_commit(
 fn evaluate_editor_convergence(
     invariant: &WorkflowInvariant,
     facts: &WorkflowDoctorFacts,
+    file: &Path,
 ) -> WorkflowInvariantResult {
     let mut result = WorkflowInvariantResult::new(invariant);
     if facts.editor.lazily_current_diverges == Some(true) {
         result
             .disproof_markers
             .push("live editor buffer diverges from disk".to_string());
-        return result.operator(
-            "the Lazily/CPC current document is ahead of disk",
-            vec!["save the live editor buffer or let the plugin handle save_document IPC, then rerun agent-doc doctor <FILE>".to_string()],
+        return result.recoverable(
+            "the Lazily/CPC live authority is ahead of its disk projection; retained intents rebase on that authority and the plugin owns native-save settlement",
+            vec![format!("agent-doc session-check {}", file.display())],
         );
     }
     if has_marker(&facts.ops_log, "editor_convergence_failure") {
@@ -710,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn doctor_marks_editor_convergence_operator_for_lazily_drift() {
+    fn doctor_marks_lazily_drift_binary_recoverable_without_operator_save() {
         let mut facts = WorkflowDoctorFacts::default();
         facts.editor.lazily_current_diverges = Some(true);
 
@@ -722,7 +723,12 @@ mod tests {
         );
 
         let editor = invariant_result(&report, WorkflowInvariantId::EditorConvergence);
-        assert_eq!(editor.outcome, WorkflowDoctorOutcome::Operator);
+        assert_eq!(editor.outcome, WorkflowDoctorOutcome::Recoverable);
+        assert!(editor.operator_actions.is_empty());
+        assert_eq!(
+            editor.repair_commands,
+            vec!["agent-doc session-check tasks/example.md".to_string()]
+        );
         assert!(
             editor
                 .disproof_markers

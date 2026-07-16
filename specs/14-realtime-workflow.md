@@ -634,7 +634,7 @@ flowchart LR
 
     DiskAuthoritative -- build operation --> AgentDeltaReady
     EditorQuiescent -- build operation --> AgentDeltaReady
-    EditorDirty -- cannot prove stable source --> ConflictBlocked
+    EditorDirty -- capture current authority epoch and rebase --> AgentDeltaReady
     DiskDriftObserved -- agent delta waits --> ConflictBlocked
     Snapshot -. bounded candidate only .-> AgentDeltaReady
     Snapshot -. forbidden .-> AppliedVerified
@@ -678,13 +678,13 @@ Realtime transitions are continuous and must work regardless of agent state:
 | Disk/editor operator sources reconcile | `DiskDriftObserved` | `EditorDirty` or `EditorQuiescent` | The editor-visible buffer includes all preserved disk and editor operator edits. |
 | Disk/editor operator sources conflict | `DiskDriftObserved` | `ConflictBlocked` | Typed conflict proves the operator sources cannot be safely combined automatically. |
 | Debounce and editor epoch settle | `EditorDirty` | `EditorQuiescent` | Latest editor-visible text is known and no in-flight local edit remains. |
-| Agent response, queue operation, pending mutation, or compact operation is captured | Any source state | `AgentDeltaReady` | The operation is narrowed to the binary-owned node/intent; snapshots are only a fallback source for this candidate. |
+| Agent response, queue operation, pending mutation, or compact operation is captured | Any source state | `AgentDeltaReady` | The operation is narrowed to the binary-owned node/intent and records the current Lazily/CPC authority epoch as its merge base; snapshots are only a fallback source for this candidate. |
 | Merge succeeds | `AgentDeltaReady` plus latest realtime source | `MergePlanned` | `agent-doc-merge` proves operator text is preserved or explicitly owned by the operation. |
 | Merge conflicts | `AgentDeltaReady` plus latest realtime source | `ConflictBlocked` | Typed conflict describing the same-node or ambiguous placement failure. |
 | Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. For CRDT remote text delivery, the handoff carries the expected editor text observed before convergence. |
 | Disk delivery starts | `MergePlanned` with no editor owner | `ApplyInFlight` | Current file still matches the merge input, or the merge is recomputed first. |
 | Delivery receipt/content verifies | `ApplyInFlight` | `AppliedVerified` | Post-apply owner-visible text equals the intended target and contains the agent delta plus every observed operator edit. Editor API success alone is not proof. |
-| Delivery fails, receipt mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | The stale plan is discarded; the next attempt must re-read source-of-truth and merge again. |
+| Delivery fails, receipt mismatches, expected editor text mismatches, or a newer operator edit appears | `ApplyInFlight` | `EditorDirty`, `DiskAuthoritative`, or `ConflictBlocked` | No success proof is published. The same content-bearing intent remains retained and rebases on the newly authoritative source; only a typed semantic conflict may enter `ConflictBlocked`. |
 | Realtime handoff completes | `AppliedVerified` | `EditorQuiescent` or `DiskAuthoritative` | Realtime publishes the verified apply proof and latest source-of-truth text without committing. |
 
 Forbidden transitions:
@@ -697,7 +697,25 @@ Forbidden transitions:
 - `MergePlanned` or `ApplyInFlight` to any document commit;
 - `agent-doc-merge` or `agent-doc-document-realtime` running `git commit`;
 - any transition that drops visible operator text to match `content_ours`, a
-  snapshot, a CRDT sidecar, or a lazily visible-write receipt.
+  snapshot, a stale replica projection, or a lazily visible-write receipt.
+
+Additional convergence invariants:
+
+- Both the requested agent target and the actual canonical text produced by a
+  reconnect or delivery must pass the shared document structural validator
+  before becoming an editor projection. This includes singleton components,
+  balanced component markers, and at most one live exchange boundary marker.
+- A whole-document editor REPLACE delivery uses the same structural guard as an
+  incremental delivery. If the remote CRDT result is invalid, the plugin does
+  not install or ACK it; it re-adopts the exact coherent editor baseline,
+  atomically re-registers the replica, and retries the retained intent.
+- A retained captured response whose editor authority has advanced is replayed
+  over that authority whether the operator cut is still unsaved or has already
+  reached disk. The binary then requests native editor save itself. Operator
+  Ctrl+S, preflight repair, recapture, and force-disk are not recovery steps.
+- IDE document selection is operator-owned. Replica refresh, reconnect,
+  controller activity, tmux focus changes, and background queue work must not
+  open, select, or focus a different JetBrains document.
 
 ## Realtime Parse State
 

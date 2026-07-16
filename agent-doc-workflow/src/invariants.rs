@@ -187,6 +187,12 @@ impl RemediationAction {
                     && !command.contains('<')
                     && !command.contains('>')
             }
+            Self::UseEditorIpcWriteback => {
+                command.starts_with("agent-doc session-check ")
+                    && !command.contains("&&")
+                    && !command.contains('<')
+                    && !command.contains('>')
+            }
             _ => false,
         }
     }
@@ -494,13 +500,13 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
     WorkflowInvariant {
         id: WorkflowInvariantId::EditorConvergence,
         title: text(
-            "Editor-visible writes converge through editor IPC or fail with explicit conflict proof",
+            "Editor-visible writes rebase on Lazily/CPC authority and settle without operator save",
         ),
         severity: InvariantSeverity::High,
         fact_sources: vec![
             fact(
-                FactSourceKind::EditorProofSidecar,
-                "listener/editor id/buffer hash",
+                FactSourceKind::WorkflowStateKernel,
+                "Lazily/CPC authority hash and replica ACK frontier",
             ),
             fact(
                 FactSourceKind::OpsLog,
@@ -512,11 +518,11 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
         ok_predicate: OkPredicate {
             all: vec![
                 clause(
-                    FactSourceKind::EditorProofSidecar,
-                    "live_buffer_hash",
+                    FactSourceKind::WorkflowStateKernel,
+                    "canonical authority hash",
                     PredicateRelation::Present,
                     None,
-                    "An active editor listener exposes the buffer hash used for convergence.",
+                    "Lazily/CPC owns the live editor text used for convergence.",
                 ),
                 clause(
                     FactSourceKind::OpsLog,
@@ -530,7 +536,7 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
                     "decide_live_buffer",
                     PredicateRelation::NotEquals,
                     Some("block_unattributed_drift"),
-                    "The write either applies cleanly or requests an editor save with provenance.",
+                    "The write either applies cleanly or retains and rebases the same intent before requesting a native editor save.",
                 ),
             ],
         },
@@ -554,20 +560,12 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
             RemediationAction::UseEditorIpcWriteback,
             None,
             &[
-                "listener sidecar present",
-                "baseline hash or normalized baseline hash matches live buffer",
-                "component/node patch scope is exact",
+                "live CPC replica registered",
+                "retained intent has a content-bearing merge base",
+                "rebased canonical target passes the shared structural validator",
             ],
         )],
-        operator_gated_remediation: vec![remediation(
-            RemediationAction::AskOperatorLiveEditorProof,
-            None,
-            &[
-                "live buffer dirty and not attributable to current operation",
-                "editor declined IPC patch",
-                "operator must save/resolve the live buffer",
-            ],
-        )],
+        operator_gated_remediation: Vec::new(),
         regression_coverage: vec![
             coverage(
                 RegressionCoverageKind::SimWorld,
@@ -873,11 +871,6 @@ mod tests {
             assert!(!invariant.disproof_markers.is_empty(), "{:?}", invariant.id);
             assert!(!invariant.safe_remediation.is_empty(), "{:?}", invariant.id);
             assert!(
-                !invariant.operator_gated_remediation.is_empty(),
-                "{:?}",
-                invariant.id
-            );
-            assert!(
                 !invariant.regression_coverage.is_empty(),
                 "{:?}",
                 invariant.id
@@ -891,6 +884,12 @@ mod tests {
                 invariant.id
             );
         }
+        let editor = catalog
+            .invariants
+            .iter()
+            .find(|invariant| invariant.id == WorkflowInvariantId::EditorConvergence)
+            .expect("editor convergence invariant");
+        assert!(editor.operator_gated_remediation.is_empty());
     }
 
     #[test]
@@ -915,6 +914,10 @@ mod tests {
         assert!(
             RemediationAction::FinalizeOrWriteCommit
                 .accepts_autofix_command("agent-doc write --commit /tmp/session.md")
+        );
+        assert!(
+            RemediationAction::UseEditorIpcWriteback
+                .accepts_autofix_command("agent-doc session-check /tmp/session.md")
         );
         assert!(
             !RemediationAction::FinalizeOrWriteCommit

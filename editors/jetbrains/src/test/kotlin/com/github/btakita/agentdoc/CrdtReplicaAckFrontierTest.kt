@@ -105,6 +105,26 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
+    fun `replace delivery rejects malformed or repairable remote canonical`() {
+        assertTrue(remoteReplaceStructureAcceptedUtil(TemplateStructureProjectionState.Exact))
+        assertFalse(
+            remoteReplaceStructureAcceptedUtil(TemplateStructureProjectionState.RepairRequired),
+        )
+        assertFalse(remoteReplaceStructureAcceptedUtil(TemplateStructureProjectionState.Invalid))
+    }
+
+    @Test
+    fun `replica registration never adopts malformed editor authority`() {
+        assertTrue(replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.Exact))
+        assertTrue(
+            replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.RepairRequired),
+        )
+        assertFalse(
+            replicaRegistrationStructureAcceptedUtil(TemplateStructureProjectionState.Invalid),
+        )
+    }
+
+    @Test
     fun `rejected remote canonical adopts only an exact unchanged editor baseline`() {
         for (remoteState in listOf(
             TemplateStructureProjectionState.Invalid,

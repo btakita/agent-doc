@@ -22,6 +22,13 @@ class PluginLifecycleListener : ProjectManagerListener {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Attach markdown buffers as CRDT replicas when the CPC endpoint is available.
         CrdtReplicaManager.getInstance(project)
+        // Dynamic plugin upgrades re-run project lifecycle startup, but do not
+        // necessarily emit a later reload_lib broadcast. Re-register every
+        // already-open markdown document through the deferred-reconnect path so
+        // a Lazily-retained response/backlog target cannot remain parked until
+        // another install or operator focus change. This scans open documents
+        // without selecting or focusing any editor.
+        CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "plugin-startup")
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
         // Highlight agent-doc-specific markdown structures in the editor.
@@ -40,9 +47,11 @@ class PluginLifecycleListener : ProjectManagerListener {
         // selectionChanged does not fire for focus movement between existing
         // splits, so this reuses editorTabSync's reconcile from focus events.
         EditorFocusSyncListener.install(project, editorTabSync)
-        // Mirror Project Controller-owned tmux focus back to the selected editor document while
-        // the operator is focused on the agent-doc tmux window.
-        TmuxPaneFocusSync.install(project)
+        // Editor selection is operator-owned. Project Controller/tmux activity can
+        // follow an explicit editor focus change through EditorTabSyncListener, but
+        // background agent, recovery, restart, or pane-focus events must never open
+        // or select a different IDE document. The reverse focus mirror therefore
+        // remains uninstalled.
         project.messageBus.connect().subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {

@@ -138,6 +138,12 @@ Closeout invariants currently exercised by the simulator:
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
 - Boundary cleanup leaves at most one live exchange boundary marker.
+- A captured response cannot commit until its tracked-work mutation envelope is
+  also captured; retained-delivery recovery preserves and applies both exactly
+  once.
+- A malformed agent target is rejected before delivery and cannot corrupt the
+  canonical document, while later valid retained transitions continue to make
+  monotonic progress.
 - After a committed closeout the working tree stays equal to HEAD modulo `(HEAD)`
   annotations and the transient boundary marker id
   (`#postcommit-ipc-worktree-corruption`). `PostCommitIpcRepositionSignal` models

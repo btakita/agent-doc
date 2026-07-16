@@ -253,7 +253,27 @@ There is **no `GetLenders` / lender-master endpoint in LOS.** TMO *does* have a 
 So the mechanism you're describing is live, not a gap.
 
 **One inherent limitation to be aware of:** because lenders are derived from fundings, a lender who exists in TMO but has **never funded a loan** won't appear in the picker — there's no funding row to surface them. That's a consequence of LOS not having a lender directory, not a bug. If we ever need pre-funding lenders (e.g. onboard-a-new-lender-before-first-deal), the options are (a) enable/query LSS for its lender master, or (b) let admins enter a lender's TMO `Account` manually (the picker already accepts a typed account). Neither is queued today; flag it if you want an item.
-<!-- agent:boundary:5234e768 -->
+
+### Re: Shipped #fundlink2 — bind an accepted loan to a pre-wire TMO funding — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#fundlink2]
+
+
+Committed + pushed (EFS `71327b0`), `make check` green (1644 tests, 0 fail; build + build:worker ok).
+
+Building on my TMO answer above: since lenders/fundings live only as loan fundings, the "link to an existing funding" primitive was already there (`tmo_unmatched_fundings` + the `POST /api/admin/tmo-unmatched-fundings/:id/bind` endpoint) — the gap was surfacing those parked fundings **scoped to the deal an admin is working**, instead of the global binding queue.
+
+**`GET /api/admin/deals/:id/unmatched-fundings`** resolves the deal's `tmo_loan_number` and returns the pre-wire fundings TMO already tracks for that loan:
+- Defaults to still-bindable (`pending`) rows; `?status=bound|dismissed` to review resolved ones.
+- Reuses the existing bind flow unchanged — an admin picks a row, POSTs the bind with the EFS lender (`user_id`), and it creates the active `source='tmo_pull'` position and marks the row bound. No duplicate funding.
+- Repo change is a composable `loan_number` filter on `tmo_unmatched_fundings_R_` (still composes with `status`).
+
+Caught the same class of gap #fundlink1 hit: `investor_management` resolves its repo imports through the `admin/shared.ts` barrel, so `tmo_unmatched_fundings_R_` had to be re-exported there too — the missing re-export was a module-load `SyntaxError` that cascaded into unrelated test files (dropped ~50 tests + 3 red). Verified by diffing full-suite results against clean HEAD before and after the fix; now 1644/1644 green.
+
+UI to drive this (a "link existing TMO funding" affordance on the deal funding panel, alongside #fundlink1-ui) is not queued yet — flag it if you want it. Remaining in queue: **#lender-sync-tmo-ui** (⏭️ deferred), then **#fundlink1-ui**. #fundlink3 (bi-directional push) stays gated on #dzmm/#7a4d.
+<!-- agent:boundary:db4cbe0d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -262,7 +282,7 @@ So the mechanism you're describing is live, not a gap.
 - ~~do [#lender-sync-tmo]~~
 - ~~do [#h8rz]~~
 - ~~do [#fundlink1]~~
-- ⏭️ do [#fundlink2]
+- ~~⏭️ do [#fundlink2]~~
 - ⏭️ do [#lender-sync-tmo-ui]
 <!-- /agent:queue -->
 

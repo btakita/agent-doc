@@ -182,6 +182,22 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
         }))
     }
 
+    fn response_materialized_in_referenced_compact_archive(
+        &self,
+        file: &Path,
+        response_body: &str,
+        commit_surface: &str,
+    ) -> bool {
+        agent_doc_archive_io::read_head_compact_archives(file, commit_surface)
+            .into_iter()
+            .any(|archive| {
+                agent_doc_turn::response_replay::response_materialized_in_content(
+                    response_body,
+                    &archive,
+                )
+            })
+    }
+
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
     }

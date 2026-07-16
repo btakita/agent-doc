@@ -130,8 +130,9 @@ plugin-version-check:
 		fi; \
 	fi
 
-# Build + machine-check the Lean formal models under formal/ (the wait-machinery
-# `no_hang` bound proof, `#waitmachine4`). Skips gracefully when the Lean
+# Build + machine-check the Lean formal models under formal/ (including the
+# wait-machine bound and captured-response closeout safety/completeness proofs).
+# Skips gracefully when the Lean
 # toolchain (lake) is not installed, so non-Lean environments / CI without elan
 # are not blocked; when lake IS present the proofs must build clean.
 lean:

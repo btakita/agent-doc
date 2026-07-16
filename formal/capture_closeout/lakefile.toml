@@ -1,0 +1,8 @@
+name = "captureCloseout"
+defaultTargets = ["CaptureCloseout"]
+
+# Self-contained and offline: this mirrors the Rust capture-closeout decision
+# table and proves both its fail-closed safety and exact-archive completeness.
+
+[[lean_lib]]
+name = "CaptureCloseout"

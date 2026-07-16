@@ -77,6 +77,11 @@ internal fun remoteAckReplayPlanUtil(
 internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): Boolean =
     pendingAckCount == 0
 
+/** A retained ACK frontier owns the retry cadence. File-watcher and editor
+ * events may add work while backoff is active, but must not bypass that gate
+ * and hammer the controller with the same rejected ACK. */
+internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !backoffScheduled
+
 @Suppress("UNUSED_PARAMETER")
 internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
     editorText: String?,
@@ -484,7 +489,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } else {
             drainRequestedPaths.add(filePath)
         }
+        if (!shouldStartRemoteDrainUtil(remoteDrainBackoffScheduled.get())) return
         if (!drainQueued.compareAndSet(false, true)) return
+        if (!shouldStartRemoteDrainUtil(remoteDrainBackoffScheduled.get())) {
+            drainQueued.set(false)
+            return
+        }
         executor.execute {
             var appliedTotal = 0
             try {
@@ -492,23 +502,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } catch (e: Exception) {
                 log.debug("[crdt-replica] remote drain skipped: ${e.message}")
             } finally {
-                drainQueued.set(false)
-                if (drainAllRequested.get() || drainRequestedPaths.isNotEmpty()) {
+                val moreWorkRequested = drainAllRequested.get() || drainRequestedPaths.isNotEmpty()
+                if (moreWorkRequested && appliedTotal == 0) {
                     // #crdt-drain-backoff: when a drain cycle applied zero useful
                     // updates (notably when the CPC socket is unavailable and every
                     // pullDelivery returns empty deltas), delay the reschedule with
                     // exponential backoff instead of re-executing immediately. A
                     // tight no-op spin generated ~70MB/min of logs and froze the IDE.
-                    if (appliedTotal == 0) {
-                        val delayMs = nextNoOpRescheduleBackoffMs()
-                        log.debug("[crdt-replica] no-op drain cycle; backing off reschedule by ${delayMs}ms (consecutive=${consecutiveNoOpReschedules.get()})")
-                        scheduleRemoteDrainAfterBackoff(delayMs, reason)
-                    } else {
-                        consecutiveNoOpReschedules.set(0)
-                        requestRemoteDrain(reason = "rescheduled")
-                    }
+                    val delayMs = nextNoOpRescheduleBackoffMs()
+                    log.debug("[crdt-replica] no-op drain cycle; backing off reschedule by ${delayMs}ms (consecutive=${consecutiveNoOpReschedules.get()})")
+                    // Publish the backoff gate before releasing drainQueued so an
+                    // external CRDT event cannot win the gap and start immediately.
+                    scheduleRemoteDrainAfterBackoff(delayMs, reason)
+                    drainQueued.set(false)
+                } else if (moreWorkRequested) {
+                    consecutiveNoOpReschedules.set(0)
+                    drainQueued.set(false)
+                    requestRemoteDrain(reason = "rescheduled")
                 } else {
                     consecutiveNoOpReschedules.set(0)
+                    drainQueued.set(false)
                 }
             }
         }

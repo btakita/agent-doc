@@ -65,6 +65,50 @@ pub const fn decide_crdt_write_admission(delivery_converged: bool) -> CrdtWriteA
     }
 }
 
+/// Evidence available when the bounded foreground wait for an editor delivery
+/// ACK expires. Canonical retention and editor visibility are deliberately
+/// separate facts: a retained target may finish delivery asynchronously, but a
+/// missing or superseded target must still fail closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrdtWriteCompletionEvidence {
+    pub exact_target_retained: bool,
+    pub async_delivery_recovery_active: bool,
+    pub delivery_converged: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrdtWriteCompletion {
+    VisibleAndAcknowledged,
+    RetainedForAsyncDelivery,
+    BlockMissingRetention,
+}
+
+pub const fn decide_crdt_write_completion(
+    evidence: CrdtWriteCompletionEvidence,
+) -> CrdtWriteCompletion {
+    if evidence.delivery_converged {
+        CrdtWriteCompletion::VisibleAndAcknowledged
+    } else if evidence.exact_target_retained && evidence.async_delivery_recovery_active {
+        CrdtWriteCompletion::RetainedForAsyncDelivery
+    } else {
+        CrdtWriteCompletion::BlockMissingRetention
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrdtRetryAdmission {
+    StartDrain,
+    RetainUntilBackoffExpires,
+}
+
+pub const fn decide_crdt_retry_admission(backoff_scheduled: bool) -> CrdtRetryAdmission {
+    if backoff_scheduled {
+        CrdtRetryAdmission::RetainUntilBackoffExpires
+    } else {
+        CrdtRetryAdmission::StartDrain
+    }
+}
+
 pub use agent_doc_merge::document_replay::{ExactDocumentReplay, coalesce_exact_document_replay};
 
 /// Admission policy for legacy editor patch transports under reliable document
@@ -4568,6 +4612,45 @@ fn crdt_write_admission_backpressures_until_visible_ack() {
     assert_eq!(
         decide_crdt_write_admission(true),
         CrdtWriteAdmission::ApplyLatest,
+    );
+}
+
+#[test]
+fn crdt_write_completion_defers_only_an_exact_retained_target() {
+    use CrdtWriteCompletion::{
+        BlockMissingRetention, RetainedForAsyncDelivery, VisibleAndAcknowledged,
+    };
+
+    for exact_target_retained in [false, true] {
+        for async_delivery_recovery_active in [false, true] {
+            for delivery_converged in [false, true] {
+                let decision = decide_crdt_write_completion(CrdtWriteCompletionEvidence {
+                    exact_target_retained,
+                    async_delivery_recovery_active,
+                    delivery_converged,
+                });
+                let expected = if delivery_converged {
+                    VisibleAndAcknowledged
+                } else if exact_target_retained && async_delivery_recovery_active {
+                    RetainedForAsyncDelivery
+                } else {
+                    BlockMissingRetention
+                };
+                assert_eq!(decision, expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn crdt_retry_admission_keeps_external_events_behind_backoff() {
+    assert_eq!(
+        decide_crdt_retry_admission(true),
+        CrdtRetryAdmission::RetainUntilBackoffExpires,
+    );
+    assert_eq!(
+        decide_crdt_retry_admission(false),
+        CrdtRetryAdmission::StartDrain,
     );
 }
 

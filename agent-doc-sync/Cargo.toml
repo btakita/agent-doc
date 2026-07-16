@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sync"
-version = "0.34.139"
+version = "0.34.140"
 edition = "2024"
 description = "Pure sync scope and layout-state planning policy for agent-doc"
 license = "MIT"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_sync"
 
 [dependencies]
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.139" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.139" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.139" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.140" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.140" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.140" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

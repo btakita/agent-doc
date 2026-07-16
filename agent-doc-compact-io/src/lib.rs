@@ -2395,13 +2395,16 @@ mod tests {
             "<!-- /patch:exchange -->\n",
         );
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("test.md");
+        let root = dir.path();
+        init_compact_test_repo(root);
+        let file = root.join("test.md");
         std::fs::write(&file, doc).unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
+        let agent_doc_dir = root.join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
         agent_doc_snapshot_io::save(&file, doc, agent_doc_ops_log_io::log_op).unwrap();
+        git_commit_file(root, "test.md");
         agent_doc_cycle_state_io::start_preflight(&file, Some(doc), Some(doc)).unwrap();
         agent_doc_capture_io::capture_response_with_current_content(&file, response, doc).unwrap();
 
@@ -2411,7 +2414,7 @@ mod tests {
             Some("exchange"),
             None,
             Some("skip"),
-            false,
+            true,
             true,
         )
         .unwrap();
@@ -2423,8 +2426,17 @@ mod tests {
             .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
             .expect("compact archive");
         assert!(archive.contains("Captured response that never reached"));
+        let head = agent_doc_git_io::revision::show_head(&file)
+            .unwrap()
+            .expect("compacted document in HEAD");
+        assert!(head.contains("*Compacted. Content archived to `"));
+        assert!(!head.contains("Captured response that never reached"));
+        let cycle = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
+        assert_eq!(cycle.phase, agent_doc_turn::CyclePhase::Committed);
         let ops = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(ops.contains("compact_active_capture_composed"));
+        assert!(ops.contains("commit_capture_materialized_in_referenced_compact_archive"));
+        assert!(!ops.contains("commit_blocked_missing_captured_response"));
     }
 
     #[test]

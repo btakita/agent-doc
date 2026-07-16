@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.140
+
+- **Compact Exchange closeout recognizes exact archived capture materialization.** The shared capture policy permits an open captured cycle to close when its staged compact document references an archive containing the exact captured response, while missing or unrelated evidence still fails closed. This removes the false already-committed refusal after JetBrains compaction without weakening response-loss protection.
+- **A retained canonical write no longer reports a failed finalize solely because editor delivery ACK is delayed (JetBrains plugin 0.2.263).** Once CRDT authority still holds the exact target and the asynchronous editor-recovery signal has been accepted, the foreground command completes as retained-for-delivery; canonical loss or a missing recovery signal still blocks. JetBrains external events now respect the single-flight ACK backoff, preventing event storms from bypassing the retry gate.
+- **Controller commit handoff uses the stream that proved liveness.** Commit no longer probes one socket and reconnects through a recycle race, and stale socket reaping is covered directly. Repeated response attempts converge through the existing atomic response-cell supersession path, preserving intervening prompts and leaving one exact final response.
+- **The failure interactions are executable and proved.** Exhaustive SimWorld schedules cover compact/finalize overlap, delayed ACK, external retry events, controller recycle, stale sockets, repeated finalize, and canonical loss. Lean proves the exact-archive closeout condition, retained-delivery safety, retry admission, and same-stream delegation invariant.
+
 ## 0.34.139
 
 - **The Stop hook resumes a retained editor-convergence capture even when its route-owned supervisor still runs an older inode.** The hook invokes the freshly installed binary's keyed strict-repair path before returning the status-only block. This is a version-independent liveness boundary: it preserves editor authority, never recaptures the response, and never elects force-disk; an absent capture or unresolved convergence still fails closed with the original response retained.

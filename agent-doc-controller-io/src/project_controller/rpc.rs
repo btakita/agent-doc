@@ -4330,23 +4330,30 @@ pub fn commit_document_via_controller(
     // running controller (the plugin talks to it); if none is reachable, fall back
     // to the caller's local commit rather than launching a controller mid-commit.
     let controller_socket = socket_path(&project_root);
-    if let Err(err) = connect_path(&controller_socket) {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_commit_document_unavailable file={} socket={} error={} recovery=local_commit",
-                canonical.display(),
-                controller_socket.display(),
-                format!("{err:#}").replace('\n', "\\n")
-            ),
-        );
-        return Ok(None);
-    }
+    let stream = match connect_path(&controller_socket) {
+        Ok(stream) => stream,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_commit_document_unavailable file={} socket={} error={} recovery=local_commit",
+                    canonical.display(),
+                    controller_socket.display(),
+                    format!("{err:#}").replace('\n', "\\n")
+                ),
+            );
+            return Ok(None);
+        }
+    };
     let payload = serde_json::to_string(&ControllerCommitDocumentPayload {
         authoritative_compaction,
     })
     .context("failed to serialize commit_document payload")?;
-    let outcome: ControllerCommitDocumentOutcome = request_existing_controller_with_timeout(
+    // The connected stream is the liveness proof. Consume that exact stream for
+    // the request instead of probing and reconnecting: a recycle between two
+    // connects otherwise turns a reachable controller into `connection refused`
+    // and invites an unsafe force-disk/manual retry loop.
+    let outcome: ControllerCommitDocumentOutcome = request_controller_on_stream_with_timeout(
         &project_root,
         ControllerRequest {
             command: "commit_document".to_string(),
@@ -4364,6 +4371,7 @@ pub fn commit_document_via_controller(
             diagnostic_payload: Some(payload),
         },
         CONTROLLER_COMMIT_DOCUMENT_TIMEOUT,
+        stream,
     )?;
     Ok(Some(outcome))
 }
@@ -13860,6 +13868,32 @@ mod tests {
     }
 
     #[test]
+    fn controller_serve_reaps_stale_socket_file_before_binding() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        let stale_socket = socket_path(&project_root);
+        std::fs::create_dir_all(stale_socket.parent().unwrap()).unwrap();
+        std::fs::write(&stale_socket, []).unwrap();
+        assert!(stale_socket.is_file());
+
+        let server_root = project_root.clone();
+        let server = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let controller_status = status(&project_root).unwrap();
+        assert!(controller_status.active);
+        assert!(stale_socket.exists());
+        assert!(
+            !stale_socket.is_file(),
+            "the stale regular file must be replaced by a live socket"
+        );
+
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        server.join().unwrap();
+    }
+
+    #[test]
     fn connect_or_launch_adopts_controller_published_during_launch_lock_contention() {
         // #suprecyclelock / #1j8q: a self-recycled supervisor can re-run `start`
         // while another project-root launcher still owns controller-launch.lock.
@@ -16436,6 +16470,61 @@ mod tests {
         unsafe {
             std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
         }
+    }
+
+    #[test]
+    fn commit_document_consumes_the_stream_that_proved_controller_liveness() {
+        let _env = reliable_sync_env_lock();
+        unsafe {
+            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let doc = dir.path().join("atomic-controller-stream.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let frame = agent_doc_reliable_sync_io::liveness::encode_liveness_frame(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.clone(),
+                pid: u64::from(std::process::id()),
+                tag: "commit-stream-test".into(),
+            },
+        ])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .unwrap()
+            .ingest(&document_hash, 1, &frame)
+            .unwrap();
+
+        let sock = socket_path(dir.path());
+        std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+        let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let (reader_half, mut writer_half) = stream.split();
+            let mut request = String::new();
+            BufReader::new(reader_half).read_line(&mut request).unwrap();
+            assert!(
+                request.contains("\"command\":\"commit_document\""),
+                "{request}"
+            );
+            writer_half
+                .write_all(
+                    b"{\"ok\":true,\"data\":{\"did_commit\":true,\"vcs_refresh_signaled\":true}}\n",
+                )
+                .unwrap();
+            writer_half.flush().unwrap();
+        });
+
+        let outcome = commit_document_via_controller(&doc, false)
+            .unwrap()
+            .expect("live editor should delegate to the existing controller");
+        assert!(outcome.did_commit);
+        assert_eq!(outcome.vcs_refresh_signaled, Some(true));
+        server.join().unwrap();
     }
 
     #[test]

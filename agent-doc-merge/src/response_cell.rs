@@ -221,7 +221,10 @@ fn supersede_response_tail_after_anchor(
         inner.push('\n');
         outcome.content = reparsed_exchange.replace_content(&outcome.content, &inner);
     }
-    outcome.applied = true;
+    // A retry can classify the already-present response as the uncommitted tail,
+    // remove it, and then reconstruct the exact same document. Treat that as a
+    // semantic no-op so callers do not emit another CRDT update/ACK cycle.
+    outcome.applied = outcome.content != doc;
     Ok(Some(outcome))
 }
 
@@ -461,6 +464,14 @@ mod tests {
             outcome.content.find("### Re: complete retry").unwrap()
                 < outcome.content.find("agent:boundary:latest").unwrap()
         );
+
+        let replay =
+            supersede_uncommitted_response_tail(&outcome.content, committed, latest).unwrap();
+        assert!(!replay.applied);
+        assert_eq!(replay.cell_id, outcome.cell_id);
+        assert_eq!(replay.content, outcome.content);
+        assert_eq!(replay.content.matches("Complete response.").count(), 1);
+        assert_eq!(replay.content.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

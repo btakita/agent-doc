@@ -153,6 +153,17 @@ canonical authority equals committed `HEAD`, disk still equals the retained base
 and the retained hashes and bytes match exactly. Any newer editor or disk content
 invalidates automatic resumption and fails closed.
 
+The same retained-delivery rule applies when an attached editor has not crossed
+its visible ACK frontier before the foreground deadline. If canonical CRDT
+authority still equals the exact complete target, the relay receipt proves that
+target was applied, and the asynchronous recovery signal was accepted, the
+foreground write completes as `retained_async_editor_delivery`; the editor retry
+continues without a force-disk write, controller recycle, or another finalize.
+Canonical loss, a mismatched receipt, or a missing recovery signal remains a hard
+failure. Retry admission is single-flight: external CRDT events may record more
+work, but cannot start another drain while the adapter's bounded ACK backoff is
+active.
+
 Queue recomputation is allowed to update future queue state without retargeting
 the current turn. The active HEAD set is the runnable prompt or prompts the
 realtime scheduler has proven are currently executing after queue normalization,

@@ -370,6 +370,13 @@ struct AckRecoveryState {
     started: Option<std::time::Instant>,
     last_signal: Option<std::time::Instant>,
     force_refresh_sent: bool,
+    recovery_signal_observed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckRecoveryWait {
+    Continue,
+    ForegroundDeadline,
 }
 
 impl AckRecoveryState {
@@ -377,7 +384,7 @@ impl AckRecoveryState {
         *self = Self::default();
     }
 
-    fn wait(&mut self, file: &Path, source: &str, live_editors: usize) -> Result<()> {
+    fn wait(&mut self, file: &Path, source: &str, live_editors: usize) -> Result<AckRecoveryWait> {
         let now = std::time::Instant::now();
         let started = *self.started.get_or_insert(now);
         let elapsed_ms = now
@@ -410,6 +417,7 @@ impl AckRecoveryState {
                     ),
                 );
             } else {
+                self.recovery_signal_observed = true;
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -424,13 +432,9 @@ impl AckRecoveryState {
             self.last_signal = Some(now);
         }
         if elapsed_ms >= CRDT_ACK_RECOVERY_TIMEOUT_MS {
-            anyhow::bail!(
-                "{source}: editor delivery ACK recovery for {} did not settle within {}ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)",
-                file.display(),
-                CRDT_ACK_RECOVERY_TIMEOUT_MS,
-            );
+            return Ok(AckRecoveryWait::ForegroundDeadline);
         }
-        Ok(())
+        Ok(AckRecoveryWait::Continue)
     }
 }
 
@@ -1220,7 +1224,51 @@ pub fn apply_canonical_replace_if_attached(
                             // this poll applies backpressure until that frontier is
                             // visible and ACKed.
                             wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            ack_recovery.wait(file, source, live_editors)?;
+                            if ack_recovery.wait(file, source, live_editors)?
+                                == AckRecoveryWait::ForegroundDeadline
+                            {
+                                let relay_write = pending_write
+                                    .take()
+                                    .expect("pending CRDT target must retain its write receipt");
+                                let exact_target_retained = relay_write.applied
+                                    && relay_text == *applied_target
+                                    && relay_write.content_hash
+                                        == agent_doc_hash::content_hash(applied_target);
+                                let completion = write_policy::decide_crdt_write_completion(
+                                    write_policy::CrdtWriteCompletionEvidence {
+                                        exact_target_retained,
+                                        async_delivery_recovery_active: ack_recovery
+                                            .recovery_signal_observed,
+                                        delivery_converged,
+                                    },
+                                );
+                                match completion {
+                                    write_policy::CrdtWriteCompletion::RetainedForAsyncDelivery => {
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "{source}_crdt_delivery_deferred file={} content_hash={} timeout_ms={} recovery=retained_async_editor_delivery operator_action=none",
+                                                file.display(),
+                                                relay_write.content_hash,
+                                                CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                                            ),
+                                        );
+                                        return Ok(Some(relay_write));
+                                    }
+                                    write_policy::CrdtWriteCompletion::BlockMissingRetention => {
+                                        anyhow::bail!(
+                                            "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",
+                                            file.display(),
+                                            CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                                        );
+                                    }
+                                    write_policy::CrdtWriteCompletion::VisibleAndAcknowledged => {
+                                        unreachable!(
+                                            "delivery-converged writes return before ACK recovery"
+                                        );
+                                    }
+                                }
+                            }
                         } else {
                             // Operator text arrived after our write. Recompute from
                             // the original base/agent candidate against the newest
@@ -3666,6 +3714,43 @@ mod tests {
                 && log.contains("reason=ack_recovery_force_refresh"),
             "compact should retain its target and actively recover the ACK path:\n{log}"
         );
+    }
+
+    #[test]
+    fn compact_exchange_returns_retained_success_when_editor_ack_stays_delayed() {
+        let baseline = "# Session\n\nseed\n";
+        let compacted = "# Session\n\nseed\n\n## Exchange\n\n*Compacted.*\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-compact-retained-async";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let started = std::time::Instant::now();
+        let write = apply_canonical_replace_if_attached(&file, baseline, compacted, "compact")
+            .expect("a retained canonical target is not a compact command failure")
+            .expect("compact should use the attached CRDT relay");
+
+        assert!(!write.delivery_converged);
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(CRDT_ACK_RECOVERY_TIMEOUT_MS),
+            "the fixture must cross the foreground ACK deadline"
+        );
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        assert!(matches!(
+            current,
+            agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. }
+                if text == compacted
+        ));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("compact_crdt_delivery_deferred")
+                && log.contains("recovery=retained_async_editor_delivery")
+                && log.contains("operator_action=none"),
+            "compact must report retained asynchronous recovery as success:\n{log}"
+        );
+        assert!(!log.contains("did not settle within"), "{log}");
     }
 
     #[test]

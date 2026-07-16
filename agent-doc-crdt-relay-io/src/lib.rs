@@ -3162,7 +3162,12 @@ mod tests {
         );
         let current = committed.replace(
             "<!-- agent:boundary:old -->",
-            "### Re: stale retry — gpt-5\n\nStale.\n<!-- agent:boundary:new -->",
+            concat!(
+                "### Re: stale retry one — gpt-5\n\nStale one.\n\n",
+                "❯ follow-up typed while delivery recovers\n\n",
+                "### Re: stale retry two — gpt-5\n\nStale two.\n",
+                "<!-- agent:boundary:new -->",
+            ),
         );
         std::fs::write(&doc, &current).unwrap();
         let file_str = doc.display().to_string();
@@ -3178,9 +3183,26 @@ mod tests {
 
         assert!(write.applied);
         assert!(write.content.contains("Committed."));
-        assert!(!write.content.contains("Stale."));
+        assert!(!write.content.contains("Stale one."));
+        assert!(!write.content.contains("Stale two."));
+        assert!(
+            write
+                .content
+                .contains("follow-up typed while delivery recovers")
+        );
         assert!(write.content.contains("Latest."));
+        assert_eq!(write.content.matches(latest).count(), 1);
         assert_eq!(write.content.matches("agent:boundary:").count(), 1);
+
+        let replay =
+            add_response_cell_for_file(&doc, Some(committed), latest, "test-supersede-replay")
+                .unwrap()
+                .expect("exact replay should still use the relay");
+        assert!(!replay.applied);
+        assert_eq!(replay.cell_id, write.cell_id);
+        assert_eq!(replay.content, write.content);
+        assert_eq!(replay.content.matches(latest).count(), 1);
+        assert_eq!(replay.content.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

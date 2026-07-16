@@ -416,16 +416,30 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
-    // Present in HEAD → a normal committed response; nothing to reconcile.
-    if agent_doc_turn::response_replay::response_materialized_in_content(
-        &capture.response_body,
-        &head,
-    ) {
-        return Ok(false);
-    }
-    // Absent from HEAD but present in a HEAD-referenced compact archive → the
-    // response was committed and then intentionally archived. Settle it durably.
-    if !response_materialized_in_head_compact_archive(file, &capture.response_body, &head) {
+    let response_in_commit_surface =
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            &capture.response_body,
+            &head,
+        );
+    let response_in_referenced_compact_archive =
+        response_materialized_in_head_compact_archive(file, &capture.response_body, &head);
+    let decision = agent_doc_workflow::capture::decide_capture_closeout_materialization(
+        agent_doc_workflow::capture::CaptureCloseoutMaterializationEvidence {
+            active_capture: true,
+            capture_terminal: false,
+            commit_surface_available: true,
+            response_in_commit_surface,
+            response_in_referenced_compact_archive,
+        },
+    );
+    // Only archive-backed materialization needs reconciliation here. Inline HEAD
+    // materialization is the normal committed response path and all missing
+    // evidence remains fail-closed for the response-replay guard.
+    if decision
+        != agent_doc_workflow::capture::CaptureCloseoutMaterializationDecision::Allow(
+            agent_doc_workflow::capture::CaptureCloseoutMaterializationBasis::ReferencedCompactArchive,
+        )
+    {
         return Ok(false);
     }
     agent_doc_capture_io::mark_discarded(file)?;

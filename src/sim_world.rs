@@ -26,6 +26,456 @@ enum CyclePhase {
     Committed,
 }
 
+/// Focused reference model for the capture -> compact -> commit closeout path.
+/// The state space distinguishes an exact compact archive from a merely
+/// response-shaped, unrelated archive so the fail-closed boundary is exercised
+/// independently of filesystem and IDE adapters.
+mod capture_compact_closeout_model {
+    use agent_doc_workflow::capture::{
+        CaptureCloseoutMaterializationBasis, CaptureCloseoutMaterializationDecision,
+        CaptureCloseoutMaterializationEvidence, decide_capture_closeout_materialization,
+    };
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    enum ArchiveReference {
+        #[default]
+        None,
+        Unrelated,
+        Exact,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        Capture,
+        ExposeCommitSurface,
+        MaterializeInline,
+        CompactIntoExactArchive,
+        ReferenceUnrelatedArchive,
+        Commit,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::Capture,
+        Action::ExposeCommitSurface,
+        Action::MaterializeInline,
+        Action::CompactIntoExactArchive,
+        Action::ReferenceUnrelatedArchive,
+        Action::Commit,
+    ];
+
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    struct World {
+        active_capture: bool,
+        capture_terminal: bool,
+        commit_surface_available: bool,
+        response_in_commit_surface: bool,
+        archive_reference: ArchiveReference,
+        unsafe_closeouts: usize,
+    }
+
+    #[derive(Debug, Default)]
+    struct Coverage {
+        exact_archive_allowed: bool,
+        missing_response_blocked: bool,
+        unrelated_archive_blocked: bool,
+    }
+
+    impl World {
+        fn evidence(&self) -> CaptureCloseoutMaterializationEvidence {
+            CaptureCloseoutMaterializationEvidence {
+                active_capture: self.active_capture,
+                capture_terminal: self.capture_terminal,
+                commit_surface_available: self.commit_surface_available,
+                response_in_commit_surface: self.response_in_commit_surface,
+                response_in_referenced_compact_archive: matches!(
+                    self.archive_reference,
+                    ArchiveReference::Exact
+                ),
+            }
+        }
+
+        fn step(&mut self, action: Action, coverage: &mut Coverage) {
+            match action {
+                Action::Capture => {
+                    self.active_capture = true;
+                    self.capture_terminal = false;
+                    self.commit_surface_available = false;
+                    self.response_in_commit_surface = false;
+                    self.archive_reference = ArchiveReference::None;
+                }
+                Action::ExposeCommitSurface => self.commit_surface_available = true,
+                Action::MaterializeInline => {
+                    self.commit_surface_available = true;
+                    self.response_in_commit_surface = true;
+                }
+                Action::CompactIntoExactArchive => {
+                    self.commit_surface_available = true;
+                    self.response_in_commit_surface = false;
+                    self.archive_reference = ArchiveReference::Exact;
+                }
+                Action::ReferenceUnrelatedArchive => {
+                    self.commit_surface_available = true;
+                    self.response_in_commit_surface = false;
+                    self.archive_reference = ArchiveReference::Unrelated;
+                }
+                Action::Commit => {
+                    let evidence = self.evidence();
+                    match decide_capture_closeout_materialization(evidence) {
+                        CaptureCloseoutMaterializationDecision::Allow(basis) => {
+                            if evidence.active_capture
+                                && !evidence.capture_terminal
+                                && evidence.commit_surface_available
+                                && !evidence.response_in_commit_surface
+                                && !evidence.response_in_referenced_compact_archive
+                            {
+                                self.unsafe_closeouts += 1;
+                            }
+                            if basis
+                                == CaptureCloseoutMaterializationBasis::ReferencedCompactArchive
+                            {
+                                coverage.exact_archive_allowed = true;
+                            }
+                            self.capture_terminal = true;
+                        }
+                        CaptureCloseoutMaterializationDecision::BlockMissingResponse => {
+                            coverage.missing_response_blocked = true;
+                            if self.archive_reference == ArchiveReference::Unrelated {
+                                coverage.unrelated_archive_blocked = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn explore(world: World, depth: usize, coverage: &mut Coverage) {
+        assert_eq!(
+            world.unsafe_closeouts, 0,
+            "closeout retired an open capture without exact response materialization: {world:?}"
+        );
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action, coverage);
+            explore(next, depth - 1, coverage);
+        }
+    }
+
+    #[test]
+    fn exact_compact_archive_closes_while_unrelated_archive_blocks() {
+        let mut coverage = Coverage::default();
+        let mut exact = World::default();
+        exact.step(Action::Capture, &mut coverage);
+        exact.step(Action::CompactIntoExactArchive, &mut coverage);
+        exact.step(Action::Commit, &mut coverage);
+        assert!(exact.capture_terminal);
+        assert!(coverage.exact_archive_allowed);
+
+        let mut unrelated = World::default();
+        unrelated.step(Action::Capture, &mut coverage);
+        unrelated.step(Action::ReferenceUnrelatedArchive, &mut coverage);
+        unrelated.step(Action::Commit, &mut coverage);
+        assert!(!unrelated.capture_terminal);
+        assert!(coverage.unrelated_archive_blocked);
+    }
+
+    #[test]
+    fn exhaustive_capture_compact_closeout_schedules_preserve_materialization() {
+        let mut coverage = Coverage::default();
+        explore(World::default(), 6, &mut coverage);
+        assert!(coverage.exact_archive_allowed);
+        assert!(coverage.missing_response_blocked);
+        assert!(coverage.unrelated_archive_blocked);
+    }
+}
+
+/// Interaction model for the live failure observed in JetBrains: a response is
+/// accepted while Compact Exchange/finalize waits on delivery, external CRDT
+/// events arrive during ACK backoff, and the controller may recycle before the
+/// retained target is committed. The world calls the production completion,
+/// retry-admission, and capture-materialization policies.
+mod retained_closeout_recovery_model {
+    use agent_doc_document_realtime::write_policy::{
+        CrdtRetryAdmission, CrdtWriteCompletion, CrdtWriteCompletionEvidence,
+        decide_crdt_retry_admission, decide_crdt_write_completion,
+    };
+    use agent_doc_workflow::capture::{
+        CaptureCloseoutMaterializationDecision, CaptureCloseoutMaterializationEvidence,
+        decide_capture_closeout_materialization,
+    };
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+    enum ControllerSocket {
+        #[default]
+        Live,
+        Stale,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        CaptureResponse,
+        Finalize,
+        CompactExchange,
+        StartAsyncRecovery,
+        EditorAck,
+        ForegroundAckDeadline,
+        RetryFinalize,
+        LoseCanonical,
+        BeginAckBackoff,
+        ExternalAckEvent,
+        EndAckBackoff,
+        RecycleController,
+        EnsureController,
+        Commit,
+    }
+
+    const ACTIONS: [Action; 14] = [
+        Action::CaptureResponse,
+        Action::Finalize,
+        Action::CompactExchange,
+        Action::StartAsyncRecovery,
+        Action::EditorAck,
+        Action::ForegroundAckDeadline,
+        Action::RetryFinalize,
+        Action::LoseCanonical,
+        Action::BeginAckBackoff,
+        Action::ExternalAckEvent,
+        Action::EndAckBackoff,
+        Action::RecycleController,
+        Action::EnsureController,
+        Action::Commit,
+    ];
+
+    #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+    struct World {
+        active_capture: bool,
+        exact_response_retained: bool,
+        response_cells: u8,
+        response_updates: u8,
+        response_inline: bool,
+        exact_archive: bool,
+        editor_acked: bool,
+        async_recovery_active: bool,
+        foreground_success: bool,
+        ack_backoff: bool,
+        controller_ack_requests: u8,
+        controller_socket: ControllerSocket,
+        committed: bool,
+    }
+
+    #[derive(Debug, Default)]
+    struct Coverage {
+        retained_timeout_succeeded: bool,
+        missing_retention_blocked: bool,
+        retry_was_idempotent: bool,
+        exact_replay_emitted_no_update: bool,
+        backoff_gated_external_event: bool,
+        stale_socket_blocked_commit: bool,
+        exact_archive_committed: bool,
+    }
+
+    impl World {
+        fn retain_response_cell(&mut self) {
+            self.active_capture = true;
+            self.exact_response_retained = true;
+            self.response_cells = 1;
+        }
+
+        fn completion(&self) -> CrdtWriteCompletion {
+            decide_crdt_write_completion(CrdtWriteCompletionEvidence {
+                exact_target_retained: self.exact_response_retained
+                    && (self.response_inline || self.exact_archive),
+                async_delivery_recovery_active: self.async_recovery_active,
+                delivery_converged: self.editor_acked,
+            })
+        }
+
+        fn step(&mut self, action: Action, coverage: &mut Coverage) {
+            if self.committed {
+                return;
+            }
+            match action {
+                Action::CaptureResponse => self.retain_response_cell(),
+                Action::Finalize | Action::RetryFinalize => {
+                    let cells_before = self.response_cells;
+                    let updates_before = self.response_updates;
+                    let already_exact_inline = self.active_capture
+                        && self.exact_response_retained
+                        && self.response_cells == 1
+                        && self.response_inline;
+                    self.retain_response_cell();
+                    if !already_exact_inline {
+                        self.response_inline = true;
+                        self.exact_archive = false;
+                        self.editor_acked = false;
+                        self.response_updates = self.response_updates.saturating_add(1);
+                    }
+                    if action == Action::RetryFinalize && cells_before == 1 {
+                        coverage.retry_was_idempotent = self.response_cells == 1;
+                    }
+                    if action == Action::RetryFinalize && already_exact_inline {
+                        coverage.exact_replay_emitted_no_update =
+                            self.response_updates == updates_before;
+                    }
+                }
+                Action::CompactExchange => {
+                    if self.active_capture && self.exact_response_retained {
+                        self.response_inline = false;
+                        self.exact_archive = true;
+                        self.editor_acked = false;
+                    }
+                }
+                Action::StartAsyncRecovery => self.async_recovery_active = true,
+                Action::EditorAck => {
+                    if self.exact_response_retained {
+                        self.editor_acked = true;
+                    }
+                }
+                Action::ForegroundAckDeadline => match self.completion() {
+                    CrdtWriteCompletion::VisibleAndAcknowledged => {
+                        self.foreground_success = true;
+                    }
+                    CrdtWriteCompletion::RetainedForAsyncDelivery => {
+                        self.foreground_success = true;
+                        coverage.retained_timeout_succeeded = true;
+                    }
+                    CrdtWriteCompletion::BlockMissingRetention => {
+                        coverage.missing_retention_blocked = true;
+                    }
+                },
+                Action::LoseCanonical => {
+                    self.exact_response_retained = false;
+                    self.editor_acked = false;
+                    self.foreground_success = false;
+                }
+                Action::BeginAckBackoff => self.ack_backoff = true,
+                Action::ExternalAckEvent => {
+                    let before = self.controller_ack_requests;
+                    if decide_crdt_retry_admission(self.ack_backoff)
+                        == CrdtRetryAdmission::StartDrain
+                    {
+                        self.controller_ack_requests =
+                            self.controller_ack_requests.saturating_add(1);
+                    }
+                    if self.ack_backoff {
+                        coverage.backoff_gated_external_event =
+                            self.controller_ack_requests == before;
+                    }
+                }
+                Action::EndAckBackoff => self.ack_backoff = false,
+                Action::RecycleController => {
+                    self.controller_socket = ControllerSocket::Stale;
+                }
+                Action::EnsureController => {
+                    self.controller_socket = ControllerSocket::Live;
+                }
+                Action::Commit => {
+                    let materialization = decide_capture_closeout_materialization(
+                        CaptureCloseoutMaterializationEvidence {
+                            active_capture: self.active_capture,
+                            capture_terminal: self.committed,
+                            commit_surface_available: self.response_inline || self.exact_archive,
+                            response_in_commit_surface: self.response_inline,
+                            response_in_referenced_compact_archive: self.exact_archive,
+                        },
+                    );
+                    if self.controller_socket == ControllerSocket::Stale {
+                        coverage.stale_socket_blocked_commit = true;
+                    } else if self.foreground_success
+                        && self.exact_response_retained
+                        && (self.response_inline || self.exact_archive)
+                        && matches!(
+                            materialization,
+                            CaptureCloseoutMaterializationDecision::Allow(_)
+                        )
+                    {
+                        self.committed = true;
+                        if self.exact_archive {
+                            coverage.exact_archive_committed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn explore(max_depth: usize, coverage: &mut Coverage) {
+        let mut frontier = BTreeSet::from([World::default()]);
+        let mut seen = frontier.clone();
+        for _ in 0..max_depth {
+            let mut next_frontier = BTreeSet::new();
+            for world in frontier {
+                assert!(
+                    world.response_cells <= 1,
+                    "stacked response cells: {world:?}"
+                );
+                assert!(
+                    !world.committed
+                        || (world.exact_response_retained
+                            && world.response_cells == 1
+                            && (world.response_inline || world.exact_archive)),
+                    "commit lost the exact response: {world:?}"
+                );
+                for action in ACTIONS {
+                    let mut next = world.clone();
+                    next.step(action, coverage);
+                    if seen.insert(next.clone()) {
+                        next_frontier.insert(next);
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+    }
+
+    #[test]
+    fn delayed_ack_compact_finalize_recycle_schedule_is_single_copy_and_recoverable() {
+        let mut coverage = Coverage::default();
+        let mut world = World::default();
+        for action in [
+            Action::CaptureResponse,
+            Action::Finalize,
+            Action::BeginAckBackoff,
+            Action::ExternalAckEvent,
+            Action::CompactExchange,
+            Action::StartAsyncRecovery,
+            Action::ForegroundAckDeadline,
+            Action::RetryFinalize,
+            Action::RetryFinalize,
+            Action::RecycleController,
+            Action::Commit,
+            Action::EnsureController,
+            Action::Commit,
+        ] {
+            world.step(action, &mut coverage);
+        }
+        assert_eq!(world.response_cells, 1);
+        assert!(world.committed);
+        assert!(coverage.retained_timeout_succeeded);
+        assert!(coverage.retry_was_idempotent);
+        assert!(coverage.exact_replay_emitted_no_update);
+        assert!(coverage.backoff_gated_external_event);
+        assert!(coverage.stale_socket_blocked_commit);
+    }
+
+    #[test]
+    fn exhaustive_retained_closeout_recovery_schedules_preserve_invariants() {
+        let mut coverage = Coverage::default();
+        explore(8, &mut coverage);
+        assert!(coverage.retained_timeout_succeeded);
+        assert!(coverage.missing_retention_blocked);
+        assert!(coverage.retry_was_idempotent);
+        assert!(coverage.exact_replay_emitted_no_update);
+        assert!(coverage.backoff_gated_external_event);
+        assert!(coverage.stale_socket_blocked_commit);
+        assert!(coverage.exact_archive_committed);
+    }
+}
+
 /// Cross-layer reference kernel for realtime delivery, editor IPC, and cycle
 /// closeout. This deliberately models observable policy rather than sockets,
 /// IDE APIs, or a second production implementation. Generated schedules make

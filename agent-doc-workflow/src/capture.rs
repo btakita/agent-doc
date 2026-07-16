@@ -34,6 +34,68 @@ pub const fn capture_state_is_repairable(state: CaptureState) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptureCloseoutMaterializationEvidence {
+    pub active_capture: bool,
+    pub capture_terminal: bool,
+    pub commit_surface_available: bool,
+    pub response_in_commit_surface: bool,
+    pub response_in_referenced_compact_archive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureCloseoutMaterializationBasis {
+    NoActiveCapture,
+    TerminalCapture,
+    CommitSurfaceUnavailable,
+    InlineCommitSurface,
+    ReferencedCompactArchive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureCloseoutMaterializationDecision {
+    Allow(CaptureCloseoutMaterializationBasis),
+    BlockMissingResponse,
+}
+
+/// Decide whether a capture is materially preserved by the commit surface.
+///
+/// Compact Exchange intentionally removes response bodies from the session
+/// document. The response remains materialized when the staged/HEAD document
+/// references a compact archive under `.agent-doc/archives` that contains the
+/// exact captured response. Adapters own parsing content and reading archives;
+/// this function owns the exhaustive closeout policy.
+pub const fn decide_capture_closeout_materialization(
+    evidence: CaptureCloseoutMaterializationEvidence,
+) -> CaptureCloseoutMaterializationDecision {
+    if !evidence.active_capture {
+        return CaptureCloseoutMaterializationDecision::Allow(
+            CaptureCloseoutMaterializationBasis::NoActiveCapture,
+        );
+    }
+    if evidence.capture_terminal {
+        return CaptureCloseoutMaterializationDecision::Allow(
+            CaptureCloseoutMaterializationBasis::TerminalCapture,
+        );
+    }
+    if !evidence.commit_surface_available {
+        return CaptureCloseoutMaterializationDecision::Allow(
+            CaptureCloseoutMaterializationBasis::CommitSurfaceUnavailable,
+        );
+    }
+    if evidence.response_in_commit_surface {
+        return CaptureCloseoutMaterializationDecision::Allow(
+            CaptureCloseoutMaterializationBasis::InlineCommitSurface,
+        );
+    }
+    if evidence.response_in_referenced_compact_archive {
+        return CaptureCloseoutMaterializationDecision::Allow(
+            CaptureCloseoutMaterializationBasis::ReferencedCompactArchive,
+        );
+    }
+    CaptureCloseoutMaterializationDecision::BlockMissingResponse
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaleCaptureRetirementDecision {
     Keep,
     RetireWedgedWriteApplied,
@@ -144,6 +206,71 @@ impl RepairTemplateChanges {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_closeout_materialization_decision_covers_the_boolean_state_table() {
+        for active_capture in [false, true] {
+            for capture_terminal in [false, true] {
+                for commit_surface_available in [false, true] {
+                    for response_in_commit_surface in [false, true] {
+                        for response_in_referenced_compact_archive in [false, true] {
+                            let evidence = CaptureCloseoutMaterializationEvidence {
+                                active_capture,
+                                capture_terminal,
+                                commit_surface_available,
+                                response_in_commit_surface,
+                                response_in_referenced_compact_archive,
+                            };
+                            let decision = decide_capture_closeout_materialization(evidence);
+                            let should_block = active_capture
+                                && !capture_terminal
+                                && commit_surface_available
+                                && !response_in_commit_surface
+                                && !response_in_referenced_compact_archive;
+                            assert_eq!(
+                                matches!(
+                                    decision,
+                                    CaptureCloseoutMaterializationDecision::BlockMissingResponse
+                                ),
+                                should_block,
+                                "unexpected decision for {evidence:?}: {decision:?}",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capture_closeout_materialization_prefers_inline_then_archive_evidence() {
+        let base = CaptureCloseoutMaterializationEvidence {
+            active_capture: true,
+            capture_terminal: false,
+            commit_surface_available: true,
+            response_in_commit_surface: false,
+            response_in_referenced_compact_archive: false,
+        };
+        assert_eq!(
+            decide_capture_closeout_materialization(CaptureCloseoutMaterializationEvidence {
+                response_in_commit_surface: true,
+                response_in_referenced_compact_archive: true,
+                ..base
+            }),
+            CaptureCloseoutMaterializationDecision::Allow(
+                CaptureCloseoutMaterializationBasis::InlineCommitSurface,
+            ),
+        );
+        assert_eq!(
+            decide_capture_closeout_materialization(CaptureCloseoutMaterializationEvidence {
+                response_in_referenced_compact_archive: true,
+                ..base
+            }),
+            CaptureCloseoutMaterializationDecision::Allow(
+                CaptureCloseoutMaterializationBasis::ReferencedCompactArchive,
+            ),
+        );
+    }
 
     #[test]
     fn capture_state_rank_orders_lifecycle_forward() {

@@ -42,6 +42,12 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
+    fun `external replica events cannot bypass retained ack backoff`() {
+        assertFalse(shouldStartRemoteDrainUtil(backoffScheduled = true))
+        assertTrue(shouldStartRemoteDrainUtil(backoffScheduled = false))
+    }
+
+    @Test
     fun `visible canonical projection is acknowledged independently of disk persistence`() {
         assertTrue(
             shouldAcknowledgeVisibleRemoteDeliveryUtil(

@@ -4056,8 +4056,11 @@ pub fn try_editor_converge(
         effects.apply_canonical_replace_if_attached(file, current_content, target, source)?
     {
         // An attached CRDT replica is the sole mutation plane. The runtime
-        // effect returns only after the canonical target (rebased with any
-        // settled operator edits) is visible and ACKed by every live editor.
+        // effect returns after the canonical target (rebased with any settled
+        // operator edits) is either ACKed by every live editor or durably
+        // retained with active asynchronous delivery recovery. In both cases
+        // legacy replay is forbidden; callers that require a disk projection
+        // separately verify `delivery_converged` at that boundary.
         // Replaying the same change through legacy component IPC would make
         // the editor's DocumentListener publish it as fresh local typing and
         // can double the document / trigger a JetBrains file-cache conflict.

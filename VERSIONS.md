@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.141
+
+- **Replay/ACK recovery recognizes a plugin updated after the turn started.** The repair boundary re-reads the latest live editor registration and explicitly supersedes a stale preflight generation. Diagnostics now distinguish plugin-package code from `libagent_doc`: `admin reload-lib` refreshes only the native cdylib and is no longer suggested as a substitute for installing/restarting an older JetBrains or VS Code plugin.
+- **Retained responses survive monotonic authoritative drift without an operator reset.** Repair keeps typed editor/disk authority, proves that the current cut preserves every captured-baseline line in order, rebases the matching open capture, and replays exactly once over later steering. A drifted `WriteApplied` capture is no longer discarded merely because its hashes changed; non-monotonic edits and superseding answers still fail closed.
+- **Console steering has a binary-owned persistence path during closeout.** `exchange add-prompt` now preserves live editor authority and the active capture instead of electing force-disk while rebasing. Harness instructions require persisting a new console prompt before resuming the older closeout, preventing a retry wedge from leaving the follow-up only in transcript memory.
+- **Lean and SimWorld cover the interaction.** Lean proves live registered generation adoption, native-reload/plugin-generation separation, safe authoritative rebase, and preservation of retained response/steering tokens. Exhaustive SimWorld schedules cover mid-turn plugin update, native-only reload, later steering, generation revalidation, safe/conflicting rebase, exact-once replay, and commit.
+
 ## 0.34.140
 
 - **Compact Exchange closeout recognizes exact archived capture materialization.** The shared capture policy permits an open captured cycle to close when its staged compact document references an archive containing the exact captured response, while missing or unrelated evidence still fails closed. This removes the false already-committed refusal after JetBrains compaction without weakening response-loss protection.

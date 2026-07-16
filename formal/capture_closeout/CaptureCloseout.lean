@@ -164,4 +164,124 @@ theorem delegation_iff_same_acquired_stream (acquired consumed : Bool) :
       acquired = true ∧ consumed = true := by
   cases acquired <;> cases consumed <;> simp [decideCommitTransport]
 
+/- A plugin package restart and a native cdylib reload are distinct generation
+   transitions. Replay/ACK boundaries adopt a newer registered editor-plugin
+   generation; a native-only reload cannot manufacture that evidence. -/
+
+inductive GenerationDecision where
+  | keepPreflight
+  | adoptLive
+  deriving DecidableEq, Repr
+
+structure GenerationEvidence where
+  preflightGeneration : Nat
+  liveGeneration : Nat
+  liveRegistrationObserved : Bool
+  deriving DecidableEq, Repr
+
+def decideGeneration (e : GenerationEvidence) : GenerationDecision :=
+  if e.liveRegistrationObserved && e.preflightGeneration < e.liveGeneration then
+    .adoptLive
+  else
+    .keepPreflight
+
+theorem newer_registered_generation_supersedes_preflight (old live : Nat)
+    (h : old < live) :
+    decideGeneration {
+      preflightGeneration := old
+      liveGeneration := live
+      liveRegistrationObserved := true
+    } = .adoptLive := by
+  simp [decideGeneration, h]
+
+theorem unregistered_generation_cannot_supersede (old live : Nat) :
+    decideGeneration {
+      preflightGeneration := old
+      liveGeneration := live
+      liveRegistrationObserved := false
+    } = .keepPreflight := by
+  simp [decideGeneration]
+
+structure RuntimeGenerations where
+  pluginGeneration : Nat
+  nativeGeneration : Nat
+  deriving DecidableEq, Repr
+
+def reloadNativeOnly (s : RuntimeGenerations) (nextNative : Nat) : RuntimeGenerations :=
+  { s with nativeGeneration := nextNative }
+
+theorem native_reload_does_not_upgrade_plugin (s : RuntimeGenerations) (next : Nat) :
+    (reloadNativeOnly s next).pluginGeneration = s.pluginGeneration := by
+  rfl
+
+/- A retained response may adopt a newer authoritative cut only when the cut is
+   a monotonic extension of the matching open-cycle baseline. This admits later
+   steering while blocking edits, deletions, reorders, and unrelated captures. -/
+
+inductive RebaseDecision where
+  | keepBaseline
+  | rebaseToAuthoritativeCurrent
+  | blockConflict
+  deriving DecidableEq, Repr
+
+structure RebaseEvidence where
+  captureRepairable : Bool
+  baselineDrifted : Bool
+  authoritativeCurrent : Bool
+  matchingOpenCycle : Bool
+  responseMissing : Bool
+  responseHeadingAnswered : Bool
+  monotonicExtension : Bool
+  deriving DecidableEq, Repr
+
+def decideRebase (e : RebaseEvidence) : RebaseDecision :=
+  if !e.baselineDrifted then
+    .keepBaseline
+  else if e.captureRepairable && e.authoritativeCurrent && e.matchingOpenCycle &&
+      e.responseMissing && !e.responseHeadingAnswered && e.monotonicExtension then
+    .rebaseToAuthoritativeCurrent
+  else
+    .blockConflict
+
+theorem safe_authoritative_rebase (answered : Bool) :
+    decideRebase {
+      captureRepairable := true
+      baselineDrifted := true
+      authoritativeCurrent := true
+      matchingOpenCycle := true
+      responseMissing := true
+      responseHeadingAnswered := answered
+      monotonicExtension := true
+    } = (if answered then .blockConflict else .rebaseToAuthoritativeCurrent) := by
+  cases answered <;> rfl
+
+theorem non_monotonic_cut_blocks_rebase (authoritative : Bool) :
+    decideRebase {
+      captureRepairable := true
+      baselineDrifted := true
+      authoritativeCurrent := authoritative
+      matchingOpenCycle := true
+      responseMissing := true
+      responseHeadingAnswered := false
+      monotonicExtension := false
+    } = .blockConflict := by
+  cases authoritative <;> rfl
+
+structure RetainedRecovery where
+  responseToken : Nat
+  steeringToken : Nat
+  baselineGeneration : Nat
+  deriving DecidableEq, Repr
+
+def adoptAuthoritativeBaseline (s : RetainedRecovery) (generation : Nat) : RetainedRecovery :=
+  { s with baselineGeneration := generation }
+
+theorem baseline_adoption_preserves_response (s : RetainedRecovery) (generation : Nat) :
+    (adoptAuthoritativeBaseline s generation).responseToken = s.responseToken := by
+  rfl
+
+theorem baseline_adoption_preserves_later_steering (s : RetainedRecovery) (generation : Nat) :
+    (adoptAuthoritativeBaseline s generation).steeringToken = s.steeringToken := by
+  rfl
+
 end CaptureCloseout

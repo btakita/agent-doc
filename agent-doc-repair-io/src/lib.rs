@@ -341,6 +341,7 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let canonical = file
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
+    agent_doc_preflight_io::warnings::report_live_plugin_generation_refresh(&canonical);
 
     let pending_path = agent_doc_fs::pending_response_path_for(&canonical)?;
     let pending_response = pending::load_pending_response_with_projection_backup(&canonical)?;
@@ -352,11 +353,13 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     let mut capture = loaded_capture
         .clone()
         .filter(|capture| capture_state_is_repairable(capture.state));
-    let mut doc_content = repair_current_document_content(
+    let current_document = repair_current_document_content(
         &canonical,
         "repair_current_document",
         force_disk_override,
     )?;
+    let current_authority = current_document.authority;
+    let mut doc_content = current_document.content;
     if force_disk_override != Some(true)
         && let Some(restored) =
             restore_committed_head_after_authority_regression(&canonical, &doc_content)?
@@ -476,7 +479,8 @@ pub fn run_with_queue_completion_ids_and_force_disk<
                 &canonical,
                 "repair_after_stale_preflight",
                 force_disk_override,
-            )?;
+            )?
+            .content;
             let response_prefix_repaired_doc = repair_response_body_prompt_prefixes_if_needed(
                 effects.repair_io_effects,
                 file,
@@ -658,19 +662,33 @@ pub fn run_with_queue_completion_ids_and_force_disk<
         )? {
             return Ok(RepairOutcome::ManualTailRemovalRespected);
         }
-        if retire_stale_capture_if_drifted(
-            effects.repair_io_effects,
+        if rebase_capture_to_authoritative_current_if_safe(
             &canonical,
             &doc_content,
             capture,
+            current_authority,
         )? {
-            return Ok(RepairOutcome::StaleCaptureRetired);
+            eprintln!(
+                "[repair] adopted the current {} cut for retained response replay in {} (capture_id={})",
+                current_authority.as_str(),
+                canonical.display(),
+                capture.capture_id,
+            );
+        } else {
+            if retire_stale_capture_if_drifted(
+                effects.repair_io_effects,
+                &canonical,
+                &doc_content,
+                capture,
+            )? {
+                return Ok(RepairOutcome::StaleCaptureRetired);
+            }
+            agent_doc_capture_io::validate_replay_with_current_content(
+                &canonical,
+                capture,
+                &doc_content,
+            )?;
         }
-        agent_doc_capture_io::validate_replay_with_current_content(
-            &canonical,
-            capture,
-            &doc_content,
-        )?;
     }
 
     replay_orphaned_response(
@@ -687,16 +705,32 @@ pub fn run_with_queue_completion_ids_and_force_disk<
     )
 }
 
+struct RepairCurrentDocument {
+    content: String,
+    authority: agent_doc_document_realtime::DocAuthority,
+}
+
 fn repair_current_document_content(
     file: &Path,
     source: &str,
     force_disk_override: Option<bool>,
-) -> Result<String> {
-    if force_disk_override == Some(true) {
-        return agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
-            .with_context(|| format!("{source}: failed to read {}", file.display()));
-    }
-    agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+) -> Result<RepairCurrentDocument> {
+    let current = if force_disk_override == Some(true) {
+        agent_doc_document_realtime_io::resolve_disk_current_document(file, source)
+            .with_context(|| format!("{source}: failed to read {}", file.display()))?
+    } else {
+        agent_doc_document_realtime_io::try_resolve_current_document_with_source(file, source)
+            .with_context(|| {
+                format!(
+                    "{source}: failed to resolve current document {}",
+                    file.display()
+                )
+            })?
+    };
+    Ok(RepairCurrentDocument {
+        authority: current.authority(),
+        content: current.into_content(),
+    })
 }
 
 fn reconcile_partial_captured_response(
@@ -1876,6 +1910,66 @@ fn discard_pending_capture_for_manual_repair(
     Ok(())
 }
 
+pub fn rebase_capture_to_authoritative_current_if_safe(
+    file: &Path,
+    doc_content: &str,
+    capture: &agent_doc_capture_io::CaptureRecord,
+    authority: agent_doc_document_realtime::DocAuthority,
+) -> Result<bool> {
+    let captured_response_body_missing = !agent_doc_turn::response_replay::response_already_applied(
+        doc_content,
+        &capture.response_body,
+    )
+        && !agent_doc_turn::response_replay::response_already_applied_after_prefix_strip(
+            doc_content,
+            &capture.response_body,
+        );
+    let captured_response_heading_answered =
+        agent_doc_turn::response_replay::first_response_heading_line(&capture.response_body)
+            .is_some_and(|heading| {
+                agent_doc_turn::response_replay::live_exchange_answers_heading(doc_content, heading)
+            });
+    let decision = agent_doc_workflow::capture::decide_authoritative_replay_rebase(
+        agent_doc_workflow::capture::AuthoritativeReplayRebaseEvidence {
+            capture_repairable: agent_doc_workflow::capture::capture_state_is_repairable(
+                capture.state,
+            ),
+            replay_baseline_drifted:
+                agent_doc_capture_io::replay_baseline_drifted_with_current_content(
+                    file,
+                    capture,
+                    doc_content,
+                )?,
+            // `RepairCurrentDocument` can only come from the typed editor/disk
+            // authority resolver. Both variants are authoritative for this cut.
+            authoritative_current: matches!(
+                authority,
+                agent_doc_document_realtime::DocAuthority::EditorBuffer
+                    | agent_doc_document_realtime::DocAuthority::Disk
+            ),
+            matching_open_cycle: agent_doc_capture_io::capture_matches_open_cycle(file, capture)?,
+            captured_response_body_missing,
+            captured_response_heading_answered,
+            current_monotonically_extends_baseline:
+                agent_doc_capture_io::authoritative_current_monotonically_extends_capture_baseline(
+                    file,
+                    capture,
+                    doc_content,
+                )?,
+        },
+    );
+    if decision
+        != agent_doc_workflow::capture::AuthoritativeReplayRebaseDecision::RebaseToAuthoritativeCurrent
+    {
+        return Ok(false);
+    }
+    agent_doc_capture_io::rebase_replay_baseline_to_authoritative_current(
+        file,
+        capture,
+        doc_content,
+    )
+}
+
 pub fn retire_stale_capture_if_drifted(
     effects: &impl RepairIoEffects,
     file: &Path,
@@ -1911,33 +2005,6 @@ pub fn retire_stale_capture_if_drifted(
 
     match decision {
         agent_doc_workflow::capture::StaleCaptureRetirementDecision::Keep => Ok(false),
-        agent_doc_workflow::capture::StaleCaptureRetirementDecision::RetireWedgedWriteApplied => {
-            effects.apply_closeout_recovery_mutation(
-                file,
-                agent_doc_flow_io::closeout::CloseoutRecoveryMutation::RetireStaleCapture {
-                    content: Some(doc_content),
-                    clear_pending_response: true,
-                    delete_pre_response: true,
-                    mark_cycle_committed_event: Some("repair_retire_wedged_write_applied_capture"),
-                    mark_cycle_abandoned_event: None,
-                    reason: agent_doc_turn::closeout_recovery::CloseoutRecoveryMutationReason::RetireWedgedWriteAppliedCapture,
-                },
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "repair_retire_wedged_write_applied_capture file={} capture_id={} cycle_id={}",
-                    file.display(),
-                    capture.capture_id,
-                    capture.cycle_id
-                ),
-            );
-            eprintln!(
-                "[repair] retired wedged write-applied capture for {} (response missing from document + baseline drifted); rebuilt snapshot/CRDT from current and preserved the captured body for forensics",
-                file.display()
-            );
-            Ok(true)
-        }
         agent_doc_workflow::capture::StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan => {
             effects.apply_closeout_recovery_mutation(
                 file,

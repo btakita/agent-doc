@@ -64,9 +64,11 @@ fn mutate(file: &Path, transform: impl FnOnce(&str) -> Result<String>) -> Result
     let new_doc = comp.replace_content(&doc, &new_inner);
     agent_doc_document_realtime_io::atomic_write_through_authority(file, &new_doc)
         .with_context(|| format!("failed to write {}", file.display()))?;
-    // Re-baseline snapshot + CRDT from the mutated document, preserving the session
-    // (from_current = true, preserve_session = true, force_disk = true).
-    crate::reset::run(file, true, true, true)
+    // Re-baseline snapshot + CRDT from the authority-resolved document while
+    // preserving the session and any active response capture. Do not elect disk
+    // authority here: a console-steering prompt can arrive while an editor owns
+    // the live buffer.
+    crate::reset::run(file, true, true, false)
         .context("failed to re-baseline snapshot/CRDT after exchange mutation")?;
     eprintln!(
         "[exchange] mutated {} and re-baselined sidecars",
@@ -96,7 +98,11 @@ pub fn add_response(file: &Path, header: &str) -> Result<()> {
 /// from stdin).
 pub fn add_prompt(file: &Path) -> Result<()> {
     let text = read_stdin()?;
-    mutate(file, |inner| Ok(exchange_tree::add_prompt(inner, &text)))
+    add_prompt_content(file, &text)
+}
+
+fn add_prompt_content(file: &Path, text: &str) -> Result<()> {
+    mutate(file, |inner| Ok(exchange_tree::add_prompt(inner, text)))
 }
 
 /// `agent-doc exchange move <FILE> --id <N> --before|--after <Anchor>`.
@@ -105,4 +111,49 @@ pub fn move_node(file: &Path, node_id: &str, anchor: &str, before: bool) -> Resu
         exchange_tree::move_exchange_node(inner, node_id, anchor, before)
             .with_context(|| format!("move failed: missing node `{node_id}` or anchor `{anchor}`"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_prompt_during_active_capture_preserves_and_rebases_the_response() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: original — test\n\n",
+            "Original answer.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: current work — test\n\n",
+            "Retained response.\n",
+            "<!-- /patch:exchange -->",
+        );
+        let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
+
+        add_prompt_content(
+            &doc,
+            "The same lender can have different vestings; preserve this follow-up.",
+        )
+        .unwrap();
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        assert!(current.contains("The same lender can have different vestings"));
+        let active = agent_doc_capture_io::load_active(&doc)
+            .unwrap()
+            .expect("active capture survives prompt insertion");
+        assert_eq!(active.capture_id, capture.capture_id);
+        assert_eq!(active.response_body, response);
+        agent_doc_capture_io::validate_replay_with_current_content(&doc, &active, &current)
+            .expect("prompt insertion rebases the retained response");
+    }
 }

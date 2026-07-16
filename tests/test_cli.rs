@@ -26355,8 +26355,9 @@ fn test_agent_doc_repair_io_routes_force_disk_reads_through_document_authority()
 
     for required in [
         "fn repair_current_document_content(",
-        "agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)",
-        "agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)",
+        "agent_doc_document_realtime_io::resolve_disk_current_document(file, source)",
+        "agent_doc_document_realtime_io::try_resolve_current_document_with_source(file, source)",
+        "authority: current.authority()",
     ] {
         assert!(
             repair_source.contains(required),

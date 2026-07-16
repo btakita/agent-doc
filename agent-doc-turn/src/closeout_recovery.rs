@@ -186,6 +186,7 @@ pub enum CloseoutRecoveryMutationReason {
     BenignReplayBaseline,
     QueueOnlyReplayBaseline,
     WholeDocumentReplayCoalescedBaseline,
+    AuthoritativeReplayBaseline,
     CommitQueueMetadataDrift,
     ResetFromVisible,
     RestoreHeadMetadata,
@@ -202,6 +203,7 @@ impl CloseoutRecoveryMutationReason {
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "whole_document_replay_coalesced_baseline"
             }
+            Self::AuthoritativeReplayBaseline => "authoritative_replay_baseline",
             Self::CommitQueueMetadataDrift => "commit_queue_metadata_drift",
             Self::ResetFromVisible => "reset_from_visible",
             Self::RestoreHeadMetadata => "restore_head_metadata",
@@ -217,6 +219,9 @@ impl CloseoutRecoveryMutationReason {
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "capture_baseline_refreshed_for_whole_document_replay_coalescence"
             }
+            Self::AuthoritativeReplayBaseline => {
+                "capture_baseline_refreshed_from_authoritative_current"
+            }
             _ => "capture_baseline_refreshed_for_benign_drift",
         }
     }
@@ -226,6 +231,9 @@ impl CloseoutRecoveryMutationReason {
             Self::QueueOnlyReplayBaseline => "queue-only drift detected",
             Self::WholeDocumentReplayCoalescedBaseline => {
                 "whole-document replay coalescence detected"
+            }
+            Self::AuthoritativeReplayBaseline => {
+                "newer authoritative document cut safely preserves the captured baseline"
             }
             _ => "benign drift detected",
         }

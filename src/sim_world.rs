@@ -476,6 +476,246 @@ mod retained_closeout_recovery_model {
     }
 }
 
+/// SimWorld for the mid-turn editor-plugin update failure class. It couples the
+/// production generation-refresh and authoritative-rebase policies with durable
+/// response/steering state. A native-only reload is intentionally a separate
+/// action: it cannot advance the editor-plugin generation.
+mod plugin_generation_capture_rebase_model {
+    use agent_doc_workflow::capture::{
+        AuthoritativeReplayRebaseDecision, AuthoritativeReplayRebaseEvidence,
+        PluginGenerationRefreshDecision, PluginGenerationRefreshEvidence,
+        decide_authoritative_replay_rebase, decide_plugin_generation_refresh,
+    };
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        CaptureResponse,
+        AddSteering,
+        ConflictingEdit,
+        UpdatePlugin,
+        ReloadNativeOnly,
+        RevalidateLiveGeneration,
+        RebaseCapture,
+        ReplayResponse,
+        Commit,
+    }
+
+    const ACTIONS: [Action; 9] = [
+        Action::CaptureResponse,
+        Action::AddSteering,
+        Action::ConflictingEdit,
+        Action::UpdatePlugin,
+        Action::ReloadNativeOnly,
+        Action::RevalidateLiveGeneration,
+        Action::RebaseCapture,
+        Action::ReplayResponse,
+        Action::Commit,
+    ];
+
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct World {
+        preflight_plugin_generation: u8,
+        live_plugin_generation: u8,
+        recognized_plugin_generation: u8,
+        native_generation: u8,
+        active_capture: bool,
+        response_retained: bool,
+        response_applied: bool,
+        response_apply_count: u8,
+        steering_durable: bool,
+        baseline_drifted: bool,
+        monotonic_extension: bool,
+        committed: bool,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                preflight_plugin_generation: 1,
+                live_plugin_generation: 1,
+                recognized_plugin_generation: 1,
+                native_generation: 1,
+                active_capture: false,
+                response_retained: false,
+                response_applied: false,
+                response_apply_count: 0,
+                steering_durable: false,
+                baseline_drifted: false,
+                monotonic_extension: true,
+                committed: false,
+            }
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct Coverage {
+        live_generation_superseded_preflight: bool,
+        native_reload_did_not_upgrade_plugin: bool,
+        steering_rebase_replayed_once: bool,
+        conflict_blocked_rebase: bool,
+    }
+
+    impl World {
+        fn step(&mut self, action: Action, coverage: &mut Coverage) {
+            if self.committed {
+                return;
+            }
+            match action {
+                Action::CaptureResponse => {
+                    self.active_capture = true;
+                    self.response_retained = true;
+                }
+                Action::AddSteering => {
+                    self.steering_durable = true;
+                    self.baseline_drifted = true;
+                    self.monotonic_extension = true;
+                }
+                Action::ConflictingEdit => {
+                    self.baseline_drifted = true;
+                    self.monotonic_extension = false;
+                }
+                Action::UpdatePlugin => self.live_plugin_generation = 2,
+                Action::ReloadNativeOnly => {
+                    let before = self.live_plugin_generation;
+                    self.native_generation = 2;
+                    coverage.native_reload_did_not_upgrade_plugin =
+                        self.live_plugin_generation == before;
+                }
+                Action::RevalidateLiveGeneration => {
+                    let decision =
+                        decide_plugin_generation_refresh(PluginGenerationRefreshEvidence {
+                            preflight_generation: self.preflight_plugin_generation.into(),
+                            live_generation: self.live_plugin_generation.into(),
+                            live_registration_observed: true,
+                        });
+                    if decision == PluginGenerationRefreshDecision::AdoptLive {
+                        self.recognized_plugin_generation = self.live_plugin_generation;
+                        coverage.live_generation_superseded_preflight = true;
+                    }
+                }
+                Action::RebaseCapture => {
+                    let decision =
+                        decide_authoritative_replay_rebase(AuthoritativeReplayRebaseEvidence {
+                            capture_repairable: self.active_capture,
+                            replay_baseline_drifted: self.baseline_drifted,
+                            authoritative_current: true,
+                            matching_open_cycle: self.active_capture,
+                            captured_response_body_missing: !self.response_applied,
+                            captured_response_heading_answered: false,
+                            current_monotonically_extends_baseline: self.monotonic_extension,
+                        });
+                    match decision {
+                        AuthoritativeReplayRebaseDecision::RebaseToAuthoritativeCurrent => {
+                            self.baseline_drifted = false;
+                        }
+                        AuthoritativeReplayRebaseDecision::BlockConflict => {
+                            if !self.monotonic_extension {
+                                coverage.conflict_blocked_rebase = true;
+                            }
+                        }
+                        AuthoritativeReplayRebaseDecision::KeepBaseline => {}
+                    }
+                }
+                Action::ReplayResponse => {
+                    if self.active_capture
+                        && self.response_retained
+                        && !self.baseline_drifted
+                        && self.recognized_plugin_generation == self.live_plugin_generation
+                    {
+                        self.response_applied = true;
+                        self.response_apply_count = 1;
+                    }
+                }
+                Action::Commit => {
+                    if self.response_applied
+                        && self.response_apply_count == 1
+                        && (!self.steering_durable || !self.baseline_drifted)
+                    {
+                        self.committed = true;
+                        if self.steering_durable {
+                            coverage.steering_rebase_replayed_once = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn assert_invariants(world: &World) {
+        assert!(
+            world.response_apply_count <= 1,
+            "duplicate response: {world:?}"
+        );
+        assert!(
+            !world.active_capture || world.response_retained,
+            "active capture lost its response: {world:?}"
+        );
+        assert!(
+            world.recognized_plugin_generation <= world.live_plugin_generation,
+            "recognized a plugin generation that never registered: {world:?}"
+        );
+        assert!(
+            !world.committed || (world.response_applied && world.response_apply_count == 1),
+            "commit lost or duplicated the response: {world:?}"
+        );
+    }
+
+    fn explore(max_depth: usize, coverage: &mut Coverage) {
+        let mut frontier = BTreeSet::from([World::default()]);
+        let mut seen = frontier.clone();
+        for _ in 0..max_depth {
+            let mut next_frontier = BTreeSet::new();
+            for world in frontier {
+                assert_invariants(&world);
+                for action in ACTIONS {
+                    let mut next = world.clone();
+                    next.step(action, coverage);
+                    assert_invariants(&next);
+                    if seen.insert(next.clone()) {
+                        next_frontier.insert(next);
+                    }
+                }
+            }
+            frontier = next_frontier;
+        }
+    }
+
+    #[test]
+    fn mid_turn_plugin_update_with_later_steering_replays_and_commits_once() {
+        let mut world = World::default();
+        let mut coverage = Coverage::default();
+        for action in [
+            Action::CaptureResponse,
+            Action::AddSteering,
+            Action::UpdatePlugin,
+            Action::ReloadNativeOnly,
+            Action::RevalidateLiveGeneration,
+            Action::RebaseCapture,
+            Action::ReplayResponse,
+            Action::Commit,
+        ] {
+            world.step(action, &mut coverage);
+            assert_invariants(&world);
+        }
+        assert!(world.committed);
+        assert!(world.steering_durable);
+        assert!(coverage.live_generation_superseded_preflight);
+        assert!(coverage.native_reload_did_not_upgrade_plugin);
+        assert!(coverage.steering_rebase_replayed_once);
+    }
+
+    #[test]
+    fn exhaustive_plugin_update_rebase_schedules_preserve_invariants() {
+        let mut coverage = Coverage::default();
+        explore(9, &mut coverage);
+        assert!(coverage.live_generation_superseded_preflight);
+        assert!(coverage.native_reload_did_not_upgrade_plugin);
+        assert!(coverage.steering_rebase_replayed_once);
+        assert!(coverage.conflict_blocked_rebase);
+    }
+}
+
 /// Cross-layer reference kernel for realtime delivery, editor IPC, and cycle
 /// closeout. This deliberately models observable policy rather than sockets,
 /// IDE APIs, or a second production implementation. Generated schedules make

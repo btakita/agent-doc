@@ -1363,15 +1363,12 @@ mod tests {
         );
     }
 
-    // `#stale-capture-deadlock-autoretire`: a wedged WRITE-APPLIED capture whose
-    // response vanished from the document and whose baseline drifted must be
-    // retired non-destructively (rebuild sidecars from current, preserve the
-    // captured body as Discarded) instead of fail-closing with "captured
-    // response baseline no longer matches current document" — which otherwise
-    // deadlocks every later commit / write --commit / route closeout drain
-    // behind a manual `reset --from-current --preserve-session`.
+    // A wedged WRITE-APPLIED capture whose response vanished while the operator
+    // added later steering must adopt that authoritative monotonic cut and replay
+    // exactly once. Retiring it would preserve only a forensic copy while losing
+    // the response from the commit surface.
     #[test]
-    fn retires_wedged_write_applied_capture_on_baseline_drift() {
+    fn rebases_and_replays_write_applied_capture_over_monotonic_steering() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let v1 = concat!(
@@ -1388,6 +1385,7 @@ mod tests {
         );
         std::fs::write(&doc, v1).unwrap();
         agent_doc_snapshot_io::save(&doc, v1, agent_doc_ops_log_io::log_op).unwrap();
+        init_git_repo(dir.path(), &doc);
 
         // A response that was captured + write-applied but never landed
         // contiguously in the document (the CRDT-intermix / concurrent-edit
@@ -1410,57 +1408,49 @@ mod tests {
         );
         std::fs::write(&doc, &v2).unwrap();
 
-        let recovered = run(&doc).unwrap();
+        let recovered = repair(&doc).unwrap();
         assert_eq!(
             recovered,
-            RepairOutcome::StaleCaptureRetired,
-            "wedged write-applied capture on baseline drift must be retired, not fail-closed"
+            RepairOutcome::ReplayedResponse,
+            "monotonic authoritative drift must replay the retained response"
         );
 
-        // Document is left as the user's current edit — the lost response is NOT
-        // replayed onto the drifted baseline (that would duplicate/reorder).
+        // The operator's later steering and the retained response both survive.
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert_eq!(result, v2, "current document must be preserved verbatim");
         assert!(
-            !result.contains("The new answer that got lost"),
-            "stale captured body must not be replayed onto the drifted document:\n{result}"
+            result.contains("- another unrelated edit"),
+            "authoritative steering must survive replay:\n{result}"
         );
+        assert!(
+            result.contains("The new answer that got lost"),
+            "retained response must be replayed:\n{result}"
+        );
+        assert_eq!(result.matches("The new answer that got lost").count(), 1);
 
-        // Sidecars rebuilt from current; cycle closed; capture retired (body
-        // preserved on disk as Discarded for forensics, not deleted).
+        // Sidecars follow the replayed cut and the capture remains durable.
         let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
-        assert_eq!(snap, v2, "snapshot must follow the current document");
+        assert_eq!(snap, result, "snapshot must follow the replayed document");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
-        assert!(!state.is_open(), "cycle must be closed after retire");
         let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(
             capture.state,
-            agent_doc_workflow::capture::CaptureState::Discarded
+            agent_doc_workflow::capture::CaptureState::Committed
         );
         assert_eq!(
             capture.response_body, lost_response,
             "captured body must be preserved for forensics"
         );
 
-        // Session-check accepts the recovered state (no open cycle, no drift).
-        match agent_doc_session_check_io::inspect(
-            &doc,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        )
-        .unwrap()
-        {
-            agent_doc_session_check_io::SessionCheckStatus::Ok(_) => {}
-            agent_doc_session_check_io::SessionCheckStatus::Interrupted(msg) => {
-                panic!("session-check must accept the retired-capture recovery: {msg}")
-            }
-        }
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("closeout_recovery_mutation")
-                && log.contains("retire_wedged_write_applied_capture"),
-            "wedged capture retirement must go through the shared recovery mutation primitive:\n{log}"
+            log.contains("capture_replay_baseline_rebased_authoritative_current"),
+            "replay must record the authoritative baseline adoption:\n{log}"
         );
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("repair commits the replayed cut");
+        assert_eq!(head, result);
     }
 
     // A `Captured`-only orphan (write never attempted) must STAY on the

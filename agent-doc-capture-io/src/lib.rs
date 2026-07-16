@@ -862,6 +862,110 @@ fn captured_baseline_coalesces_to_current(
     Ok((coalesced == current).then_some((replay.copies, replay.retained_additions)))
 }
 
+/// Prove that the retained capture is still the response owned by the current
+/// open cycle. Recovery adapters use this before adopting a newer authority cut.
+pub fn capture_matches_open_cycle(file: &Path, capture: &CaptureRecord) -> Result<bool> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(false);
+    };
+    Ok(state.is_open()
+        && state.cycle_id == capture.cycle_id
+        && state.capture_id.as_deref() == Some(capture.capture_id.as_str())
+        && state.response_sha256.as_deref() == Some(capture.response_sha256.as_str()))
+}
+
+fn replay_baseline_content_for_capture(
+    file: &Path,
+    capture: &CaptureRecord,
+) -> Result<Option<String>> {
+    if let Some(content) = capture.baseline_content.as_deref()
+        && capture
+            .file_hash
+            .as_deref()
+            .is_some_and(|expected| expected == replay_file_hash(content))
+    {
+        return Ok(Some(content.to_string()));
+    }
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if !state.is_open()
+        || state.cycle_id != capture.cycle_id
+        || state.capture_id.as_deref() != Some(capture.capture_id.as_str())
+    {
+        return Ok(None);
+    }
+    let Some(path) = state.baseline_file.as_deref() else {
+        return Ok(None);
+    };
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
+    Ok(capture
+        .file_hash
+        .as_deref()
+        .is_some_and(|expected| expected == replay_file_hash(&content))
+        .then_some(content))
+}
+
+/// Structural proof for automatic replay-baseline adoption: the authoritative
+/// current cut must preserve every captured-baseline line in order. Transient
+/// agent-doc markers are normalized before comparison so transport-only state
+/// does not manufacture a conflict.
+pub fn authoritative_current_monotonically_extends_capture_baseline(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file: &str,
+) -> Result<bool> {
+    let Some(baseline) = replay_baseline_content_for_capture(file, capture)? else {
+        return Ok(false);
+    };
+    let baseline =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(&baseline);
+    let current =
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(current_file);
+    Ok(agent_doc_workflow::capture::current_monotonically_extends_baseline(&baseline, &current))
+}
+
+/// Adopt a newer authoritative, monotonic document cut as the replay baseline.
+/// The capture remains active and the exact response body is unchanged.
+pub fn rebase_replay_baseline_to_authoritative_current(
+    file: &Path,
+    capture: &CaptureRecord,
+    current_file: &str,
+) -> Result<bool> {
+    if !capture_matches_open_cycle(file, capture)?
+        || !authoritative_current_monotonically_extends_capture_baseline(
+            file,
+            capture,
+            current_file,
+        )?
+    {
+        return Ok(false);
+    }
+    agent_doc_snapshot_io::save(file, current_file, agent_doc_ops_log_io::log_op)?;
+    let current_file_hash = replay_file_hash(current_file);
+    let current_snapshot_hash = agent_doc_hash::content_hash(current_file);
+    refresh_replay_baseline_for_reason(
+        file,
+        capture,
+        &current_file_hash,
+        Some(&current_snapshot_hash),
+        CloseoutRecoveryMutationReason::AuthoritativeReplayBaseline,
+    )?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "capture_replay_baseline_rebased_authoritative_current file={} capture_id={} cycle_id={} response_sha256={} recovery=replay_captured_response",
+            file.display(),
+            capture.capture_id,
+            capture.cycle_id,
+            capture.response_sha256,
+        ),
+    );
+    Ok(true)
+}
+
 /// Returns true when the captured `response_body` is still contiguously
 /// present in the current document (modulo blank-line / transient marker
 /// normalization and a transient `❯ ` prompt prefix present on either side).

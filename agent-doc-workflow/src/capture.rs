@@ -98,19 +98,16 @@ pub const fn decide_capture_closeout_materialization(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaleCaptureRetirementDecision {
     Keep,
-    RetireWedgedWriteApplied,
     RetireSupersededCapturedOnlyOrphan,
 }
 
 /// Side-effect-free stale-capture retirement policy.
 ///
-/// A drifted `WriteApplied` capture may be retired only after the captured body
-/// is missing from the live document: the write was already attempted, but
-/// replaying onto a drifted baseline risks duplication or reordering. A
-/// `Captured`-only orphan is more conservative because the write never ran, so
-/// retirement requires proof that the captured heading is already answered by a
-/// superseding live exchange turn; that proof is enough even when the baseline
-/// hashes have not drifted.
+/// A durable response is never retired merely because a `WriteApplied` attempt
+/// raced with later authoritative document state. The response remains replayable
+/// after a safe baseline rebase, or retained for an explicit conflict recovery.
+/// A `Captured`-only orphan may be retired only when its heading is already
+/// answered by a superseding live exchange turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StaleCaptureRetirementEvidence {
     pub state: CaptureState,
@@ -130,10 +127,90 @@ pub const fn decide_stale_capture_retirement(
         CaptureState::Captured if evidence.captured_response_heading_answered => {
             StaleCaptureRetirementDecision::RetireSupersededCapturedOnlyOrphan
         }
-        CaptureState::WriteApplied if evidence.replay_baseline_drifted => {
-            StaleCaptureRetirementDecision::RetireWedgedWriteApplied
-        }
         _ => StaleCaptureRetirementDecision::Keep,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoritativeReplayRebaseEvidence {
+    pub capture_repairable: bool,
+    pub replay_baseline_drifted: bool,
+    pub authoritative_current: bool,
+    pub matching_open_cycle: bool,
+    pub captured_response_body_missing: bool,
+    pub captured_response_heading_answered: bool,
+    pub current_monotonically_extends_baseline: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoritativeReplayRebaseDecision {
+    KeepBaseline,
+    RebaseToAuthoritativeCurrent,
+    BlockConflict,
+}
+
+/// Decide whether an interrupted response may adopt a newer authoritative cut.
+///
+/// The monotonic-extension proof is deliberately strict: every baseline line
+/// must remain in order and only new lines may have been inserted. That admits
+/// later user steering without treating arbitrary edits, deletions, or reorders
+/// as benign. A matching open cycle binds the retained response to the cut.
+pub const fn decide_authoritative_replay_rebase(
+    evidence: AuthoritativeReplayRebaseEvidence,
+) -> AuthoritativeReplayRebaseDecision {
+    if !evidence.replay_baseline_drifted {
+        return AuthoritativeReplayRebaseDecision::KeepBaseline;
+    }
+    if evidence.capture_repairable
+        && evidence.authoritative_current
+        && evidence.matching_open_cycle
+        && evidence.captured_response_body_missing
+        && !evidence.captured_response_heading_answered
+        && evidence.current_monotonically_extends_baseline
+    {
+        return AuthoritativeReplayRebaseDecision::RebaseToAuthoritativeCurrent;
+    }
+    AuthoritativeReplayRebaseDecision::BlockConflict
+}
+
+/// True when `current` preserves every baseline line in order and differs only
+/// by inserted lines. This is the small, pure proof used before rebasing a
+/// retained response onto concurrent operator steering.
+pub fn current_monotonically_extends_baseline(baseline: &str, current: &str) -> bool {
+    if baseline == current {
+        return true;
+    }
+    let mut current_lines = current.lines();
+    baseline
+        .lines()
+        .all(|baseline_line| current_lines.by_ref().any(|line| line == baseline_line))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginGenerationRefreshEvidence {
+    pub preflight_generation: u128,
+    pub live_generation: u128,
+    pub live_registration_observed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginGenerationRefreshDecision {
+    KeepPreflight,
+    AdoptLive,
+}
+
+/// A registered editor generation observed at replay/ACK time supersedes the
+/// turn-start generation when it is newer. Native-library reloads do not enter
+/// this decision because they do not replace editor-plugin code.
+pub const fn decide_plugin_generation_refresh(
+    evidence: PluginGenerationRefreshEvidence,
+) -> PluginGenerationRefreshDecision {
+    if evidence.live_registration_observed
+        && evidence.live_generation > evidence.preflight_generation
+    {
+        PluginGenerationRefreshDecision::AdoptLive
+    } else {
+        PluginGenerationRefreshDecision::KeepPreflight
     }
 }
 
@@ -318,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_capture_retirement_retires_drifted_write_applied_capture() {
+    fn stale_capture_retirement_retains_drifted_write_applied_capture() {
         let decision = decide_stale_capture_retirement(StaleCaptureRetirementEvidence {
             state: CaptureState::WriteApplied,
             replay_baseline_drifted: true,
@@ -326,10 +403,7 @@ mod tests {
             captured_response_heading_answered: false,
         });
 
-        assert_eq!(
-            decision,
-            StaleCaptureRetirementDecision::RetireWedgedWriteApplied
-        );
+        assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
     }
 
     #[test]
@@ -393,6 +467,76 @@ mod tests {
             });
             assert_eq!(decision, StaleCaptureRetirementDecision::Keep);
         }
+    }
+
+    #[test]
+    fn authoritative_rebase_accepts_new_steering_on_the_matching_open_cycle() {
+        let decision = decide_authoritative_replay_rebase(AuthoritativeReplayRebaseEvidence {
+            capture_repairable: true,
+            replay_baseline_drifted: true,
+            authoritative_current: true,
+            matching_open_cycle: true,
+            captured_response_body_missing: true,
+            captured_response_heading_answered: false,
+            current_monotonically_extends_baseline: true,
+        });
+        assert_eq!(
+            decision,
+            AuthoritativeReplayRebaseDecision::RebaseToAuthoritativeCurrent
+        );
+    }
+
+    #[test]
+    fn authoritative_rebase_blocks_conflicts_and_non_authoritative_cuts() {
+        for (authoritative_current, monotonic) in [(false, true), (true, false)] {
+            let decision = decide_authoritative_replay_rebase(AuthoritativeReplayRebaseEvidence {
+                capture_repairable: true,
+                replay_baseline_drifted: true,
+                authoritative_current,
+                matching_open_cycle: true,
+                captured_response_body_missing: true,
+                captured_response_heading_answered: false,
+                current_monotonically_extends_baseline: monotonic,
+            });
+            assert_eq!(decision, AuthoritativeReplayRebaseDecision::BlockConflict);
+        }
+    }
+
+    #[test]
+    fn monotonic_extension_allows_insertions_but_not_edits_or_reorders() {
+        let baseline = "first\nsecond\nthird\n";
+        assert!(current_monotonically_extends_baseline(
+            baseline,
+            "first\nnew steering\nsecond\nthird\n"
+        ));
+        assert!(!current_monotonically_extends_baseline(
+            baseline,
+            "first\nchanged\nthird\n"
+        ));
+        assert!(!current_monotonically_extends_baseline(
+            baseline,
+            "second\nfirst\nthird\n"
+        ));
+    }
+
+    #[test]
+    fn live_registered_plugin_generation_supersedes_preflight() {
+        assert_eq!(
+            decide_plugin_generation_refresh(PluginGenerationRefreshEvidence {
+                preflight_generation: 10,
+                live_generation: 20,
+                live_registration_observed: true,
+            }),
+            PluginGenerationRefreshDecision::AdoptLive
+        );
+        assert_eq!(
+            decide_plugin_generation_refresh(PluginGenerationRefreshEvidence {
+                preflight_generation: 10,
+                live_generation: 20,
+                live_registration_observed: false,
+            }),
+            PluginGenerationRefreshDecision::KeepPreflight
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::PreflightWarning;
 use indexmap::IndexMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Collect warnings that can be evaluated before preflight mutates document or
@@ -225,6 +225,116 @@ pub fn plugin_version_is_older(running: &str, expected: &str) -> bool {
     false
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LivePluginGenerationStatus {
+    pub editor_id: Option<String>,
+    pub kind: String,
+    pub running: String,
+    pub expected: String,
+    pub timestamp_ms: u128,
+    pub stale: bool,
+}
+
+/// Resolve the latest live registration for each editor instance. A plugin
+/// restart may occur after preflight; the newer registration is the authority
+/// for replay/ACK recovery and supersedes the turn-start diagnostic.
+pub fn live_plugin_generation_statuses_from_snapshots(
+    snapshots: &[agent_doc_debounce::LiveBufferSnapshot],
+    expected_for_kind: impl Fn(&str) -> Option<&'static str>,
+) -> Vec<LivePluginGenerationStatus> {
+    let mut latest: HashMap<(String, String), &agent_doc_debounce::LiveBufferSnapshot> =
+        HashMap::new();
+    for snapshot in snapshots {
+        let (Some(kind), Some(running)) = (
+            snapshot.editor_kind.as_deref(),
+            snapshot.editor_version.as_deref(),
+        ) else {
+            continue;
+        };
+        if expected_for_kind(kind).is_none() {
+            continue;
+        }
+        let key = (
+            kind.to_ascii_lowercase(),
+            snapshot.editor_id.clone().unwrap_or_default(),
+        );
+        let replace = latest.get(&key).is_none_or(|current| {
+            agent_doc_workflow::capture::decide_plugin_generation_refresh(
+                agent_doc_workflow::capture::PluginGenerationRefreshEvidence {
+                    preflight_generation: current.timestamp_ms,
+                    live_generation: snapshot.timestamp_ms,
+                    live_registration_observed: true,
+                },
+            ) == agent_doc_workflow::capture::PluginGenerationRefreshDecision::AdoptLive
+        });
+        if replace {
+            latest.insert(key, snapshot);
+        }
+        let _ = running;
+    }
+    let mut statuses = latest
+        .into_values()
+        .filter_map(|snapshot| {
+            let kind = snapshot.editor_kind.as_deref()?;
+            let running = snapshot.editor_version.as_deref()?;
+            let expected = expected_for_kind(kind)?;
+            Some(LivePluginGenerationStatus {
+                editor_id: snapshot.editor_id.clone(),
+                kind: kind.to_string(),
+                running: running.to_string(),
+                expected: expected.to_string(),
+                timestamp_ms: snapshot.timestamp_ms,
+                stale: plugin_version_is_older(running, expected),
+            })
+        })
+        .collect::<Vec<_>>();
+    statuses.sort_by(|left, right| {
+        left.kind
+            .cmp(&right.kind)
+            .then_with(|| left.editor_id.cmp(&right.editor_id))
+    });
+    statuses
+}
+
+pub fn live_plugin_generation_statuses(file: &Path) -> Vec<LivePluginGenerationStatus> {
+    let file_str = file.display().to_string();
+    let live = agent_doc_debounce::live_buffer_snapshots(&file_str)
+        .into_iter()
+        .filter(agent_doc_debounce::live_buffer_snapshot_editor_is_live)
+        .collect::<Vec<_>>();
+    live_plugin_generation_statuses_from_snapshots(&live, expected_plugin_version)
+}
+
+/// Emit replay-time generation evidence. This deliberately runs after preflight
+/// so a plugin installed/restarted during the turn is recognized immediately.
+pub fn report_live_plugin_generation_refresh(file: &Path) {
+    for status in live_plugin_generation_statuses(file) {
+        if status.stale {
+            eprintln!(
+                "[editor] live {} plugin {} is older than expected {}; install/update the editor plugin and restart/reload the IDE host. `agent-doc admin reload-lib` refreshes only libagent_doc and cannot change plugin code or its reported version.",
+                status.kind, status.running, status.expected,
+            );
+        } else {
+            eprintln!(
+                "[editor] live {} plugin {} registered (expected {}); this live generation supersedes any stale plugin warning captured earlier in the turn.",
+                status.kind, status.running, status.expected,
+            );
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "live_plugin_generation_refresh file={} editor_kind={} editor_id={} running={} expected={} stale={} source=repair_boundary",
+                file.display(),
+                status.kind,
+                status.editor_id.as_deref().unwrap_or("unknown"),
+                status.running,
+                status.expected,
+                status.stale,
+            ),
+        );
+    }
+}
+
 /// `#stale-plugin-detect`: detect any live editor plugin reporting a version
 /// older than the plugin build this binary ships with, and warn so the operator
 /// reinstalls it.
@@ -247,26 +357,20 @@ pub fn stale_plugin_warnings_from_snapshots(
 ) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut warnings = Vec::new();
-    for snapshot in snapshots {
-        let (Some(kind), Some(running)) = (
-            snapshot.editor_kind.as_deref(),
-            snapshot.editor_version.as_deref(),
-        ) else {
-            continue;
-        };
-        let Some(expected) = expected_for_kind(kind) else {
-            continue;
-        };
-        if !plugin_version_is_older(running, expected) {
+    for status in live_plugin_generation_statuses_from_snapshots(snapshots, &expected_for_kind) {
+        if !status.stale {
             continue;
         }
-        if !seen.insert((kind.to_string(), running.to_string())) {
+        if !seen.insert((status.kind.clone(), status.running.clone())) {
             continue;
         }
         warnings.push(PreflightWarning {
             code: "stale_plugin".to_string(),
             message: format!(
-                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/native code (a known source of live_prompt_drift / content_ours merge regressions). Reinstall the {kind} plugin (JetBrains: update the IDE plugin to {expected}; VS Code: reinstall the extension) or run `agent-doc admin reload-lib` to force a cdylib reload.",
+                "stale editor plugin: a live {kind} plugin reports version {running}, older than the {expected} build this agent-doc binary ships with. The live editor may run pre-fix IPC/plugin code (a known source of live_prompt_drift / content_ours merge regressions). Install/update the {kind} plugin (JetBrains: update to {expected} and restart/reload the IDE; VS Code: reinstall the extension and reload the window). `agent-doc admin reload-lib` refreshes only the native libagent_doc cdylib; it cannot replace Kotlin/TypeScript plugin code or change the reported plugin version. A later live registration at {expected} or newer supersedes this warning.",
+                kind = status.kind,
+                running = status.running,
+                expected = status.expected,
             ),
             document_agent: None,
             active_harness: None,
@@ -330,6 +434,17 @@ mod tests {
         }
     }
 
+    fn snapshot_with_generation(
+        editor_id: &str,
+        version: &str,
+        timestamp_ms: u128,
+    ) -> agent_doc_debounce::LiveBufferSnapshot {
+        let mut snapshot = snapshot_with_editor("jetbrains", version);
+        snapshot.editor_id = Some(editor_id.to_string());
+        snapshot.timestamp_ms = timestamp_ms;
+        snapshot
+    }
+
     #[test]
     fn stale_plugin_warning_flags_older_live_plugin() {
         let snapshots = vec![snapshot_with_editor("jetbrains", "0.2.205")];
@@ -340,6 +455,38 @@ mod tests {
         assert_eq!(warnings[0].code, "stale_plugin");
         assert!(warnings[0].message.contains("0.2.205"));
         assert!(warnings[0].message.contains("0.2.206"));
+        assert!(warnings[0].message.contains("refreshes only the native"));
+        assert!(
+            warnings[0]
+                .message
+                .contains("cannot replace Kotlin/TypeScript")
+        );
+    }
+
+    #[test]
+    fn replay_boundary_uses_latest_live_generation_for_the_same_editor() {
+        let snapshots = vec![
+            snapshot_with_generation("idea-project", "0.2.261", 10),
+            snapshot_with_generation("idea-project", "0.2.263", 20),
+        ];
+        let statuses =
+            live_plugin_generation_statuses_from_snapshots(&snapshots, |_| Some("0.2.263"));
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].running, "0.2.263");
+        assert!(!statuses[0].stale);
+    }
+
+    #[test]
+    fn replay_boundary_keeps_independent_editor_generations_separate() {
+        let snapshots = vec![
+            snapshot_with_generation("idea-a", "0.2.261", 10),
+            snapshot_with_generation("idea-b", "0.2.263", 20),
+        ];
+        let statuses =
+            live_plugin_generation_statuses_from_snapshots(&snapshots, |_| Some("0.2.263"));
+        assert_eq!(statuses.len(), 2);
+        assert!(statuses.iter().any(|status| status.stale));
+        assert!(statuses.iter().any(|status| !status.stale));
     }
 
     #[test]

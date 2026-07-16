@@ -84,6 +84,14 @@ does not kill the controller or elect `--force-disk`. Only a typed
 `needs_operator` result for competing user-authored intent pauses automatic
 recovery.
 
+A canonical editor advance after delivery proof is another recoverable delivery
+race, not evidence that the capture failed. The document actor re-enters the CRDT
+replace/ACK barrier with the original projection base and target, preserving the
+same capture identity and exact-once response and backlog mutations. If the
+foreground rebase budget is exhausted, the retained operation continues through
+the supervisor and `session-check`; the agent still must not recapture, rerun
+`finalize` or `write --commit`, or force a disk projection.
+
 Rule-based ambiguity resolution requires positive evidence. A duplicate semantic
 operation is deduped; a causally newer editor/replica epoch wins over its stale
 projection; compatible concurrent CRDT histories merge. Missing causal lineage or

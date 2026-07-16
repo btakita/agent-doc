@@ -361,7 +361,7 @@ fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
         }
         (initial, ForceDiskMutationFence::RegisteredEditorReplica) => {
             Err(ForceDiskAuthorityChanged(format!(
-                "force-disk authority changed before mutation for {}: a live editor relay is now registered (initial={initial:?}, status={}); no disk write was performed; retry finalize without --force-disk so the editor replica can reconcile",
+                "force-disk authority changed before mutation for {}: a live editor relay is now registered (initial={initial:?}, status={}); no disk write was performed; run only agent-doc session-check for the existing binary-owned capture so the editor replica can reconcile; do not resubmit finalize, write --commit, or --force-disk",
                 file.display(),
                 current_text_status(&current)
             ))
@@ -1099,6 +1099,49 @@ pub fn settle_retained_committed_projection_through_authority(
     Ok(true)
 }
 
+/// Settle a captured (not yet committed) closeout after an editor reconnect has
+/// already installed the retained target as both canonical authority and disk.
+///
+/// Replacement replica registration bootstraps directly from canonical state,
+/// so it can be delivery-converged with an empty ACK queue. In that state the
+/// durable deferred-write slot is historical evidence, not an outstanding
+/// delivery. Clear it only when the exact retained target is authoritative,
+/// projected to disk, and contains the already-durable captured response.
+pub fn settle_retained_captured_projection_through_authority(
+    path: &Path,
+    captured_response: &str,
+    source: &str,
+) -> Result<bool> {
+    let Some(pending) = pending_document_write(path) else {
+        return Ok(false);
+    };
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    let target_hash = agent_doc_hash::content_hash(&pending.target_content);
+    if canonical != pending.target_content
+        || disk != pending.target_content
+        || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
+        || !agent_doc_turn::response_replay::response_materialized_in_content(
+            captured_response,
+            &canonical,
+        )
+    {
+        return Ok(false);
+    }
+
+    clear_all_deferred_document_write_intents(path, source)?;
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "retained_captured_projection_settled file={} intent_id={} target_hash={} canonical_disk_exact=true captured_response_materialized=true deferred_lineage=cleared",
+            path.display(),
+            pending.intent_id,
+            target_hash,
+        ),
+    );
+    Ok(true)
+}
+
 /// Repair-only zero-replica recovery.
 ///
 /// Ordinary editor-owned writes must never fall back to disk when the owner has
@@ -1454,7 +1497,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                     schedule_stale_editor_replica_pcp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_retry_finalize",
+                                    "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
                                 )));
                             }
@@ -1509,7 +1552,7 @@ pub fn apply_canonical_replace_if_attached(
                                 let recycle_status = agent_doc_controller_io::project_controller::
                                     schedule_stale_editor_replica_pcp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
-                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_retry_finalize",
+                                    "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
                                 )));
                             }
@@ -4072,10 +4115,17 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(1),
             "zero-replica authority must fail fast instead of stalling the turn"
         );
+        let message = format!("{err:#}");
         assert!(
-            format!("{err:#}").contains("await_editor_replica_no_disk_write"),
-            "unexpected error: {err:#}"
+            message.contains("await_editor_replica_no_disk_write_then_session_check"),
+            "unexpected error: {message}"
         );
+        assert!(
+            message.contains("run only agent-doc session-check"),
+            "{message}"
+        );
+        assert!(!message.contains("retry_finalize"), "{message}");
+        assert!(!message.contains("resubmit finalize without"), "{message}");
         assert!(
             format!("{err:#}").contains("editor_replica_reregister=requested"),
             "zero-replica recovery must request editor replica re-registration: {err:#}"
@@ -4457,6 +4507,69 @@ mod tests {
             pending_document_write(&file).is_none(),
             "successful reconnect delivery must clear retained lineage"
         );
+    }
+
+    #[test]
+    fn retained_captured_projection_settles_after_replacement_replica_bootstrap() {
+        let editor_base =
+            "# Session\n\n<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n";
+        let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
+        let captured_target = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            captured_response.trim_end()
+        );
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-captured-replacement-bootstrap";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            &captured_target,
+            editor_base,
+            "retained_captured_projection_zero_replica_test",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+        );
+
+        let (_replacement_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should bootstrap from retained canonical");
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_captured_replacement_bootstrap_current",
+            )
+            .unwrap(),
+            captured_target,
+        );
+        std::fs::write(&file, &captured_target).unwrap();
+
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_captured_replacement_bootstrap_test",
+            )
+            .unwrap(),
+            "replacement bootstrap plus exact disk save should settle without an impossible ACK"
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_captured_replacement_bootstrap_verify",
+            )
+            .unwrap(),
+            captured_target,
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_target);
     }
 
     #[test]

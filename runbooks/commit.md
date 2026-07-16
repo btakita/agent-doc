@@ -29,7 +29,7 @@ A `finalize` / `write --commit` that reached `committed` with `session-check` OK
 
 Console lines like `IPC timeout — response saved as patch`, `IPC proof insufficient … recovery=retry_without_disk_write`, `IPC proof insufficient … recovery=direct_write_fallback`, `missing_response_probe`, or `no_ack` are different: they mean the editor path did not prove delivery. Do not treat that as a successful response closeout for an active editor buffer, do not continue the queue past it, and do not choose an automatic direct session-document disk write. Retry through the editor/CRDT path so the editor buffer remains authoritative. Use `--force-disk` only when the operator explicitly asks for that escape hatch or no live editor owns the file.
 
-`recovery=await_editor_replica_no_disk_write_then_retry_finalize` is the zero-replica form of that retry-only state. The binary has already retained the complete target and requested a safe owner-scoped supervisor recycle. Let the recycle/reconnect complete, then retry the same `finalize` transaction (or let the harness recovery loop do so); do not run `agent-doc repair`, reconstruct the response, or choose `--force-disk`.
+`recovery=await_editor_replica_no_disk_write_then_session_check` is the zero-replica form of that retry-only state. The binary has already retained the complete target and requested a safe owner-scoped supervisor recycle. Let the recycle/reconnect complete, then run only `agent-doc session-check <FILE>` (or let the binary-owned recovery loop do so); do not run another `finalize`, `write --commit`, or `repair`, reconstruct the response, or choose `--force-disk`. Treat the pre-0.34.148 token `recovery=await_editor_replica_no_disk_write_then_retry_finalize` identically if it appears in an older retained diagnostic; its name was misleading, not an instruction to recapture.
 
 A `session-check` interruption with `editor_convergence_required` or missing
 `operator_text_authority_v1` is the same class of retry-only failure. It means
@@ -41,11 +41,14 @@ that escape hatch, because force-disk is a human recovery decision rather than
 an automatic closeout strategy.
 
 `controller_model_backpressure`, a pending delivery ACK, or a response that is
-already present in the live editor is also a settle-and-retry state. The target is
-retained and exact response cells are idempotent, so repeated `finalize` / `write
---commit` calls only add contention. Stop concurrent closeout attempts, keep the
-live editor authoritative, wait for the shared cooldown/reconnect path, and retry
-the same closeout once. Do not kill the project controller to clear a queue strike
+already present in the live editor is also a settle-and-observe state. The target
+is retained and exact response cells are idempotent, so repeated `finalize` /
+`write --commit` calls only add contention. Stop concurrent closeout attempts,
+keep the live editor authoritative, wait for the shared cooldown/reconnect path,
+and retry only `session-check`. A replacement replica can bootstrap from the
+retained canonical target with no pending ACK; `session-check` then retires the
+historical deferred slot, refreshes the exact response snapshot, and commits the
+same durable capture. Do not kill the project controller to clear a queue strike
 or backpressure, and do not use `--force-disk` while the editor is live.
 
 A live editor buffer that differs from disk is usually a **valid unsaved-document

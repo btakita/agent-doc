@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.148
+
+- **`session-check` now finishes a retained capture after replacement-replica bootstrap.** When JetBrains has installed and saved the exact retained canonical target, replacement registration legitimately has an empty ACK queue. The check recognizes exact canonical/target/disk convergence, retires the historical deferred slot, refreshes the response snapshot, and commits the same durable capture without asking the agent to finalize again.
+- **Retained-closeout guidance is single-command and non-recursive.** It now says to retry only `session-check`; it never suggests another finalize/write payload or force-disk recovery. The pending-capture guard also accepts a named same-turn completion such as ``#item, now done`` without masking unrelated future-work recommendations.
+- **PlusCal/TLA+ covers the reconnect settlement.** `CloseoutChurn.tla` proves that an empty-ACK replacement bootstrap eventually clears the retained slot, refreshes the capture snapshot, and commits with exactly one response/backlog application.
+
 ## 0.34.147
 
 - **A live editor advance after CRDT delivery proof no longer turns a successful capture into an agent retry.** The document authority internally rebases the same retained projection intent over the newer canonical cut, repeats the ACK barrier, and preserves operator text while applying the response and any backlog mutation exactly once. If the bounded foreground retry cannot settle, `session-check` reports binary-owned continuation and explicitly forbids recapture, another finalize/write, or force-disk recovery.

@@ -75,6 +75,33 @@ pub fn response_explicitly_has_no_followups(response_text: &str) -> bool {
         .any(|phrase| lower.contains(phrase))
 }
 
+/// True when the response explicitly closes a named tracked-work item in the
+/// same turn (for example, ``#shard, now done``). This is narrower than the
+/// general no-followups predicate: callers may use it to avoid demanding a new
+/// backlog mutation for work that the response identifies as already complete,
+/// while recommendation detection still evaluates any other future work.
+pub fn response_explicitly_closes_named_followup(response_text: &str) -> bool {
+    const COMPLETION_QUALIFIERS: &[&str] = &[
+        "now done",
+        "now complete",
+        "completed this turn",
+        "implemented this turn",
+        "closed this turn",
+    ];
+
+    response_text.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        let completed = COMPLETION_QUALIFIERS
+            .iter()
+            .any(|qualifier| lower.contains(qualifier))
+            || (lower.contains("this turn")
+                && ["implemented", "completed", "closed"]
+                    .iter()
+                    .any(|verb| lower.contains(verb)));
+        lower.contains('#') && completed
+    })
+}
+
 pub fn future_work_signal(response_text: &str, has_pending_add: bool) -> Option<&'static str> {
     if has_pending_add {
         return None;
@@ -619,5 +646,18 @@ mod tests {
                 .patterns_matched
                 .contains(&PatternKind::UnconditionalFollowUp)
         );
+    }
+
+    #[test]
+    fn named_followup_completed_in_same_turn_is_explicitly_closed() {
+        assert!(response_explicitly_closes_named_followup(
+            "Did the registry sharding (`#haivensharreg`, now done) — all checks are green."
+        ));
+        assert!(response_explicitly_closes_named_followup(
+            "Implemented #cachefix this turn; no behavior regression."
+        ));
+        assert!(!response_explicitly_closes_named_followup(
+            "Queued #haivensharreg for the next turn."
+        ));
     }
 }

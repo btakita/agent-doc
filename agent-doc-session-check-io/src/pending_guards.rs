@@ -101,6 +101,7 @@ pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<Gua
     if state.requires_backlog_capture
         && state.required_backlog_targets.is_empty()
         && !agent_doc_turn::heuristics::response_explicitly_has_no_followups(&response_text)
+        && !agent_doc_turn::heuristics::response_explicitly_closes_named_followup(&response_text)
     {
         return Ok(
             agent_doc_workflow::session_check::pending_capture_required_no_mutations_guard_result(),

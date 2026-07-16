@@ -13,6 +13,10 @@ template response is rejected before mutation.
 After the first delivery proof, an editor advances canonical authority before
 disk projection.  The document actor rebases the same retained intent; neither
 the response nor its backlog mutation is captured/applied a second time.
+If the editor then reconnects by replacement registration, its bootstrap is
+already the retained canonical target and its delivery queue is empty.  A fair
+session-check settles that historical deferred slot, refreshes the response
+snapshot, and commits the same capture without requiring an impossible ACK.
 ***************************************************************************)
 
 (* --fair algorithm ChurnFreeCloseout
@@ -32,6 +36,11 @@ deliveryProof = FALSE,
 editorAdvancePending = TRUE,
 canonicalAdvancedAfterProof = FALSE,
 postProofRebases = 0,
+deferredDelivery = TRUE,
+replacementReplicaBootstrapped = FALSE,
+replacementAckQueueEmpty = FALSE,
+snapshotMatchesCapture = FALSE,
+sessionCheckRecovered = FALSE,
 documentQueueMatches = 3,
 snapshotQueueMatches = 2,
 documentQueueMarked = 0,
@@ -102,6 +111,37 @@ QueueDone:
     end while;
 end process;
 
+process ReplacementReplica = "replacement_replica"
+begin
+BootstrapRetainedCanonical:
+    await responseCopies = 1;
+    replacementReplicaBootstrapped := TRUE;
+    replacementAckQueueEmpty := TRUE;
+ReplicaDone:
+    while TRUE do
+        skip;
+    end while;
+end process;
+
+process SessionCheck = "session_check"
+begin
+AwaitReplacementBootstrap:
+    await replacementReplicaBootstrapped /\ replacementAckQueueEmpty;
+SettleHistoricalDeferredSlot:
+    deferredDelivery := FALSE;
+RefreshCapturedResponseSnapshot:
+    snapshotMatchesCapture := TRUE;
+CommitRecoveredCapture:
+    assert cycleState = "rotated_open" /\ captureCopies = 1;
+    cycleState := "committed_response";
+    sessionCheckRecovered := TRUE;
+    committed := TRUE;
+SessionCheckDone:
+    while TRUE do
+        skip;
+    end while;
+end process;
+
 process StrictMarkerGuard = "marker_guard"
 begin
 RejectUnmarkedResponse:
@@ -138,9 +178,6 @@ ApplySameCapture:
     responseCopies := responseCopies + 1;
     backlogMutationCopies := backlogMutationCopies + 1;
     fullResponseInHead := TRUE;
-CommitExactlyOnce:
-    cycleState := "committed_response";
-    committed := TRUE;
 CloseoutDone:
     while TRUE do
         skip;
@@ -165,6 +202,11 @@ TypeOK ==
     /\ editorAdvancePending \in BOOLEAN
     /\ canonicalAdvancedAfterProof \in BOOLEAN
     /\ postProofRebases \in Nat
+    /\ deferredDelivery \in BOOLEAN
+    /\ replacementReplicaBootstrapped \in BOOLEAN
+    /\ replacementAckQueueEmpty \in BOOLEAN
+    /\ snapshotMatchesCapture \in BOOLEAN
+    /\ sessionCheckRecovered \in BOOLEAN
     /\ documentQueueMatches \in Nat
     /\ snapshotQueueMatches \in Nat
     /\ documentQueueMarked \in Nat
@@ -195,11 +237,18 @@ CommitRequiresObservedAckAndFullBody == committed =>
     /\ backlogMutationCopies = 1
     /\ postProofRebases = 1
     /\ queueSyncDone
+    /\ replacementReplicaBootstrapped
+    /\ replacementAckQueueEmpty
+    /\ ~deferredDelivery
+    /\ snapshotMatchesCapture
+    /\ sessionCheckRecovered
 
 EventuallyForegroundObservesLandedAck == <>ackObserved
 EventuallyPartialQueueSyncCompletes == <>queueSyncDone
 EventuallyMalformedResponseRejected == <>malformedRejected
 EventuallySameCaptureCommitsExactlyOnce == <>(committed /\ responseCopies = 1)
 EventuallyPostProofAdvanceRebases == <>(postProofRebases = 1)
+EventuallyReplacementBootstrapSettlesSameCapture ==
+    <>(sessionCheckRecovered /\ ~deferredDelivery /\ snapshotMatchesCapture)
 
 =============================================================================

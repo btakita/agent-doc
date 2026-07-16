@@ -95,6 +95,14 @@ pub struct SessionCheckReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CapturedFinalizeResumeOutcome {
+    NotApplicable,
+    Committed,
+    Superseded,
+    Retained { reason: String },
+}
+
 pub trait SessionCheckEffects {
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
@@ -119,6 +127,7 @@ pub trait SessionCheckEffects {
         file: &Path,
         event: &str,
     ) -> Result<Option<&'static str>>;
+    fn resume_captured_finalize(&self, file: &Path) -> Result<CapturedFinalizeResumeOutcome>;
 }
 
 /// CLI entry: check the end-of-cycle write invariant for `file`.
@@ -986,20 +995,37 @@ fn retained_pending_write_message(
     reason: &str,
     source: &str,
     target_hash: &str,
+    resume_reason: Option<&str>,
 ) -> String {
+    let resume_detail = resume_reason
+        .map(|reason| {
+            format!(
+                " Same-capture recovery remains pending: {}.",
+                reason.replace('\n', " ")
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume after the editor/controller ACK. Do not recapture it with `agent-doc write --commit` and do not force disk; retry `agent-doc session-check {}` or `agent-doc finalize {}` after delivery converges.",
+        "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
         intent_id,
         file.display(),
         reason,
         source,
         target_hash,
-        file.display(),
+        resume_detail,
         file.display(),
     )
 }
 
 fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<SessionCheckStatus> {
+    inspect_core_with_captured_resume(file, effects, true)
+}
+
+fn inspect_core_with_captured_resume(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    allow_captured_resume: bool,
+) -> Result<SessionCheckStatus> {
     let initial_last_ops_event = agent_doc_ops_log_io::last_ops_event(file)?;
 
     if let Some(replay) = detect_jb_cache_conflict_accept_duplicate_replay(file)? {
@@ -1044,6 +1070,28 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
         .as_ref()
         .is_some_and(|state| state.phase == CyclePhase::Committed);
 
+    let mut captured_resume_reason = None;
+    if !closeout_committed
+        && allow_captured_resume
+        && cycle_state.as_ref().is_some_and(|state| {
+            matches!(
+                state.phase,
+                CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
+            )
+        })
+    {
+        match effects.resume_captured_finalize(file)? {
+            CapturedFinalizeResumeOutcome::Committed
+            | CapturedFinalizeResumeOutcome::Superseded => {
+                return inspect_core_with_captured_resume(file, effects, false);
+            }
+            CapturedFinalizeResumeOutcome::NotApplicable => {}
+            CapturedFinalizeResumeOutcome::Retained { reason } => {
+                captured_resume_reason = Some(reason);
+            }
+        }
+    }
+
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
         && !closeout_committed
     {
@@ -1054,8 +1102,18 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
                 pending.reason.token(),
                 &pending.source,
                 &pending.target_hash,
+                captured_resume_reason.as_deref(),
             ),
         ));
+    }
+
+    if let Some(reason) = captured_resume_reason {
+        return Ok(SessionCheckStatus::Interrupted(format!(
+            "[session-check] INTERRUPTED: binary-owned captured closeout for `{}` remains pending: {}. The same capture is durable; do not issue another closeout payload and do not force disk. Retry only `agent-doc session-check {}`.",
+            file.display(),
+            reason.replace('\n', " "),
+            file.display(),
+        )));
     }
 
     if let Some(state) = cycle_state {
@@ -1558,6 +1616,10 @@ mod terminal_convergence_tests {
         ) -> Result<Option<&'static str>> {
             Ok(None)
         }
+
+        fn resume_captured_finalize(&self, _file: &Path) -> Result<CapturedFinalizeResumeOutcome> {
+            Ok(CapturedFinalizeResumeOutcome::NotApplicable)
+        }
     }
 
     #[test]
@@ -1688,9 +1750,13 @@ mod terminal_convergence_tests {
             "crdt_delivery_ack_pending",
             "write_stream",
             "new",
+            None,
         );
         assert!(message.contains("same capture will resume"));
-        assert!(message.contains("Do not recapture"));
+        assert!(message.contains("Do not issue another closeout payload"));
         assert!(message.contains("do not force disk"));
+        assert!(message.contains("retry only `agent-doc session-check session.md`"));
+        assert!(!message.contains("agent-doc finalize"));
+        assert!(!message.contains("write --commit"));
     }
 }

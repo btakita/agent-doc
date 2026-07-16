@@ -196,6 +196,152 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
     ) -> Result<Option<&'static str>> {
         agent_doc_repair_io::recover_missing_commit_boundary(&REPAIR_IO_EFFECTS, file, event)
     }
+
+    fn resume_captured_finalize(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_session_check_io::CapturedFinalizeResumeOutcome> {
+        use agent_doc_session_check_io::CapturedFinalizeResumeOutcome as Outcome;
+        use agent_doc_turn::CyclePhase;
+
+        let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+            return Ok(Outcome::NotApplicable);
+        };
+        if !matches!(
+            state.phase,
+            CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
+        ) {
+            return Ok(Outcome::NotApplicable);
+        }
+        let (Some(capture_id), Some(response_sha256)) = (
+            state.capture_id.as_deref(),
+            state.response_sha256.as_deref(),
+        ) else {
+            return Ok(Outcome::NotApplicable);
+        };
+        let Some(capture) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        else {
+            return Ok(Outcome::NotApplicable);
+        };
+        if capture.cycle_id != state.cycle_id
+            || capture.response_sha256 != response_sha256
+            || capture.response_body.trim().is_empty()
+        {
+            return Ok(Outcome::NotApplicable);
+        }
+
+        let has_retained_delivery =
+            agent_doc_document_realtime_io::pending_document_write(file).is_some();
+        if has_retained_delivery {
+            let settled = match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
+                file,
+                &capture.response_body,
+                "session_check_retained_captured_projection_settlement",
+            ) {
+                Ok(settled) => settled,
+                Err(err) => {
+                    return Ok(Outcome::Retained {
+                        reason: format!("retained projection is not yet safe to settle: {err:#}"),
+                    });
+                }
+            };
+            if !settled {
+                return Ok(Outcome::Retained {
+                    reason: "retained target has not reached exact canonical/disk convergence"
+                        .to_string(),
+                });
+            }
+        } else if state.phase != CyclePhase::WriteApplied {
+            return Ok(Outcome::NotApplicable);
+        }
+
+        let Some(current_state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        else {
+            return Ok(Outcome::Superseded);
+        };
+        if current_state.cycle_id != state.cycle_id
+            || current_state.capture_id.as_deref() != Some(capture_id)
+            || current_state.response_sha256.as_deref() != Some(response_sha256)
+        {
+            return Ok(Outcome::Superseded);
+        }
+
+        if let Err(err) = agent_doc_repair_io::pending::clear_pending(file) {
+            return Ok(Outcome::Retained {
+                reason: format!("failed to advance the durable capture to write-applied: {err:#}"),
+            });
+        }
+        let current = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+            file,
+            "session_check_retained_capture_write_applied",
+        ) {
+            Ok(current) => current,
+            Err(err) => {
+                return Ok(Outcome::Retained {
+                    reason: format!("failed to re-read settled document authority: {err:#}"),
+                });
+            }
+        };
+        let disk = match agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "session_check_retained_capture_disk",
+        ) {
+            Ok(disk) => disk,
+            Err(err) => {
+                return Ok(Outcome::Retained {
+                    reason: format!("failed to re-read settled disk projection: {err:#}"),
+                });
+            }
+        };
+        if disk != current
+            || !agent_doc_turn::response_replay::response_materialized_in_content(
+                &capture.response_body,
+                &current,
+            )
+        {
+            return Ok(Outcome::Retained {
+                reason: "captured response is not yet exact in both canonical authority and disk"
+                    .to_string(),
+            });
+        }
+        if let Err(err) = agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)
+        {
+            return Ok(Outcome::Retained {
+                reason: format!("failed to refresh the settled response snapshot: {err:#}"),
+            });
+        }
+        if state.phase == CyclePhase::ResponseCaptured
+            && let Err(err) = agent_doc_cycle_state_io::mark_write_applied(
+                file,
+                "session_check_retained_capture_write_applied",
+                Some(&current),
+                Some(&current),
+            )
+        {
+            return Ok(Outcome::Retained {
+                reason: format!("failed to project write-applied state: {err:#}"),
+            });
+        }
+        if let Err(err) = agent_doc_commit_io::commit(file) {
+            return Ok(Outcome::Retained {
+                reason: format!("same-capture commit remains retryable: {err:#}"),
+            });
+        }
+
+        let committed =
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)?.is_some_and(|current| {
+                current.cycle_id == state.cycle_id && current.phase == CyclePhase::Committed
+            });
+        if committed {
+            Ok(Outcome::Committed)
+        } else {
+            Ok(Outcome::Retained {
+                reason: "same-capture commit returned without a committed cycle projection"
+                    .to_string(),
+            })
+        }
+    }
 }
 
 pub struct RuntimeCloseoutEffects;

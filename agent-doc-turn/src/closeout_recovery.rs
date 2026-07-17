@@ -675,6 +675,44 @@ pub enum CloseoutRecoveryDecision {
     },
 }
 
+/// Evidence for deriving `write_applied` from the durable captured-response
+/// intent plus the observable editor-authority and disk projections. No
+/// per-document capture-state sidecar participates in this decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteAppliedReconciliationEvidence {
+    pub cycle_phase: crate::CyclePhase,
+    pub response_materialized_in_authority: bool,
+    pub authority_matches_disk: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteAppliedReconciliationDecision {
+    AlreadyProjected,
+    PromoteCycleProjection,
+    RetainUntilVisible,
+    NotApplicable,
+}
+
+pub const fn reconcile_write_applied_evidence(
+    evidence: WriteAppliedReconciliationEvidence,
+) -> WriteAppliedReconciliationDecision {
+    use WriteAppliedReconciliationDecision::{
+        AlreadyProjected, NotApplicable, PromoteCycleProjection, RetainUntilVisible,
+    };
+
+    if matches!(evidence.cycle_phase, crate::CyclePhase::WriteApplied) {
+        return AlreadyProjected;
+    }
+    if !matches!(evidence.cycle_phase, crate::CyclePhase::ResponseCaptured) {
+        return NotApplicable;
+    }
+    if evidence.response_materialized_in_authority && evidence.authority_matches_disk {
+        PromoteCycleProjection
+    } else {
+        RetainUntilVisible
+    }
+}
+
 impl CloseoutRecoveryDecision {
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -902,6 +940,42 @@ mod tests {
             Some(CyclePhase::PreflightStarted),
             true
         ));
+    }
+
+    #[test]
+    fn write_applied_reconciliation_has_one_safe_forward_path() {
+        use WriteAppliedReconciliationDecision::{
+            AlreadyProjected, NotApplicable, PromoteCycleProjection, RetainUntilVisible,
+        };
+
+        let evidence = |cycle_phase, response_materialized_in_authority, authority_matches_disk| {
+            reconcile_write_applied_evidence(WriteAppliedReconciliationEvidence {
+                cycle_phase,
+                response_materialized_in_authority,
+                authority_matches_disk,
+            })
+        };
+
+        assert_eq!(
+            evidence(CyclePhase::WriteApplied, true, true),
+            AlreadyProjected
+        );
+        assert_eq!(
+            evidence(CyclePhase::ResponseCaptured, true, true),
+            PromoteCycleProjection
+        );
+        assert_eq!(
+            evidence(CyclePhase::ResponseCaptured, false, true),
+            RetainUntilVisible
+        );
+        assert_eq!(
+            evidence(CyclePhase::ResponseCaptured, true, false),
+            RetainUntilVisible
+        );
+        assert_eq!(
+            evidence(CyclePhase::PreflightStarted, true, true),
+            NotApplicable
+        );
     }
 
     #[test]

@@ -1,5 +1,121 @@
 # Plan: state backbone and realtime statechart consolidation
 
+## Load-bearing document-turn contract (2026-07-16)
+
+This section supersedes any older design that lets commands reconstruct turn
+progress by reconciling capture JSON, cycle JSON, snapshots, ACK files, or live
+buffer files. The entire document-turn pipeline is one durable state machine,
+folded from facts in Lazily's SQLite-backed state ledger. A local statechart may
+validate transitions, but it is not a second authority.
+
+### Invariant
+
+A turn may advance only monotonically from durable facts. `Committed` means the
+same response intent is proven in the operator-visible document, through the
+native editor-save boundary when an editor owns the document, and in the exact
+Git commit. Operator edits are never replaced merely to make an agent transition
+succeed. A deleted queue item is an operator edit and therefore cannot be
+resurrected by replaying an older document image.
+
+### Policy owner
+
+`agent-doc-state-backbone` owns the event fold and durable transition state.
+`agent-doc-turn` owns the pure transition function. Commands, supervisors,
+plugins, document realtime code, and Git adapters submit evidence and execute
+effects; none may independently choose or persist a lifecycle phase.
+
+### State regions
+
+The state is modeled as orthogonal regions so transport recovery cannot regress
+document or commit progress:
+
+| Region | Monotonic states |
+|---|---|
+| Response intent | `Absent -> Captured(response_hash, body_ref)` |
+| Document projection | `Unobserved -> ApplyRequested -> Visible(authority_hash) -> NativeSaveProven(disk_hash)` |
+| Git proof | `Unobserved -> CommitRequested(candidate_hash) -> Committed(head_sha, candidate_hash)` |
+| Turn disposition | `Open -> TerminalConverged` or `Open -> OperatorBlocked` or `Open -> Abandoned` |
+| Queue dispatch | `Stopped/Idle -> HeadAdmitted(head_id) -> HeadSettled(head_id)` |
+
+`OperatorBlocked` is resumable after new evidence; it is not permission to pick
+disk over the editor or the editor over disk. Terminal dispositions cannot be
+silently exchanged. A conflicting terminal fact is an integrity error with both
+facts retained for diagnosis.
+
+### Transition table
+
+| Current evidence | Event | Guard | Next fact/effect |
+|---|---|---|---|
+| response absent | `ResponseCaptured` | nonempty body + stable hash | persist body by hash and append captured fact |
+| captured, not visible | `ProjectionObserved` | authority contains the exact response cell once | append visible proof; never replay a whole document |
+| visible, disk differs | `NativeSaveObserved` | editor revision and saved hash correspond | append native-save proof |
+| visible, authority=disk, lifecycle projection lags | `SessionCheckObserved` | response hash is exact in both | append missing write-applied proof monotonically |
+| native-save proven | `CommitRequested` | candidate preserves current operator cells | execute exact Git commit |
+| commit requested | `GitCommitObserved` | HEAD tree contains candidate hash | append commit proof and terminal convergence |
+| any open state | `ReplicaLost` / timeout | no destructive choice is proven | request re-registration or emit operator block; retain intent |
+| terminal converged | duplicate/reordered event | event id or proof already folded | idempotent no-op |
+| any state | stale lower-rank projection | same cycle identity | ignore it; never regress |
+
+### Evidence inputs
+
+- Lazily document-cell identity, revision/frontier, and operator-edit events.
+- Plugin receipt/applied/rejected and native-save observations.
+- Exact authority, disk, response-cell, candidate-tree, and HEAD hashes.
+- Replica membership/liveness facts and stable cycle, capture, delivery, and
+  queue-head identities.
+
+An immutable response body may be stored as a content-addressed payload referenced
+by the ledger. That is blob storage, not a lifecycle sidecar: it has no phase and
+cannot drive a transition by itself.
+
+### Allowed edit surfaces
+
+- Pure state/evidence types and reducers: `agent-doc-turn` and
+  `agent-doc-state-backbone`.
+- Evidence and effect adapters: the focused `*-io`, controller, supervisor, Git,
+  and plugin crates.
+- Lazily protocol bindings shared by Rust, Kotlin, and JavaScript.
+
+The same event, state, guard, and effect names are used across these seams.
+Adapters must not invent aliases such as `already_applied`, `write_applied`, and
+`delivery_ack_pending` for the same fact without one typed conversion at the
+boundary.
+
+### Sidecar deletion sequence
+
+1. Make the ledger projection the first and only transition read. Existing JSON
+   is accepted solely by a one-way compatibility importer when the ledger lacks
+   that historical cycle.
+2. Stop every capture-state, cycle-state, ACK-content, snapshot-authority, and
+   live-buffer-sidecar writer. Persist payload blobs and events through Lazily.
+3. Delete compatibility readers after an instrumented release proves no imports
+   occur. No dual-write parity window may make both stores authoritative.
+4. Delete the sidecar directories, reapers, stale-sidecar repair commands, and
+   doctor states that exist only for their reconciliation.
+
+Routing is not an exception: editor membership and target identity come from the
+Lazily replica/open-set projection, never from a filesystem lease.
+
+### Verification
+
+- Model-check every event ordering for monotonicity, idempotence, and terminal
+  uniqueness; use generated traces as simulation-test fixtures.
+- Run deterministic simulations with reordered/duplicated/dropped events,
+  process and IDE restarts, held keys, unsaved cuts, concurrent operator deletes,
+  replica loss, save delays, and Git failures.
+- Assert operator cells are never removed or resurrected, a response cell lands
+  at most once, no command recommends itself, and every recoverable state has one
+  typed forward action.
+- Keep focused reducer tests plus end-to-end Rust/Kotlin/JavaScript conformance
+  tests for event names, hashes, and transition outcomes.
+
+### Out of scope
+
+- Electing disk or an old snapshot as authority when current operator intent is
+  unknown.
+- Treating a timeout as proof that an effect did not happen.
+- Adding any new filesystem state file as a recovery shortcut.
+
 ## Theme
 
 Agent-doc correctness-critical state should be consolidated into two places:

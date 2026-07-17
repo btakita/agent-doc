@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.174
+
+- **Closeout progress is monotonic across lagging replicas.** A stale closeout projection can no longer regress a newer lifecycle phase, and conflicting terminal facts remain explicit instead of being resolved by read order.
+- **`session-check` repairs the exact `response_captured` / `write_applied` split without a sidecar decision.** When the captured response is already present exactly once in both the live authority and disk, the durable backbone advances to write-applied and continues to commit. It does not read capture-state JSON, recapture the response, replay a whole document, or recommend `write --commit` in a loop.
+- **The document-turn state-machine and sidecar-deletion contract is now load-bearing architecture.** Lifecycle transitions live in the Lazily-backed state ledger; plugins, editor, disk, and Git submit typed evidence or execute effects. Routing, liveness, capture-state, cycle-state, snapshot-authority, and ACK-content files have no authority exception during retirement.
+
 ## 0.34.173
 
 - **A retained capture cannot converge on a target that dropped its response.** When editor, Lazily/CRDT, and disk exactly match an incomplete reconnect target, `session-check` now replays the durable response cell over that editor-authoritative cut, preserving newer operator prompts and queue deletions, then settles only after editor ACK and disk projection.

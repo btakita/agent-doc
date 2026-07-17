@@ -5,6 +5,14 @@ The concrete implementation of **S6** from
 "eliminate the durable filesystem sidecars entirely" north star. S6 was previously
 rejected on premises that S5 (2026-07-11) invalidated; this plan supersedes that decision.
 
+**2026-07-16 clarification:** there are no routing, liveness, capture-state,
+cycle-state, snapshot-authority, or ACK-content exceptions. All of them move to
+the Lazily-backed ledger/projections described in
+[`plan-state-backbone-realtime-statecharts.md`](plan-state-backbone-realtime-statecharts.md).
+Filesystem JSON is at most a one-way historical import during cutover; it is not
+written, merged, polled, or consulted as runtime authority. The prior wording
+that deferred the routing read is superseded.
+
 ## Progress 2026-07-14 — operator directive "full retirement now" (supersedes "keep for background durability")
 
 Two destructive step-6 slices landed after a live controller wedge
@@ -48,8 +56,10 @@ avoid entangling that session's work.
    the lease write, and both reapers (`reap_dead_live_buffer_sidecars`, `reap_stale_jetbrains_live_buffers`
    — note these now **duplicate**; consolidate or delete together). Keep the `SqliteOutbox`/ledger as
    the recycle-recovery source (already lazily-owned).
-- The routing read (`ipc-io::editor_target`) stays on the sidecar (deferred — inside the
-  `reliable-sync-io → ipc-io` dep cycle; routing, not authority).
+- **Routing cutover** — break the `reliable-sync-io -> ipc-io` dependency cycle
+  with a narrow replica-target query seam, then move `ipc-io::editor_target` to
+  the Lazily replica/open-set projection. Delete the filesystem routing read in
+  the same slice; routing is correctness-critical and has no sidecar exception.
 
 ## Goal
 

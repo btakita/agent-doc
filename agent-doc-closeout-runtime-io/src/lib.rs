@@ -284,14 +284,13 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         ) {
             return Ok(Outcome::NotApplicable);
         }
-        let (Some(capture_id), Some(response_sha256)) = (
-            state.capture_id.as_deref(),
-            state.response_sha256.as_deref(),
-        ) else {
+        let (Some(capture_id), Some(response_sha256)) =
+            (state.capture_id.clone(), state.response_sha256.clone())
+        else {
             return Ok(Outcome::NotApplicable);
         };
         let Some(capture) =
-            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+            agent_doc_cycle_state_io::load_projected_captured_response(file, &capture_id)?
         else {
             return Ok(Outcome::NotApplicable);
         };
@@ -323,8 +322,55 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                         .to_string(),
                 });
             }
-        } else if state.phase != CyclePhase::WriteApplied && !reactivated_false_stale_capture {
-            return Ok(Outcome::NotApplicable);
+        } else if !reactivated_false_stale_capture {
+            let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "session_check_write_applied_capture_reconciliation_current",
+            )?;
+            let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+                file,
+                "session_check_write_applied_capture_reconciliation_disk",
+            )?;
+            let decision = agent_doc_turn::closeout_recovery::reconcile_write_applied_evidence(
+                agent_doc_turn::closeout_recovery::WriteAppliedReconciliationEvidence {
+                    cycle_phase: state.phase,
+                    response_materialized_in_authority:
+                        agent_doc_turn::response_replay::response_materialized_in_content(
+                            &capture.response_body,
+                            &current,
+                        ),
+                    authority_matches_disk: current == disk,
+                },
+            );
+            match decision {
+                agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::AlreadyProjected => {}
+                agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::PromoteCycleProjection => {
+                    agent_doc_cycle_state_io::mark_write_applied(
+                        file,
+                        "session_check_capture_write_applied_reconciled",
+                        Some(&current),
+                        Some(&disk),
+                    )?;
+                    let Some(reconciled) =
+                        agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+                    else {
+                        return Ok(Outcome::Retained {
+                            reason: "write-applied capture reconciliation lost its cycle projection"
+                                .to_string(),
+                        });
+                    };
+                    state = reconciled;
+                }
+                    agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::RetainUntilVisible => {
+                        return Ok(Outcome::Retained {
+                            reason: "response_captured: captured response is waiting for exact authority/disk convergence before write-applied"
+                                .to_string(),
+                        });
+                    }
+                agent_doc_turn::closeout_recovery::WriteAppliedReconciliationDecision::NotApplicable => {
+                    return Ok(Outcome::NotApplicable);
+                }
+            }
         }
 
         let Some(current_state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
@@ -332,8 +378,8 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             return Ok(Outcome::Superseded);
         };
         if current_state.cycle_id != state.cycle_id
-            || current_state.capture_id.as_deref() != Some(capture_id)
-            || current_state.response_sha256.as_deref() != Some(response_sha256)
+            || current_state.capture_id.as_deref() != Some(capture_id.as_str())
+            || current_state.response_sha256.as_deref() != Some(response_sha256.as_str())
         {
             return Ok(Outcome::Superseded);
         }
@@ -665,6 +711,71 @@ mod tests {
             agent_doc_capture_io::CaptureState::Discarded,
             "the exact same capture must no longer remain falsely retired"
         );
+    }
+
+    #[test]
+    fn write_applied_capture_promotes_lagging_backbone_before_commit_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please halt the queue.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: queue halted — test\n\n",
+            "The queue is halted.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- no-pending-capture -->\n",
+        );
+        let target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please halt the queue.\n",
+            "### Re: queue halted — test\n\n",
+            "The queue is halted.\n",
+            "<!-- agent:boundary:response -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        std::fs::write(&file, base).unwrap();
+        agent_doc_snapshot_io::save(&file, base, agent_doc_ops_log_io::log_op).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
+        std::fs::write(&file, target).unwrap();
+        agent_doc_snapshot_io::save(&file, target, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_capture_io::mark_write_applied(&file).unwrap();
+
+        let before = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.phase, CyclePhase::ResponseCaptured);
+        assert_eq!(
+            before.capture_id.as_deref(),
+            Some(capture.capture_id.as_str())
+        );
+
+        let outcome = RuntimeSessionCheckEffects
+            .resume_captured_finalize(&file)
+            .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                CapturedFinalizeResumeOutcome::Committed
+                    | CapturedFinalizeResumeOutcome::Retained { .. }
+            ),
+            "write-applied capture proof must enter commit recovery: {outcome:?}"
+        );
+        let after = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            after.phase,
+            CyclePhase::WriteApplied | CyclePhase::Committed
+        ));
     }
 }
 

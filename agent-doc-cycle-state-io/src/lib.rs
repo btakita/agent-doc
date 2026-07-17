@@ -635,11 +635,17 @@ pub fn apply_closeout_projection_to_cycle_state(
         return false;
     }
 
+    let resolution = agent_doc_turn::resolve_closeout_phase(state.phase, projected_phase);
     let preserve_noop_commit_event = state.phase == projected_phase
         && agent_doc_turn::cycle_policy::is_noop_commit_event(&state.last_event);
-    let changed = state.phase != projected_phase;
-    state.phase = projected_phase;
-    if !preserve_noop_commit_event {
+    let changed = matches!(
+        resolution,
+        agent_doc_turn::CloseoutPhaseResolution::AdoptProjected
+    );
+    if changed {
+        state.phase = projected_phase;
+    }
+    if (changed || state.phase == projected_phase) && !preserve_noop_commit_event {
         state.last_event = projection.event_label(projected_phase);
     }
     if state.capture_id.is_none() {
@@ -3273,6 +3279,36 @@ mod tests {
                 .last_event
                 .contains("state_backbone_commit_observed")
         );
+    }
+
+    #[test]
+    fn load_with_closeout_projection_never_regresses_newer_sidecar_phase() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        start_preflight(&doc, Some("body"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("body"),
+            Some("body"),
+            "response-sha",
+            None,
+        )
+        .unwrap();
+
+        // Simulate a crash after the local phase advanced but before the
+        // matching backbone fact was appended.
+        let mut sidecar = load(&doc).unwrap().unwrap();
+        sidecar.phase = CyclePhase::WriteApplied;
+        sidecar.last_event = "capture_write_applied_proof".to_string();
+        save(&doc, &sidecar).unwrap();
+
+        let projected = load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(projected.phase, CyclePhase::WriteApplied);
+        assert_eq!(projected.last_event, "capture_write_applied_proof");
     }
 
     #[test]

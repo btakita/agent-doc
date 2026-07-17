@@ -51,6 +51,51 @@ impl CyclePhase {
     pub const fn is_open(self) -> bool {
         !matches!(self, Self::Committed | Self::Abandoned)
     }
+
+    const fn progress_rank(self) -> Option<u8> {
+        match self {
+            Self::PreflightStarted => Some(0),
+            Self::ResponseCaptured => Some(1),
+            Self::WriteApplied => Some(2),
+            Self::Committed | Self::Abandoned => None,
+        }
+    }
+}
+
+/// Monotone resolution for two durable views of the same closeout cycle.
+///
+/// The state backbone and the local cycle projection are replicas of one
+/// lifecycle, not competing authorities. A lagging replica may fill missing
+/// metadata, but it must never move the lifecycle backward. Conflicting
+/// terminal facts remain explicit instead of being resolved by last-read wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseoutPhaseResolution {
+    KeepCurrent,
+    AdoptProjected,
+    ConflictingTerminalFacts,
+}
+
+pub const fn resolve_closeout_phase(
+    current: CyclePhase,
+    projected: CyclePhase,
+) -> CloseoutPhaseResolution {
+    use CloseoutPhaseResolution::{AdoptProjected, ConflictingTerminalFacts, KeepCurrent};
+
+    if current as u8 == projected as u8 {
+        return KeepCurrent;
+    }
+    match (current, projected) {
+        (
+            CyclePhase::Committed | CyclePhase::Abandoned,
+            CyclePhase::Committed | CyclePhase::Abandoned,
+        ) => ConflictingTerminalFacts,
+        (CyclePhase::Committed | CyclePhase::Abandoned, _) => KeepCurrent,
+        (_, CyclePhase::Committed | CyclePhase::Abandoned) => AdoptProjected,
+        _ => match (current.progress_rank(), projected.progress_rank()) {
+            (Some(current), Some(projected)) if projected > current => AdoptProjected,
+            _ => KeepCurrent,
+        },
+    }
 }
 
 /// Maximum age for treating an open cycle as actively in flight for reactive
@@ -364,6 +409,30 @@ mod tests {
         assert!(!machine.send(CycleEvent::WriteApplied));
         assert!(!machine.send(CycleEvent::Abandoned));
         assert_eq!(machine.state(), CyclePhase::Committed);
+    }
+
+    #[test]
+    fn closeout_phase_resolution_is_monotone_across_replica_lag() {
+        use super::CloseoutPhaseResolution::{
+            AdoptProjected, ConflictingTerminalFacts, KeepCurrent,
+        };
+
+        assert_eq!(
+            resolve_closeout_phase(CyclePhase::ResponseCaptured, CyclePhase::WriteApplied),
+            AdoptProjected
+        );
+        assert_eq!(
+            resolve_closeout_phase(CyclePhase::WriteApplied, CyclePhase::ResponseCaptured),
+            KeepCurrent
+        );
+        assert_eq!(
+            resolve_closeout_phase(CyclePhase::Committed, CyclePhase::WriteApplied),
+            KeepCurrent
+        );
+        assert_eq!(
+            resolve_closeout_phase(CyclePhase::Committed, CyclePhase::Abandoned),
+            ConflictingTerminalFacts
+        );
     }
 
     #[test]

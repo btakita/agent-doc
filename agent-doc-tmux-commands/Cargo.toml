@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux-commands"
-version = "0.34.173"
+version = "0.34.174"
 edition = "2024"
 description = "Pure tmux command builders and parsers for agent-doc"
 license = "MIT"

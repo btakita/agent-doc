@@ -51,10 +51,7 @@ pub fn supervisor_stderr_redirect_needed(harness: &HarnessConfig, route_owned: b
 }
 
 pub fn supervisor_stderr_redirect_path(project_root: &Path) -> PathBuf {
-    project_root
-        .join(".agent-doc")
-        .join("logs")
-        .join("supervisor-stderr.log")
+    agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(project_root)
 }
 
 #[cfg(unix)]

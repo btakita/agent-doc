@@ -41,4 +41,18 @@ submit), reading as "stderr bled through."
   (`SupervisorStderrRedirect`), `start.rs`, `route.rs` boot diagnostics, and the
   `#restartstderrbleed` invariant in `AGENTS.md`.
 - Operator-verify: live JB `Run Agent Doc` on a no-pane document, confirm no raw
-  stderr appears in the pane on start or on the first manual submit.
+stderr appears in the pane on start or on the first manual submit.
+
+## Implementation status (2026-07-16)
+
+Code-complete. Fresh route provisioning and controller-owned cold replacement
+now create the supervisor stderr log before submitting the pane command and
+render `2>> <supervisor-stderr.log>` into that command. This closes the entire
+pre-redirect window, including argument parsing and admission failures; the
+existing in-process `SupervisorStderrRedirect` remains defense in depth.
+
+A deterministic fd-plumbing test executes a fake route-owned agent-doc binary
+and proves its boot diagnostic reaches only the supervisor log, with empty pane
+stdout/stderr captures. The remaining live no-pane JB observation is an
+operator-verification gate because automated verification must not create or
+focus an IDE/tmux pane during operator activity.

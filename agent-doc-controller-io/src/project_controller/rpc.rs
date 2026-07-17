@@ -12214,11 +12214,29 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         match supervisor_replacement_pane_start_decision(pane_alive, current_command.as_deref()) {
             SupervisorReplacementPaneStartDecision::PreserveExisting => {
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
-                let start_cmd =
-                    agent_doc_supervisor_process::start_command::route_owned_start_command(
-                        &agent_doc_bin,
-                        &work.file,
+                let project_root = agent_doc_project_root_io::project_root_containing(&work.file)
+                    .or_else(|| work.file.parent().map(Path::to_path_buf))
+                    .context(
+                        "replacement supervisor document must have a project root or parent",
+                    )?;
+                let stderr_log =
+                    agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
+                        &project_root,
                     );
+                let stderr_log_dir = stderr_log
+                    .parent()
+                    .context("replacement supervisor stderr path must include a logs directory")?;
+                std::fs::create_dir_all(stderr_log_dir).with_context(|| {
+                    format!(
+                        "failed to prepare replacement supervisor stderr directory {}",
+                        stderr_log_dir.display()
+                    )
+                })?;
+                let start_cmd = agent_doc_supervisor_process::start_command::route_owned_start_command_with_stderr_log(
+                    &agent_doc_bin,
+                    &work.file,
+                    &stderr_log,
+                );
                 agent_doc_tmux_io::input_diag::log_text_submit(
                     agent_doc_tmux_io::input_diag::InputDiagSink::new(
                         Some(&work.file),

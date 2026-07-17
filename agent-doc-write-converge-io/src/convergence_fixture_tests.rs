@@ -1324,9 +1324,9 @@ mod core_tests {
         );
     }
     #[test]
-    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
-        // The visible file carries a NEW user prompt the snapshot never saw —
-        // adopting content_ours would silently drop it. Fail closed.
+    fn live_prompt_drift_auto_recovery_safe_accepts_disk_only_exchange_prompt() {
+        // The visible file carries a NEW user prompt the snapshot never saw. The
+        // editor cut stays authoritative and the response cell appends after it.
         let snapshot = agent_doc_test_support::drift_content_ours();
         let mut fragmented = agent_doc_test_support::drift_baseline();
         fragmented = fragmented.replace(
@@ -1334,13 +1334,21 @@ mod core_tests {
             "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
         );
         assert!(
-            !live_prompt_drift_auto_recovery_safe(
+            live_prompt_drift_auto_recovery_safe(
                 &snapshot,
                 &fragmented,
                 normalize_visible_recovery_compare,
             ),
-            "a disk-only user prompt must block auto-recovery"
+            "a live user prompt must not block response-cell recovery"
         );
+        let target = live_prompt_drift_recovery_target(
+            &snapshot,
+            &fragmented,
+            normalize_visible_recovery_compare,
+        )
+        .expect("the response cell should append after the live prompt");
+        assert!(target.contains("❯ do #brand-new-user-prompt-typed-after-preflight"));
+        assert!(target.contains("### Re: do #fix"));
     }
     #[test]
     fn live_prompt_drift_auto_recovery_preserves_disk_only_queue_item() {

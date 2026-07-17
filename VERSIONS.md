@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.163
+
+- **Fresh route-owned supervisors redirect stderr before the binary starts.** Route provisioning and controller-owned cold replacement create `.agent-doc/logs/supervisor-stderr.log` before submitting the pane command, then render an exact shell-level `2>>` redirection. Argument parsing, admission failures, and every other pre-`SupervisorStderrRedirect` diagnostic therefore stay out of the agent pane; the in-process redirect remains defense in depth.
+- **The initial-boot fd invariant is executable.** A deterministic process test launches a fake route-owned agent-doc command and proves its boot diagnostic reaches only the supervisor log while the pane stdout/stderr captures remain empty. Architecture checks require both fresh-route and replacement-supervisor call sites to use the redirected renderer.
+- **Retained response recovery no longer resurrects operator-deleted queue or backlog entries.** Response delivery now rebases as a semantic cell over the current Lazily editor cut. A missing response appends without replaying stale components; once the response is live, projection retains the editor cut byte-for-byte, including unsaved deletions and newer prompts.
+- **Post-cell projection cannot create the duplicate-boundary wedge.** The semantic rebase bypasses the whole-document component merge that could duplicate an exchange boundary after delivery, while preflight/session-check retain the narrow self-heal for artifacts created by older binaries. Exhaustive Rust fixtures and the `CrdtLineageFence` TLC model cover deleted queue state, newer prompts, idempotent replay, and the single-boundary invariant.
+
 ## 0.34.162
 
 - **Response persistence is now incremental at semantic boundaries.** `response-checkpoint` writes cumulative, complete `### Re:` cells into Lazily without queue/backlog mutation or commit; later checkpoints replace the prior uncommitted tail. `respond` is now the primary binary-owned exact-once turn-resolution command, with `finalize` retained as a compatibility alias rather than a distinct phase or the first document write.

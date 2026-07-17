@@ -1549,7 +1549,6 @@ pub fn apply_canonical_replace_if_attached(
     // RPC timeouts are congestion signals inside this larger deadline, not a
     // reason to abandon an already-accepted compact/finalize mutation.
     let mut deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
-    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(expected_current).encode_state();
     let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
     let mut pending_target: Option<String> = None;
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpcRelayWrite> = None;
@@ -1747,14 +1746,14 @@ pub fn apply_canonical_replace_if_attached(
                                 &relay_text,
                                 source,
                             );
-                            let merged = agent_doc_merge::crdt::merge_by_component(
-                                    Some(&base_state),
-                                    content,
-                                    &editor_cut,
-                                )
-                                .with_context(|| {
-                                    format!(
-                                        "{source}: failed to CRDT-merge the settled editor version for {}",
+                            let merged = rebase_agent_candidate_over_editor_cut(
+                        expected_current,
+                        content,
+                        &editor_cut,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "{source}: failed to CRDT-merge the settled editor version for {}",
                                         file.display()
                                     )
                                 })?;
@@ -1983,6 +1982,41 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
         .flatten()
         .is_none();
     boundary_singleton && single_exchange
+}
+
+/// Rebase one binary-owned document candidate onto Lazily's current operator
+/// cut. Response delivery is a semantic cell, not a whole-document replay:
+/// once that response is already present, the live cut wins byte-for-byte; if
+/// it is still missing, append only that response cell. Other candidates keep
+/// the existing component-aware three-way merge.
+fn rebase_agent_candidate_over_editor_cut(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Result<String> {
+    let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
+        editor_cut,
+        merge_base,
+        agent_target,
+    )?
+    .unwrap_or_else(|| editor_cut.to_string());
+    let target_introduces_response =
+        !write_policy::buffer_presents_reference_response(agent_target, merge_base);
+    if target_introduces_response {
+        if write_policy::buffer_presents_reference_response(agent_target, &editor_reconciled) {
+            return Ok(editor_reconciled);
+        }
+        if let Some(recovered) = write_policy::live_prompt_drift_recovery_target(
+            agent_target,
+            &editor_reconciled,
+            write_policy::normalize_visible_recovery_compare,
+        ) {
+            return Ok(recovered);
+        }
+    }
+
+    let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(merge_base).encode_state();
+    agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
 }
 
 /// Normalize the narrow structural transient produced when a retained response
@@ -2643,46 +2677,19 @@ pub fn deferred_document_write_reconnect_content(
             continue;
         }
 
-        // A timed-out delivery can already be visible in the editor with newer
-        // operator text even though its ACK never settled.  Treat that intent
-        // as applied before replaying later journal entries; merging it again
-        // from the older expected cut makes the exchange component conflict
-        // with the operator edit and the component merge's ours-wins policy
-        // would erase that edit.
-        let target_introduces_response =
-            !agent_doc_document_realtime::write_policy::buffer_presents_reference_response(
-                &intent.target_content,
-                &merge_base,
-            );
-        if target_introduces_response
-            && agent_doc_document_realtime::write_policy::buffer_presents_reference_response(
-                &intent.target_content,
-                &merged,
-            )
-        {
-            continue;
-        }
-
-        let editor_reconciled =
-            agent_doc_merge::response_cell::reconcile_superseded_response_targets(
-                &merged,
-                &merge_base,
-                &intent.target_content,
-            )?
-            .unwrap_or_else(|| merged.clone());
-        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(&merge_base).encode_state();
-        merged = agent_doc_merge::crdt::merge_by_component(
-            Some(&base_state),
-            &intent.target_content,
-            &editor_reconciled,
-        )
-        .with_context(|| {
-            format!(
-                "failed to replay deferred agent change {} over editor content for {}",
-                intent.intent_id,
-                file.display()
-            )
-        })?;
+        // Re-evaluate each durable semantic intent over the latest operator
+        // cut. In particular, a retained response may append only its response
+        // cell; replaying its stale whole-document target can resurrect queue
+        // or backlog lines the operator deleted while the ACK was pending.
+        merged =
+            rebase_agent_candidate_over_editor_cut(&merge_base, &intent.target_content, &merged)
+                .with_context(|| {
+                    format!(
+                        "failed to replay deferred agent change {} over editor content for {}",
+                        intent.intent_id,
+                        file.display()
+                    )
+                })?;
         merged = agent_doc_merge::response_cell::deduplicate_response_cells(&merged)
             .ok()
             .flatten()
@@ -5072,6 +5079,130 @@ mod tests {
             "the closing editor's queue tombstone must be monotonic:\n{projected}"
         );
         assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn retained_response_rebase_preserves_live_prompt_and_operator_deletions() {
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "❯ Compare the profiles.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#haivenresume]\n",
+            "- do [#haivenapply]\n",
+            "- do [#haivenprofiles]\n",
+            "- do [#kept]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#haivenresume] resume\n",
+            "- [ ] [#haivenapply] apply\n",
+            "- [ ] [#haivenprofiles] profiles\n",
+            "- [ ] [#kept] keep\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let agent_target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Compare the profiles. — gpt-5\n\nComparison complete.\n<!-- /agent:exchange -->",
+        );
+        let editor_cut = baseline
+            .replace(
+                "❯ Compare the profiles.\n",
+                "❯ Compare the profiles.\n❯ Implement gRPC batching.\n",
+            )
+            .replace("- do [#haivenresume]\n", "")
+            .replace("- do [#haivenapply]\n", "")
+            .replace("- do [#haivenprofiles]\n", "")
+            .replace("- [ ] [#haivenresume] resume\n", "")
+            .replace("- [ ] [#haivenapply] apply\n", "")
+            .replace("- [ ] [#haivenprofiles] profiles\n", "");
+
+        let rebased =
+            rebase_agent_candidate_over_editor_cut(baseline, &agent_target, &editor_cut).unwrap();
+
+        assert!(rebased.contains("### Re: Compare the profiles."));
+        assert!(rebased.contains("❯ Implement gRPC batching."));
+        assert!(rebased.contains("[#kept]"));
+        assert!(!rebased.contains("haivenresume"));
+        assert!(!rebased.contains("haivenapply"));
+        assert!(!rebased.contains("haivenprofiles"));
+    }
+
+    #[test]
+    fn retained_response_rebase_is_noop_after_cell_is_already_live() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n❯ Question.\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n- do [#deleted]\n<!-- /agent:queue -->\n",
+        );
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Question. — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+        );
+        let live = target
+            .replace("❯ Question.\n", "❯ Question.\n❯ New prompt.\n")
+            .replace("- do [#deleted]\n", "");
+
+        let rebased = rebase_agent_candidate_over_editor_cut(baseline, &target, &live).unwrap();
+
+        assert_eq!(rebased, live);
+    }
+
+    #[test]
+    fn retained_response_rebase_exhausts_editor_cut_interleavings() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Original prompt.\n",
+            "<!-- agent:boundary:one -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n- do [#operator-deleted]\n<!-- /agent:queue -->\n",
+            "<!-- agent:backlog -->\n- [ ] [#operator-deleted] work\n<!-- /agent:backlog -->\n",
+        );
+        let target = baseline.replace(
+            "<!-- agent:boundary:one -->",
+            "### Re: Original prompt. — gpt-5\n\nAnswered.\n<!-- agent:boundary:one -->",
+        );
+
+        for response_already_live in [false, true] {
+            for operator_deletes in [false, true] {
+                for operator_adds_prompt in [false, true] {
+                    let mut editor_cut = if response_already_live {
+                        target.clone()
+                    } else {
+                        baseline.to_string()
+                    };
+                    if operator_deletes {
+                        editor_cut = editor_cut
+                            .replace("- do [#operator-deleted]\n", "")
+                            .replace("- [ ] [#operator-deleted] work\n", "");
+                    }
+                    if operator_adds_prompt {
+                        editor_cut = editor_cut.replace(
+                            "❯ Original prompt.\n",
+                            "❯ Original prompt.\n❯ New prompt during delivery.\n",
+                        );
+                    }
+
+                    let rebased =
+                        rebase_agent_candidate_over_editor_cut(baseline, &target, &editor_cut)
+                            .unwrap();
+                    assert_eq!(rebased.matches("### Re: Original prompt.").count(), 1);
+                    assert_eq!(rebased.matches("agent:boundary:").count(), 1);
+                    assert_eq!(
+                        rebased.contains("operator-deleted"),
+                        !operator_deletes,
+                        "queue/backlog deletion state changed for already_live={response_already_live}, adds_prompt={operator_adds_prompt}\n{rebased}",
+                    );
+                    assert_eq!(
+                        rebased.contains("❯ New prompt during delivery."),
+                        operator_adds_prompt,
+                    );
+                    assert!(agent_projection_integrity_valid(&rebased));
+                    if response_already_live {
+                        assert_eq!(rebased, editor_cut);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

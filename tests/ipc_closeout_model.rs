@@ -1049,10 +1049,10 @@ fn commit_auto_recovers_live_prompt_drift_wedge() {
 }
 
 #[test]
-fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
-    // Negative case: the same wedge shape, but the visible file also carries a
-    // genuine new user prompt the snapshot never saw. Auto-recovery must NOT fire
-    // (it would silently drop the user prompt); the commit fails closed instead.
+fn commit_rebases_response_over_newer_visible_user_prompt() {
+    // The visible file carries a genuine new user prompt the response snapshot
+    // never saw. Semantic response recovery appends only the missing response
+    // cell over that newer cut, so neither side needs to be discarded.
     let (tmp, doc, _baseline, original) = setup_project(false);
     let root = tmp.path();
 
@@ -1071,17 +1071,27 @@ fn commit_fails_closed_when_drift_carries_disk_only_user_prompt() {
         .current_dir(root)
         .args(["commit", doc.to_str().unwrap()])
         .assert()
-        .failure();
+        .success();
 
     let ops_log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        !ops_log.contains("live_prompt_drift_auto_recovered"),
-        "a disk-only user prompt must block auto-recovery (fail closed):\n{ops_log}"
+        ops_log.contains("live_prompt_drift_auto_recovered"),
+        "semantic response recovery must remain observable:\n{ops_log}"
     );
     let visible = fs::read_to_string(&doc).unwrap();
     assert!(
         visible.contains("do #typed-after-preflight"),
-        "the genuine user prompt must remain on disk for the next cycle:\n{visible}"
+        "the genuine user prompt must survive semantic response recovery:\n{visible}"
+    );
+    assert!(
+        visible.contains("Implemented and verified the auto-recovery"),
+        "the missing response must land beside the newer prompt:\n{visible}"
+    );
+    let head = head_blob(root);
+    assert!(
+        head.contains("do #typed-after-preflight")
+            && head.contains("Implemented and verified the auto-recovery"),
+        "commit must preserve the prompt and response together:\n{head}"
     );
 }
 

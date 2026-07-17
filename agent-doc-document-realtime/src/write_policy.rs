@@ -23,7 +23,7 @@ use agent_doc_turn::response_replay::response_materialized_in_content;
 use anyhow::Result;
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -2089,9 +2089,9 @@ fn is_exchange_boundary(line: &str) -> bool {
 /// never authorizes wholesale snapshot adoption: queue/backlog/frontmatter and
 /// other disjoint operator edits stay as they are in `file_content`, while only
 /// the newest missing `### Re:` block from `snapshot` may be appended to
-/// `agent:exchange`. Prompt-target edits inside the visible file still fail
-/// closed because the resolver cannot prove where the response should land
-/// relative to a newly typed prompt.
+/// `agent:exchange`. A newly typed prompt stays before that response: the live
+/// buffer is the authoritative operator cut, and the response is a distinct
+/// append-only cell applied after that cut.
 pub fn live_prompt_drift_auto_recovery_safe(
     snapshot: &str,
     file_content: &str,
@@ -2112,13 +2112,6 @@ pub fn live_prompt_drift_recovery_target(
     file_content: &str,
     normalize_visible_recovery_compare: impl Fn(&str) -> String + Copy,
 ) -> Option<String> {
-    // A newly typed prompt inside `agent:exchange` makes response placement
-    // ambiguous. Queue/backlog prompt text is disjoint operator state and is
-    // preserved by the merged target below.
-    if exchange_has_disk_only_prompt_target(snapshot, file_content) {
-        return None;
-    }
-
     let response_block = latest_missing_snapshot_response_block(
         snapshot,
         file_content,
@@ -2137,63 +2130,6 @@ pub fn live_prompt_drift_recovery_target(
     (normalize_visible_recovery_compare(&recovered)
         != normalize_visible_recovery_compare(file_content))
     .then_some(recovered)
-}
-
-fn exchange_has_disk_only_prompt_target(snapshot: &str, file_content: &str) -> bool {
-    let (Ok(snapshot_components), Ok(file_components)) = (
-        agent_doc_element::element::parse(snapshot),
-        agent_doc_element::element::parse(file_content),
-    ) else {
-        return true;
-    };
-    let (Some(snapshot_exchange), Some(file_exchange)) = (
-        snapshot_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-        file_components
-            .iter()
-            .find(|component| component.name == AGENT_RESPONSE_COMPONENT),
-    ) else {
-        return true;
-    };
-    let snapshot_counts = exchange_prompt_target_counts(snapshot_exchange.content(snapshot));
-    let mut seen: HashMap<String, usize> = HashMap::new();
-    for prompt in exchange_prompt_target_lines(file_exchange.content(file_content)) {
-        let count = seen.entry(prompt.clone()).or_insert(0);
-        *count += 1;
-        if *count > snapshot_counts.get(&prompt).copied().unwrap_or(0) {
-            return true;
-        }
-    }
-    false
-}
-
-fn exchange_prompt_target_counts(exchange_body: &str) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for prompt in exchange_prompt_target_lines(exchange_body) {
-        *counts.entry(prompt).or_insert(0) += 1;
-    }
-    counts
-}
-
-fn exchange_prompt_target_lines(exchange_body: &str) -> Vec<String> {
-    exchange_body
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('❯') || text_line_looks_like_prompt_target(trimmed) {
-                Some(
-                    trimmed
-                        .strip_prefix('❯')
-                        .unwrap_or(trimmed)
-                        .trim()
-                        .to_string(),
-                )
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 
 fn latest_missing_snapshot_response_block(
@@ -3797,18 +3733,22 @@ Working.
     }
 
     #[test]
-    fn live_prompt_drift_auto_recovery_safe_rejects_disk_only_exchange_prompt() {
+    fn live_prompt_drift_auto_recovery_safe_accepts_new_exchange_prompt() {
         let snapshot = drift_content_ours();
         let fragmented = drift_baseline().replace(
             "❯ do #fix\n<!-- /agent:exchange -->",
             "❯ do #fix\n❯ do #brand-new-user-prompt-typed-after-preflight\n<!-- /agent:exchange -->",
         );
 
-        assert!(!live_prompt_drift_auto_recovery_safe(
+        assert!(live_prompt_drift_auto_recovery_safe(
             &snapshot,
             &fragmented,
             identity_normalize
         ));
+        let target = live_prompt_drift_recovery_target(&snapshot, &fragmented, identity_normalize)
+            .expect("the response cell should append after the live prompt");
+        assert!(target.contains("❯ do #brand-new-user-prompt-typed-after-preflight"));
+        assert!(target.contains("### Re: do #fix"));
     }
 
     #[test]

@@ -7,6 +7,8 @@ machines and checked in a temporary directory on every test run.
 
 - exact retained-response safety across replay and bounded ACK failures;
 - preservation of steering added after the original response capture;
+- semantic response projection over the current editor cut, including idempotent
+  post-cell replay that preserves queue tombstones and a single boundary marker;
 - separation of native-library, installed-package, and live-editor generations;
 - adoption of a plugin generation registered after the turn's preflight; and
 - eventual package convergence, editor publication, and response commit under

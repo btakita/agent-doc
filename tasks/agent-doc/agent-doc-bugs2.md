@@ -249,85 +249,6 @@ EFS currently has a newer, unrelated captured finalize in `retain_without_mutati
 
 No source change or new backlog item is needed for this duplicate. Session accretion is at warning level (205 exchange lines), but the auto queue is active, so this cycle continues without clearing context.
 
-❯ > 📌 haiven.md session had a JB `File Cache Conflict`.
-> ```
-❯ > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-❯ >   controller pid, retry the commit):
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-❯ >   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-❯ >   Waiting, then retrying:
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-❯ >   tree? committed? is the editor replica alive?) before any further infra action.
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-❯ >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-> ```
-
-
-❯ > **Queue prompt:**
-❯ >
-> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
-❯ > ```
-> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-❯ > ```
-
-The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
-
-In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
-
-Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
-
-### Re: 🚧 📌 JB `Compact Exchange` on monsterrodholders.md — gpt-5
-
-> **Queue prompt:**
->
-❯ > 📌 haiven.md session had a JB `File Cache Conflict`.
-> ```
-❯ > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
-❯ >   controller pid, retry the commit):
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
-❯ >   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
-❯ >   Waiting, then retrying:
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
-❯ >   tree? committed? is the editor replica alive?) before any further infra action.
-❯ >
-❯ >   Ran 1 shell command
-❯ >
-❯ > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
-❯ >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
-> ```
-
-
-❯ > **Queue prompt:**
-❯ >
-> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
-❯ > ```
-> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
-❯ > ```
-
-The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
-
-In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
-
-Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
-### Re: ACK wedges, queue resurrection, and cross-document Compact Exchange — gpt-5
-
-> **Queue prompt:**
->
 > 📌 haiven.md session had a JB `File Cache Conflict`.
 > ```
 > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
@@ -349,6 +270,85 @@ Do not run finalize, write, repair, or force-disk; the existing capture will res
 > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
 >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
 > ```
+
+
+> **Queue prompt:**
+>
+> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+> ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+> ```
+
+The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
+
+In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
+
+Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
+
+### Re: 🚧 📌 JB `Compact Exchange` on monsterrodholders.md — gpt-5
+
+> **Queue prompt:**
+>
+❯ > 📌 haiven.md session had a JB `File Cache Conflict`.
+> ```
+❯ > ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+❯ >   controller pid, retry the commit):
+>
+❯ >   Ran 1 shell command
+>
+❯ > ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+❯ >   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+❯ >   Waiting, then retrying:
+>
+❯ >   Ran 1 shell command
+>
+❯ > ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+❯ >   tree? committed? is the editor replica alive?) before any further infra action.
+❯ >
+❯ >   Ran 1 shell command
+❯ >
+❯ > ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+❯ >   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+> ```
+
+
+> **Queue prompt:**
+❯ >
+> 🚧 📌 JB `Compact Exchange` on monsterrodholders.md
+❯ > ```
+> agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
+❯ > ```
+
+The response is durably captured but cannot commit because JetBrains’ visible buffer and disk differ.
+
+In JetBrains, inspect `tasks/agent-doc/agent-doc-bugs2.md`. If the visible editor content is correct, keep the editor version and save it. Then say “continue.”
+
+Do not run finalize, write, repair, or force-disk; the existing capture will resume after authority settles.
+### Re: ACK wedges, queue resurrection, and cross-document Compact Exchange — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 haiven.md session had a JB `File Cache Conflict`.
+❯ > ```
+> ● Delivery-ACK wedge again — response is on the realtime backbone. Applying the proven recovery (kill the lazy
+>   controller pid, retry the commit):
+>
+>   Ran 1 shell command
+>
+> ● Response is safe on the plane (already_applied); after the controller kill the editor replica must re-register with
+>   the relaunched controller before the commit can land. Recovery is explicit: await re-register, no disk write, retry.
+>   Waiting, then retrying:
+>
+>   Ran 1 shell command
+>
+> ● Persistent wedge across retries — let me diagnose the actual state (is the response/#haivenws-done in the working
+>   tree? committed? is the editor replica alive?) before any further infra action.
+>
+>   Ran 1 shell command
+>
+> ● Response is in the working tree + CRDT plane but not committed, and #haivenws is still [ ] (the --done/--backlog-add
+>   are in the wedged transaction). A fresh superproject controller (725847) is now up. Retrying the commit against it:
+❯ > ```
 
 > **Also addressed:** 🚧 📌 JB `Compact Exchange` on monsterrodholders.md failed while waiting on the unrelated `equityfundingsource.md` editor ACK.
 
@@ -414,7 +414,7 @@ Live Haiven verification also advanced past the prior malformed-tree gate. A fre
 
 `#restartstderrbleed2` is complete and is now being closed atomically rather than left available for backlog-to-queue resurrection.
 
-The fresh route/controller supervisor stderr fix shipped in agent-doc v0.34.163 (`523e422c9`): stderr is redirected before process startup, and the process regression proves boot diagnostics cannot bleed into the agent pane. The subsequent editor-authority recovery fixes shipped through v0.34.165 (`4a437cb87`), which is pushed, tagged, installed, reloaded, and recycled. The full `make check` suite and TLA+ models pass.
+The fresh route/controller supervisor stderr fix shipped in agent-doc v0.34.163 (`523e422c9`): stderr is redirected 8|before process startup, and the process regression proves boot diagnostics cannot bleed into the agent pane. The subsequent editor-authority recovery fixes shipped through v0.34.165 (`4a437cb87`), which is pushed, tagged, installed, reloaded, and recycled. The full `make check` suite and TLA+ models pass.
 
 No actionable follow-up remains for this item.
 
@@ -428,14 +428,14 @@ ACK and disk convergence are now separate transitions. An ACKed write stays dura
 
 Live dogfood recovered this document through that exact path. The editor authority hash `b7eeafbd…` was saved natively to disk, `#restartstderrbleed2` is absent from the active backlog and archived in the done file, and the old preflight boundary recovered on the freshly recycled `0.34.169` controller. The full `make check` gate and focused ACK/native-save regressions passed; the CLI/native library and JetBrains integration were reinstalled, and the controller was recycled.
 
-`#5bzd` is also code-complete in the current release. Both supervisor-IPC and direct-pane dispatch paths now detect a busy harness before spending the normal dispatch-start proof budget. They return the typed `AcceptedQueuedBehindActiveTurn` result, emit `route_dispatch_start_queued_behind_active_turn`, and do not file the false `accepted_without_dispatch_start_proof` issue. The focused queued/busy dispatch tests pass. The separate `#r4gq` item remains the appropriate live operator verification, so the historical implementation item can be reaped without losing the live-proof gate.
+`#5bzd` is also code-complete in the current release. Both supervisor-IPC and direct-pane dispatch paths now detect a busy harness before spending the normal dispatch-start proof budget. They return the typed |`AcceptedQueuedBehindActiveTurn` result, emit `route_dispatch_start_queued_behind_active_turn`, and do not file the false `accepted_without_dispatch_start_proof` issue. The focused queued/busy dispatch tests pass. The separate `#r4gq` item remains the appropriate live operator verification, so the historical implementation item can be reaped without losing the live-proof gate.
 
 ### Re: Re-added Haiven prompt
 
 Acknowledged. The prompt you re-added to `haiven.md` is the authoritative live-editor cut. I did not write, reset, or merge that document while it remains unsaved, so this cycle cannot replace it with the older disk projection.
 
 `#5bzd` is complete and is being reaped now. The shipped routing change treats a busy harness as `AcceptedQueuedBehindActiveTurn` before the normal dispatch-start proof budget is spent, avoiding the false `accepted_without_dispatch_start_proof` failure. v0.34.170 additionally serializes logical editor refresh generations, rejects late frames from retired generations, and repairs a proven concatenated replay by rebasing the pending agent target over the operator cut. The full workspace gate and the focused exhaustive refresh/replay tests pass.
-<!-- agent:boundary:f92d4d3b -->
+<!-- agent:boundary:3bcf64b9 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -614,9 +614,6 @@ What are #next-steps to fix bugs?
 - [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
-- [x] [#5bzd] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%25 actor_generation=1137 editor_attempt_id=unknown dispatch_proof_state=none elapsed_ms=12773 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783437151060-direct_pane_dispatch_start_unproven-codex-_25-9831ae756eb0.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_start_proof content_hash=sha256:1ec714087cfb4c5fc783eb9ad2f02a563124b3df04828fbe1140370937f40135]
-  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=none elapsed_ms=10168 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783978049569-direct_pane_dispatch_start_unproven-codex-_83-627a6490e502.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof)
-  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=none elapsed_ms=10147 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783978049960-direct_pane_dispatch_start_unproven-codex-_83-627a6490e502.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
 - [ ] [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md

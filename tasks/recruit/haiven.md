@@ -140,17 +140,51 @@ The editor restart cleared the 0.2.271→0.2.272 plugin gap. The merge kept your
 Closed `#friendfanout` (it said "implement resolve mode", which we decided against in favour of the friend-frame). `make check` green, wspool tests pass under `-race`. Pushed: submodule `1a55783` + superproject gitlink, both in sync with origin.
 
 **Next: the take-home v2 review** — the actual deliverable, and where I'd put the remaining time.
-<!-- agent:boundary:313b81c1 -->
+
+### Re: gRPC leg, a 10× harness bug, and batching latency — opus-4-8
+
+Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated everything I'd told you about this leg.
+
+**The bug first.** Every `dspool` throughput number I reported was **~10× too low**. The suite charged its own 2-second quiet-detection window to the run, flooring throughput near `total / quiet`. The tell was that ws and gRPC plateaued at *identical* ~21k/s across pool sizes 4/8/16 — a "ceiling" that was really `settle()`. Fixed: it now returns the instant the leg last advanced. Shed percentages were counts and were always right; every throughput figure moved.
+
+**Corrected — and it reverses the verdict:**
+
+| pool | batch | ws shed | ws throughput | grpc shed | grpc throughput |
+|---|---|---|---|---|---|
+| 1 | 1 | 89.5% | 38.1 k/s | **59.3%** | **72.3 k/s** (1.9×) |
+| 4 | 1 | 0% | 183.6 k/s | 0% | **220.3 k/s** |
+| 16 | 64 | 0% | 316.4 k/s | 0% | **332.4 k/s** |
+
+**gRPC is the faster leg at every point** — 1.9× at pool=1 (an HTTP/2 stream pipelines; the ws stand-in ping-pongs), narrowing to ~1.05× at 16. "Streams are the pool" holds: N ordered channels from **one** TCP connection.
+
+**But its defaults are a trap.** Stock 64 KiB windows shed **71.5%** where ws shed **0%**. Raising windows on both ends → **0%**. The cause is this design's own constraint: HTTP/2 flow control is built for senders that can **block**, and §4.2 forbids that — so a stalled send backs up the bounded queue and converts into *shed*. Multiplexing also couples streams through one connection-level window, which N sockets don't have. Pick gRPC for contracts; budget for tuning.
+
+**The correction that matters most:** the leg measures **~330 k/s against the hub's ~360 k/s inbound need**. I'd called it "17× short of the hub" — that was the artifact. It's at rough parity. So **throughput was never what ruled out-of-process downstreams**; the cliff and the coupling are. In-process is ~70× the leg (not ~1,000×), and that's still not a performance argument (§2.4.1).
+
+### Does batching increase latency?
+
+**Yes for the head of the batch, and you're right that I understated it.** The peer deserializes the *whole array* before handling message #1, so it pays `(N−1) × per_message_deserialize` (~1 µs each → **~60 µs at N=64**). That's a tighter cap rule than I'd written: **`N_max ≈ latency_budget / per_message_deserialize`**, not per-message *service* time. Doc corrected.
+
+**One pushback:** it isn't "bound by the last message off the queue." Opportunistic batching never *waits* for an arrival — it takes only what's already queued. The coupling is in transit+parse, not a wait. (A flush timer *would* have that wait — a third reason against one.)
+
+**And the penalty only lands when the queue is already backed up, where it's a large net win.** N=64 queued, RTT ~50 µs: unbatched, message *k* waits `k × RTT` (average ~1,600 µs); batched, all land in ~1 RTT + parse (~114 µs). The head pays ~60 µs so the tail saves ~10×. Empty queue → batch=1 → identical to unbatched. **Batching only degrades a case that was already degraded.**
+
+**Your in-process contrast is exactly right, and it's the argument that survives**: 0.186 ns, no marshal, no transit, no parse, no batch — sent immediately, always. Not a throughput argument; a failure-mode and latency one.
+
+**Caveat I owe you:** I have *not* measured latency — that's reasoned from a measured ~1 µs unmarshal and ~50 µs RTT. Given I just found a 10× bug in this same suite, weight it accordingly. Queued `#dslatency` for p50/p99 instrumentation.
+
+`make check` green, grpcpool passes `-race`. Pushed: `c290d2e` + `9cd9db7`, gitlinks bumped.
+<!-- agent:boundary:8c22a925 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-/goal Implement backlog item(s): #b10a
+- ⏭️ /goal Implement backlog item(s): #b10a
 - ⏭️ /goal Implement backlog item(s): #yyzn
 - ~~Please go through LOADTEST.md. Simplify based on the existing benchmarks. Show before/after for interesting code events such as no sharding vs sharding. We should be able to replicate no sharding with a sharding of 1. Please simplify LOADTEST.md + DESIGN.md + README.md. They have accumulated cruft as we iterated...some of the content is outdated + inaccurate with the current system.~~
 - ~~Please add a websocket pool to the downstream connections. Load test with 1 websocket connection per downstream service...then load test with the websocket pool. Compare dropped connections + dropped messages/retries.~~
-- Implement grpc with opportunistic batching and benchmark.
+- ~~Implement grpc with opportunistic batching and benchmark.~~ — auto-struck: answered this cycle (#ftstrike)
 - do [#friendsnapshot]
 - ~~do [#friendfanout]~~
 - do [#yyzn-clarify]

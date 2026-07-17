@@ -410,7 +410,14 @@ agent-doc v0.34.164 is committed at `1c2d3610d`, pushed, tagged, installed, and 
 Verification passed: targeted Haiven-shape tests, negative repair tests, `make tla`, and the full `make check` suite. The installed CLI reports 0.34.164 and the JetBrains native library reload was broadcast.
 
 Live Haiven verification also advanced past the prior malformed-tree gate. A fresh preflight probe reports a valid authority (`recovered: false` because session-check already performed the narrow repair), and its semantic diff confirms the operator-deleted queue entries remain absent while current prompts/queue edits remain present. The remaining nonzero session-check is a separate backlog-capture semantic guard on an already-committed response, not an ACK, structural, projection, or editor-authority wedge; I left that operator-owned closeout state intact rather than force-clearing it.
-<!-- agent:boundary:ba7d8d63 -->
+### Re: Fresh-start stderr bleed tracking closed — gpt-5.4
+
+`#restartstderrbleed2` is complete and is now being closed atomically rather than left available for backlog-to-queue resurrection.
+
+The fresh route/controller supervisor stderr fix shipped in agent-doc v0.34.163 (`523e422c9`): stderr is redirected before process startup, and the process regression proves boot diagnostics cannot bleed into the agent pane. The subsequent editor-authority recovery fixes shipped through v0.34.165 (`4a437cb87`), which is pushed, tagged, installed, reloaded, and recycled. The full `make check` suite and TLA+ models pass.
+
+No actionable follow-up remains for this item.
+<!-- agent:boundary:60713cfd -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -461,7 +468,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ~~~
-- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~
+- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~t
 - ~~📌 haiven.md response was not committed.~~
 - ~~📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.~~
 - ~~📌 do [#zqv8]~~
@@ -471,7 +478,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#goal1d0k]~~
 - ~~📌 do [#idlewatchturnactive]~~
 - ⏭️ 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
@@ -507,11 +514,11 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#5qjj]
 - ~~📌 do [#jbcompactexchange]~~
 - ⏭️ 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#compactcrdtretry]
 - ⏭️ 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#compactcrdtretry]
 - ⏭️ 📌 do [#jblocalhistverify]
-- 📌 do [#compactcrdtretry]
+- ⏭️ 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 <!-- /agent:queue -->

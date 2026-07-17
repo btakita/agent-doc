@@ -1796,7 +1796,7 @@ fn apply_metadata_drift_recovery(
 }
 
 /// Refresh the durable baseline and cold CRDT restart projection from explicit content. Mirrors
-/// `reset --from-current` without creating per-document compatibility files. The
+/// `reset --from-current` without creating per-document hot-path files. The
 /// preflight-owned baseline is intentionally left untouched (it is re-taken at the
 /// next stable post-commit point).
 fn refresh_recovery_projection_from_content(file: &Path, content: &str) -> Result<()> {

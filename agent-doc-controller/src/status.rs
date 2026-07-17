@@ -610,7 +610,7 @@ pub fn default_control_plane_status() -> ControlPlaneStatus {
         process_model: "project_scoped_single_process".to_string(),
         external_boundary: "controller_ipc".to_string(),
         state_authority: ".agent-doc/state.db".to_string(),
-        projection_authority: "compatibility_output".to_string(),
+        projection_authority: "cold_recovery_output".to_string(),
         dispatch_actor: ControlPlaneActorStatus {
             role: "dispatch_actor".to_string(),
             authority: "mutating_command_admission".to_string(),
@@ -641,7 +641,7 @@ pub fn default_control_plane_status() -> ControlPlaneStatus {
         },
         projection_workers: ControlPlaneActorStatus {
             role: "projection_worker".to_string(),
-            authority: "compatibility_projection".to_string(),
+            authority: "cold_recovery_projection".to_string(),
             state: "unknown".to_string(),
             owned_items: 0,
             categories: BTreeMap::new(),

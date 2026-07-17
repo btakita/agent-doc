@@ -2597,6 +2597,29 @@ mod tests {
     }
 
     #[test]
+    fn controller_projection_starts_after_retiring_removed_state_facts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        conn.execute("DELETE FROM state_schema_migrations", [])
+            .unwrap();
+        agent_doc_sqlite::state_store::insert_state_event_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::StateEventInsert {
+                event_id: "legacy-pending-response-captured",
+                document_hash: "doc-hash",
+                domain: "closeout",
+                fact_type: "pending_response_captured",
+                payload_json: r#"{"event_id":"legacy-pending-response-captured","fact":{"type":"pending_response_captured"}}"#,
+            },
+        )
+        .unwrap();
+        drop(conn);
+
+        let projection = load_state_backbone_projection(dir.path()).unwrap();
+        assert!(projection.documents.is_empty());
+    }
+
+    #[test]
     fn write_then_read_bootstrap_roundtrips() {
         let dir = tempfile::TempDir::new().unwrap();
         let bootstrap = test_bootstrap(&dir);

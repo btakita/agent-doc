@@ -14477,7 +14477,7 @@ mod tests {
         assert_eq!(status.control_plane.state_authority, ".agent-doc/state.db");
         assert_eq!(
             status.control_plane.projection_authority,
-            "compatibility_output"
+            "cold_recovery_output"
         );
         assert_eq!(status.control_plane.dispatch_actor.owned_items, 1);
         assert_eq!(

@@ -43,9 +43,9 @@ projections, and tmux transcript inference.
 - A supervisor adapter exists for each managed harness child. It owns child
   process state, PTY/stdin delivery, readiness evidence, restart/clear control,
   and heartbeat reporting for that child.
-- Projection workers emit compatibility files and diagnostics from committed
-  controller state. They never establish ownership and never block command
-  admission.
+- Projection workers emit cold recovery files and diagnostics from committed
+controller state. They never establish ownership and never block command
+admission.
 
 ## State authority
 
@@ -53,6 +53,10 @@ projections, and tmux transcript inference.
 generations, dispatch attempts, queue heads, queue controls, queue
 backpressure, document cycles, pending backlog mutations, supervisor leases,
 admin operations, and projection diagnostics.
+- Schema initialization transactionally retires state-event variants removed
+  from the strict backbone ABI before any ledger projection. The migration is
+  recorded in `state_schema_migrations`; it deletes redundant retired rows and
+  does not add a legacy deserializer or runtime compatibility branch.
 - `.agent-doc/proof-ledger/<document-hash>.jsonl` is the append-only operation
 proof ledger for mirror-mode cutover rows until those proofs move behind the
 store actor. Each row is keyed by `operation_id` plus `content_hash` and covers

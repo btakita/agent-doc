@@ -466,6 +466,11 @@ CREATE TABLE IF NOT EXISTS editor_op_captures (
             timestamp INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS state_schema_migrations (
+            migration_id TEXT PRIMARY KEY,
+            applied_at INTEGER NOT NULL
+        );
+
 CREATE INDEX IF NOT EXISTS state_events_document_hash_id
 ON state_events(document_hash, id);
 
@@ -609,6 +614,43 @@ ON queue_document_state(state_kind);
     ensure_projection_diagnostic_columns(conn)?;
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
+    retire_removed_state_event_variants(conn)?;
+    Ok(())
+}
+
+const RETIRE_PENDING_RESPONSE_FACTS_MIGRATION: &str = "retire_pending_response_fact_variants_v1";
+
+/// Remove event variants that no longer exist in the strict state-backbone ABI.
+///
+/// Older releases dual-wrote `pending_response_*` facts beside the canonical
+/// `response_captured` lifecycle facts. The duplicate variants were removed in
+/// 0.34.175, so retaining those rows makes strict projection fail before the
+/// controller can create its socket. This schema transaction retires the
+/// redundant rows once; it does not deserialize, translate, or preserve a
+/// compatibility runtime path.
+fn retire_removed_state_event_variants(conn: &Connection) -> Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("begin retired state-event migration")?;
+    let already_applied = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM state_schema_migrations WHERE migration_id = ?1)",
+        [RETIRE_PENDING_RESPONSE_FACTS_MIGRATION],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !already_applied {
+        let applied_at = sqlite_i64(timestamp_secs(), "state migration applied_at")?;
+        tx.execute(
+            "DELETE FROM state_events
+             WHERE fact_type IN ('pending_response_captured', 'pending_response_cleared')",
+            [],
+        )?;
+        tx.execute(
+            "INSERT INTO state_schema_migrations (migration_id, applied_at) VALUES (?1, ?2)",
+            params![RETIRE_PENDING_RESPONSE_FACTS_MIGRATION, applied_at],
+        )?;
+    }
+    tx.commit()
+        .context("commit retired state-event migration")?;
     Ok(())
 }
 
@@ -2957,6 +2999,58 @@ mod tests {
             std::fs::read_dir(root.join(".agent-doc"))?.count(),
             1,
             "normal open must not create a replacement or quarantine sidecar"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn open_state_db_transactionally_retires_removed_state_event_variants() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc"))?;
+        let legacy = Connection::open(state_db_path(root))?;
+        legacy.execute_batch(
+            r#"
+            CREATE TABLE state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                document_hash TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                fact_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
+            );
+            INSERT INTO state_events (
+                event_id, document_hash, domain, fact_type, payload_json, timestamp
+            ) VALUES
+                ('legacy-captured', 'doc-hash', 'closeout', 'pending_response_captured', '{}', 1),
+                ('legacy-cleared', 'doc-hash', 'closeout', 'pending_response_cleared', '{}', 2),
+                ('current-captured', 'doc-hash', 'closeout', 'response_captured', '{}', 3);
+            "#,
+        )?;
+        drop(legacy);
+
+        let conn = open_state_db(root)?;
+        let remaining: Vec<String> = conn
+            .prepare("SELECT fact_type FROM state_events ORDER BY id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(remaining, vec!["response_captured"]);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM state_schema_migrations WHERE migration_id = ?1",
+                [RETIRE_PENDING_RESPONSE_FACTS_MIGRATION],
+                |row| row.get::<_, i64>(0),
+            )?,
+            1
+        );
+
+        initialize_state_db(&conn)?;
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM state_events", [], |row| row
+                .get::<_, i64>(0))?,
+            1,
+            "reopening the canonical schema must leave current facts intact"
         );
         Ok(())
     }

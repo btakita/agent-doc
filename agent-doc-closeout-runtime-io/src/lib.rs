@@ -215,16 +215,16 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             return Ok(Outcome::NotApplicable);
         };
         let mut reactivated_false_stale_capture = false;
-            let false_stale_reactivation_cycle = (state.phase == CyclePhase::Abandoned
+        let false_stale_reactivation_cycle = (state.phase == CyclePhase::Abandoned
+            && cycle_event_is(
+                &state.last_event,
+                "repair_retire_superseded_captured_only_orphan",
+            ))
+            || (state.phase == CyclePhase::ResponseCaptured
                 && cycle_event_is(
                     &state.last_event,
-                    "repair_retire_superseded_captured_only_orphan",
-                ))
-                || (state.phase == CyclePhase::ResponseCaptured
-                    && cycle_event_is(
-                        &state.last_event,
-                        "session_check_reactivated_false_stale_capture_retirement",
-                    ));
+                    "session_check_reactivated_false_stale_capture_retirement",
+                ));
         if false_stale_reactivation_cycle
             && let (Some(capture_id), Some(response_sha256)) =
                 (state.capture_id.as_deref(), state.response_sha256.as_deref())
@@ -631,7 +631,9 @@ mod tests {
             abandoned.last_event,
         );
 
-        let outcome = RuntimeSessionCheckEffects.resume_captured_finalize(&file).unwrap();
+        let outcome = RuntimeSessionCheckEffects
+            .resume_captured_finalize(&file)
+            .unwrap();
         assert!(
             matches!(
                 outcome,
@@ -649,7 +651,10 @@ mod tests {
             .unwrap();
         assert_eq!(state.cycle_id, capture.cycle_id);
         assert!(
-            matches!(state.phase, CyclePhase::WriteApplied | CyclePhase::Committed),
+            matches!(
+                state.phase,
+                CyclePhase::WriteApplied | CyclePhase::Committed
+            ),
             "the false-stale cycle must be reactivated and advanced: {state:?}"
         );
         let capture = agent_doc_capture_io::load_by_id(&file, &capture.capture_id)

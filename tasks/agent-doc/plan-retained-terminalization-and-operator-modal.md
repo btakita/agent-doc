@@ -4,11 +4,13 @@
 
 1. A captured closeout that has reached the exact canonical and disk target must terminalize exactly once regardless of whether delivery convergence or `session-check` observes equality first. A false-stale retirement may reopen only the same cycle/capture/response identity and only from its named false-stale abandonment reason.
 2. A routed prompt must never be injected into an operator-owned interactive modal; prompt-bearing work is queued durably and resumes only after the operator clears the modal.
+3. Editor delivery ACK is not disk convergence. A non-capture write intent remains durable until the exact canonical editor cut is also proven on disk; a valid delivery-converged editor cut may be projected only through the editor's native save path.
 
 ## Policy owners
 
 - Retained closeout: `agent-doc-state-backbone` owns the authoritative closeout projection; `agent-doc-cycle-state-io` emits the identity-checked false-stale reactivation fact; `agent-doc-closeout-runtime-io` owns capture settlement and commit; `agent-doc-session-check-io` must invoke it for every resumable phase before declaring terminal convergence.
 - Pane routing: `agent-doc-harness` owns typed pane-blocker classification and `agent-doc-queue::route_dispatch` owns which blockers are queueable. Both dispatch-only and regular `agent-doc-route-io` paths apply the queue decision before repair, focus, interrupt, or synthesized pane input.
+- Editor projection: `agent-doc-document-realtime-io` owns ACK-versus-save semantics and native-save proof; `agent-doc-session-check-io` may invoke that proof only for no-cycle or preflight-only state, never as a substitute for captured-response recovery.
 
 ## Transition tables
 
@@ -25,6 +27,16 @@
 | Captured response is not materialized in canonical authority | Retain and retry the same capture |
 | Cycle is committed or superseded | Return terminal outcome without replaying another payload |
 
+### Non-capture editor projection
+
+| State | Decision |
+|---|---|
+| CRDT delivery ACKed; disk still trails | Keep the deferred intent; do not emit `DocumentWriteConverged` |
+| Live editor is valid, has members, and is delivery-converged | Request native editor save; never force-write disk |
+| Native save proves exact canonical bytes on disk | Emit convergence and clear matching deferred lineage |
+| Historical version already cleared the intent after ACK | In no-cycle/preflight-only state, save the exact live canonical cut and verify authority/disk equality |
+| Captured response cycle | Use capture-identity recovery; generic editor projection is forbidden |
+
 ### Routed pane
 
 | Pane state | Prompt-bearing decision |
@@ -37,7 +49,7 @@
 
 ## Evidence inputs
 
-- Cycle phase, capture id, response hash, abandonment reason, retained target hash/content, canonical hash, disk hash, live-editor count, and delivery convergence.
+- Cycle phase, capture id, response hash, abandonment reason, retained target hash/content, canonical hash, disk hash, live-editor count, delivery convergence, and exact native-save proof.
 - ANSI-stripped bottom-of-pane lines. The Claude artifact modal requires both `Enter to open` and a bottom `https://claude.ai/code/artifact/` URL.
 - Whether the editor supplied prompt-bearing change text that can be durably enqueued.
 
@@ -51,11 +63,12 @@
 - `agent-doc-queue`: map that typed blocker to a queue source.
 - `agent-doc-route-io`: apply the queue-before-repair decision in regular and dispatch-only routes.
 - `agent-doc-controller`: render the exact operator remedy at the edge.
+- `agent-doc-document-realtime-io`: retain ACKed writes until exact disk proof and expose the native-save-only live-editor settlement.
 - Version metadata and this architecture record.
 
 ## Verification
 
-- Pure tests for exact false-stale identity reactivation, equal-target capture resumption, artifact-picker classification, queue-source mapping, and recovery wording.
+- Pure tests for exact false-stale identity reactivation, equal-target capture resumption, ACK-without-save retention, native-save settlement with and without historical intent, artifact-picker classification, queue-source mapping, and recovery wording.
 - Package integration tests across session-check, harness, queue, route/controller compilation.
 - Full `make check`, including simulation, Lean, and TLA gates.
 - Live dogfood: install/recycle, then prove the retained `agent-doc-bugs2.md` capture commits through `session-check` without another payload.

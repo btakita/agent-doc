@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.169
+
+- **Editor delivery ACK no longer retires a write before native disk-save proof.** The CRDT delivery loop previously emitted `DocumentWriteConverged` immediately after the plugin ACKed the canonical frontier. Direct queue/backlog maintenance could therefore lose its only durable projection intent while the IDE buffer was still ahead of disk, leaving `session-check` with no safe recovery lineage. ACKed writes now remain retained until the exact canonical bytes are proven on disk; only the enclosing native-save or explicit settlement path clears them.
+- **A valid live editor cut can recover historical ACK-only state without force-disk.** For no-cycle and preflight-only recovery, `session-check` now treats a structurally valid, member-backed, delivery-converged editor authority as the source of truth and requests the editor's native save. It verifies the same canonical bytes in both editor authority and disk before proceeding. This preserves unsaved operator queue deletions and prompts, and repairs states created by older binaries that prematurely cleared their intent.
+
 ## 0.34.168
 
 - **False-stale retained captures now reopen coherently and terminalize from the state backbone.** Repair could retire a captured cycle as `Abandoned`, while a later exact-target `session-check` reopened only the direct cycle file; the authoritative backbone projection stayed terminal and the same retained response remained pending forever. Cycle state now emits a typed false-stale reactivation fact carrying the document, cycle, capture, response hash, and retirement reason. The backbone accepts it only for the exact matching false-stale abandonment, after which closeout settlement clears the retained intent and commits exactly once. An integration regression reproduces the abandoned/discarded capture with canonical and disk already at the retained target.

@@ -196,6 +196,52 @@ fn ensure_terminal_authority_disk_convergence(
     if authority_content == disk_content {
         return Ok(());
     }
+    let non_capture_cycle = terminal_phase_allows_non_capture_projection_settlement(
+        agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|state| state.phase),
+    );
+    if non_capture_cycle
+        && agent_doc_document_realtime_io::settle_retained_non_capture_projection_through_authority(
+            file,
+            "session_check_terminal_non_capture_projection_settlement",
+        )?
+    {
+        let settled_authority = crate::resolve_current_document_content(
+            file,
+            "session_check_terminal_non_capture_projection_settled",
+        )?;
+        let settled_disk = crate::resolve_disk_document_content(
+            file,
+            "session_check_terminal_non_capture_projection_settled",
+        )?;
+        anyhow::ensure!(
+            settled_authority == authority_content && settled_disk == authority_content,
+            "[session-check] retained non-capture projection settlement for {} returned without exact authority/disk convergence (authority_hash={}, disk_hash={})",
+            file.display(),
+            agent_doc_hash::content_hash(&settled_authority),
+            agent_doc_hash::content_hash(&settled_disk),
+        );
+        agent_doc_snapshot_io::save(file, &settled_authority, agent_doc_ops_log_io::log_op)?;
+        return Ok(());
+    }
+    if non_capture_cycle
+        && agent_doc_document_realtime_io::settle_live_editor_projection_through_authority(
+            file,
+            "session_check_terminal_live_editor_projection_settlement",
+        )?
+    {
+        let settled_authority = crate::resolve_current_document_content(
+            file,
+            "session_check_terminal_live_editor_projection_settled",
+        )?;
+        let settled_disk = crate::resolve_disk_document_content(
+            file,
+            "session_check_terminal_live_editor_projection_settled",
+        )?;
+        if settled_authority == authority_content && settled_disk == authority_content {
+            agent_doc_snapshot_io::save(file, &settled_authority, agent_doc_ops_log_io::log_op)?;
+            return Ok(());
+        }
+    }
     if agent_doc_git_io::revision::show_head(file)?.as_deref() == Some(authority_content)
         && effects.settle_retained_committed_projection(file, authority_content, disk_content)?
     {
@@ -230,6 +276,10 @@ fn ensure_terminal_authority_disk_convergence(
         agent_doc_hash::content_hash(disk_content),
         recycle_status,
     );
+}
+
+fn terminal_phase_allows_non_capture_projection_settlement(phase: Option<CyclePhase>) -> bool {
+    phase.is_none_or(|phase| phase == CyclePhase::PreflightStarted)
 }
 
 fn self_heal_transiently_stale_committed_projection(
@@ -1870,11 +1920,36 @@ mod terminal_convergence_tests {
     }
 
     #[test]
+    fn terminal_convergence_only_settles_non_capture_or_preflight_projection() {
+        assert!(terminal_phase_allows_non_capture_projection_settlement(
+            None
+        ));
+        assert!(terminal_phase_allows_non_capture_projection_settlement(
+            Some(CyclePhase::PreflightStarted,)
+        ));
+        for phase in [
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+            CyclePhase::Committed,
+            CyclePhase::Abandoned,
+        ] {
+            assert!(
+                !terminal_phase_allows_non_capture_projection_settlement(Some(phase)),
+                "captured or terminal phase {phase:?} must stay on its identity-checked closeout path",
+            );
+        }
+    }
+
+    #[test]
     fn session_check_rejects_crdt_disk_divergence_after_committed_closeout() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
-        std::fs::write(&file, "canonical response\n<!-- agent:boundary:new -->\n").unwrap();
+        std::fs::write(
+            &file,
+            "canonical response\n<!-- no-pending-capture -->\n<!-- agent:boundary:old -->\n",
+        )
+        .unwrap();
 
         let err = ensure_terminal_authority_disk_convergence(
             &file,

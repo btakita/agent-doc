@@ -662,8 +662,6 @@ fn publish_fresh_live_buffer_content(file: &Path, source: &str) -> Result<Option
         if let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
             query_live_editor_authority(&canonical, "fresh_live_buffer_publish")?
         {
-            let hash = agent_doc_hash::content_hash(&text);
-            clear_deferred_document_write_intent(&canonical, &hash, "fresh_live_buffer_publish")?;
             return Ok(Some(text));
         }
         if std::time::Instant::now() >= deadline {
@@ -832,6 +830,11 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                             intent_id,
                         )));
                     }
+                    clear_deferred_document_write_intent(
+                        path,
+                        &relay_write.content_hash,
+                        "serialized_atomic_write_projection",
+                    )?;
                     agent_doc_ops_log_io::log_op(
                         path,
                         &format!(
@@ -847,6 +850,11 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                         .map(|disk| agent_doc_hash::content_hash(&disk) == relay_write.content_hash)
                         .unwrap_or(false) =>
                 {
+                    clear_deferred_document_write_intent(
+                        path,
+                        &relay_write.content_hash,
+                        "serialized_atomic_write_projection_after_detach",
+                    )?;
                     agent_doc_ops_log_io::log_op(
                         path,
                         &format!(
@@ -1019,6 +1027,51 @@ fn request_native_editor_save_for_canonical_projection(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+/// Project the exact live editor authority through the editor's native save
+/// path without changing the editor buffer.
+///
+/// This is the terminal recovery path for a valid, delivery-converged editor
+/// cut whose historical deferred-write event was incorrectly retired after an
+/// ACK but before disk-save proof. The editor remains the source of truth: no
+/// disk candidate is merged into it and no force-disk write is permitted.
+pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str) -> Result<bool> {
+    let canonical = try_resolve_current_document_content(path, source)?;
+    let disk = resolve_disk_current_document_content(path, source)?;
+    if canonical == disk {
+        return Ok(true);
+    }
+    validate_canonical_document_target(path, &canonical, source)?;
+    let agent_doc_crdt_relay_io::CurrentText::Current {
+        text,
+        live_editors,
+        delivery_converged: true,
+    } = observe_live_editor_authority_after_model_ensure(path, source)?
+    else {
+        return Ok(false);
+    };
+    if live_editors == 0 || text != canonical {
+        return Ok(false);
+    }
+    if !request_native_editor_save_for_canonical_projection(path, &canonical, source)? {
+        return Ok(false);
+    }
+    let settled_authority = try_resolve_current_document_content(path, source)?;
+    let settled_disk = resolve_disk_current_document_content(path, source)?;
+    if settled_authority != canonical || settled_disk != canonical {
+        return Ok(false);
+    }
+    agent_doc_ops_log_io::log_op(
+        path,
+        &format!(
+            "live_editor_projection_settled file={} source={} content_hash={} editor_authority=true delivery_converged=true disk_version_exact=true",
+            path.display(),
+            source,
+            agent_doc_hash::content_hash(&canonical),
+        ),
+    );
+    Ok(true)
 }
 
 /// Explicit operator-authorized disk escape hatch. It preserves the same
@@ -1296,9 +1349,10 @@ pub fn settle_retained_captured_projection_through_authority(
 /// captured-response closeout.
 ///
 /// Delivery-only reconciliation can retain a deterministic document projection
-/// without capturing an assistant response. Once both canonical editor
-/// authority and disk equal that exact retained target, no response proof is
-/// applicable or necessary.
+/// without capturing an assistant response. When canonical editor authority is
+/// already the exact retained target but disk still trails it, request the
+/// editor's native save and settle only after disk proves the same bytes. No
+/// response proof is applicable or necessary.
 ///
 /// Semantic rebase intents are deliberately excluded. Exact bytes do not prove
 /// that a target composed before a newer operator cut preserved deletions from
@@ -1413,16 +1467,38 @@ pub fn settle_retained_non_capture_projection_through_authority(
     {
         return Ok(false);
     }
-    let disk = resolve_disk_current_document_content(path, source)?;
+    let mut disk = resolve_disk_current_document_content(path, source)?;
     if disk != pending.target_content {
-        return Ok(false);
+        let agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            live_editors,
+            delivery_converged: true,
+            ..
+        } = observe_live_editor_authority_after_model_ensure(path, source)?
+        else {
+            return Ok(false);
+        };
+        if live_editors == 0 || text != pending.target_content {
+            return Ok(false);
+        }
+        if !request_native_editor_save_for_canonical_projection(
+            path,
+            &pending.target_content,
+            "retained_non_capture_projection_settlement",
+        )? {
+            return Ok(false);
+        }
+        disk = resolve_disk_current_document_content(path, source)?;
+        if disk != pending.target_content {
+            return Ok(false);
+        }
     }
 
     clear_all_deferred_document_write_intents(path, source)?;
     agent_doc_ops_log_io::log_op(
         path,
         &format!(
-            "retained_non_capture_projection_settled file={} intent_id={} target_hash={} canonical_disk_exact=true deferred_lineage=cleared",
+            "retained_non_capture_projection_settled file={} intent_id={} target_hash={} canonical_disk_exact=true native_editor_save=true deferred_lineage=cleared",
             path.display(),
             pending.intent_id,
             target_hash,
@@ -1729,15 +1805,10 @@ pub fn apply_canonical_replace_if_attached(
                                 .expect("pending CRDT target must retain its write receipt");
                             relay_write.delivery_converged = true;
                             relay_write.live_editors = live_editors;
-                            clear_deferred_document_write_intent(
-                                file,
-                                &relay_write.content_hash,
-                                source,
-                            )?;
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
-                                    "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
+                                    "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} transport=crdt_only",
                                     file.display(),
                                     relay_write.content_hash,
                                     relay_write.update_bytes,
@@ -1968,15 +2039,10 @@ pub fn apply_canonical_replace_if_attached(
                             }
                             Ok(Some(mut relay_write)) if relay_write.delivery_converged => {
                                 relay_write.live_editors = live_editors;
-                                clear_deferred_document_write_intent(
-                                    file,
-                                    &relay_write.content_hash,
-                                    source,
-                                )?;
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
-                                        "{source}_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true wait_ms={} transport=crdt_only",
+                                        "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} transport=crdt_only",
                                         file.display(),
                                         relay_write.content_hash,
                                         relay_write.update_bytes,
@@ -5010,6 +5076,21 @@ mod tests {
 
         assert!(write.delivery_converged);
         assert_eq!(write.content_hash, agent_doc_hash::content_hash(target));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        assert_eq!(
+            pending_document_write(&file)
+                .expect("delivery ACK alone must keep the write intent durable")
+                .target_content,
+            target,
+        );
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "test_crdt_visible_ack_disk_settlement",
+            )
+            .unwrap(),
+        );
+        assert!(pending_document_write(&file).is_none());
         assert!(
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
                 .unwrap()
@@ -5180,6 +5261,10 @@ mod tests {
             other => panic!("expected current CRDT text, got {other:?}"),
         };
         assert_eq!(current, target);
+        assert!(
+            pending_document_write(&file).is_none(),
+            "native disk-save proof must retire the matching write intent",
+        );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("transport=crdt_editor_native_save"));
         assert!(log.contains("disk_rewritten=false"));
@@ -6159,11 +6244,11 @@ mod tests {
     }
 
     #[test]
-    fn retained_non_capture_projection_settles_when_authority_and_disk_are_exact() {
+    fn retained_non_capture_projection_requests_native_save_then_settles_exactly() {
         let editor_base = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
         let normalized_target =
             "# Session\n\n<!-- agent:queue -->\nnormalized\n<!-- /agent:queue -->\n";
-        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let (dir, file, _canonical) = temp_doc(editor_base);
         let identity = "test-retained-non-capture-projection";
         seed_reliable_sync_open(&file, identity);
         let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
@@ -6202,6 +6287,12 @@ mod tests {
             .unwrap(),
             "canonical convergence without the native disk save must remain retained",
         );
+        assert!(
+            dir.path()
+                .join(".agent-doc/patches/save-document.signal")
+                .exists(),
+            "an exact retained non-capture target must request the editor's native save",
+        );
         assert!(pending_document_write(&file).is_some());
 
         std::fs::write(&file, normalized_target).expect("simulate the editor's native save");
@@ -6215,6 +6306,77 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn live_editor_projection_recovers_historical_ack_without_retained_intent() {
+        let baseline = "# Session\n\n<!-- agent:queue -->\nold\n<!-- /agent:queue -->\n";
+        let editor_target =
+            "# Session\n\n<!-- agent:queue -->\noperator cut\n<!-- /agent:queue -->\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-live-editor-projection-historical-ack";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            editor_target,
+            baseline,
+            "live_editor_projection_historical_ack_test",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+        );
+        assert!(pending_document_write(&file).is_some());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("replacement editor replica should bootstrap from retained canonical");
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "live_editor_projection_historical_ack_current",
+            )
+            .unwrap(),
+            editor_target,
+        );
+
+        clear_deferred_document_write_intent(
+            &file,
+            &agent_doc_hash::content_hash(editor_target),
+            "simulate_historical_ack_only_convergence",
+        )
+        .unwrap();
+        assert!(pending_document_write(&file).is_none());
+        assert!(
+            !settle_live_editor_projection_through_authority(
+                &file,
+                "live_editor_projection_before_native_save_test",
+            )
+            .unwrap(),
+            "requesting a native save is not itself disk proof",
+        );
+        assert!(
+            dir.path()
+                .join(".agent-doc/patches/save-document.signal")
+                .exists(),
+            "historical ACK recovery must request a native editor save",
+        );
+
+        std::fs::write(&file, editor_target).expect("simulate the editor's native save");
+        assert!(
+            settle_live_editor_projection_through_authority(
+                &file,
+                "live_editor_projection_after_native_save_test",
+            )
+            .unwrap(),
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_target);
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

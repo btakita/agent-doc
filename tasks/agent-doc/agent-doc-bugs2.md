@@ -395,7 +395,22 @@ Verification passed: the explicit all-target Clippy command and the full `make c
 Source commit `01c2856e1` is pushed to `agent-doc/main`. Root gitlink commit `34f76625a` is local only because the root branch still contains unrelated concurrent commits that should not be pushed together.
 
 Preflight still reports that the running IDE host has JetBrains plugin 0.2.271 loaded while 0.2.272 is installed; the previously requested IDE restart remains necessary before relying on live editor-delivery ACK behavior.
-<!-- agent:boundary:68da5116 -->
+
+### Re: Fresh-start stderr and editor-authority recovery shipped — gpt-5.4
+
+Shipped the complete fresh-start stderr and editor-authority recovery fix.
+
+agent-doc v0.34.164 is committed at `1c2d3610d`, pushed, tagged, installed, and recycled. The original fresh route/controller supervisor stderr leak remains fixed by redirecting stderr before process start (v0.34.163); v0.34.164 closes the recovery paths exposed by the Haiven repro:
+
+- Retained response projections are semantic response cells rebased over the current Lazily editor cut. They no longer require whole-document lineage, and they preserve unsaved prompts plus queue/backlog deletions.
+- A replay-created unmatched duplicate component close is normalized before the generic integrity gate only when there is exactly one whole-line unmatched close, the same component already closed normally, and removing that line restores the full structural contract. Operator-authored unmatched markers still fail closed.
+- Settlement uses Lazily/CRDT plus native editor save. No live-buffer content sidecar, force-disk election, or disk-over-editor conflict policy was introduced.
+- The TLA+ model now includes duplicate-close replay/normalization, forbids commit while component closes are unbalanced, and proves eventual normalization without regressing queue tombstones.
+
+Verification passed: targeted Haiven-shape tests, negative repair tests, `make tla`, and the full `make check` suite. The installed CLI reports 0.34.164 and the JetBrains native library reload was broadcast.
+
+Live Haiven verification also advanced past the prior malformed-tree gate. A fresh preflight probe reports a valid authority (`recovered: false` because session-check already performed the narrow repair), and its semantic diff confirms the operator-deleted queue entries remain absent while current prompts/queue edits remain present. The remaining nonzero session-check is a separate backlog-capture semantic guard on an already-committed response, not an ACK, structural, projection, or editor-authority wedge; I left that operator-owned closeout state intact rather than force-clearing it.
+<!-- agent:boundary:ba7d8d63 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -455,7 +470,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#jbcompactexchange]~~
 - ~~📌 do [#goal1d0k]~~
 - ~~📌 do [#idlewatchturnactive]~~
-- 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
@@ -491,11 +506,11 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 t
 - 📌 do [#5qjj]
 - ~~📌 do [#jbcompactexchange]~~
-- 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
-- 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
-- 📌 do [#jblocalhistverify]
+- ⏭️ 📌 do [#jblocalhistverify]
 - 📌 do [#compactcrdtretry]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]

@@ -1966,6 +1966,9 @@ pub struct DispatchOnlyBlockerRecoveryHintFacts<'a> {
 pub fn dispatch_only_blocker_recovery_hint(
     facts: DispatchOnlyBlockerRecoveryHintFacts<'_>,
 ) -> String {
+    if facts.harness_binary == "claude" && facts.reason == "claude artifact picker open" {
+        return "press `Esc` once in that Claude pane to dismiss the online artifact picker; the queued Run Agent Doc prompt will resume automatically".to_string();
+    }
     if facts.harness_binary == "codex" && facts.reason == "codex hook review prompt" {
         return format!(
             "open `/hooks` in that Codex pane, approve or disable the pending hook change, wait for the idle composer, then rerun `agent-doc route --dispatch-only {}` or the editor Run Agent Doc action",
@@ -4327,6 +4330,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
 
     #[test]
     fn dispatch_only_blocker_recovery_hint_names_codex_hook_review_action() {
+        let artifact = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
+            harness_binary: "claude",
+            reason: "claude artifact picker open",
+            file_display: "tasks/recruit/haiven.md",
+        });
+        assert!(artifact.contains("press `Esc` once"), "{artifact}");
+        assert!(artifact.contains("resume automatically"), "{artifact}");
+
         let hint = dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
             harness_binary: "codex",
             reason: "codex hook review prompt",

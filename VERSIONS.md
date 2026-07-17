@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.167
+
+- **An exact retained target now terminalizes even after disk has already caught up.** `session-check` previously attempted captured-finalize recovery only while canonical authority and disk differed. If the JetBrains save/reconnect completed first, both sides exactly matched the retained target but the capture record remained pending forever. The terminal convergence rung now resumes any resumable capture regardless of byte equality, clears its retained intent, advances write-applied state, and commits exact-once. A regression covers the observed equal-authority/equal-disk state.
+- **Claude online-artifact pickers no longer trigger document repair or a routed-injection failure.** The harness recognizes the bottom-of-pane `Enter to open` plus `claude.ai/code/artifact` modal as a typed, operator-owned blocker. Prompt-bearing JetBrains `Run Agent Doc` requests queue durably behind it and resume after the operator presses `Esc`; agent-doc never sends `Esc` or `Enter`, preserving operator activity. The fallback diagnostic names the exact dismissal action.
+
 ## 0.34.166
 
 - **Retained replay normalization now runs after replay, not only before it.** Live proof on `agent-doc-bugs2.md` showed canonical Lazily authority was structurally valid with one boundary at `session-check` entry; the retained response resume then created the second boundary later in the same call, after the entry normalizer had already passed. Both captured-resume validation branches now normalize the replay result before their integrity check, preserving the operator cut while preventing the resumed delivery from blocking itself.

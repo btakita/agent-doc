@@ -116,6 +116,7 @@ pub fn dispatch_active_turn_queue_source(
         ("codex", "active codex turn") => Some("dispatch_only_codex_active_turn"),
         ("opencode", "opencode active turn") => Some("dispatch_only_opencode_active_turn"),
         ("claude", "active claude turn") => Some("dispatch_only_claude_active_turn"),
+        ("claude", "claude artifact picker open") => Some("dispatch_only_claude_artifact_picker"),
         _ => None,
     }
 }
@@ -485,6 +486,10 @@ mod tests {
         assert_eq!(
             dispatch_active_turn_queue_source("claude", "active claude turn"),
             Some("dispatch_only_claude_active_turn")
+        );
+        assert_eq!(
+            dispatch_active_turn_queue_source("claude", "claude artifact picker open"),
+            Some("dispatch_only_claude_artifact_picker")
         );
         assert_eq!(
             dispatch_active_turn_queue_source("codex", "codex hook review prompt"),

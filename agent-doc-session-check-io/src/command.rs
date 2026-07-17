@@ -357,12 +357,7 @@ pub fn run_with_options(
     // a clean retained response visible only in canonical authority. Do not let
     // the generic authority/disk divergence guard block the exact captured
     // response that owns the lossless replay recipe.
-    if resume_captured_finalize_before_terminal_convergence(
-        file,
-        &authority_content,
-        &disk_content,
-        effects,
-    )? {
+    if resume_captured_finalize_before_terminal_convergence(file, effects)? {
         authority_content = validate_integrity_after_captured_resume(
             file,
             "session_check_terminal_convergence_after_captured_resume",
@@ -678,13 +673,8 @@ fn resume_captured_finalize_for_recovery(
 
 fn resume_captured_finalize_before_terminal_convergence(
     file: &Path,
-    authority_content: &str,
-    disk_content: &str,
     effects: &impl SessionCheckEffects,
 ) -> Result<bool> {
-    if authority_content == disk_content {
-        return Ok(false);
-    }
     resume_captured_finalize_for_recovery(
         file,
         effects,
@@ -1851,7 +1841,7 @@ mod terminal_convergence_tests {
     }
 
     #[test]
-    fn session_check_resumes_retained_capture_before_terminal_divergence_guard() {
+    fn session_check_resumes_retained_capture_even_after_target_reaches_disk() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
@@ -1871,23 +1861,11 @@ mod terminal_convergence_tests {
         .unwrap();
 
         assert!(
-            resume_captured_finalize_before_terminal_convergence(
-                &file,
-                "editor-authoritative response",
-                baseline,
-                &ResumeEffects,
-            )
-            .unwrap()
+            resume_captured_finalize_before_terminal_convergence(&file, &ResumeEffects).unwrap()
         );
         assert!(
-            !resume_captured_finalize_before_terminal_convergence(
-                &file,
-                baseline,
-                baseline,
-                &ResumeEffects,
-            )
-            .unwrap(),
-            "converged authority must not replay a retained capture"
+            resume_captured_finalize_before_terminal_convergence(&file, &ResumeEffects).unwrap(),
+            "exact authority/disk convergence must still terminalize retained capture state"
         );
     }
 

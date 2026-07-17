@@ -551,6 +551,9 @@ impl HarnessConfig {
                 .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
+            if claude_artifact_picker_open(&recent) {
+                return Some("claude artifact picker open".to_string());
+            }
             if claude_active_turn_busy(&recent) {
                 // #jb-stale-busy-idle-footer part 2: when a stale working spinner
                 // or interrupt hint sits in scrollback but the bottom of the pane
@@ -843,6 +846,21 @@ fn claude_active_turn_busy(recent_lower: &[String]) -> bool {
     recent_lower
         .iter()
         .any(|line| line.contains("esc to interrupt") || is_claude_working_spinner_line(line))
+}
+
+/// Claude's online-artifact chooser occupies the composer even though no model
+/// turn is running. Treat it as a typed dispatch blocker so routed prompts can
+/// queue behind the operator-owned modal instead of attempting repair or
+/// injecting the trigger as an artifact selection.
+fn claude_artifact_picker_open(recent_lower: &[String]) -> bool {
+    recent_lower
+        .iter()
+        .take(3)
+        .any(|line| line.starts_with("https://claude.ai/code/artifact/"))
+        && recent_lower
+            .iter()
+            .take(5)
+            .any(|line| line.contains("enter to open"))
 }
 
 /// True for a Claude working-spinner line: a spinner glyph at the start, a gerund
@@ -1468,6 +1486,27 @@ mod tests {
         assert!(
             !h.has_busy_cue(CLAUDE_IDLE_PANE),
             "idle composer pane must not read as busy"
+        );
+    }
+
+    #[test]
+    fn claude_artifact_picker_is_a_typed_dispatch_blocker() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "❯\n",
+            "Opus 4.8 ctx:24% ~/work/btakita/agent-loop/tasks/recruit/haiven main brian@host\n",
+            "⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+            "hub-benchmarks · Enter to open\n",
+            "https://claude.ai/code/artifact/02561a6e-9d8b-462a-82f3-685b92470e57\n",
+        );
+
+        assert_eq!(
+            h.dispatch_blocker_reason(pane).as_deref(),
+            Some("claude artifact picker open")
+        );
+        assert!(
+            !h.is_dispatch_ready_prompt_line("hub-benchmarks · Enter to open"),
+            "artifact selection must never be treated as an injectable composer"
         );
     }
 

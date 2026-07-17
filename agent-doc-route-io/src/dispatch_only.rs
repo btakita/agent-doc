@@ -631,6 +631,35 @@ pub fn retry_dispatch_only_after_busy_pane(
     delivery: DispatchOnlyReopenDelivery,
     effects: DispatchOnlyRouteEffects,
 ) -> Result<String> {
+    if let Some(reason) = blocker_reason
+        && let Some(source) = agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source(
+            &harness.binary,
+            reason,
+        )
+        && let Some(prompt_text) = queue_prompt_text
+    {
+        // A queueable blocker (an active turn or operator-owned modal) is
+        // neither an idle composer nor a broken actor. Preserve the prompt
+        // durably and let the normal queue drain resume when it clears; never
+        // run document repair or send Escape/Enter into the pane.
+        let queued = (effects.enqueue_route_dispatch_prompt)(file, prompt_text, source, true)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_blocker_queued file={} pane={} harness={} reason={} source={} appended={} already_present={} superseded={}",
+                file.display(),
+                busy_pane,
+                harness.binary,
+                reason,
+                source,
+                queued.appended,
+                queued.already_present,
+                queued.superseded,
+            ),
+        );
+        (effects.emit_busy_route_queued_diagnostic)(tmux, busy_pane, file, harness);
+        return Ok(busy_pane.to_string());
+    }
     let fallback_detail = blocker_reason.map(|reason| format!("still shows {reason}"));
     if allow_auto_fix_retry {
         match attempt_busy_existing_pane_auto_fix(tmux, file, session_id, busy_pane, file_path)? {

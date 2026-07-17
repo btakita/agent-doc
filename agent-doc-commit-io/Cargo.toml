@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-commit-io"
-version = "0.34.167"
+version = "0.34.168"
 edition = "2024"
 description = "Commit lifecycle coordinator for agent-doc session documents"
 license = "MIT"
@@ -15,45 +15,45 @@ default = []
 test-support = []
 
 [dependencies]
-agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.167" }
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.167" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.167" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.167" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.167" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.167" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.167" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.167" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.167" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.167" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.34.167" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.167" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.167" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.167" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.167" }
-agent-doc-git = { path = "../agent-doc-git", version = "0.34.167" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.167" }
-agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.34.167" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.167" }
-agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.167" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.167" }
-agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.167" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.167" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.167" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.167" }
-agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.167" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.167" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.167" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.167" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.34.167" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.167" }
-agent-doc-turn-scope-io = { path = "../agent-doc-turn-scope-io", version = "0.34.167" }
-agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.167" }
-agent-doc-write-ipc-io = { path = "../agent-doc-write-ipc-io", version = "0.34.167" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.167" }
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.34.168" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.34.168" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.34.168" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.34.168" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.34.168" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.168" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.168" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.34.168" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.34.168" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.34.168" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.34.168" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.34.168" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.34.168" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.34.168" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.168" }
+agent-doc-git = { path = "../agent-doc-git", version = "0.34.168" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.168" }
+agent-doc-hooks-io = { path = "../agent-doc-hooks-io", version = "0.34.168" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.168" }
+agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.34.168" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.34.168" }
+agent-doc-plugin-owner = { path = "../agent-doc-plugin-owner", version = "0.34.168" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.168" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.34.168" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.34.168" }
+agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.34.168" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.34.168" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.34.168" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.34.168" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.34.168" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.34.168" }
+agent-doc-turn-scope-io = { path = "../agent-doc-turn-scope-io", version = "0.34.168" }
+agent-doc-write-converge-io = { path = "../agent-doc-write-converge-io", version = "0.34.168" }
+agent-doc-write-ipc-io = { path = "../agent-doc-write-ipc-io", version = "0.34.168" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.34.168" }
 anyhow = "1"
 
 [dev-dependencies]
-agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.167" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.167" }
+agent-doc-element-boundary = { path = "../agent-doc-element-boundary", version = "0.34.168" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.168" }
 serde_json = "1"
 tempfile = "3"

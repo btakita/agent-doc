@@ -1868,7 +1868,7 @@ pub fn reactivate_false_stale_capture_retirement(
     state.updated_at = now_secs();
     state.blocked_closeout = None;
     save(file, &state)?;
-    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
+    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::FalseStaleReactivated)?;
     append_phase_event_to_session_log(file, &state, None);
     Ok(true)
 }
@@ -1918,6 +1918,7 @@ enum CloseoutProjectionEvent {
     WriteApplied,
     Committed,
     Abandoned,
+    FalseStaleReactivated,
 }
 
 fn append_closeout_projection_event(
@@ -1977,6 +1978,21 @@ fn append_closeout_projection_event(
             cycle_id: state.cycle_id.clone(),
             reason: state.last_event.clone(),
         },
+        CloseoutProjectionEvent::FalseStaleReactivated => {
+            let Some(capture_id) = state.capture_id.clone() else {
+                return Ok(false);
+            };
+            let Some(response_sha256) = state.response_sha256.clone() else {
+                return Ok(false);
+            };
+            agent_doc_state_backbone::StateFact::FalseStaleCaptureReactivated {
+                document_hash: document_hash.clone(),
+                cycle_id: state.cycle_id.clone(),
+                capture_id,
+                response_sha256,
+                retirement_reason: "repair_retire_superseded_captured_only_orphan".to_string(),
+            }
+        }
     };
     let event_id = closeout_projection_event_id(&document_hash, state, event);
     append_state_fact(file, event_id, fact)
@@ -2180,6 +2196,11 @@ fn closeout_projection_event_id(
         CloseoutProjectionEvent::Abandoned => format!(
             "closeout-abandoned:{document_hash}:{}:{}",
             state.cycle_id, state.last_event
+        ),
+        CloseoutProjectionEvent::FalseStaleReactivated => format!(
+            "closeout-false-stale-reactivated:{document_hash}:{}:{}",
+            state.cycle_id,
+            state.response_sha256.as_deref().unwrap_or("missing")
         ),
     }
 }

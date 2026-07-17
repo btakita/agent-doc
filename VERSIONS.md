@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.168
+
+- **False-stale retained captures now reopen coherently and terminalize from the state backbone.** Repair could retire a captured cycle as `Abandoned`, while a later exact-target `session-check` reopened only the direct cycle file; the authoritative backbone projection stayed terminal and the same retained response remained pending forever. Cycle state now emits a typed false-stale reactivation fact carrying the document, cycle, capture, response hash, and retirement reason. The backbone accepts it only for the exact matching false-stale abandonment, after which closeout settlement clears the retained intent and commits exactly once. An integration regression reproduces the abandoned/discarded capture with canonical and disk already at the retained target.
+- **Prompt-bearing Claude blockers now queue before regular route recovery as well as dispatch-only routing.** A JetBrains `Run Agent Doc` request that finds an active Claude turn or online-artifact picker no longer enters the regular route's auto-fix, focus, interrupt, or injection path. The binary records the prompt-bearing work behind the typed blocker and returns it as already running; operator input remains untouched, and dismissing the artifact picker with `Esc` lets the existing owner continue. Focused route tests cover the modal with and without pending prompt work plus unknown-blocker fail-closed behavior.
+
 ## 0.34.167
 
 - **An exact retained target now terminalizes even after disk has already caught up.** `session-check` previously attempted captured-finalize recovery only while canonical authority and disk differed. If the JetBrains save/reconnect completed first, both sides exactly matched the retained target but the capture record remained pending forever. The terminal convergence rung now resumes any resumable capture regardless of byte equality, clears its retained intent, advances write-applied state, and commits exact-once. A regression covers the observed equal-authority/equal-disk state.

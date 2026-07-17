@@ -141,6 +141,13 @@ fn repair_atomic_write_if_current(
 
 pub struct RuntimeSessionCheckEffects;
 
+fn cycle_event_is(state_event: &str, expected: &str) -> bool {
+    state_event == expected
+        || state_event
+            .split_ascii_whitespace()
+            .any(|field| field.strip_prefix("reason=") == Some(expected))
+}
+
 pub fn session_check_effects() -> RuntimeSessionCheckEffects {
     RuntimeSessionCheckEffects
 }
@@ -208,10 +215,16 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             return Ok(Outcome::NotApplicable);
         };
         let mut reactivated_false_stale_capture = false;
-        let false_stale_reactivation_cycle = (state.phase == CyclePhase::Abandoned
-            && state.last_event == "repair_retire_superseded_captured_only_orphan")
-            || (state.phase == CyclePhase::ResponseCaptured
-                && state.last_event == "session_check_reactivated_false_stale_capture_retirement");
+            let false_stale_reactivation_cycle = (state.phase == CyclePhase::Abandoned
+                && cycle_event_is(
+                    &state.last_event,
+                    "repair_retire_superseded_captured_only_orphan",
+                ))
+                || (state.phase == CyclePhase::ResponseCaptured
+                    && cycle_event_is(
+                        &state.last_event,
+                        "session_check_reactivated_false_stale_capture_retirement",
+                    ));
         if false_stale_reactivation_cycle
             && let (Some(capture_id), Some(response_sha256)) =
                 (state.capture_id.as_deref(), state.response_sha256.as_deref())
@@ -223,13 +236,12 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                 (agent_doc_capture_io::CaptureState::Discarded, Some(_))
                     | (agent_doc_capture_io::CaptureState::Captured, None)
             )
-            && let Some(_settled_content) =
-                agent_doc_document_realtime_io::settle_acknowledged_captured_projection_through_authority(
-                    file,
-                    &capture.response_body,
-                    "session_check_false_stale_capture_retirement_settlement",
-                )?
-        {
+                && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
+                        file,
+                        &capture.response_body,
+                        "session_check_false_stale_capture_retirement_settlement",
+                    )?
+            {
             let capture_reactivated = agent_doc_capture_io::reactivate_false_stale_retirement(
                 file,
                 capture_id,
@@ -525,6 +537,129 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
             snapshot_content,
             file_content,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
+    use agent_doc_turn::CyclePhase;
+
+    #[test]
+    fn exact_retained_target_reactivates_false_stale_capture_before_commit_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please investigate.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: investigate — test\n\n",
+            "Fixed the retained closeout.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- no-pending-capture -->\n",
+        );
+        let target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: investigate — test\n\n",
+            "Fixed the retained closeout.\n",
+            "<!-- agent:boundary:response -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        std::fs::write(&file, base).unwrap();
+        agent_doc_snapshot_io::save(&file, base, agent_doc_ops_log_io::log_op).unwrap();
+        let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
+        agent_doc_capture_io::mark_discarded(&file).unwrap();
+        agent_doc_cycle_state_io::mark_abandoned(
+            &file,
+            "repair_retire_superseded_captured_only_orphan",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+
+        agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+            &file,
+            target,
+            base,
+            "false_stale_exact_target_fixture_projection",
+        )
+        .unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &file,
+            base,
+            target,
+            "false_stale_exact_target_test",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(response, target),
+            "fixture target must materialize the captured response"
+        );
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write(&file).is_some(),
+            "fixture must retain a document-write intent"
+        );
+        assert_eq!(
+            agent_doc_document_realtime_io::try_resolve_current_document_content(
+                &file,
+                "false_stale_exact_target_fixture_current",
+            )
+            .unwrap(),
+            target,
+            "fixture canonical authority must equal the retained target"
+        );
+        let abandoned = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(abandoned.phase, CyclePhase::Abandoned);
+        assert!(
+            cycle_event_is(
+                &abandoned.last_event,
+                "repair_retire_superseded_captured_only_orphan"
+            ),
+            "projected state must preserve the typed abandonment reason: {}",
+            abandoned.last_event,
+        );
+
+        let outcome = RuntimeSessionCheckEffects.resume_captured_finalize(&file).unwrap();
+        assert!(
+            matches!(
+                outcome,
+                CapturedFinalizeResumeOutcome::Committed
+                    | CapturedFinalizeResumeOutcome::Retained { .. }
+            ),
+            "the exact retained target must enter closeout recovery instead of returning NotApplicable: {outcome:?}"
+        );
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write(&file).is_none(),
+            "exact canonical/disk convergence must retire the orphaned delivery intent"
+        );
+        let state = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.cycle_id, capture.cycle_id);
+        assert!(
+            matches!(state.phase, CyclePhase::WriteApplied | CyclePhase::Committed),
+            "the false-stale cycle must be reactivated and advanced: {state:?}"
+        );
+        let capture = agent_doc_capture_io::load_by_id(&file, &capture.capture_id)
+            .unwrap()
+            .unwrap();
+        assert_ne!(
+            capture.state,
+            agent_doc_capture_io::CaptureState::Discarded,
+            "the exact same capture must no longer remain falsely retired"
+        );
     }
 }
 

@@ -496,6 +496,17 @@ pub enum StateFact {
         cycle_id: String,
         reason: String,
     },
+    /// The exact retained response proved that a narrowly classified capture
+    /// retirement was false. This is the only event allowed to reopen that
+    /// terminal projection, and it carries the capture identity plus the
+    /// abandonment reason that must match the prior state.
+    FalseStaleCaptureReactivated {
+        document_hash: String,
+        cycle_id: String,
+        capture_id: String,
+        response_sha256: String,
+        retirement_reason: String,
+    },
     DocumentCellMergeAckRecorded {
         document_hash: String,
         cycle_id: String,
@@ -686,6 +697,7 @@ impl StateFact {
             | Self::CommitObserved { document_hash, .. }
             | Self::SessionCheckPassed { document_hash, .. }
             | Self::CycleAbandoned { document_hash, .. }
+            | Self::FalseStaleCaptureReactivated { document_hash, .. }
             | Self::DocumentCellMergeAckRecorded { document_hash, .. }
             | Self::DocumentCellMergeAckCarriedForward { document_hash, .. }
             | Self::OwnerGenerationChanged { document_hash, .. }
@@ -731,6 +743,7 @@ impl StateFact {
             | Self::CommitObserved { .. }
             | Self::SessionCheckPassed { .. }
             | Self::CycleAbandoned { .. }
+            | Self::FalseStaleCaptureReactivated { .. }
             | Self::DocumentCellMergeAckRecorded { .. }
             | Self::DocumentCellMergeAckCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
@@ -807,6 +820,7 @@ impl StateFact {
             Self::CommitObserved { .. } => "commit_observed",
             Self::SessionCheckPassed { .. } => "session_check_passed",
             Self::CycleAbandoned { .. } => "cycle_abandoned",
+            Self::FalseStaleCaptureReactivated { .. } => "false_stale_capture_reactivated",
             Self::DocumentCellMergeAckRecorded { .. } => "document_cell_merge_ack_recorded",
             Self::DocumentCellMergeAckCarriedForward { .. } => {
                 "document_cell_merge_ack_carried_forward"
@@ -1521,6 +1535,25 @@ impl DocumentStateProjection {
                 self.closeout.realtime_steering = TurnSteeringProjection::none();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "abandoned");
+            }
+            StateFact::FalseStaleCaptureReactivated {
+                cycle_id,
+                capture_id,
+                response_sha256,
+                retirement_reason,
+                ..
+            } => {
+                let exact_false_stale_retirement = self.closeout.cycle_id.as_deref()
+                    == Some(cycle_id)
+                    && self.closeout.phase == Some(CyclePhase::Abandoned)
+                    && self.closeout.abandoned_reason.as_deref() == Some(retirement_reason)
+                    && self.closeout.capture_id.as_deref() == Some(capture_id)
+                    && self.closeout.response_sha256.as_deref() == Some(response_sha256);
+                if exact_false_stale_retirement {
+                    self.closeout.phase = Some(CyclePhase::ResponseCaptured);
+                    self.closeout.abandoned_reason = None;
+                    self.closeout.session_check_passed = false;
+                }
             }
             StateFact::DocumentCellMergeAckRecorded {
                 cycle_id,
@@ -4074,6 +4107,59 @@ mod tests {
 
     fn state_event(event_id: impl Into<String>, fact: StateFact) -> StateEvent {
         StateEvent::new(event_id, fact)
+    }
+
+    #[test]
+    fn exact_false_stale_capture_reactivation_is_the_only_abandoned_cycle_reopen() {
+        let mut projection = DocumentStateProjection::new("doc-reactivation");
+        projection.apply(&StateFact::PreflightStarted {
+            document_hash: "doc-reactivation".into(),
+            cycle_id: "cycle-1".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.apply(&StateFact::ResponseCaptured {
+            document_hash: "doc-reactivation".into(),
+            cycle_id: "cycle-1".into(),
+            capture_id: "cycle-1".into(),
+            response_sha256: "response-1".into(),
+            response_body: Some("response body".into()),
+            file_hash: None,
+            snapshot_hash: None,
+            baseline_content: None,
+        });
+        projection.apply(&StateFact::CycleAbandoned {
+            document_hash: "doc-reactivation".into(),
+            cycle_id: "cycle-1".into(),
+            reason: "repair_retire_superseded_captured_only_orphan".into(),
+        });
+        assert_eq!(projection.closeout.phase, Some(CyclePhase::Abandoned));
+
+        projection.apply(&StateFact::FalseStaleCaptureReactivated {
+            document_hash: "doc-reactivation".into(),
+            cycle_id: "cycle-1".into(),
+            capture_id: "wrong-capture".into(),
+            response_sha256: "response-1".into(),
+            retirement_reason: "repair_retire_superseded_captured_only_orphan".into(),
+        });
+        assert_eq!(
+            projection.closeout.phase,
+            Some(CyclePhase::Abandoned),
+            "mismatched capture identity must remain terminal"
+        );
+
+        projection.apply(&StateFact::FalseStaleCaptureReactivated {
+            document_hash: "doc-reactivation".into(),
+            cycle_id: "cycle-1".into(),
+            capture_id: "cycle-1".into(),
+            response_sha256: "response-1".into(),
+            retirement_reason: "repair_retire_superseded_captured_only_orphan".into(),
+        });
+        assert_eq!(
+            projection.closeout.phase,
+            Some(CyclePhase::ResponseCaptured)
+        );
+        assert!(projection.closeout.abandoned_reason.is_none());
     }
 
     fn authority_event(

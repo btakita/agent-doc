@@ -36,6 +36,18 @@ pub enum BusyPaneInterruptRecoveryOutcome {
     Skipped,
 }
 
+fn pending_prompt_waits_behind_queueable_blocker(
+    harness_binary: &str,
+    prompt_bearing_marker: Option<&str>,
+    blocker_reason: Option<&str>,
+) -> Option<&'static str> {
+    prompt_bearing_marker?;
+    agent_doc_queue::route_dispatch::dispatch_active_turn_queue_source(
+        harness_binary,
+        blocker_reason?,
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn maybe_run_test_busy_auto_fix_hook(
     tmux: &Tmux,
@@ -403,6 +415,32 @@ pub fn ensure_existing_pane_ready_for_dispatch(
 
     let provenance = pane_route_provenance(tmux, pane);
     let blocker_reason = ready_outcome.blocker_reason().map(str::to_string);
+    if let Some(source) = pending_prompt_waits_behind_queueable_blocker(
+        &harness.binary,
+        prompt_bearing_marker,
+        blocker_reason.as_deref(),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_existing_pane_prompt_queued_behind_blocker file={} pane={} harness={} blocker={} source={} {}",
+                file.display(),
+                pane,
+                harness.binary,
+                blocker_reason.as_deref().unwrap_or("timeout"),
+                source,
+                provenance
+            ),
+        );
+        eprintln!(
+            "[route] registered pane {} for {} has an operator-owned {} blocker — the pending document prompt remains queued and will run when the live {} session returns to its idle composer",
+            pane,
+            file.display(),
+            blocker_reason.as_deref().unwrap_or("busy"),
+            harness.binary,
+        );
+        return Ok(ExistingPaneDispatchReadiness::BusyAlreadyRunning);
+    }
     if prompt_bearing_marker.is_none() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -440,4 +478,45 @@ pub fn ensure_existing_pane_ready_for_dispatch(
         provenance,
         blocker_reason,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending_prompt_waits_behind_queueable_blocker;
+
+    #[test]
+    fn pending_claude_prompt_waits_behind_artifact_picker_without_auto_fix() {
+        assert_eq!(
+            pending_prompt_waits_behind_queueable_blocker(
+                "claude",
+                Some("operator-prompt-marker"),
+                Some("claude artifact picker open"),
+            ),
+            Some("dispatch_only_claude_artifact_picker")
+        );
+    }
+
+    #[test]
+    fn artifact_picker_without_pending_prompt_does_not_schedule_duplicate_work() {
+        assert_eq!(
+            pending_prompt_waits_behind_queueable_blocker(
+                "claude",
+                None,
+                Some("claude artifact picker open"),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unknown_blocker_still_uses_fail_closed_recovery() {
+        assert_eq!(
+            pending_prompt_waits_behind_queueable_blocker(
+                "claude",
+                Some("operator-prompt-marker"),
+                Some("unknown claude modal"),
+            ),
+            None
+        );
+    }
 }

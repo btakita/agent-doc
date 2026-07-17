@@ -9,6 +9,8 @@ machines and checked in a temporary directory on every test run.
 - preservation of steering added after the original response capture;
 - semantic response projection over the current editor cut, including idempotent
   post-cell replay that preserves queue tombstones and a single boundary marker;
+- response-cell settlement without requiring whole-document lineage, while
+  non-response semantic rebases remain causally fenced;
 - separation of native-library, installed-package, and live-editor generations;
 - adoption of a plugin generation registered after the turn's preflight; and
 - eventual package convergence, editor publication, and response commit under
@@ -33,6 +35,8 @@ external request.
 - stale-lineage frames cannot corrupt or resurrect canonical content;
 - quarantined stale frames eventually advance the ACK cursor; and
 - delivery ACK and native editor save are distinct transitions;
+- a replay-created unmatched component close is normalized before commit, while
+  the operator cut and queue deletion tombstones remain unchanged;
 - an operator advance between save request and save invalidates the old proof
   without losing the durable agent intent; and
 - commit is impossible until the retained agent intent is applied and the exact

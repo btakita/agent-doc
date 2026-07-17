@@ -1311,12 +1311,22 @@ pub fn settle_retained_non_capture_projection_through_authority(
     let Some(pending) = pending_document_write(path) else {
         return Ok(false);
     };
-    if !matches!(
+    let exact_projection_reason = matches!(
         pending.reason,
         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
             | DocumentWriteDeferredReason::EditorDeliveryWorkerStale
             | DocumentWriteDeferredReason::CrdtDeliveryAckPending
-    ) {
+    );
+    let semantic_response_base = matches!(
+        pending.reason,
+        DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+    )
+    .then_some(pending.expected_content.as_deref())
+    .flatten()
+    .filter(|expected| {
+        !write_policy::buffer_presents_reference_response(&pending.target_content, expected)
+    });
+    if !exact_projection_reason && semantic_response_base.is_none() {
         agent_doc_ops_log_io::log_op(
             path,
             &format!(
@@ -1328,7 +1338,75 @@ pub fn settle_retained_non_capture_projection_through_authority(
         );
         return Ok(false);
     }
-    let canonical = try_resolve_current_document_content(path, source)?;
+    let mut canonical = try_resolve_current_document_content(path, source)?;
+    if let Some(semantic_base) = semantic_response_base {
+        let rebased = rebase_agent_candidate_over_editor_cut(
+            semantic_base,
+            &pending.target_content,
+            &canonical,
+        )?;
+        if rebased != canonical {
+            let Some(relay_write) = apply_canonical_replace_if_attached(
+                path,
+                &canonical,
+                &rebased,
+                "retained_non_capture_response_rebase",
+            )?
+            else {
+                return Ok(false);
+            };
+            if !relay_write.delivery_converged {
+                return Ok(false);
+            }
+            canonical = try_resolve_current_document_content(path, source)?;
+        }
+        if !write_policy::buffer_presents_reference_response(&pending.target_content, &canonical) {
+            return Ok(false);
+        }
+        validate_canonical_document_target(path, &canonical, source)?;
+
+        let mut disk = resolve_disk_current_document_content(path, source)?;
+        if disk != canonical {
+            let agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged: true,
+                ..
+            } = observe_live_editor_authority_after_model_ensure(path, source)?
+            else {
+                return Ok(false);
+            };
+            if live_editors == 0 || text != canonical {
+                return Ok(false);
+            }
+            if !request_native_editor_save_for_canonical_projection(
+                path,
+                &canonical,
+                "retained_non_capture_response_settlement",
+            )? {
+                return Ok(false);
+            }
+            disk = resolve_disk_current_document_content(path, source)?;
+            if disk != canonical {
+                return Ok(false);
+            }
+        }
+
+        let settled_target_hash = agent_doc_hash::content_hash(&canonical);
+        clear_all_deferred_document_write_intents(path, source)?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_non_capture_response_projection_settled file={} intent_id={} retained_target_hash={} settled_target_hash={} semantic_rebase=true canonical_disk_exact=true native_editor_save=true deferred_lineage=cleared",
+                path.display(),
+                pending.intent_id,
+                pending.target_hash,
+                settled_target_hash,
+            ),
+        );
+        return Ok(true);
+    }
+
     let target_hash = agent_doc_hash::content_hash(&pending.target_content);
     if canonical != pending.target_content
         || !pending.target_hash.eq_ignore_ascii_case(&target_hash)
@@ -2019,17 +2097,91 @@ fn rebase_agent_candidate_over_editor_cut(
     agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
 }
 
+/// Remove one whole-line component close that is provably an unmatched replay
+/// duplicate. The scan mirrors the component parser's stack discipline and
+/// ignores markers in code/quoted ranges. We only repair when there is exactly
+/// one unmatched close, the same component already had a balanced close, and
+/// deleting that line restores the complete projection integrity contract.
+fn remove_single_unmatched_duplicate_component_close(content: &str) -> Option<String> {
+    let ignored = agent_doc_element::element::find_code_ranges(content)
+        .into_iter()
+        .chain(agent_doc_element::element::find_quoted_ranges(content))
+        .collect::<Vec<_>>();
+    let mut stack: Vec<String> = Vec::new();
+    let mut balanced_closes = std::collections::HashMap::<String, usize>::new();
+    let mut unmatched: Option<(usize, usize, String)> = None;
+    let mut offset = 0usize;
+
+    for line in content.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = line_start + line.len();
+        offset = line_end;
+        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let marker_start = line_start + leading;
+        if ignored
+            .iter()
+            .any(|&(start, end)| marker_start >= start && marker_start < end)
+        {
+            continue;
+        }
+
+        let trimmed = line.trim();
+        let Some(inner) = trimmed
+            .strip_prefix("<!--")
+            .and_then(|value| value.strip_suffix("-->"))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if inner.starts_with("agent:boundary:") {
+            continue;
+        }
+        if let Some(name) = inner.strip_prefix("/agent:") {
+            if stack.last().is_some_and(|open| open == name) {
+                stack.pop();
+                *balanced_closes.entry(name.to_string()).or_default() += 1;
+            } else if stack.is_empty()
+                && balanced_closes.get(name).copied().unwrap_or_default() > 0
+                && unmatched.is_none()
+            {
+                unmatched = Some((line_start, line_end, name.to_string()));
+            } else {
+                return None;
+            }
+        } else if let Some(rest) = inner.strip_prefix("agent:") {
+            let name = rest.split_whitespace().next().unwrap_or_default();
+            if name.is_empty() {
+                return None;
+            }
+            stack.push(name.to_string());
+        }
+    }
+    if !stack.is_empty() {
+        return None;
+    }
+    let (start, end, _) = unmatched?;
+    let mut repaired = String::with_capacity(content.len() - (end - start));
+    repaired.push_str(&content[..start]);
+    repaired.push_str(&content[end..]);
+    agent_projection_integrity_valid(&repaired).then_some(repaired)
+}
+
 /// Normalize the narrow structural transient produced when a retained response
-/// replay duplicates response cells and/or protocol boundary markers. This is
-/// deliberately pure: callers validate and write the returned target through
-/// the current document authority before entering their generic integrity gate.
+/// replay duplicates response cells, protocol boundary markers, or a component
+/// closing marker. This is deliberately pure: callers validate and write the
+/// returned target through the current document authority before entering their
+/// generic integrity gate.
 pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Option<String> {
     if agent_projection_integrity_valid(content) {
         return None;
     }
-    let normalized = agent_doc_merge::response_cell::deduplicate_response_cells(content)
+    let mut normalized = agent_doc_merge::response_cell::deduplicate_response_cells(content)
         .ok()
-        .flatten()?;
+        .flatten()
+        .unwrap_or_else(|| content.to_string());
+    if !agent_projection_integrity_valid(&normalized) {
+        normalized = remove_single_unmatched_duplicate_component_close(&normalized)?;
+    }
     (normalized != content && agent_projection_integrity_valid(&normalized)).then_some(normalized)
 }
 
@@ -4475,6 +4627,68 @@ mod tests {
     }
 
     #[test]
+    fn unmatched_duplicate_done_close_is_repaired_without_touching_operator_cut() {
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Earlier exchange.\n",
+            "<!-- agent:boundary:current -->\n",
+            "❯ Please write this prompt after the boundary.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- keep-this-item\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:done -->\n",
+            "- completed item\n",
+            "<!-- /agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let expected = duplicated.replacen(
+            "<!-- /agent:done -->\n<!-- /agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            1,
+        );
+
+        let normalized = normalize_recoverable_response_replay_duplication(duplicated)
+            .expect("one replay-duplicated done close should be recoverable");
+
+        assert_eq!(normalized, expected);
+        assert!(agent_projection_integrity_valid(&normalized));
+        assert!(normalized.contains("❯ Please write this prompt after the boundary."));
+        assert!(normalized.contains("- keep-this-item"));
+        assert!(!normalized.contains("deleted-queue-item"));
+    }
+
+    #[test]
+    fn unmatched_operator_authored_close_without_duplicate_evidence_is_not_repaired() {
+        let malformed = concat!(
+            "<!-- agent:exchange -->\n",
+            "Operator prompt.\n",
+            "<!-- agent:boundary:current -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert!(normalize_recoverable_response_replay_duplication(malformed).is_none());
+    }
+
+    #[test]
+    fn marker_examples_in_code_do_not_supply_duplicate_close_evidence() {
+        let malformed = concat!(
+            "<!-- agent:exchange -->\n",
+            "```md\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+            "```\n",
+            "<!-- agent:boundary:current -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- /agent:done -->\n",
+        );
+
+        assert!(normalize_recoverable_response_replay_duplication(malformed).is_none());
+    }
+
+    #[test]
     fn malformed_canonical_target_is_rejected_before_relay_mutation() {
         let baseline = concat!(
             "<!-- agent:exchange -->\n",
@@ -5923,6 +6137,73 @@ mod tests {
             pending.reason,
             DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
         );
+    }
+
+    #[test]
+    fn semantic_response_projection_settles_over_exact_operator_cut_without_lineage() {
+        let editor_base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Original prompt.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n<!-- /agent:queue -->\n",
+        );
+        let response_target = editor_base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: Original prompt. — gpt-5\n\nAnswered.\n<!-- agent:boundary:base -->",
+        );
+        let operator_cut = response_target
+            .replace(
+                "❯ Original prompt.\n",
+                "❯ Original prompt.\n❯ Prompt typed during delivery.\n",
+            )
+            .replace("- do [#deleted]\n", "");
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-semantic-response-no-lineage";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            &response_target,
+            "semantic_response_no_lineage_test",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(
+                client_id,
+                0,
+                editor_base.chars().count() as u32,
+                &operator_cut,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, &operator_cut).expect("simulate the exact native editor save");
+
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "semantic_response_no_lineage_settlement_test",
+            )
+            .unwrap(),
+            "a semantic response target can settle over the current operator cut without whole-document lineage",
+        );
+        let settled = try_resolve_current_document_content(
+            &file,
+            "semantic_response_no_lineage_settled_current",
+        )
+        .unwrap();
+        assert_eq!(settled, operator_cut);
+        assert!(settled.contains("Prompt typed during delivery."));
+        assert!(!settled.contains("#deleted"));
+        assert_eq!(settled.matches("### Re: Original prompt.").count(), 1);
+        assert_eq!(settled.matches("agent:boundary:").count(), 1);
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

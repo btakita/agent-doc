@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.164
+
+- **Response-bearing semantic rebases no longer wedge on missing whole-document lineage.** A retained non-capture response target is now recognized as a semantic cell, reconciled over the current Lazily operator cut, and settled through a native editor save. Operator prompts and queue/backlog deletions remain authoritative; non-response whole-document targets still require causal operator-cut proof.
+- **A replay-duplicated component close no longer blocks its own recovery.** Preflight and session-check recognize exactly one whole-line unmatched close only when that component already closed normally and removing the replay artifact restores the complete structural contract. The repair flows through Lazily, preserving prompts after the exchange boundary and every queue/backlog deletion in the live editor cut; unmatched operator-authored markers still fail closed.
+
 ## 0.34.163
 
 - **Fresh route-owned supervisors redirect stderr before the binary starts.** Route provisioning and controller-owned cold replacement create `.agent-doc/logs/supervisor-stderr.log` before submitting the pane command, then render an exact shell-level `2>>` redirection. Argument parsing, admission failures, and every other pre-`SupervisorStderrRedirect` diagnostic therefore stay out of the agent pane; the in-process redirect remains defense in depth.

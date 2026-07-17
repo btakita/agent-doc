@@ -59,6 +59,34 @@ pub struct PreflightOptions {
     pub probe: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActivePromptMarkerProjection {
+    Unchanged,
+    Applied { delivery_converged: bool },
+    SkippedDetached,
+    SkippedError(String),
+}
+
+/// Publish the cosmetic active-prompt marker without entering the durable
+/// serialized-write pipeline. A delayed editor ACK must not turn a transient UI
+/// hint into a closeout-blocking document-write intent.
+fn project_active_prompt_marker_with(
+    authoritative: &str,
+    marked: &str,
+    project: impl FnOnce(&str, &str) -> Result<Option<bool>>,
+) -> ActivePromptMarkerProjection {
+    if authoritative == marked {
+        return ActivePromptMarkerProjection::Unchanged;
+    }
+    match project(authoritative, marked) {
+        Ok(Some(delivery_converged)) => {
+            ActivePromptMarkerProjection::Applied { delivery_converged }
+        }
+        Ok(None) => ActivePromptMarkerProjection::SkippedDetached,
+        Err(err) => ActivePromptMarkerProjection::SkippedError(err.to_string()),
+    }
+}
+
 fn closeout_cycle_is_open(file: &Path) -> Result<bool> {
     let projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
@@ -1303,21 +1331,64 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             .map(|change| change.text.clone())
             .collect::<Vec<_>>();
         if !active_exchange_prompt_targets.is_empty() {
-            let authoritative =
-                resolve_current_preflight_document(file, "active_exchange_prompt_marker")?;
-            let marked = agent_doc_element_exchange::mark_active_exchange_prompts_in_progress(
-                &authoritative,
-                &active_exchange_prompt_targets,
+            let projection = match resolve_current_preflight_document(
+                file,
+                "active_exchange_prompt_marker",
+            ) {
+                Ok(authoritative) => {
+                    let marked =
+                        agent_doc_element_exchange::mark_active_exchange_prompts_in_progress(
+                            &authoritative,
+                            &active_exchange_prompt_targets,
+                        );
+                    project_active_prompt_marker_with(
+                        &authoritative,
+                        &marked,
+                        |expected_current, content| {
+                            agent_doc_document_realtime_io::apply_cpc_write_through_relay_authority(
+                                file,
+                                expected_current,
+                                content,
+                                "active_exchange_prompt_marker",
+                            )
+                            .map(|write| write.map(|write| write.delivery_converged))
+                        },
+                    )
+                }
+                Err(err) => ActivePromptMarkerProjection::SkippedError(err.to_string()),
+            };
+            let status = match &projection {
+                ActivePromptMarkerProjection::Unchanged => "unchanged",
+                ActivePromptMarkerProjection::Applied {
+                    delivery_converged: true,
+                } => "applied_acknowledged",
+                ActivePromptMarkerProjection::Applied {
+                    delivery_converged: false,
+                } => "applied_ack_pending",
+                ActivePromptMarkerProjection::SkippedDetached => "skipped_detached",
+                ActivePromptMarkerProjection::SkippedError(_) => "skipped_error",
+            };
+            let error = match &projection {
+                ActivePromptMarkerProjection::SkippedError(error) => {
+                    format!(" error={error:?}")
+                }
+                _ => String::new(),
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "active_exchange_prompt_marker_projection file={} targets={} marker=🚧 prefix=❯ status={status} durable_intent=false{error}",
+                    file.display(),
+                    active_exchange_prompt_targets.len()
+                ),
             );
-            if marked != authoritative {
-                agent_doc_document_realtime_io::atomic_write_through_authority(file, &marked)?;
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "active_exchange_prompt_marked file={} targets={} marker=🚧 prefix=❯",
-                        file.display(),
-                        active_exchange_prompt_targets.len()
-                    ),
+            if matches!(
+                projection,
+                ActivePromptMarkerProjection::SkippedDetached
+                    | ActivePromptMarkerProjection::SkippedError(_)
+            ) {
+                eprintln!(
+                    "[preflight] warning: active exchange prompt marker projection {status}; continuing because the marker is transient"
                 );
             }
         }
@@ -1597,6 +1668,43 @@ mod tests {
     use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn active_prompt_marker_ack_delay_is_non_fatal_and_non_durable() {
+        let authoritative =
+            "<!-- agent:exchange patch=append -->\nPrompt\n<!-- /agent:exchange -->\n";
+        let marked =
+            "<!-- agent:exchange patch=append -->\n❯ 🚧 Prompt\n<!-- /agent:exchange -->\n";
+        let mut projections = 0usize;
+        let outcome = project_active_prompt_marker_with(authoritative, marked, |expected, next| {
+            projections += 1;
+            assert_eq!(expected, authoritative);
+            assert_eq!(next, marked);
+            Ok(Some(false))
+        });
+
+        assert_eq!(
+            projections, 1,
+            "the cosmetic path must make one projection only"
+        );
+        assert_eq!(
+            outcome,
+            ActivePromptMarkerProjection::Applied {
+                delivery_converged: false
+            }
+        );
+    }
+
+    #[test]
+    fn active_prompt_marker_projection_error_is_a_skip() {
+        let outcome = project_active_prompt_marker_with("Prompt", "❯ 🚧 Prompt", |_, _| {
+            anyhow::bail!("editor unavailable")
+        });
+        assert_eq!(
+            outcome,
+            ActivePromptMarkerProjection::SkippedError("editor unavailable".to_string())
+        );
+    }
 
     #[test]
     fn closeout_cycle_is_open_uses_terminal_projection() {

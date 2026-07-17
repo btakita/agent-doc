@@ -1323,6 +1323,35 @@ pub fn settle_retained_non_capture_projection_through_authority(
     let Some(pending) = pending_document_write(path) else {
         return Ok(false);
     };
+    // agent-doc 0.35.0 briefly published the active exchange prompt marker via
+    // `atomic_write_through_authority`. A delayed editor ACK therefore retained
+    // a durable write for a cosmetic-only transformation and wedged the next
+    // preflight. Retire only that exact historical shape: a serialized write
+    // whose target contains the active marker and is otherwise equivalent to
+    // its expected exchange content after transient prefixes are removed.
+    let transient_active_prompt_marker_intent =
+        pending.source.starts_with("serialized_atomic_write")
+            && pending.target_content.contains('🚧')
+            && pending.expected_content.as_deref().is_some_and(|expected| {
+                expected != pending.target_content
+                    && agent_doc_document::transient_markers::exchange_prompt_prefix_equivalent(
+                        expected,
+                        &pending.target_content,
+                    )
+            });
+    if transient_active_prompt_marker_intent {
+        clear_deferred_document_write_intent(path, &pending.target_hash, source)?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_transient_prompt_marker_projection_retired file={} intent_id={} target_hash={} semantic=exchange_prompt_prefix_equivalent delivery_ack_not_required=true deferred_lineage=cleared",
+                path.display(),
+                pending.intent_id,
+                pending.target_hash,
+            ),
+        );
+        return Ok(true);
+    }
     let exact_projection_reason = matches!(
         pending.reason,
         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
@@ -6565,6 +6594,60 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), normalized_target);
+    }
+
+    #[test]
+    fn retained_active_prompt_marker_projection_retires_without_native_save() {
+        let editor_base = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Prompt heading\n",
+            "Prompt prose\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let marked_target = concat!(
+            "# Session\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### ❯ 🚧 Prompt heading\n",
+            "❯ Prompt prose\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-retained-active-prompt-marker-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.deregister(client_id)).unwrap();
+
+        let err = atomic_write_if_current_through_authority(
+            &file,
+            marked_target,
+            editor_base,
+            "serialized_atomic_write",
+        )
+        .unwrap_err();
+        assert!(
+            err.downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+                .is_some()
+        );
+        assert!(pending_document_write(&file).is_some());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), editor_base);
+
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "retained_active_prompt_marker_projection_test",
+            )
+            .unwrap(),
+            "a marker-only serialized write must not wait for a native save"
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            editor_base,
+            "retiring the cosmetic intent must not rewrite disk"
+        );
     }
 
     #[test]

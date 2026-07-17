@@ -6,6 +6,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.1
+
+- **Transient prompt working state can no longer wedge closeout.** Preflight publishes the syntax-aware `❯ 🚧` exchange marker through one best-effort canonical CRDT projection, never the durable serialized-write pipeline. A delayed editor ACK or projection error cannot fail preflight or create a retained document-write intent.
+- **The 0.35.0 marker-intent churn self-heals without overwriting operator text.** Session recovery retires only a stranded `serialized_atomic_write` whose target contains `🚧` and is exchange-prefix-equivalent to its expected content. Ordinary retained document writes still require canonical/disk native-save proof.
+
 ## 0.35.0
 
 - **Compact Exchange preserves independent live cells.** After CRDT convergence, compaction rebases its live and committed projections onto authoritative sibling components before checkpointing or committing. Queue/backlog deletions made while exchange compaction is running now survive normally. The post-`agent:boundary` exchange tail is also independent live operator state: it may change during compaction without failing, remains visible after compaction, and stays out of the committed compact snapshot; only drift in the compact-owned archiveable prefix fails closed (`#compact-independent-cells`).
